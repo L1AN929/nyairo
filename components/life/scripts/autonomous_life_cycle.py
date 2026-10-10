@@ -73,6 +73,15 @@ ENV_AUTONOMOUS_ENABLED = "CHIYO_AUTONOMOUS_LIFE_ENABLED"
 #: call does not spend budget.
 ENV_MAX_ROUNDS_PER_DAY = "CHIYO_AUTONOMOUS_MAX_ROUNDS_PER_DAY"
 DEFAULT_MAX_ROUNDS_PER_DAY = 4
+#: E09.2 reference values.  They are limits, not a personality rhythm: the point is
+#: that a long unattended day has a bounded cost, not that she acts this often.
+DEFAULT_MAX_COGNITION_CALLS_PER_DAY = 12
+DEFAULT_MAX_ACTIONS_PER_DAY = 8
+#: E09.1 low-frequency check window, in minutes.
+DEFAULT_CHECK_INTERVAL_MINUTES = 120
+ENV_MAX_COGNITION_CALLS_PER_DAY = "CHIYO_AUTONOMOUS_MAX_COGNITION_CALLS_PER_DAY"
+ENV_MAX_ACTIONS_PER_DAY = "CHIYO_AUTONOMOUS_MAX_ACTIONS_PER_DAY"
+ENV_CHECK_INTERVAL_MINUTES = "CHIYO_AUTONOMOUS_CHECK_INTERVAL_MINUTES"
 
 #: The only trigger a timer may produce.  See the module docstring.
 TRIGGER_IDLE_WINDOW = ag1.TRIGGER_EXPLICIT_REEVALUATION
@@ -118,6 +127,19 @@ def _utc_now_iso() -> str:
 
 def _local_day() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d")
+
+
+def _int_setting(source: Mapping[str, str], name: str, default: int) -> int:
+    """One integer setting, with an unusable value falling back to the reference.
+
+    A malformed limit must not disable the limit: falling back to the documented
+    default keeps the budget bounded instead of silently unbounded.
+    """
+
+    try:
+        return int(str(source.get(name) or default).strip())
+    except (TypeError, ValueError):
+        return int(default)
 
 
 class AutonomousLifeError(RuntimeError):
@@ -200,12 +222,23 @@ class StepReceipt:
 
 
 class RoundBudget:
-    """A small persisted per-day round counter.  Exhaustion never destroys state."""
+    """A small persisted per-day counter.  Exhaustion never destroys state.
 
-    def __init__(self, state_root: Path | str, *, max_rounds_per_day: int) -> None:
+    Three counters live in the same file because they are three different things:
+    rounds *considered*, cognition calls actually made (a decision AND a content
+    generation both count), and real actions executed.  Keeping them apart is what
+    stops "she thought about it" from being reported as "she did something", and
+    what makes a per-wake permission check possible.
+    """
+
+    def __init__(self, state_root: Path | str, *, max_rounds_per_day: int,
+                 max_cognition_calls_per_day: int = DEFAULT_MAX_COGNITION_CALLS_PER_DAY,
+                 max_actions_per_day: int = DEFAULT_MAX_ACTIONS_PER_DAY) -> None:
         self.state_root = Path(state_root)
         self.path = self.state_root / BUDGET_FILENAME
         self.max_rounds_per_day = max(0, int(max_rounds_per_day))
+        self.max_cognition_calls_per_day = max(0, int(max_cognition_calls_per_day))
+        self.max_actions_per_day = max(0, int(max_actions_per_day))
 
     def _load(self) -> dict[str, Any]:
         try:
@@ -213,26 +246,88 @@ class RoundBudget:
         except (OSError, ValueError):
             return {}
 
-    def spent_today(self) -> int:
+    def _today(self) -> dict[str, Any]:
+        """Today's counters.  A stale day reads as zero without rewriting the file.
+
+        Reading must not reset anything: a restart on the same day keeps the spend,
+        which is exactly what E09.2 requires.
+        """
+
         data = self._load()
         if str(data.get("day")) != _local_day():
-            return 0
-        return int(data.get("spent") or 0)
+            return {}
+        return data
+
+    def _write(self, **changes: Any) -> None:
+        data = self._today()
+        data.update(changes)
+        data["day"] = _local_day()
+        data["updated_at"] = _utc_now_iso()
+        data["max_rounds_per_day"] = self.max_rounds_per_day
+        data["max_cognition_calls_per_day"] = self.max_cognition_calls_per_day
+        data["max_actions_per_day"] = self.max_actions_per_day
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, self.path)
+
+    def spent_today(self) -> int:
+        return int(self._today().get("spent") or 0)
 
     def remaining(self) -> int:
         return max(0, self.max_rounds_per_day - self.spent_today())
 
     def spend(self) -> int:
         """Count one round.  Returns the new total for today."""
-        day = _local_day()
         spent = self.spent_today() + 1
-        payload = {"day": day, "spent": spent, "max_rounds_per_day": self.max_rounds_per_day,
-                   "updated_at": _utc_now_iso()}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmp, self.path)
+        self._write(spent=spent)
         return spent
+
+    # -- cognition calls (decisions AND content generation) --------------------
+    def cognition_used_today(self) -> int:
+        return int(self._today().get("cognition_used") or 0)
+
+    def cognition_remaining(self) -> int:
+        return max(0, self.max_cognition_calls_per_day - self.cognition_used_today())
+
+    def note_cognition(self, count: int = 1) -> int:
+        used = self.cognition_used_today() + max(0, int(count))
+        self._write(cognition_used=used)
+        return used
+
+    # -- real actions ----------------------------------------------------------
+    def actions_used_today(self) -> int:
+        return int(self._today().get("actions_used") or 0)
+
+    def actions_remaining(self) -> int:
+        return max(0, self.max_actions_per_day - self.actions_used_today())
+
+    def note_action(self, count: int = 1) -> int:
+        used = self.actions_used_today() + max(0, int(count))
+        self._write(actions_used=used)
+        return used
+
+    def may_start_wake(self) -> tuple[bool, str]:
+        """May one wake begin at all?  A refusal names the exact exhausted limit."""
+
+        if self.remaining() <= 0:
+            return False, "ROUND_BUDGET_EXHAUSTED"
+        if self.cognition_remaining() <= 0:
+            return False, "COGNITION_BUDGET_EXHAUSTED"
+        return True, "ALLOWED"
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "max_rounds_per_day": self.max_rounds_per_day,
+            "spent_today": self.spent_today(),
+            "remaining_today": self.remaining(),
+            "max_cognition_calls_per_day": self.max_cognition_calls_per_day,
+            "cognition_used_today": self.cognition_used_today(),
+            "cognition_remaining_today": self.cognition_remaining(),
+            "max_actions_per_day": self.max_actions_per_day,
+            "actions_used_today": self.actions_used_today(),
+            "actions_remaining_today": self.actions_remaining(),
+        }
 
 
 class _LazyStepSpec(AbcMapping):
@@ -320,7 +415,14 @@ class AutonomousLifeCycle:
                 max_rounds_per_day = int(src.get(ENV_MAX_ROUNDS_PER_DAY) or DEFAULT_MAX_ROUNDS_PER_DAY)
             except ValueError:
                 max_rounds_per_day = DEFAULT_MAX_ROUNDS_PER_DAY
-        self.budget = RoundBudget(self.state_root, max_rounds_per_day=max_rounds_per_day)
+        self.budget = RoundBudget(
+            self.state_root,
+            max_rounds_per_day=max_rounds_per_day,
+            max_cognition_calls_per_day=_int_setting(
+                src, ENV_MAX_COGNITION_CALLS_PER_DAY, DEFAULT_MAX_COGNITION_CALLS_PER_DAY),
+            max_actions_per_day=_int_setting(
+                src, ENV_MAX_ACTIONS_PER_DAY, DEFAULT_MAX_ACTIONS_PER_DAY),
+        )
 
         #: The artifact continuation source, when a port was supplied.  Registered so AG-0 can
         #: actually see the work; the registry refuses unknown or forbidden source kinds itself.
@@ -1141,8 +1243,17 @@ class AutonomousLifeCycle:
     def _finish(self, base: dict[str, Any], outcome: str, *, llm_calls: int,
                 detail: str = "") -> dict[str, Any]:
         self.last_outcome = outcome
+        # E09.2: charge the budget here, not at the call sites, so every entry point
+        # (timer, event wake, run-once) is charged identically.  A real cognition call
+        # is spent whether or not it produced an action, and a failed real request is
+        # not free.  A round that never reached a model spends nothing.
+        if llm_calls:
+            self.budget.note_cognition(int(llm_calls))
+        if base.get("action_id") or outcome in {OUTCOME_ACTED, OUTCOME_ALREADY_DONE}:
+            self.budget.note_action()
         base.update({"outcome": outcome, "detail": detail, "llm_calls": llm_calls,
-                     "budget_remaining": self.budget.remaining()})
+                     "budget_remaining": self.budget.remaining(),
+                     "budget": self.budget.snapshot()})
         return base
 
     def status(self) -> dict[str, Any]:
@@ -1157,9 +1268,7 @@ class AutonomousLifeCycle:
         return {
             "autonomous_enabled": self.enabled,
             "rounds_run": self.rounds_run,
-            "budget": {"max_rounds_per_day": self.budget.max_rounds_per_day,
-                       "spent_today": self.budget.spent_today(),
-                       "remaining_today": self.budget.remaining()},
+            "budget": self.budget.snapshot(),
             "last_outcome": self.last_outcome,
             "last_error": self.last_error,
             "last_step_receipt": self.last_receipt.to_dict() if self.last_receipt else None,

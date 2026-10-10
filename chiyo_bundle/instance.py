@@ -96,6 +96,23 @@ class Instance:
             self.native._life_supply_client=LifeSupplyReadClient(str(Path(supply_socket).expanduser().resolve()),timeout=0.3)
         self.runtime,self.life_wrapper=wire_runtime(self.native,environment=env)
         if self.life_wrapper and self.life_wrapper.load_error:raise RuntimeError('Life could not acquire its independent owner')
+        # E11.1: the read-only life projection the chat turn may use.  It reads only through
+        # ports that already own the facts (LR-2 Activity, AR-0 actions, the grant-scoped work
+        # port, the governed experience port); a port that is not available simply means fewer
+        # facts, never a guess.  With no Life at all the chat path is untouched.
+        self.life_projection=None
+        if self.life_wrapper and not self.life_wrapper.load_error:
+            try:
+                scripts=str(ROOT/'components/life/scripts')
+                if scripts not in sys.path:sys.path.insert(0,scripts)
+                from life_projection import life_projection_from_paths
+                life_runtime=getattr(self.life_wrapper._adapter,'_RUNTIME',None)
+                self.life_projection=life_projection_from_paths(
+                    runtime=life_runtime,supply_socket=supply_socket,subject_id=supply_subject,
+                    evidence_db=paths['m0_db'],controls_db=str(control))
+                self.native.life_projection=self.life_projection
+            except Exception:
+                self.life_projection=None
         if cognition_shadow:
             if not self.life_wrapper:raise RuntimeError('Cognition Shadow requires the Life owner')
             adapter=self.life_wrapper._adapter
@@ -175,4 +192,6 @@ class Instance:
             'memory_control_healthy':self.native.memory_controls.projection().healthy if self.native.memory_controls else None,
             'memory_resolver_state':getattr(self.native.m37_resolver,'state',None),
             'life_loaded':bool(self.life_wrapper),'proactive_enabled':False,'autonomous_action_enabled':False,
+            # E11.4: what the chat turn could actually know, and what it could not read.
+            'life_projection':(self.life_projection.diagnostics() if self.life_projection else None),
             'hermes_version':'0.21.0','state_is_independent':True}
