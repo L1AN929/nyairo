@@ -275,6 +275,7 @@ class ProductionLifeRuntime:
         apply_production_cutover: Optional[bool] = None,
         audit_journal_factory: Optional[Callable[[Path], Any]] = None,
         install_root: Path | str | None = None,
+        artifact_action_adapter: Any = None,
     ) -> None:
         self.audit_journal_factory = audit_journal_factory
         self.state_root = resolve_state_root(state_root, install_root=install_root)
@@ -350,8 +351,15 @@ class ProductionLifeRuntime:
             namespace=NAMESPACE_AGENCY,
         )
         self.world_adapter = ag2.WorldActionAdapter(RefusingWorldResolver())
-        self.file_adapter = RefusingFileAdapter(self.sandbox_files_dir)
-        self.file_observer = ag2.FileArtifactObserver(self.sandbox_files_dir)
+        # The managed-artifact adapter is opt-in: with no adapter supplied, this root behaves
+        # exactly as before (a fail-closed RefusingFileAdapter and the sandbox observer).  When
+        # one is supplied, the sandbox observer is removed as well, because the adapter returns
+        # owner-backed evidence and a sandbox file observation would be a different, wrong fact.
+        self.artifact_action_adapter = artifact_action_adapter
+        self.file_adapter = (artifact_action_adapter if artifact_action_adapter is not None
+                             else RefusingFileAdapter(self.sandbox_files_dir))
+        self.file_observer = (None if artifact_action_adapter is not None
+                              else ag2.FileArtifactObserver(self.sandbox_files_dir))
         self.tool_adapter = ag2.ToolActionAdapter(RefusingToolExecutor())
         self.message_adapter = ag2.MessageActionAdapter(RefusingMessageProvider())
         self.action_command = ag2.ActionCommandService(
@@ -533,8 +541,9 @@ class ProductionLifeRuntime:
         self.ag2_progress_port = ag2.build_ag2_port(self.progress_coordinator, {
             "register_result_binding", "register_progress_contract", "register_completion_contract",
             "ingest_progress_evidence", "recover", "auto_apply_natural_completion", "read_service"})
-        self.ag2_file_observer_port = ag2.build_ag2_port(
-            self.file_observer, {"observe_file_evidence"})
+        self.ag2_file_observer_port = (
+            ag2.build_ag2_port(self.file_observer, {"observe_file_evidence"})
+            if self.file_observer is not None else None)
         self.ag2_activity_command_port = ag2.build_ag2_port(
             self.activity_command, {"start_activity", "pause_activity", "abandon_activity"})
         self.ag2_candidate_port = ag2.build_ag2_port(
@@ -753,6 +762,7 @@ def build_production_life_runtime(
     apply_production_cutover: Optional[bool] = None,
     audit_journal_factory: Optional[Callable[[Path], Any]] = None,
     install_root: Path | str | None = None,
+    artifact_action_adapter: Any = None,
 ) -> ProductionLifeRuntime:
     """Assemble the V0.1 production runtime.  Caller owns ``close()``.
 
@@ -771,4 +781,5 @@ def build_production_life_runtime(
         apply_production_cutover=apply_production_cutover,
         audit_journal_factory=audit_journal_factory,
         install_root=install_root,
+        artifact_action_adapter=artifact_action_adapter,
     )

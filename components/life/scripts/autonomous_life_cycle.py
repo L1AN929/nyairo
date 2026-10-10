@@ -43,6 +43,7 @@ Honest limits of this revision
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -62,6 +63,8 @@ from life_artifact_port import (
     LifeArtifactUnavailable,
     operation_key_for,
 )
+from action_reality_ledger import ACTION_KIND_FILE
+from managed_artifact_action_adapter import OP_COMMIT_VERSION
 
 #: Master switch.  Autonomous life is OFF unless the operator turns it on.
 ENV_AUTONOMOUS_ENABLED = "CHIYO_AUTONOMOUS_LIFE_ENABLED"
@@ -96,6 +99,7 @@ OUTCOME_ACTED = "ACTED"
 OUTCOME_STEP_REFUSED = "STEP_REFUSED"
 OUTCOME_STEP_UNKNOWN = "STEP_UNKNOWN"
 OUTCOME_ALREADY_DONE = "ALREADY_DONE"
+OUTCOME_STEP_UNSETTLED = "STEP_UNSETTLED"
 
 #: Reason code used when a step is not attempted because the work already moved.
 REASON_HEAD_ADVANCED = "ARTIFACT_HEAD_ADVANCED"
@@ -350,15 +354,21 @@ class AutonomousLifeCycle:
         adoption_spec = (self._adoption_spec(resume_point)
                          if resume_point and not has_foreground else None)
 
+        # When a real AR-0 adapter is wired, the single step goes through AR-0: proposal, the
+        # durable submission fence, an attempt, the owner's receipt, and reconciliation by the
+        # original operation.  Without one, nothing crosses a submission fence at all.
+        ar0_step = (self._ar0_step_spec(resume_point, observed_at=obs)
+                    if resume_point is not None and act and self._ar0_enabled() else None)
+        base["step_path"] = "AR0" if ar0_step is not None else "PORT_DIRECT"
+
         try:
             out = self.runtime.coordinator.run_decision_and_adoption_cycle(
                 trigger_kind=trigger_kind,
                 trigger_ref=trigger_ref,
                 observed_at=obs,
                 adoption_spec=adoption_spec,
-                # AR-0's real adapter for artifact verbs is WP-05.  Passing False keeps this
-                # revision from pretending an AR-0 action crossed a submission fence.
-                execute_initial_step=False,
+                step_spec_override=ar0_step,
+                execute_initial_step=ar0_step is not None,
             )
         except ag2.KillSwitchDisabledError as exc:
             return self._finish(base, OUTCOME_DISABLED, llm_calls=0, detail=str(exc))
@@ -403,11 +413,17 @@ class AutonomousLifeCycle:
                                 detail=str(getattr(adp_rec, "rejection_reason_code", adoption_status)))
 
         # Adopted.  Now do the one narrow real step.
+        if ar0_step is not None:
+            return self._classify_ar0_step(out, base, obs)
+
         if not act or resume_point is None or not self.artifact_grant_id or not self.workspace_id:
             return self._finish(base, OUTCOME_ACTED, llm_calls=1,
                                 detail="adopted with no narrow step available in this revision")
 
+        # No AR-0 adapter is wired, so no action crosses a submission fence.  The step is still
+        # performed against the real owner through the narrow port and its receipt is journalled.
         receipt = self._commit_next_version(resume_point, base, obs)
+
         self.last_receipt = receipt
         base["step_receipt"] = receipt.to_dict()
         if receipt.effect_state == EffectState.APPLIED:
@@ -421,6 +437,117 @@ class AutonomousLifeCycle:
                                 detail=receipt.reason or "no change needed")
         return self._finish(base, OUTCOME_STEP_REFUSED, llm_calls=1,
                             detail=f"{receipt.status}:{receipt.reason}")
+
+    # -- AR-0 step (E01/E05) -----------------------------------------------------------
+
+    def _ar0_enabled(self) -> bool:
+        """True when the composition root has a real AR-0 adapter for the artifact verbs."""
+        return getattr(self.runtime, "artifact_action_adapter", None) is not None
+
+    def _ar0_step_spec(self, point: ArtifactResumePoint, *, observed_at: str) -> dict[str, Any]:
+        """One bounded step, described for AR-0.  No second planner is introduced."""
+        content = self.writer.next_content(point, observed_at=observed_at)
+        return {
+            "step_kind": ag2.STEP_KIND_FILE_ACTION,
+            "action_kind": ACTION_KIND_FILE,
+            "target_ref": f"artifact:{point.artifact_id}",
+            "payload_spec": {
+                "op": OP_COMMIT_VERSION,
+                "artifact_id": point.artifact_id,
+                "expected_head": point.head_version_id,
+                "content": content,
+                "grant_id": str(self.artifact_grant_id),
+            },
+            "expected_effect_predicates": ["artifact_written_verified"],
+            "post_submit_life_behavior": ag2.POST_SUBMIT_KEEP_ACTIVE,
+            # Deterministic per (work, head): one intended edit, one logical action, one Supply
+            # operation -- so a reconciliation can never mint a second version.
+            # The key encodes *what is intended*: the work, the head it was based on, and the
+            # bytes to write.  Two different intended edits are two different logical actions;
+            # repeating the same intent reuses the same action and the same Supply operation
+            # instead of writing a second version.
+            "idempotency_key": (
+                f"idem_step:v02:{point.artifact_id}:{point.head_version_id}:"
+                f"{hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]}"),
+        }
+
+    def _classify_ar0_step(self, out: Mapping[str, Any], base: dict[str, Any],
+                           obs: str) -> dict[str, Any]:
+        """Report the AR-0 result as exactly what the owner confirmed -- never more."""
+        step_res = out.get("step_execution_result") or {}
+        submit = step_res.get("submit_result") or {}
+        action = submit.get("action") or {}
+        status = str(action.get("status") or "")
+        receipts: list[dict[str, Any]] = []
+        if action.get("action_id"):
+            try:
+                receipts = self.runtime.action_read.list_receipts(str(action["action_id"]))
+            except Exception:  # pragma: no cover - read failure is reported, not invented
+                receipts = []
+        receipt = receipts[-1] if receipts else None
+        details = dict((receipt or {}).get("details") or {})
+
+        base.update({
+            "action_id": action.get("action_id"),
+            "action_status": status,
+            "provider_operation_ref": action.get("provider_operation_ref"),
+            "owner_status": details.get("owner_status"),
+            "owner_version_id": details.get("version_id"),
+            "owner_version_created": details.get("version_created"),
+            "owner_receipt": receipt,
+        })
+
+        # Journal the step with the same shape the direct-port path uses, so one file answers
+        # "what did she actually do" regardless of which path executed it.
+        payload = dict(action.get("frozen_payload") or {})
+        if status == "SUCCEEDED" and details.get("version_created") is not False:
+            effect_state = EffectState.APPLIED
+        elif status == "SUCCEEDED":
+            effect_state = EffectState.NO_CHANGE
+        elif status == "FAILED":
+            effect_state = EffectState.REFUSED
+        else:
+            effect_state = EffectState.UNKNOWN
+        step_receipt = StepReceipt(
+            observed_at=_utc_now_iso(),
+            artifact_id=str(payload.get("artifact_id") or ""),
+            expected_head=payload.get("expected_head"),
+            operation_key=str(action.get("provider_operation_ref") or ""),
+            effect_state=effect_state,
+            status=status,
+            reason=str(details.get("owner_status") or ""),
+            version_id=details.get("version_id"),
+            version_number=details.get("version_number"),
+            head_version_id=details.get("version_id"),
+            correlation_id=base.get("correlation_id"),
+            decision_id=base.get("decision_id"),
+            activity_ref=base.get("activity_ref"),
+            detail=str(details.get("detail") or "")[:200],
+        )
+        self.last_receipt = step_receipt
+        base["step_receipt"] = step_receipt.to_dict()
+        self._journal(step_receipt)
+
+        if status == "SUCCEEDED":
+            if details.get("version_created") is False:
+                # The action happened; the work did not change.  That is not a new version and it
+                # is not counted as one.
+                return self._finish(base, OUTCOME_ALREADY_DONE, llm_calls=1,
+                                    detail=f"owner answered {details.get('owner_status')}; no new version")
+            return self._finish(base, OUTCOME_ACTED, llm_calls=1,
+                                detail=f"owner committed {details.get('version_id')}")
+        if status == "UNKNOWN":
+            return self._finish(
+                base, OUTCOME_STEP_UNKNOWN, llm_calls=1,
+                detail=f"action {action.get('action_id')} result unknown; "
+                       "reconcile the original operation before any retry")
+        if status == "FAILED":
+            return self._finish(
+                base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                detail=f"owner refused: {details.get('owner_status')} "
+                       f"{details.get('detail') or ''}".strip())
+        return self._finish(base, OUTCOME_STEP_UNSETTLED, llm_calls=1,
+                            detail=f"action status {status!r} did not settle in this round")
 
     # -- narrow step -------------------------------------------------------------------
 
