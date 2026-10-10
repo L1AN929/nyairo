@@ -57,6 +57,7 @@ STATUS_BLOCKED = "BLOCKED"
 STATUS_DENY = "DENY"
 STATUS_NOT_FOUND = "NOT_FOUND"
 STATUS_UNKNOWN = "UNKNOWN"
+STATUS_CONFLICT = "CONFLICT"
 STATUS_KNOWN = "KNOWN"
 
 
@@ -86,6 +87,9 @@ class EffectState:
     NO_CHANGE = "NO_CHANGE"
     REFUSED = "REFUSED"
     NOT_FOUND = "NOT_FOUND"
+    #: The owner refused because the compare-and-swap precondition no longer holds.  A definite
+    #: answer, never an unknown one: the caller must re-read the head and reconsider.
+    CONFLICT = "CONFLICT"
     #: The command may or may not have landed.  Must be resolved before any retry.
     UNKNOWN = "UNKNOWN"
 
@@ -424,6 +428,8 @@ class LifeArtifactPort:
             return ArtifactOutcome(effect_state=EffectState.NO_CHANGE, status=status, **base)
         if status == STATUS_NOT_FOUND:
             return ArtifactOutcome(effect_state=EffectState.NOT_FOUND, status=status, **base)
+        if status == STATUS_CONFLICT:
+            return ArtifactOutcome(effect_state=EffectState.CONFLICT, status=status, **base)
         if status in {STATUS_BLOCKED, STATUS_DENY}:
             return ArtifactOutcome(effect_state=EffectState.REFUSED, status=status, **base)
         # Anything else -- including the service's own UNKNOWN -- is an unknown effect.
