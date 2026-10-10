@@ -261,6 +261,7 @@ class AutonomousLifeCycle:
         workspace_id: Optional[str] = None,
         artifact_grant_id: Optional[str] = None,
         writer: Optional[ContinuationWriter] = None,
+        experience_provider: Optional[Callable[[], list[dict[str, Any]]]] = None,
         max_rounds_per_day: Optional[int] = None,
         enabled: Optional[bool] = None,
         env: Optional[Mapping[str, str]] = None,
@@ -298,6 +299,9 @@ class AutonomousLifeCycle:
         self.last_outcome: Optional[str] = None
         self.last_error: Optional[str] = None
         self.last_receipt: Optional[StepReceipt] = None
+        #: E07: the same bounded, governance-filtered experience view the content writer gets, so a
+        #: decision may weigh the same past the writing does.  Empty means memory is not consulted.
+        self.experience_provider = experience_provider
         self.rounds_run = 0
 
     # -- zero-LLM material check -------------------------------------------------------
@@ -414,6 +418,7 @@ class AutonomousLifeCycle:
                 step_spec_override=ar0_step,
                 execute_initial_step=ar0_step is not None,
                 body_capacity_state=capacity,
+                prior_experiences=self._experience_view(),
             )
         except ag2.KillSwitchDisabledError as exc:
             return self._finish(base, OUTCOME_DISABLED, llm_calls=0, detail=str(exc))
@@ -608,6 +613,19 @@ class AutonomousLifeCycle:
                        f"{details.get('detail') or ''}".strip())
         return self._finish(base, OUTCOME_STEP_UNSETTLED, llm_calls=1,
                             detail=f"action status {status!r} did not settle in this round")
+
+    def _experience_view(self) -> list[dict[str, Any]]:
+        """The bounded, governance-filtered experiences this round may weigh.
+
+        Empty when no provider is installed or the provider fails, which is also exactly how the
+        A/B control removes memory from a decision without deleting anything.
+        """
+        if self.experience_provider is None:
+            return []
+        try:
+            return [dict(item) for item in (self.experience_provider() or []) if isinstance(item, Mapping)]
+        except Exception:
+            return []
 
     def _emit_progress_experience(self, out: Mapping[str, Any], base: dict[str, Any],
                                   *, artifact_ref: Any, version_ref: Any) -> None:
@@ -834,6 +852,7 @@ class AutonomousLifeCycle:
 def autonomous_life_cycle_from_env(runtime: Any, *, artifact_port: LifeArtifactPort,
                                    subject_id: str, workspace_id: str, artifact_grant_id: str,
                                    writer: Optional[ContinuationWriter] = None,
+                                   experience_provider: Optional[Callable[[], list[dict[str, Any]]]] = None,
                                    env: Optional[Mapping[str, str]] = None) -> AutonomousLifeCycle:
     """Assemble the cycle with the switches and budget read from the environment."""
     return AutonomousLifeCycle(
