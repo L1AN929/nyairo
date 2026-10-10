@@ -144,10 +144,13 @@ class ProductionAgencyCognitionAdapter:
 
     @staticmethod
     def _compact_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
-        # Stable identifiers and free-form source summaries can contain private/user-authored
-        # text. The model only needs bounded decision structure; never send those fields.
-        keep = ("source_kind", "candidate_kind", "hard_constraint_status", "capacity_state",
-                "executable_now", "candidate_revision", "candidate_set_revision")
+        # The decision schema requires the model to name the candidate it chose, so the candidate
+        # id has to be in the prompt.  It is an opaque reference ("cand:<hash>"), not private text:
+        # free-form source summaries and titles are still withheld, which is what this method is
+        # actually protecting.  Without the id the model can only ever answer NO_ACTION.
+        keep = ("candidate_id", "source_kind", "candidate_kind", "hard_constraint_status",
+                "capacity_state", "executable_now", "candidate_revision",
+                "candidate_set_revision")
         return {k: candidate.get(k) for k in keep if k in candidate}
 
     @staticmethod

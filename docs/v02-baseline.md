@@ -110,6 +110,22 @@ run_decision_and_adoption_cycle(trigger_kind, trigger_ref, ...)   ag2:4526
 8. **两份同名副本容易引错。** `components/alpha/chiyo/life_runtime/*` 与 `components/life/scripts/*` 是同名不同内容的两个副本（例如 `current_activity.py` 3 KB vs 26 KB）。v0.2 一律以 `components/life/**` 为准。
 9. `components/world/service/` 与 `service/bridge/` 存在重复实现（`world_action_authorization.py`、`action_intent.py` 各两份，时区还不一致：`+08:00` vs UTC）。WP-07 只挑一份接，不合并重构。
 
+## 7. E00.2 运行链映射表（能力 / 入口 / caller / 开关 / 可调用 / 缺什么）
+
+状态列在 2026-10-10 的隔离环境里**实测**过，不是读代码推断；`可实际调用` 指"在这个隔离环境里真的跑出过结果"。
+
+| 能力 | 真正的入口 | 真实 caller / owner | 当前启用开关 | 运行模式 | 可实际调用？ | 缺什么 |
+|---|---|---|---|---|---|---|
+| Candidate（AG-0） | `CandidateMaterializer.build_candidate_set(observed_at=)`（`ag0:2719`）；源注册表在 `life_runtime_production.py:460` | `LifeIntegrationCoordinator.run_decision_and_adoption_cycle`（`ag2:4560`）；owner = 各 canonical 读口 | 无 per-source 开关；受 `LIFE_RUNTIME_ENABLED` + `AGENCY_ENABLED` 约束 | `production` 命名空间 | **YES** | `PERSONAL_OPPORTUNITY` 在 v0.1 没有真实源；v0.2 补 `artifact_continuation_source.py` 后才产出候选 |
+| Decision（AG-1） | `AgencyDecisionService.evaluate_opportunity`（`ag1:3467`） | `ag2:4619`；owner = AG-1 自己（`AgencyDecisionStore`，JSON+JSONL） | `AGENCY_ENABLED`（`life_runtime_production.py:491` 按 kill switch 注入） | `production` 命名空间 | **YES**（0 候选 → 规则 `NO_ACTION`；有候选 → `COGNITIVE_REQUIRED`，需要认知适配器） | 生产装配里装的是 `DisabledCognitionAdapter`（`life_runtime_production.py:167`）；真实模型适配器从未接线 |
+| Activity（LR-2） | `ActivityCommandService.{start_activity,pause_activity,abandon_activity}`，经 AG-2 窄端口（白名单 `life_runtime_production.py:538`） | `DecisionAdoptionCoordinator.adopt_decision`（`ag2:3139`）；owner = `CanonicalActivityStore`（`canonical_life_state.json` + `life_transitions.jsonl`） | 无独立开关；需 `ActivityAuthorityLease` + capability，`CHIYO_LIFE_PRODUCTION_CUTOVER=canonical` | `canonical` 命名空间 | **YES** | 无（v0.2 验收里 START/CONTINUE 都真写了 canonical） |
+| Action（AR-0） | `ActionCommandService.{propose_action,prepare_action,submit_action}`（`action_reality_ledger.py:2675` 等） | `DecisionActionBridge.create_step_and_propose_action`（`ag2:3730`）/ `submit_step_action_and_apply_post_submit_behavior`（`ag2:3804`）；owner = `ActionStore`（`action_reality_state.json`） | `ACTION_EXECUTION_ENABLED`（`ag2:4916`）+ `SandboxExecutorCapability` | `production` 命名空间 | **YES**（仅作品窄动词，v0.2 接了真实适配器） | World/Tool/Message 三个适配器仍是 `Refusing*`；`FILE_ACTION` 在 v0.1 只有沙箱实现 |
+| Supply commit | `LifeSupplyService.dispatch` 的 `commit_markdown` / `create_artifact`（`life_supply.py:1077` / `:996`） | v0.2 窄端口 `LifeArtifactPort`（`life_artifact_port.py`）经 Unix socket，身份 = `SERVICE_PRINCIPAL`（`SO_PEERCRED`） | `ARTIFACT_EXTERNAL_ACTION=ON` + 一份 REUSABLE 的 `COMMIT_MANAGED_ARTIFACT` grant（target `workspace:<id>`） | 独立进程 + 单库 `life_supply.sqlite` | **YES** | v0.1 的 Life 侧只有 `chiyo_bundle/presence.py:103 save_note`，且固定 `create_artifact`、无法追加版本 |
+| Memory admission | 无真实入口；生产装配装的是 `RefusingSettlementConsumer("memory")`（`life_runtime_production.py:156`） | `ResultSettlementService.register_consumer`（`ag2:445`）会调用它 | 无 | — | **NO** | 需要一条只接受合法行动经历的最窄 handoff（E07）；当前不存在 |
+| World（写） | `WorldResolver.resolve(proposal)`（`world_action_resolver.py:634`）→ `WorldBodyService.act`（`world_body_service.py:360`） | 仓库内只有 `service/bridge/intent_executor.py:279` 一处真实提交点，且该 bridge **没有 `__init__.py`、全仓无注册点** | `WORLD_BODY_INTENT_MUTATION_GATE`（默认 off）、`WORLD_BODY_MUTATION_MODE`（默认未设） | — | **NO**（生产里只跑只读包装 `chiyo_bundle/world_read_service.py`） | 需要一条合法且被装配的 World action port（E08）；`chiyo_bundle/instance.py:70` 只设了 `WORLD_BODY_INTEGRATION_MODE` |
+
+**E00 结论**：第一条 `commit_markdown` 生活路径的每一段现在都有真实 caller/owner（Candidate → Decision → Activity → Action → Supply commit），且都在隔离环境里真跑出过结果；断点只有两处：**认知适配器**（v0.1 装的是 Disabled，B4 要接真实模型）与 **Memory admission / World 写口**（E07/E08 才做）。
+
 ## 7. 本阶段不做（截断范围）
 
 不做全仓 SHA256 巡检、不重写 Hermes/Native Memory/World/Supply、不新增 Authority Domain、不为 v0.2 建通用迁移平台、不做 3D/主动外发/付款/任意 shell。
