@@ -11,6 +11,7 @@ def main():
   ('world','components','world:world/service:world/service/bridge:world/scripts',['-m','unittest','discover','-s','world/service','-q']),
   ('life','components','',['check_life.py']),
   ('life-v02','components','life/scripts',['check_life_v02.py']),
+  ('life-memory-v02','components','life/scripts:native:native/src:native/memory_runtime_v1',['check_life_memory_v02.py']),
   ('host-boundaries','','.:vendor/hermes',['-m','unittest','discover','-s','tests','-p','test_*.py','-q']),
   ('cognition-faults','','.:vendor/hermes',['-m','pytest','tests/test_cognition_reliability.py','-q'])]
  failed=[]

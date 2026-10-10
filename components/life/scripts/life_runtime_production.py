@@ -276,6 +276,7 @@ class ProductionLifeRuntime:
         audit_journal_factory: Optional[Callable[[Path], Any]] = None,
         install_root: Path | str | None = None,
         artifact_action_adapter: Any = None,
+        experience_consumer: Any = None,
     ) -> None:
         self.audit_journal_factory = audit_journal_factory
         self.state_root = resolve_state_root(state_root, install_root=install_root)
@@ -522,7 +523,10 @@ class ProductionLifeRuntime:
         self.integration_commit = ag2.IntegrationCommitPort(
             self.integration_store, self.integration_lease, self.integration_capability
         )
-        self.experience_consumer = RefusingExperienceConsumer()
+        # Opt-in, exactly like the artifact adapter: with nothing supplied the experience handoff
+        # keeps being refused, so the default assembly cannot write a memory by accident.
+        self.experience_consumer = (experience_consumer if experience_consumer is not None
+                                    else RefusingExperienceConsumer())
 
         self.ag2_decision_port = ag2.build_ag2_port(
             self.decision_service, {"evaluate_opportunity", "reconcile_after_crash"})
@@ -763,6 +767,7 @@ def build_production_life_runtime(
     audit_journal_factory: Optional[Callable[[Path], Any]] = None,
     install_root: Path | str | None = None,
     artifact_action_adapter: Any = None,
+    experience_consumer: Any = None,
 ) -> ProductionLifeRuntime:
     """Assemble the V0.1 production runtime.  Caller owns ``close()``.
 
@@ -782,4 +787,5 @@ def build_production_life_runtime(
         audit_journal_factory=audit_journal_factory,
         install_root=install_root,
         artifact_action_adapter=artifact_action_adapter,
+        experience_consumer=experience_consumer,
     )
