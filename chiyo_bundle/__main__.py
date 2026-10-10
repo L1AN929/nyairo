@@ -12,16 +12,23 @@ def _life(args):
     if args.action=='list-recent-actions':
         print(json.dumps(control.list_recent_actions(args.state,limit=args.limit),ensure_ascii=False,indent=1));return
     # run-once is the development entry: one real consideration window through the real
-    # runner.  It needs an assembled instance, so it is the only verb that does.
-    i=Instance(args.state,owner=args.owner,memory=args.memory,life=True,tools=False)
+    # runner, obtained from the same assembly the Hermes plugin uses.  It never assumes a
+    # global cycle object, and it never builds a second canonical writer: the runtime it
+    # asks for is the one that holds the lease, and a lease held elsewhere fails closed.
     try:
-        from autonomous_life_runner import AutonomousLifeRunner
-        cycle=getattr(getattr(i.life_wrapper,'_adapter',None),'_CYCLE',None)
-        if cycle is None:
-            print(json.dumps({'ok':False,'reason':'NO_CYCLE','detail':'this instance has no autonomous cycle assembled'},ensure_ascii=False));return
-        runner=AutonomousLifeRunner(cycle,state_root=control.life_state_root(args.state))
-        print(json.dumps(control.run_once(args.state,runner=runner),ensure_ascii=False,indent=1))
-    finally:i.close()
+        from life_runtime_adapter import autonomous_life, autonomous_status, runner_tick
+        from autonomous_life_assembly import run_once as _run_once
+    except Exception as exc:
+        print(json.dumps({'ok': False, 'reason': 'ASSEMBLY_UNAVAILABLE',
+                          'detail': '%s: %s' % (type(exc).__name__, exc)}, ensure_ascii=False))
+        return
+    if args.action == 'status':
+        assembled = autonomous_life()
+        print(json.dumps({'control': control.read_status(args.state),
+                          'assembled': autonomous_status()}, ensure_ascii=False, indent=1))
+        return
+    assembled = autonomous_life()
+    print(json.dumps(_run_once(assembled), ensure_ascii=False, indent=1))
 def main():
  p=argparse.ArgumentParser();p.add_argument('command',choices=['chat','doctor','life']);p.add_argument('--state',required=True);p.add_argument('--owner',default='local-owner');p.add_argument('--memory',action='store_true');p.add_argument('--life',action='store_true');p.add_argument('--tools',action='store_true');p.add_argument('--text')
  p.add_argument('--action',choices=LIFE_VERBS);p.add_argument('--limit',type=int,default=20)

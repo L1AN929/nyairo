@@ -68,6 +68,10 @@ MODE_FILE = LOG_DIR / "INTEGRATION_MODE"
 BJT = timezone(timedelta(hours=8))
 
 _LOCK = threading.RLock()
+
+#: B8-2: the autonomous chain assembled on top of ``_RUNTIME``.  ``None`` means it has
+#: not been assembled yet; the state dict carries either READY or BLOCKED + the reason.
+_ASSEMBLED: Optional[dict] = None
 _RUNTIME: Any = None
 _RUNTIME_ERROR: Optional[str] = None
 
@@ -406,6 +410,104 @@ def runtime_status() -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001
                 out["observe_error"] = f"{type(exc).__name__}: {exc}"
         return out
+
+
+# ---------------------------------------------------------------------------------
+# B8-2: the autonomous chain, assembled on the runtime that already holds the lease
+# ---------------------------------------------------------------------------------
+
+
+def autonomous_life(*, force: bool = False) -> dict:
+    """Assemble (once) the cycle, the runner and the feed poller over ``_RUNTIME``.
+
+    This is the real handle the CLI and the turn hook use.  It never builds a second
+    ``ProductionLifeRuntime``: it reuses the one already loaded, so the canonical
+    writer lease is the single one this state root has.  A missing configuration is
+    reported as ``BLOCKED`` with the specific reason -- never as a success, and never
+    by inventing a permission.
+    """
+
+    global _ASSEMBLED
+    with _LOCK:
+        runtime = _runtime()
+        if runtime is None:
+            return {"state": "BLOCKED", "reason": "RUNTIME_UNAVAILABLE",
+                    "detail": _RUNTIME_ERROR or "the life runtime is not loaded"}
+        if _ASSEMBLED is not None and _ASSEMBLED.get("runtime") is runtime and not force:
+            return _ASSEMBLED
+        try:
+            scripts = str(RELEASE_SCRIPTS)
+            if scripts not in sys.path:
+                sys.path.insert(0, scripts)
+            import autonomous_life_assembly as assembly
+        except Exception as exc:  # noqa: BLE001
+            _ASSEMBLED = {"state": "BLOCKED", "reason": "ASSEMBLY_UNAVAILABLE",
+                          "detail": f"{type(exc).__name__}: {exc}"}
+            return _ASSEMBLED
+        assembled = assembly.assemble_autonomous_life(
+            runtime, environment=_ENVIRONMENT, state_root=STATE_ROOT)
+        assembled["runtime"] = runtime
+        _ASSEMBLED = assembled
+        _METRICS["autonomous_state"] = assembled.get("state")
+        if assembled.get("state") != "READY":
+            _METRICS["autonomous_reason"] = assembled.get("reason")
+            logger.info("autonomous life not assembled: %s (%s)",
+                        assembled.get("reason"), assembled.get("detail"))
+        else:
+            logger.info("autonomous life assembled: enabled=%s lease=%s",
+                        assembled.get("enabled"), assembled.get("lease_instance"))
+        return _ASSEMBLED
+
+
+def autonomous_runner() -> Any:
+    """The assembled runner, or ``None`` with ``autonomous_error()`` explaining why."""
+
+    assembled = autonomous_life()
+    return assembled.get("runner") if assembled.get("state") == "READY" else None
+
+
+def autonomous_error() -> Optional[dict]:
+    assembled = autonomous_life()
+    if assembled.get("state") == "READY":
+        return None
+    return {"reason": assembled.get("reason"), "detail": assembled.get("detail"),
+            "missing": assembled.get("missing")}
+
+
+def autonomous_status() -> dict:
+    """The CLI's ``status``: the switch, the budget, the window and the last wake."""
+
+    assembled = autonomous_life()
+    if assembled.get("state") != "READY":
+        return {"assembled": False, "state": assembled.get("state"),
+                "reason": assembled.get("reason"), "detail": assembled.get("detail"),
+                "missing": assembled.get("missing")}
+    runner = assembled["runner"]
+    return {"assembled": True, "state": "READY", "enabled": runner.enabled,
+            "lease_instance": assembled.get("lease_instance"),
+            "subject_id": assembled.get("subject_id"),
+            "artifact_grant_id": assembled.get("artifact_grant_id"),
+            "runner": runner.status()}
+
+
+def runner_tick(*, act: bool = True) -> dict:
+    """One bounded step of the resident runner, driven by the host.
+
+    No scheduler and no background thread are added here: the plugin's own turn hook
+    calls this, and the CLI can call it on demand.  A step polls the real feeds, hands
+    any fresh event to the runner, and runs the check window if it is due.
+    """
+
+    assembled = autonomous_life()
+    if assembled.get("state") != "READY":
+        return {"ok": False, "reason": assembled.get("reason"),
+                "detail": assembled.get("detail")}
+    try:
+        import autonomous_life_assembly as assembly
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": "ASSEMBLY_UNAVAILABLE",
+                "detail": f"{type(exc).__name__}: {exc}"}
+    return assembly.runner_tick(assembled, act=act)
 
 
 # ---------------------------------------------------------------------------------
