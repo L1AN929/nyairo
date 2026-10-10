@@ -588,6 +588,12 @@ class AutonomousLifeCycle:
                 artifact_id=payload.get("artifact_id"), version_id=details.get("version_id"),
                 version_number=details.get("version_number"),
                 correlation_id=base.get("correlation_id"), action_ref=action.get("action_id"))
+            # A real, owner-confirmed change is the milestone Memory cares about.  AG-2 only
+            # emitted COMPLETED/ABANDONED/CONFLICT before, so "she actually changed something"
+            # had no handoff at all.
+            self._emit_progress_experience(
+                out, base, artifact_ref=payload.get("artifact_id"),
+                version_ref=details.get("version_id"))
             return self._finish(base, OUTCOME_ACTED, llm_calls=1,
                                 detail=f"owner committed {details.get('version_id')}")
         if status == "UNKNOWN":
@@ -602,6 +608,43 @@ class AutonomousLifeCycle:
                        f"{details.get('detail') or ''}".strip())
         return self._finish(base, OUTCOME_STEP_UNSETTLED, llm_calls=1,
                             detail=f"action status {status!r} did not settle in this round")
+
+    def _emit_progress_experience(self, out: Mapping[str, Any], base: dict[str, Any],
+                                  *, artifact_ref: Any, version_ref: Any) -> None:
+        """Tell the experience consumer that a verified change really happened.
+
+        Delivery failures are recorded, never raised: AG-2 keeps the handoff pending for a retry and
+        nothing about the work is rolled back.
+        """
+        int_rec = out.get("integration_record")
+        integration_id = getattr(int_rec, "integration_id", None)
+        activity_ref = base.get("activity_ref")
+        if not integration_id or not activity_ref:
+            return
+        artifact_refs = [r for r in (f"artifact:{artifact_ref}" if artifact_ref else None,
+                                     f"artifactversion:{version_ref}" if version_ref else None)
+                         if r]
+        try:
+            result = self.runtime.coordinator.emit_experience_handoff(
+                integration_id=str(integration_id),
+                activity_id=str(activity_ref),
+                terminal_or_milestone_kind=ag2.HANDOFF_KIND_SIGNIFICANT_PROGRESS,
+                occurred_at=base.get("observed_at"),
+                artifact_refs=artifact_refs,
+            )
+        except Exception as exc:
+            base["experience_handoff_error"] = f"{type(exc).__name__}: {exc}"
+            return
+        dispatch = result.get("dispatch_result") or {}
+        deliveries = dispatch.get("deliveries") or []
+        handoff_event = result.get("handoff_event")
+        base["experience_handoff"] = {
+            "handoff_id": getattr(handoff_event, "handoff_id", None),
+            "idempotent_replay": bool(result.get("idempotent_replay")),
+            "disposition": deliveries[-1].get("consumer_disposition") if deliveries else None,
+            "status": deliveries[-1].get("status") if deliveries else None,
+            "pending": len(dispatch.get("pending_handoff_ids") or []),
+        }
 
     def _record_artifact_progress(self, base: dict[str, Any], *, activity_ref: Any,
                                   artifact_id: Any, version_id: Any, version_number: Any,

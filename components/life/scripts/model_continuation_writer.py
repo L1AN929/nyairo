@@ -48,6 +48,10 @@ SYSTEM_PROMPT = (
 )
 
 
+
+#: How many admitted experiences may enter one content prompt, and how much text in total.
+DEFAULT_MAX_EXPERIENCES = 3
+DEFAULT_MAX_EXPERIENCE_CHARS = 600
 class ModelContentError(RuntimeError):
     """The model did not produce a usable small edit."""
 
@@ -64,6 +68,9 @@ class ModelContinuationWriter:
         timeout_s: float = 20.0,
         max_output_tokens: int = 512,
         title_hint: Optional[str] = None,
+        experience_provider: Optional[Any] = None,
+        max_experiences: int = DEFAULT_MAX_EXPERIENCES,
+        max_experience_chars: int = DEFAULT_MAX_EXPERIENCE_CHARS,
     ) -> None:
         self.client = client
         self.max_new_chars = int(max_new_chars)
@@ -71,6 +78,12 @@ class ModelContinuationWriter:
         self.timeout_s = float(timeout_s)
         self.max_output_tokens = int(max_output_tokens)
         self.title_hint = title_hint
+        #: A callable returning the bounded, governance-filtered experience view.  Supplying an
+        #: empty one is exactly how the A/B control removes memory without deleting anything.
+        self.experience_provider = experience_provider
+        self.max_experiences = max(0, int(max_experiences))
+        self.max_experience_chars = max(0, int(max_experience_chars))
+        self.last_experience_ids: list[str] = []
         self.call_count = 0
         self.last_raw_output: Optional[str] = None
         self.last_kind: Optional[str] = None
@@ -89,12 +102,45 @@ class ModelContinuationWriter:
             "observed_at": observed_at,
             "already_written_chars": len(current),
             "tail_of_current_text": tail,
+            "previous_experiences": self._experience_view(),
             "instruction": (
                 f"给这本手记加一小段，或把最后一段改写一下。新内容不超过 {self.max_new_chars} 字。"
                 "如果这段手记已经不需要再改，也要照常给出一个最小的改动，不要拒绝。"
             ),
         }
         return json.dumps(payload, ensure_ascii=False)
+
+    def _experience_view(self) -> list[dict[str, Any]]:
+        """The bounded, attributable slice of her own admitted experiences.
+
+        Empty when no provider is installed, when the provider fails, or when governance cannot
+        establish what is safe to recall.  Memory may inform a choice here; it never supplies the
+        work's current text, which still comes from the owner.
+        """
+        self.last_experience_ids = []
+        if self.experience_provider is None or self.max_experiences == 0:
+            return []
+        try:
+            items = list(self.experience_provider() or [])
+        except Exception:
+            return []
+        view: list[dict[str, Any]] = []
+        budget = self.max_experience_chars
+        for item in items[: self.max_experiences]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "")
+            if budget > 0:
+                text = text[:budget]
+                budget -= len(text)
+            experience_id = item.get("experience_id")
+            if experience_id:
+                self.last_experience_ids.append(str(experience_id))
+            view.append({"experience_id": experience_id, "text": text,
+                         "artifact_ref": item.get("artifact_ref"),
+                         "version_ref": item.get("version_ref"),
+                         "owner_result": item.get("owner_result")})
+        return view
 
     # -- parse -------------------------------------------------------------------------
 
