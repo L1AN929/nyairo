@@ -435,6 +435,40 @@ class GatewaySurface:
             labels = {}
         return labels
 
+    def _reachable_move_candidates(self) -> list[dict[str, Any]]:
+        """B6-3: reachable destinations from the World's own location catalog.
+
+        The list is derived from the canonical reachability relation at the
+        *current* place, so it changes with the real World state and is never
+        invented by the gateway or by the model.  A surface that cannot read
+        the catalog offers no MOVE candidate at all: an empty list is honest,
+        a guessed destination is not.
+        """
+
+        place_id = (self._world_live().get("location") or {}).get("place_id")
+        if not place_id:
+            return []
+        try:
+            import world_living_skeleton as wls
+        except Exception:  # noqa: BLE001 - no catalog means no candidate
+            return []
+        try:
+            catalog = {item["location_id"]: item for item in wls.location_catalog()}
+            current = catalog[str(place_id)]
+        except Exception:  # noqa: BLE001
+            return []
+        candidates: list[dict[str, Any]] = []
+        for target in current.get("reachable") or []:
+            item = catalog.get(str(target))
+            if item is None:
+                continue
+            candidates.append({
+                "location_id": item["location_id"],
+                "label": item["name"],
+                "kind": item["kind"],
+            })
+        return candidates
+
     def get_available_actions(self) -> dict[str, Any]:
         """What the gateway is allowed to ask for (ticket sections 18-20)."""
 
@@ -458,6 +492,9 @@ class GatewaySurface:
                 "available": True,
                 "params": {"destination_location_id": "string"},
                 "requires": ["world.revision", "world.location"],
+                # B6-3: reachable destinations, taken from the World's own
+                # catalog at the current place -- never invented here.
+                "candidates": self._reachable_move_candidates(),
             },
             {
                 "verb": "POSE",

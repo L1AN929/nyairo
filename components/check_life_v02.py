@@ -45,7 +45,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 LIFE_SCRIPTS = ROOT / "life" / "scripts"
-sys.path.insert(0, str(LIFE_SCRIPTS))
+NATIVE = ROOT / "native"
+for _path in (str(LIFE_SCRIPTS), str(NATIVE), str(NATIVE / "src"),
+              str(NATIVE / "memory_runtime_v1")):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 REQUIRED_ENV = ("NYA02_SUPPLY_SOCKET", "NYA02_SUBJECT", "NYA02_WORKSPACE_ID",
                 "NYA02_ARTIFACT_GRANT")
@@ -153,7 +157,8 @@ def main() -> int:
                                                str(point.head_version_id)))
             return (point.content or "") + "\n\n（我的这一笔）\n"
 
-    def build(*, enabled: bool, max_rounds: int, writer=None, drop_response: bool = False):
+    def build(*, enabled: bool, max_rounds: int, writer=None, drop_response: bool = False,
+              experience_consumer=None):
         # Each section is a fresh consideration window.  The day budget is a real persisted
         # counter, so the check clears it explicitly instead of pretending rounds are free.
         (install_root / "autonomous_budget.json").unlink(missing_ok=True)
@@ -167,7 +172,8 @@ def main() -> int:
             fault_injection_drop_response_after_write=drop_response)
         runtime = lrp.build_production_life_runtime(
             install_root, kill_switches=switches, cognition_adapter=cognition,
-            install_root=install_root, artifact_action_adapter=adapter)
+            install_root=install_root, artifact_action_adapter=adapter,
+            experience_consumer=experience_consumer)
         cycle = AutonomousLifeCycle(
             runtime, artifact_port=port, subject_id=subject, workspace_id=workspace_id,
             artifact_grant_id=grant_id, writer=writer,
@@ -412,6 +418,72 @@ def main() -> int:
                 if journal.exists() else [])
     check(bool(receipts), "steps were journalled", len(receipts))
     print(f"  note  {len(receipts)} step receipt(s) recorded in {journal}")
+
+    # ---- 11. the work does not roll back when Memory refuses -------------------------
+    print("[11] a Memory failure does not roll back the work")
+    from app.evidence import EvidenceStore
+    from life_experience_memory_consumer import MemoryAdmissionExperienceConsumer
+    from life_experience_port import LifeExperiencePort, life_conversation_id
+    from memory_control import MemoryControlLedger
+
+    blocked_parent = install_root / "not-a-directory"
+    blocked_parent.write_text("this is a file, so no database can live under it\n",
+                              encoding="utf-8")
+    broken_consumer = MemoryAdmissionExperienceConsumer(
+        LifeExperiencePort(blocked_parent / "evidence.sqlite", subject=subject),
+        enabled=True)
+    runtime, port, cycle, adapter, cognition = build(
+        enabled=True, max_rounds=MAX_ROUNDS, experience_consumer=broken_consumer)
+    try:
+        head_before = port.read_head(artifact_id) or {}
+        versions_before = head_before.get("version_number")
+        refused = cycle.evaluate_once(trigger_ref="evt:v02:check:11")
+        check(refused["outcome"] == OUTCOME_ACTED,
+              "the round still acted although Memory could not be written",
+              refused.get("detail"))
+        head_after = port.read_head(artifact_id) or {}
+        check(head_after.get("version_number") == (versions_before or 0) + 1,
+              "the work advanced and was NOT rolled back",
+              f"{versions_before} -> {head_after.get('version_number')}")
+        handoff = refused.get("experience_handoff") or {}
+        check(handoff.get("pending", 0) >= 1,
+              "the experience stays pending for a deterministic retry", handoff)
+        check(refused.get("experience_handoff_error") is None,
+              "a DEFER is a disposition, not an error", refused.get("experience_handoff_error"))
+        activity = runtime.canonical_state()["activities"].get(activity_ref) or {}
+        check(activity.get("status") == "ACTIVE",
+              "the canonical Activity did not roll back either", activity.get("status"))
+    finally:
+        runtime.close()
+
+    # ---- 12. an interruption before delivery is resumed after a restart --------------
+    print("[12] a pending handoff is delivered after a restart")
+    evidence_db = install_root / "evidence.sqlite"
+    controls_db = install_root / "controls.sqlite"
+    store = EvidenceStore(evidence_db)
+    MemoryControlLedger(controls_db, evidence_db, owner=subject,
+                        conversation=life_conversation_id(subject)).initialize()
+    live_port = LifeExperiencePort(evidence_db, controls_db=controls_db, subject=subject)
+    runtime, port, cycle, adapter, cognition = build(
+        enabled=True, max_rounds=MAX_ROUNDS,
+        experience_consumer=MemoryAdmissionExperienceConsumer(live_port, enabled=True))
+    try:
+        check(store.recent_verified_outcomes(memory_owner=subject, limit=10) == [],
+              "nothing reached M0 before the restart",
+              len(store.recent_verified_outcomes(memory_owner=subject, limit=10)))
+        delivered = runtime.coordinator.dispatch_experience_handoffs()
+        check(delivered.get("dispatched_count", 0) >= 1,
+              "the pending handoff was delivered after the restart",
+              delivered.get("pending_handoff_ids"))
+        check(delivered.get("pending_handoff_ids") == [],
+              "nothing is left pending", delivered.get("pending_handoff_ids"))
+        rows = store.recent_verified_outcomes(memory_owner=subject, limit=10)
+        check(len(rows) == 1, "M0 holds exactly one row for that source", len(rows))
+        check(rows and rows[0]["speaker"] == "chiyo" and rows[0]["delivery_status"] == "VERIFIED",
+              "the delivered row is the verified one",
+              (rows[0]["speaker"], rows[0]["delivery_status"]) if rows else None)
+    finally:
+        runtime.close()
 
     print()
     if FAILURES:

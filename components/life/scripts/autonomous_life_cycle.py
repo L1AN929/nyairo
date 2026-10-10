@@ -64,7 +64,7 @@ from life_artifact_port import (
     LifeArtifactUnavailable,
     operation_key_for,
 )
-from action_reality_ledger import ACTION_KIND_FILE
+from action_reality_ledger import ACTION_KIND_FILE, ACTION_KIND_WORLD
 from managed_artifact_action_adapter import OP_COMMIT_VERSION
 
 #: Master switch.  Autonomous life is OFF unless the operator turns it on.
@@ -85,6 +85,10 @@ TRIGGER_RECOVERY = ag1.TRIGGER_RECOVERY_RECONCILIATION
 
 BUDGET_FILENAME = "autonomous_budget.json"
 JOURNAL_FILENAME = "life_step_journal.jsonl"
+
+#: B6-5: the one World verb this cycle issues.  POSE needs a second parameter
+#: (orientation) that a single observed target cannot supply, so it is not offered.
+MOVE_VERB = "MOVE"
 
 #: Outcome vocabulary.  Each one is a distinct real thing; they are never merged.
 OUTCOME_DISABLED = "DISABLED"
@@ -114,6 +118,15 @@ def _utc_now_iso() -> str:
 
 def _local_day() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d")
+
+
+class AutonomousLifeError(RuntimeError):
+    """A real, non-recoverable condition inside one autonomous round.
+
+    Raised only when the round cannot be honestly completed -- for example a committed
+    Decision that names no observed destination.  It is never used to paper over a
+    refusal that should be reported as one.
+    """
 
 
 class ContinuationWriter(Protocol):
@@ -249,6 +262,26 @@ class _LazyStepSpec(AbcMapping):
         return len(self._value())
 
 
+class _DecisionBoundStepSpec:
+    """A step spec built only once the Decision is committed.
+
+    Same laziness contract as ``_LazyStepSpec``, with one difference that the World
+    path needs: a MOVE's shape depends on *which* place the Decision chose, so it
+    cannot be described before the choice exists.  AG-2 calls this with the
+    committed ``DecisionRecord``, so the step stays bound to the Decision that
+    produced it instead of to a guess made before it.
+    """
+
+    def __init__(self, build: Callable[[Any], Mapping[str, Any]]) -> None:
+        self._build = build
+        self._cache: Optional[dict[str, Any]] = None
+
+    def __call__(self, decision_record: Any) -> dict[str, Any]:
+        if self._cache is None:
+            self._cache = dict(self._build(decision_record))
+        return self._cache
+
+
 class AutonomousLifeCycle:
     """The real entry point.  One call, at most one step, then IDLE."""
 
@@ -262,6 +295,7 @@ class AutonomousLifeCycle:
         artifact_grant_id: Optional[str] = None,
         writer: Optional[ContinuationWriter] = None,
         experience_provider: Optional[Callable[[], list[dict[str, Any]]]] = None,
+        world_opportunity_provider: Optional[Callable[[], list[dict[str, Any]]]] = None,
         max_rounds_per_day: Optional[int] = None,
         enabled: Optional[bool] = None,
         env: Optional[Mapping[str, str]] = None,
@@ -302,6 +336,13 @@ class AutonomousLifeCycle:
         #: E07: the same bounded, governance-filtered experience view the content writer gets, so a
         #: decision may weigh the same past the writing does.  Empty means memory is not consulted.
         self.experience_provider = experience_provider
+        #: B6-5: the World observation seam.  The provider returns the observed opportunities a
+        #: *real* observation supports; it never picks one.  With no provider wired the World is
+        #: not consulted at all, and this cycle behaves exactly as before.
+        self.world_opportunity_provider = world_opportunity_provider
+        self.last_world_observation: Optional[dict[str, Any]] = None
+        self.last_world_error: Optional[str] = None
+        self.last_world_opportunities: list[dict[str, Any]] = []
         self.rounds_run = 0
 
     # -- zero-LLM material check -------------------------------------------------------
@@ -335,8 +376,16 @@ class AutonomousLifeCycle:
             if point is not None:
                 found["continuable_artifact"] = point.to_dict()
 
+        # B6-5: ask the World what she can actually perceive right now.  This is a bounded read
+        # through the gateway, not a model call, and it is the only way AG-0 may ever see a
+        # World opportunity: the source is fed from outside by design.
+        observed = self._refresh_world_opportunities()
+        found["world_opportunities"] = [item.get("opportunity_id") for item in observed]
+        if self.last_world_error:
+            found["world_error"] = self.last_world_error
+
         found["has_material"] = bool(
-            found["foreground_activity"] or found["continuable_artifact"])
+            found["foreground_activity"] or found["continuable_artifact"] or observed)
         return found
 
     # -- the cycle ---------------------------------------------------------------------
@@ -385,6 +434,11 @@ class AutonomousLifeCycle:
         has_foreground = bool(material.get("foreground_activity"))
         adoption_spec = (self._adoption_spec(resume_point)
                          if resume_point and not has_foreground else None)
+        # B6-5: with no artifact to continue, the World is the material.  The Activity shape is
+        # derived from the observed opportunity *set*, never from a chosen destination: choosing
+        # is AG-1's job, and it has not happened yet at this point.
+        if adoption_spec is None and self.last_world_opportunities and not has_foreground:
+            adoption_spec = self._world_adoption_spec(self.last_world_opportunities)
 
         # When a real AR-0 adapter is wired, the single step goes through AR-0: proposal, the
         # durable submission fence, an attempt, the owner's receipt, and reconciliation by the
@@ -396,12 +450,28 @@ class AutonomousLifeCycle:
             # NO_ACTION or DEFER round.  A writer failure surfaces from that materialisation.
             ar0_step = _LazyStepSpec(
                 lambda: self._ar0_step_spec(resume_point, observed_at=obs))
-        base["step_path"] = "AR0" if ar0_step is not None else "PORT_DIRECT"
+
+        # B6-5: the World step.  Same seam, same laziness, one difference -- a MOVE's shape
+        # depends on *which* place the Decision chose, so this override is a callable of the
+        # committed Decision rather than a fixed Mapping.  The artifact path keeps priority:
+        # continuing real work outranks going somewhere.
+        world_step = None
+        if (ar0_step is None and act and not has_foreground
+                and self._world_step_enabled() and self.last_world_opportunities):
+            world_step = _DecisionBoundStepSpec(self._world_step_spec)
+
+        if ar0_step is not None:
+            base["step_path"] = "AR0"
+        elif world_step is not None:
+            base["step_path"] = "WORLD_AR0"
+        else:
+            base["step_path"] = "PORT_DIRECT"
 
         # A real capacity signal instead of "unknown": what she actually has left is the round
         # budget this cycle is allowed to spend and whether a step can be executed at all.  With
         # UNKNOWN the model reasonably defers forever, which is honest but not living.
-        if not act or not self.artifact_grant_id:
+        step_capable = bool(self.artifact_grant_id) or self._world_step_enabled()
+        if not act or not step_capable:
             capacity = ag1.CAPACITY_UNAVAILABLE
         elif self.budget.remaining() <= 1:
             capacity = ag1.CAPACITY_LIMITED
@@ -415,8 +485,8 @@ class AutonomousLifeCycle:
                 trigger_ref=trigger_ref,
                 observed_at=obs,
                 adoption_spec=adoption_spec,
-                step_spec_override=ar0_step,
-                execute_initial_step=ar0_step is not None,
+                step_spec_override=(ar0_step if ar0_step is not None else world_step),
+                execute_initial_step=(ar0_step is not None or world_step is not None),
                 body_capacity_state=capacity,
                 prior_experiences=self._experience_view(),
             )
@@ -467,6 +537,9 @@ class AutonomousLifeCycle:
                                 detail=str(getattr(adp_rec, "rejection_reason_code", adoption_status)))
 
         # Adopted.  Now do the one narrow real step.
+        if world_step is not None:
+            return self._classify_world_step(out, base, obs)
+
         if ar0_step is not None:
             return self._classify_ar0_step(out, base, obs)
 
@@ -613,6 +686,253 @@ class AutonomousLifeCycle:
                        f"{details.get('detail') or ''}".strip())
         return self._finish(base, OUTCOME_STEP_UNSETTLED, llm_calls=1,
                             detail=f"action status {status!r} did not settle in this round")
+
+    # -- World step (B6-5) --------------------------------------------------------------
+
+    def _world_step_enabled(self) -> bool:
+        """True when a real World action adapter AND a real observation seam are wired.
+
+        Both halves are required: an observation with no adapter could only ever be
+        described, and an adapter with no observation would have nothing real to act on.
+        """
+        return (self.world_opportunity_provider is not None
+                and getattr(self.runtime, "world_action_adapter", None) is not None)
+
+    def _refresh_world_opportunities(self) -> list[dict[str, Any]]:
+        """Feed AG-0 the World opportunities one real observation supports.
+
+        AG-0's ``WorldOpportunityCandidateSource`` is fed from outside by design -- it
+        may not scan the World itself -- so this is the only door through which a World
+        fact can become a candidate.  Recording is idempotent: the opportunity id is
+        derived from the place, the World revision and the destination, so observing
+        twice from the same state produces the same records, not duplicates.
+        """
+        self.last_world_opportunities = []
+        self.last_world_error = None
+        if self.world_opportunity_provider is None:
+            return []
+        source = getattr(self.runtime, "world_opportunity_source", None)
+        if source is None:
+            self.last_world_error = "runtime has no world_opportunity_source"
+            return []
+        try:
+            observed = list(self.world_opportunity_provider() or [])
+        except Exception as exc:  # a broken seam is reported, never papered over
+            self.last_world_error = f"{type(exc).__name__}: {exc}"
+            return []
+        # The provider read one observation; keep it so the step spec can name the place
+        # she was in and the World revision the observation came from.
+        seen = getattr(self.world_opportunity_provider, "last_observation", None)
+        if isinstance(seen, dict):
+            self.last_world_observation = dict(seen)
+        recorded: list[dict[str, Any]] = []
+        for item in observed:
+            try:
+                source.record_observed_opportunity(item)
+            except Exception as exc:
+                self.last_world_error = f"{type(exc).__name__}: {exc}"
+                continue
+            recorded.append(dict(item))
+        self.last_world_opportunities = recorded
+        return recorded
+
+    def _world_adoption_spec(self, opportunities: list[dict[str, Any]]) -> dict[str, Any]:
+        """The Activity shape for going somewhere she actually observed.
+
+        LR-5 already owns this vocabulary (``WORLD_ACTION_BOUNDED`` /
+        ``MAX_CONFIRMED_POSITION`` / ``WORLD_CANONICAL_OBSERVATION``), so no new
+        progress semantics are invented.  The target set is every place the observation
+        offered -- this method does not choose, because AG-1 has not chosen yet.
+        """
+        targets: list[str] = []
+        origin = ""
+        for item in opportunities:
+            if not origin:
+                origin = str(item.get("location_ref") or "")
+            for ref in item.get("target_refs") or []:
+                # LR-5's checkpoint reference must live in a namespace it recognises,
+                # and its binding matches on a prefix: the World's own `world_fact`
+                # namespace is the one it already owns for exactly this.
+                text = "world_fact:%s" % ref
+                if text not in targets:
+                    targets.append(text)
+        if not targets:
+            raise AutonomousLifeError("no observed destination to adopt an Activity for")
+        if ":" not in origin:
+            origin = targets[0]
+        origin = "world_fact:%s" % origin
+        # LR-5 owns this policy version (activity_progress_completion_lr5.POLICY_POSITION_V1):
+        # a MOVE advances a *position*, so no new policy version is invented here.
+        import activity_progress_completion_lr5 as lr5
+
+        spec = ag2.ActivityAdoptionSpec(
+            activity_kind="GO_TO_OBSERVED_PLACE",
+            title="去她观察到的地方",
+            target_refs=targets,
+            origin_ref=origin,
+            # Reaching a place is a bounded action with a real end state, unlike an
+            # open-ended piece of work: the checkpoint is the furthest place the World
+            # owner has actually confirmed.
+            progress_contract_spec={
+                "progress_kind": "WORLD_ACTION_BOUNDED",
+                "checkpoint_semantics": "MAX_CONFIRMED_POSITION",
+                "target_refs": targets,
+                "policy_version": lr5.POLICY_POSITION_V1,
+            },
+            result_binding_spec={
+                "target_refs": targets,
+                "allowed_evidence_kinds": ["SETTLED_RESULT_EVENT", "WORLD_CANONICAL_OBSERVATION"],
+                "authority_domains": ["result_settlement_authority", "world_authority"],
+                "policy_version": lr5.POLICY_POSITION_V1,
+            },
+        )
+        return spec.to_dict()
+
+    def _world_step_spec(self, decision_record: Any) -> dict[str, Any]:
+        """One bounded MOVE, described from the Decision that actually chose it.
+
+        The destination is read back from the committed Decision's own candidate
+        record -- not re-derived from the model, and not from a fresh guess.  A
+        Decision that names no observed destination is a refusal, not a default.
+        """
+        candidate_ref = getattr(decision_record, "selected_candidate_ref", None)
+        candidate: Optional[dict[str, Any]] = None
+        if candidate_ref:
+            try:
+                candidate = self.runtime.candidate_read.get_candidate(str(candidate_ref))
+            except Exception as exc:
+                self.last_world_error = f"{type(exc).__name__}: {exc}"
+        destination = ""
+        if candidate:
+            for ref in candidate.get("target_refs") or []:
+                text = str(ref)
+                if text.startswith("place:"):
+                    destination = text.split(":", 1)[1]
+                    break
+        if not destination:
+            raise AutonomousLifeError(
+                "the committed Decision %r names no observed MOVE destination" % (candidate_ref,))
+
+        observation = self.last_world_observation or {}
+        place = str((observation.get("location") or {}).get("place_id") or "unknown")
+        revision = observation.get("world_revision")
+        return {
+            "step_kind": ag2.STEP_KIND_WORLD_ACTION,
+            "action_kind": ACTION_KIND_WORLD,
+            "target_ref": "place:%s" % destination,
+            "payload_spec": {
+                "verb": MOVE_VERB,
+                "target": destination,
+                # AR-0-side bookkeeping only: the World's own dependency evidence is
+                # produced by the Intent Executor's fresh read, never by this payload.
+                "expected_dependencies": {},
+            },
+            "expected_effect_predicates": ["world_location_confirmed"],
+            "post_submit_life_behavior": ag2.POST_SUBMIT_KEEP_ACTIVE,
+            # One intended move, one logical action: the key encodes where she was, the
+            # World revision the observation came from, and where she is going -- so a
+            # retry reuses the same execution instead of moving twice.
+            "idempotency_key": "idem_step:v02:world:%s:r%s:%s" % (place, revision, destination),
+        }
+
+    def _classify_world_step(self, out: Mapping[str, Any], base: dict[str, Any],
+                             obs: str) -> dict[str, Any]:
+        """Report the World result as exactly what the World owner confirmed."""
+        step_res = out.get("step_execution_result") or {}
+        submit = step_res.get("submit_result") or {}
+        action = submit.get("action") or {}
+        status = str(action.get("status") or "")
+        receipts: list[dict[str, Any]] = []
+        if action.get("action_id"):
+            try:
+                receipts = self.runtime.action_read.list_receipts(str(action["action_id"]))
+            except Exception:  # pragma: no cover - read failure is reported, not invented
+                receipts = []
+        receipt = receipts[-1] if receipts else None
+        details = dict((receipt or {}).get("details") or {})
+        evidence = list((receipt or {}).get("evidence_refs") or [])
+
+        base.update({
+            "action_kind": ACTION_KIND_WORLD,
+            "action_id": action.get("action_id"),
+            "action_status": status,
+            "provider_operation_ref": action.get("provider_operation_ref"),
+            "world_evidence_refs": evidence,
+            "world_revision": details.get("world_revision"),
+            "world_mutation_ref": evidence[-1] if evidence else None,
+        })
+
+        if status == "SUCCEEDED":
+            self._record_world_progress(
+                base, activity_ref=base.get("activity_ref"),
+                destination=(action.get("frozen_payload") or {}).get("target"),
+                action_ref=action.get("action_id"),
+                correlation_id=base.get("correlation_id"))
+            return self._finish(base, OUTCOME_ACTED, llm_calls=1,
+                                detail="world owner applied %s" % (evidence or "the move"))
+        if status == "UNKNOWN":
+            return self._finish(
+                base, OUTCOME_STEP_UNKNOWN, llm_calls=1,
+                detail="world action result unknown; reconcile the original execution "
+                       "before any retry")
+        if status == "FAILED":
+            return self._finish(
+                base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                detail="world owner refused: %s %s" % (details.get("code") or status,
+                                                       details.get("detail") or ""))
+        return self._finish(base, OUTCOME_STEP_UNSETTLED, llm_calls=1,
+                            detail="world action status %r did not settle in this round" % status)
+
+    def _record_world_progress(self, base: dict[str, Any], *, activity_ref: Any,
+                               destination: Any, action_ref: Any,
+                               correlation_id: Any) -> None:
+        """Hand LR-5 an observation of the World owner's own state.
+
+        The place comes from the World owner's canonical state, never from the action
+        payload or the model.  LR-5 already owns ``WORLD_CANONICAL_OBSERVATION`` and
+        ``world_authority``, so nothing new is invented here either.
+        """
+        import activity_progress_completion_lr5 as lr5
+
+        if not activity_ref or not destination:
+            return
+        place = str(destination).split(":", 1)[-1]
+        revision = (self.last_world_observation or {}).get("world_revision")
+        # The canonical place the World owner reports, in LR-5's own world_fact
+        # namespace, with the revision the observation was taken from.
+        fact_ref = ("world_fact:place:%s:r%s" % (place, revision)
+                    if revision is not None else "world_fact:place:%s" % place)
+        now = _utc_now_iso()
+        evidence = lr5.LifeProgressEvidence(
+            progress_evidence_id=(
+                f"pevid:{hashlib.sha256(f'{activity_ref}:{place}'.encode('utf-8')).hexdigest()[:16]}"),
+            source_kind=lr5.SOURCE_KIND_WORLD_FACT,
+            source_ref=f"world:state:{place}",
+            authority_domain="world_authority",
+            epistemic_kind=lr5.EPISTEMIC_CANONICAL_OBSERVATION,
+            occurred_at=now,
+            observed_at=now,
+            recorded_at=now,
+            idempotency_key=f"pevid_idem:{activity_ref}:{place}",
+            activity_id=str(activity_ref),
+            action_ref=str(action_ref) if action_ref else None,
+            world_fact_ref=fact_ref,
+            target_ref=fact_ref,
+            observed_facts={"world_location_ref": fact_ref,
+                            "observation_source": "world_gateway.get_snapshot"},
+            correlation_id=str(correlation_id) if correlation_id else None,
+        )
+        try:
+            result = self.runtime.ag2_progress_port.ingest_progress_evidence(evidence)
+        except Exception as exc:
+            base["progress_ingest_error"] = f"{type(exc).__name__}: {exc}"
+            return
+        state = result.get("progress_state")
+        base["progress_state"] = (state.get("progress_state")
+                                  if isinstance(state, dict) else state)
+        update = result.get("checkpoint_update") or {}
+        base["checkpoint_update_ref"] = update.get("checkpoint_update_id")
+        base["checkpoint_ref"] = update.get("checkpoint_ref") or update.get("new_checkpoint_ref")
 
     def _experience_view(self) -> list[dict[str, Any]]:
         """The bounded, governance-filtered experiences this round may weigh.

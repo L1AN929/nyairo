@@ -22,7 +22,12 @@ Usage (as the service principal, inside the isolated environment)
 ----------------------------------------------------------------
     NYA02_SUPPLY_SOCKET=... NYA02_SUBJECT=... NYA02_WORKSPACE_ID=... NYA02_ARTIFACT_GRANT=... \
     NYA02_PROFILE_HOME=/root/.nyairo NYA02_LIFE_STATE=/srv/nya02/life-state \
-    python3 components/life/tests/v02/run_model_e2e.py smoke|run [--max-calls N]
+    python3 components/life/tests/v02/run_model_e2e.py smoke|run|ab [--max-calls N]
+
+``ab`` is the B5-1 control: the same work, the same head and the same candidate
+set, decided once with the admitted experience in view and once without it, then
+written once with and once without.  ``--skip-content`` measures only the decision
+half (two calls instead of four).
 """
 from __future__ import annotations
 
@@ -58,9 +63,11 @@ class CallLedger:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("smoke", "run"))
+    parser.add_argument("mode", choices=("smoke", "run", "ab"))
     parser.add_argument("--max-calls", type=int, default=6)
     parser.add_argument("--rounds", type=int, default=3)
+    parser.add_argument("--skip-content", action="store_true",
+                        help="A/B: measure only the decision half (2 calls instead of 4)")
     args = parser.parse_args()
 
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
@@ -162,6 +169,10 @@ def main() -> int:
             runtime.close()
         return 0
 
+    if args.mode == "ab":
+        return _ab(ledger, cfg, counted_client, lrp, ag2, install_root, subject,
+                   workspace_id, grant_id, skip_content=args.skip_content)
+
     # ---- the real three-round scenario ------------------------------------------------
     print("[1] round one: create the work and write the first continuation")
     cognition = ProductionAgencyCognitionAdapter(
@@ -234,6 +245,185 @@ def main() -> int:
           if runtime else "closed")
     print("  provider calls used:", ledger.used, "/", ledger.cap)
     print("  step journal:", install_root / "life_step_journal.jsonl")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# B5-1: the real-model A/B control
+# ---------------------------------------------------------------------------
+
+#: The one admitted experience both halves of the control see (group A) or do not
+#: (group B).  It is the same text the deterministic memory check uses, so the two
+#: evidence sets describe the same thing.
+AB_EXPERIENCE = {
+    "experience_id": "lexp:ab:1",
+    "text": "上次写窗缝那一段，她觉得结尾收得太快了。",
+    "artifact_ref": None,
+    "version_ref": None,
+}
+
+
+class _ObservingCognition:
+    """The real adapter, with the request recorded before it is sent.
+
+    It adds no behaviour: the decision is still made by the real model, through the
+    real adapter, validated by the real AG-1.  It only lets the control prove that
+    the experience view actually reached the request.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.model_id = inner.model_id
+        self.model_version = inner.model_version
+        self.seen: list[dict] = []
+
+    def invoke(self, request, *, schema_retry_index: int = 0):
+        self.seen.append({
+            "prior_experiences": [dict(x) for x in
+                                  (getattr(request, "prior_experiences", ()) or ())],
+            "legal_decision_enums": list(getattr(request, "legal_decision_enums", []) or []),
+            "candidate_kinds": [c.get("candidate_kind")
+                                for c in (getattr(request, "candidates", []) or [])],
+        })
+        return self._inner.invoke(request, schema_retry_index=schema_retry_index)
+
+
+class _HeadUnchangedWriter:
+    """A continuation writer that returns the head, so no version is written.
+
+    The A/B must compare decisions at ONE head.  A writer that never changes the
+    work keeps the artifact exactly where it was, so the second half of the control
+    faces the same work, the same head and the same candidate set.
+    """
+
+    def next_content(self, point, *, observed_at: str) -> str:
+        return point.content or ""
+
+
+def _ab(ledger, cfg, counted_client, lrp, ag2, install_root, subject, workspace_id, grant_id,
+        *, skip_content: bool = False):
+    """Same work, same head, same candidate set -- with and without her memories."""
+
+    from agency_cognition_adapter import ProductionAgencyCognitionAdapter
+    from autonomous_life_cycle import AutonomousLifeCycle
+    from life_artifact_port import ArtifactResumePoint, LifeArtifactPort
+    from managed_artifact_action_adapter import SupplyManagedArtifactActionAdapter
+    from model_continuation_writer import ModelContinuationWriter
+
+    port = LifeArtifactPort(os.environ["NYA02_SUPPLY_SOCKET"], subject)
+    created = port.create_artifact(
+        workspace_id=workspace_id, title="夜里的手记",
+        content="# 夜里的手记\n\n第一行：今天把窗户开了一条缝。\n",
+        grant_id=grant_id, operation_key="op:b5ab:create:1")
+    artifact_id = created.artifact_id
+    print("artifact:", artifact_id, "v1:", created.version_id)
+
+    def provider_for(with_experience: bool):
+        if not with_experience:
+            return None
+        return lambda: [dict(AB_EXPERIENCE, artifact_ref=artifact_id)]
+
+    def one_round(label: str, *, with_experience: bool) -> dict:
+        # Each half gets its own Life state root.  Without that the first half's
+        # adoption would leave a foreground Activity behind, and the second half
+        # would face a different candidate set -- which would confound the control
+        # with something other than the memory view.
+        half_root = install_root / f"ab-{label.lower()}"
+        half_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(half_root, 0o700)
+        inner = ProductionAgencyCognitionAdapter(
+            client=counted_client(timeout_s=30.0, max_output_tokens=256),
+            timeout_s=30.0, max_output_tokens=256)
+        cognition = _ObservingCognition(inner)
+        switches = ag2.LifeRuntimeKillSwitches(
+            life_runtime_enabled=True, agency_enabled=True,
+            action_execution_enabled=True, proactive_enabled=False)
+        adapter = SupplyManagedArtifactActionAdapter(
+            port, grant_id=grant_id, workspace_id=workspace_id)
+        runtime = lrp.build_production_life_runtime(
+            half_root, kill_switches=switches, cognition_adapter=cognition,
+            install_root=half_root, artifact_action_adapter=adapter)
+        cycle = AutonomousLifeCycle(
+            runtime, artifact_port=port, subject_id=subject, workspace_id=workspace_id,
+            artifact_grant_id=grant_id, writer=_HeadUnchangedWriter(),
+            experience_provider=provider_for(with_experience),
+            max_rounds_per_day=4, enabled=True)
+        try:
+            head = port.read_head(artifact_id) or {}
+            out = cycle.evaluate_once(trigger_ref=f"evt:b5ab:{label}")
+        finally:
+            runtime.close()
+        seen = cognition.seen[-1] if cognition.seen else {}
+        record = {
+            "label": label,
+            "with_experience": with_experience,
+            "head_before": head.get("version_id"),
+            "head_after": (port.read_head(artifact_id) or {}).get("version_id"),
+            "decision": out.get("decision"),
+            "reason_codes": out.get("reason_codes"),
+            "short_rationale": out.get("short_rationale"),
+            "selected_candidate_ref": out.get("selected_candidate_ref"),
+            "outcome": out.get("outcome"),
+            "experiences_in_request": [x.get("experience_id")
+                                       for x in seen.get("prior_experiences", [])],
+            "candidate_kinds": seen.get("candidate_kinds"),
+        }
+        print(f"  {label}: " + json.dumps(
+            {k: record[k] for k in ("decision", "reason_codes", "short_rationale",
+                                    "outcome", "experiences_in_request",
+                                    "candidate_kinds")}, ensure_ascii=False))
+        return record
+
+    print("[A] AG-1 with the admitted experience in view")
+    a = one_round("A", with_experience=True)
+    print("[B] AG-1 with an empty view (the same writer, the same head)")
+    b = one_round("B", with_experience=False)
+
+    print("[C] content generation, same resume point, with and without")
+    point = port.latest_resumable()
+    if point is None:
+        print("  no resumable artifact; skipping the content half")
+        return 1
+    if skip_content:
+        a_text = b_text = None
+        a_ids = b_ids = None
+        print("  skipped (--skip-content); the decision half is what is being measured")
+    else:
+        a_writer = ModelContinuationWriter(
+            counted_client(purpose="artifact_edit", max_output_tokens=512),
+            experience_provider=provider_for(True), max_new_chars=200)
+        a_text = a_writer.next_content(point, observed_at="2026-10-10T21:00:00+08:00")
+        b_writer = ModelContinuationWriter(
+            counted_client(purpose="artifact_edit", max_output_tokens=512),
+            experience_provider=None, max_new_chars=200)
+        b_text = b_writer.next_content(point, observed_at="2026-10-10T21:00:00+08:00")
+        a_ids, b_ids = a_writer.last_experience_ids, b_writer.last_experience_ids
+
+    print()
+    print("result (reported as measured, not as expected):")
+    print("  the two halves faced the same head:",
+          a["head_before"] == b["head_before"] == b["head_after"],
+          (a["head_before"], b["head_before"], b["head_after"]))
+    print("  the two halves faced the same candidate set:",
+          a["candidate_kinds"] == b["candidate_kinds"],
+          (a["candidate_kinds"], b["candidate_kinds"]))
+    print("  the experience reached AG-1 in A only:",
+          a["experiences_in_request"] == [AB_EXPERIENCE["experience_id"]]
+          and b["experiences_in_request"] == [],
+          (a["experiences_in_request"], b["experiences_in_request"]))
+    if not skip_content:
+        print("  the same experience reached the content prompt in A only:",
+              a_ids == [AB_EXPERIENCE["experience_id"]] and b_ids == [],
+              (a_ids, b_ids))
+    print("  the decision differed:", a["decision"] != b["decision"],
+          (a["decision"], b["decision"]))
+    print("  the reason codes differed:", a["reason_codes"] != b["reason_codes"],
+          (a["reason_codes"], b["reason_codes"]))
+    if not skip_content:
+        print("  the produced text differed:", a_text != b_text)
+        print("  A text:", json.dumps(a_text[-120:], ensure_ascii=False))
+        print("  B text:", json.dumps(b_text[-120:], ensure_ascii=False))
+    print("  provider calls used:", ledger.used, "/", ledger.cap)
     return 0
 
 
