@@ -534,6 +534,11 @@ class AutonomousLifeCycle:
                 # is not counted as one.
                 return self._finish(base, OUTCOME_ALREADY_DONE, llm_calls=1,
                                     detail=f"owner answered {details.get('owner_status')}; no new version")
+            self._record_artifact_progress(
+                base, activity_ref=base.get("activity_ref"),
+                artifact_id=payload.get("artifact_id"), version_id=details.get("version_id"),
+                version_number=details.get("version_number"),
+                correlation_id=base.get("correlation_id"), action_ref=action.get("action_id"))
             return self._finish(base, OUTCOME_ACTED, llm_calls=1,
                                 detail=f"owner committed {details.get('version_id')}")
         if status == "UNKNOWN":
@@ -549,15 +554,93 @@ class AutonomousLifeCycle:
         return self._finish(base, OUTCOME_STEP_UNSETTLED, llm_calls=1,
                             detail=f"action status {status!r} did not settle in this round")
 
+    def _record_artifact_progress(self, base: dict[str, Any], *, activity_ref: Any,
+                                  artifact_id: Any, version_id: Any, version_number: Any,
+                                  correlation_id: Any, action_ref: Any) -> None:
+        """Hand LR-5 the only thing it may act on: an observation of the owner's own state.
+
+        The version reference comes from the owner's ``read_head``, never from the model or from
+        the action payload, and it is submitted as canonical artifact state, not as a claim about
+        the action.  If the contract or the observation is refused, the refusal is reported in the
+        round result instead of being swallowed.
+        """
+        import activity_progress_completion_lr5 as lr5
+
+        if not activity_ref or not version_id:
+            return
+        artifact_bare = str(artifact_id or "").split(":", 1)[-1]
+        version_bare = str(version_id).split(":", 1)[-1]
+        now = _utc_now_iso()
+        evidence = lr5.LifeProgressEvidence(
+            progress_evidence_id=(
+                f"pevid:{hashlib.sha256(f'{activity_ref}:{version_id}'.encode('utf-8')).hexdigest()[:16]}"),
+            source_kind="ARTIFACT_CANONICAL_STATE",
+            source_ref=f"artifactstate:{artifact_bare}:{version_bare}",
+            authority_domain="artifact_authority",
+            epistemic_kind="CANONICAL_OBSERVATION",
+            occurred_at=now,
+            observed_at=now,
+            recorded_at=now,
+            idempotency_key=f"pevid_idem:{activity_ref}:{version_id}",
+            activity_id=str(activity_ref),
+            action_ref=str(action_ref) if action_ref else None,
+            artifact_ref=f"artifact:{artifact_bare}",
+            target_ref=f"artifact:{artifact_bare}",
+            observed_facts={"latest_version_ref": f"artifactversion:{version_bare}",
+                            "version_number": version_number,
+                            "observation_source": "life_supply.read_head"},
+            correlation_id=str(correlation_id) if correlation_id else None,
+        )
+        try:
+            result = self.runtime.ag2_progress_port.ingest_progress_evidence(evidence)
+        except Exception as exc:
+            base["progress_ingest_error"] = f"{type(exc).__name__}: {exc}"
+            return
+        state = result.get("progress_state")
+        base["progress_state"] = (state.get("progress_state")
+                                  if isinstance(state, dict) else state)
+        update = result.get("checkpoint_update") or {}
+        base["checkpoint_update_ref"] = update.get("checkpoint_update_id")
+        base["checkpoint_ref"] = update.get("checkpoint_ref") or update.get("new_checkpoint_ref")
+
     # -- narrow step -------------------------------------------------------------------
 
     def _adoption_spec(self, point: ArtifactResumePoint) -> dict[str, Any]:
+        # LR-2 validates these as "<namespace>:<id>", so the owner's own id prefix is stripped
+        # once and re-added as a namespace instead of being nested twice.
+        def _ref(namespace: str, value: str, *owner_prefixes: str) -> str:
+            text = str(value or "")
+            for prefix in owner_prefixes:
+                if text.startswith(prefix):
+                    text = text[len(prefix):]
+                    break
+            return f"{namespace}:{text}"
+
+        artifact_ref = _ref("artifact", point.artifact_id, "artifact:")
+        version_ref = (_ref("artifactversion", point.head_version_id, "artifact-version:")
+                       if point.head_version_id else "")
+        target_refs = [r for r in (artifact_ref, version_ref) if r]
         spec = ag2.ActivityAdoptionSpec(
             activity_kind="CONTINUE_PERSONAL_ARTIFACT",
             title=f"继续《{point.title or point.artifact_id}》",
-            target_refs=[f"artifact:{point.artifact_id}",
-                         f"artifactversion:{point.head_version_id}"],
-            origin_ref=f"artifact:{point.artifact_id}",
+            target_refs=target_refs,
+            origin_ref=artifact_ref,
+            # This is an open-ended work: one committed version is progress, not the end of the
+            # activity.  So there is deliberately no automatic completion contract -- wrapping up
+            # is her explicit choice (ABANDON/收尾), never something a single write decides.  The
+            # checkpoint follows the latest version the owner actually confirmed.
+            progress_contract_spec={
+                "progress_kind": "OPEN_ENDED",
+                "checkpoint_semantics": "LATEST_ARTIFACT_VERSION",
+                "target_refs": target_refs,
+                "policy_version": "chiyo.life.progress.open_ended.v1",
+            },
+            result_binding_spec={
+                "target_refs": target_refs,
+                "allowed_evidence_kinds": ["SETTLED_RESULT_EVENT", "ARTIFACT_CANONICAL_STATE"],
+                "authority_domains": ["result_settlement_authority", "artifact_authority"],
+                "policy_version": "chiyo.life.progress.artifact.v1",
+            },
         )
         return spec.to_dict()
 

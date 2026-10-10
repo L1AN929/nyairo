@@ -221,8 +221,9 @@ def main() -> int:
               second.get("adoption_status"))
         activity_ref = second.get("activity_ref")
         check(bool(activity_ref), "canonical Activity was created", activity_ref)
-        check(runtime.canonical_state()["revision"] == 1, "canonical revision advanced",
-              runtime.canonical_state()["revision"])
+        check(len(runtime.canonical_state()["activities"]) == 1,
+              "exactly one canonical Activity exists",
+              len(runtime.canonical_state()["activities"]))
         check(second.get("action_status") == "SUCCEEDED", "AR-0 action SUCCEEDED",
               second.get("action_status"))
         check(str(second.get("provider_operation_ref") or "").startswith("life:"),
@@ -255,12 +256,40 @@ def main() -> int:
               third.get("decision"))
         check(third.get("activity_ref") == activity_ref,
               "continued the same Activity, no parallel work", third.get("activity_ref"))
-        check(runtime.canonical_state()["revision"] == 1,
-              "no second Activity was created", runtime.canonical_state()["revision"])
+        check(len(runtime.canonical_state()["activities"]) == 1,
+              "no second Activity was created; the same one was continued",
+              len(runtime.canonical_state()["activities"]))
         head = port.read_head(artifact_id)
         check((head or {}).get("parent_version_id") == v2,
               "new version's parent is the previous version",
               (head or {}).get("parent_version_id"))
+        # LR-5 must be able to say what actually advanced.  It only ever sees owner-backed
+        # evidence: the settled result of the action plus the artifact's canonical state.
+        # LR-5 only ever moves the resume point on owner-backed evidence.  What matters is the
+        # recorded transition, not the aggregate state after a later re-evaluation.
+        checkpoints = runtime.progress_read.list_checkpoint_updates(str(activity_ref))
+        advanced = [c for c in checkpoints if c.get("progress_state") == "ADVANCED"]
+        check(bool(advanced), "a checkpoint advanced on the owner's confirmed version",
+              [c.get("progress_state") for c in checkpoints])
+        check(all(c.get("new_checkpoint_ref") != "chk:stage:001" for c in advanced),
+              "the resume point moved off its initial placeholder",
+              [c.get("new_checkpoint_ref") for c in advanced])
+        check(all(int(c.get("activity_revision_after", 0)) > int(c.get("activity_revision_before", 0))
+                  for c in advanced),
+              "the canonical Activity revision advanced with the checkpoint",
+              [(c.get("activity_revision_before"), c.get("activity_revision_after"))
+               for c in advanced])
+        check(runtime.progress_read.get_progress_state(str(activity_ref)).get("checkpoint_ref")
+              != "chk:stage:001",
+              "the Activity's current checkpoint follows the work",
+              runtime.progress_read.get_progress_state(str(activity_ref)).get("checkpoint_ref"))
+        pcontract = runtime.progress_read.get_progress_contract(str(activity_ref))
+        check((pcontract or {}).get("progress_kind") == "OPEN_ENDED",
+              "the work is an open-ended activity, not one that ends after a single edit",
+              (pcontract or {}).get("progress_kind"))
+        check(runtime.progress_read.get_completion_contract(str(activity_ref)) is None,
+              "no automatic completion contract decides when the work is finished",
+              runtime.progress_read.get_completion_contract(str(activity_ref)))
     finally:
         runtime.close()
 
