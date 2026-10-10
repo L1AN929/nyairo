@@ -277,6 +277,7 @@ class ProductionLifeRuntime:
         install_root: Path | str | None = None,
         artifact_action_adapter: Any = None,
         experience_consumer: Any = None,
+        world_action_adapter: Any = None,
     ) -> None:
         self.audit_journal_factory = audit_journal_factory
         self.state_root = resolve_state_root(state_root, install_root=install_root)
@@ -351,7 +352,15 @@ class ProductionLifeRuntime:
             caller_module=CALLER_SANDBOX_EXECUTOR,
             namespace=NAMESPACE_AGENCY,
         )
-        self.world_adapter = ag2.WorldActionAdapter(RefusingWorldResolver())
+        # The real World adapter is opt-in, exactly like the artifact adapter: with
+        # nothing supplied this root keeps the fail-closed resolver.  When one is
+        # supplied, only AR-0's World adapter slot changes -- AR-0 itself, its
+        # ledger, its fences and its receipts are untouched (B6-2).
+        self.world_action_adapter = world_action_adapter
+        self.world_adapter = (
+            world_action_adapter if world_action_adapter is not None
+            else ag2.WorldActionAdapter(RefusingWorldResolver())
+        )
         # The managed-artifact adapter is opt-in: with no adapter supplied, this root behaves
         # exactly as before (a fail-closed RefusingFileAdapter and the sandbox observer).  When
         # one is supplied, the sandbox observer is removed as well, because the adapter returns
@@ -768,6 +777,7 @@ def build_production_life_runtime(
     install_root: Path | str | None = None,
     artifact_action_adapter: Any = None,
     experience_consumer: Any = None,
+    world_action_adapter: Any = None,
 ) -> ProductionLifeRuntime:
     """Assemble the V0.1 production runtime.  Caller owns ``close()``.
 
@@ -788,4 +798,5 @@ def build_production_life_runtime(
         install_root=install_root,
         artifact_action_adapter=artifact_action_adapter,
         experience_consumer=experience_consumer,
+        world_action_adapter=world_action_adapter,
     )
