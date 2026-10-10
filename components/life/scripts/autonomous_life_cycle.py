@@ -44,6 +44,7 @@ Honest limits of this revision
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping as AbcMapping
 import json
 import os
 from dataclasses import dataclass, field
@@ -221,6 +222,33 @@ class RoundBudget:
         return spent
 
 
+class _LazyStepSpec(AbcMapping):
+    """A step spec built only when AG-2 materialises it.
+
+    ``run_decision_and_adoption_cycle`` resolves ``step_spec_override`` with ``dict(...)`` *after*
+    the decision, so a Mapping here means the content model call happens only when a step is
+    really going to be executed -- never for a NO_ACTION or DEFER round.
+    """
+
+    def __init__(self, build: Callable[[], Mapping[str, Any]]) -> None:
+        self._build = build
+        self._cache: Optional[dict[str, Any]] = None
+
+    def _value(self) -> dict[str, Any]:
+        if self._cache is None:
+            self._cache = dict(self._build())
+        return self._cache
+
+    def __getitem__(self, key: str) -> Any:
+        return self._value()[key]
+
+    def __iter__(self) -> Any:
+        return iter(self._value())
+
+    def __len__(self) -> int:
+        return len(self._value())
+
+
 class AutonomousLifeCycle:
     """The real entry point.  One call, at most one step, then IDLE."""
 
@@ -357,9 +385,25 @@ class AutonomousLifeCycle:
         # When a real AR-0 adapter is wired, the single step goes through AR-0: proposal, the
         # durable submission fence, an attempt, the owner's receipt, and reconciliation by the
         # original operation.  Without one, nothing crosses a submission fence at all.
-        ar0_step = (self._ar0_step_spec(resume_point, observed_at=obs)
-                    if resume_point is not None and act and self._ar0_enabled() else None)
+        ar0_step = None
+        if resume_point is not None and act and self._ar0_enabled():
+            # Lazy on purpose: AG-2 materialises this override only *after* the decision, so the
+            # content model call happens when a step will really be executed -- never for a
+            # NO_ACTION or DEFER round.  A writer failure surfaces from that materialisation.
+            ar0_step = _LazyStepSpec(
+                lambda: self._ar0_step_spec(resume_point, observed_at=obs))
         base["step_path"] = "AR0" if ar0_step is not None else "PORT_DIRECT"
+
+        # A real capacity signal instead of "unknown": what she actually has left is the round
+        # budget this cycle is allowed to spend and whether a step can be executed at all.  With
+        # UNKNOWN the model reasonably defers forever, which is honest but not living.
+        if not act or not self.artifact_grant_id:
+            capacity = ag1.CAPACITY_UNAVAILABLE
+        elif self.budget.remaining() <= 1:
+            capacity = ag1.CAPACITY_LIMITED
+        else:
+            capacity = ag1.CAPACITY_AVAILABLE
+        base["capacity_state"] = capacity
 
         try:
             out = self.runtime.coordinator.run_decision_and_adoption_cycle(
@@ -369,11 +413,16 @@ class AutonomousLifeCycle:
                 adoption_spec=adoption_spec,
                 step_spec_override=ar0_step,
                 execute_initial_step=ar0_step is not None,
+                body_capacity_state=capacity,
             )
         except ag2.KillSwitchDisabledError as exc:
             return self._finish(base, OUTCOME_DISABLED, llm_calls=0, detail=str(exc))
-        except Exception as exc:  # a broken owner read is a real failure, reported as one
+        except Exception as exc:  # a real failure, reported as one
             self.last_error = f"{type(exc).__name__}: {exc}"
+            if type(exc).__name__ == "ModelContentError" or "content writer" in str(exc):
+                # The decision happened; producing the content did not.  Nothing was written.
+                return self._finish(base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                                    detail=f"content writer failed: {self.last_error}"[:300])
             return self._finish(base, OUTCOME_DECISION_FAILED, llm_calls=0, detail=self.last_error)
 
         dec_res = out.get("decision_result") or {}
@@ -656,7 +705,18 @@ class AutonomousLifeCycle:
         # attempt, so an UNKNOWN can be resolved and retried without minting a second version.
         key = operation_key_for("commit", point.artifact_id, str(point.head_version_id),
                                activity_ref, correlation_id)
-        content = self.writer.next_content(point, observed_at=obs)
+        try:
+            content = self.writer.next_content(point, observed_at=obs)
+        except Exception as exc:
+            outcome = ArtifactOutcome(effect_state=EffectState.REFUSED, status="CONTENT_FAILED",
+                                      reason=f"{type(exc).__name__}", detail=str(exc)[:200],
+                                      artifact_id=point.artifact_id, operation_key=key)
+            receipt = StepReceipt.from_outcome(
+                outcome, expected_head=point.head_version_id, artifact_id=point.artifact_id,
+                operation_key=key, correlation_id=correlation_id or None,
+                decision_id=decision_id or None, activity_ref=activity_ref or None)
+            self._journal(receipt)
+            return receipt
         try:
             outcome = self.artifact_port.commit_version(
                 artifact_id=point.artifact_id,
