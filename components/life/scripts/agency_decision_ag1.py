@@ -108,6 +108,7 @@ from activity_waiting_agenda import (
 )
 from candidate_sources_ag0 import (
     CANDIDATE_KIND_CONSIDER_EXPLICIT_GOAL,
+    CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY,
     CANDIDATE_KIND_CONSIDER_WORLD_OPPORTUNITY,
     CANDIDATE_KIND_CONTINUE_CURRENT,
     CANDIDATE_KIND_FULFILL_COMMITMENT,
@@ -2229,11 +2230,16 @@ class DecisionOutputValidator:
         legal: list[str] = [DECISION_DEFER]
 
         # Section 65: START only for actionable new candidate (never CONSIDER_EXPLICIT_GOAL without step, never during ATOMIC)
+        # v0.2 (Autonomous Life WP-02): a PERSONAL_OPPORTUNITY that is executable now is an
+        # actionable new candidate in exactly the same sense as a world opportunity.  Before
+        # this line existed the only legal decision for the subject's own work was DEFER, so
+        # "continue my own booklet" could not be started at all -- see docs/v02-baseline.md.
         if candidate.candidate_kind in {
             CANDIDATE_KIND_RESPOND_USER_REQUEST,
             CANDIDATE_KIND_CONSIDER_WORLD_OPPORTUNITY,
             CANDIDATE_KIND_FULFILL_COMMITMENT,
             CANDIDATE_KIND_PURSUE_GOAL_STEP,
+            CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY,
         }:
             if intr != INTERRUPTIBILITY_ATOMIC and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}:
                 legal.append(DECISION_START)
