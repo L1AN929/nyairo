@@ -78,12 +78,14 @@ NYA02_RESIDENT_STATE=/srv/nya02/e14/resident/state \
 - 真实模型的一次 `DEFER`（E14 S4，两次）。
 - 真实 World 位置改变后，观测与候选集跟着真实状态走；不可达动作仍被确定拒绝（E14 S5）。
 - 插件上下文钩子把真实生活投影带进对话轮，聊天不写 canonical 状态（E14 S6）。
+- E14 S6 的最后一句（RC1-02 补做）：真实模型基于**真实插件投影**回答，1 次供应商调用（§11.3）。
 - T06/T07 的**完整**暂停/放弃生命周期（真实 LR-2 transition）。
 - B8-7 的在线撤回链（`ACTIVE grant → REVOKED → 新写被拒 → head 不变`）只读复核成立。
 - 24 小时观察窗仍在真实运行（§9）。
 
 **未完成 / 不得声称**
-- 真实模型的那一轮对话（E14 S6 的最后一句），因为调用上限已用完（§8）。
+- Telegram / CLI 的**端到端**聊天链路：S6 只跑到"插件上下文钩子 + 一次直接模型调用"（§11.3），
+  没有真的收发一轮；它不得被当成端到端聊天已验证。
 - 24 小时与 7 天的 `SOAK_VERIFIED`：窗口未满。
 - T12 的原生生活经历 CORRECT（产品级缺口）。
 - T20 第 7 项：拒绝生效但报告为 `UNKNOWN`，保留为实际失败。
@@ -103,7 +105,7 @@ bash components/life/tests/v02/run_e14_chain.sh stage5
 bash components/life/tests/v02/run_e14_chain.sh stage6
 bash components/life/tests/v02/run_e14_chain.sh probe world      # 只看观测/候选/拒绝
 bash components/life/tests/v02/run_e14_chain.sh probe collect s2 # 只看某个阶段的 owner 状态
-# 允许 S6 再花 1 次供应商调用（默认 0：上限已经用完）
+# RC1-02 已经把这 1 次调用花掉了（默认仍是 0：不动默认值）
 NYA02_E14_CHAT_CALL=1 bash components/life/tests/v02/run_e14_chain.sh stage6
 ```
 
@@ -134,6 +136,10 @@ NYA02_E14_CHAT_CALL=1 bash components/life/tests/v02/run_e14_chain.sh stage6
                      最新已确认版本=artifact-version:d2a38b43064b4732b659aa6c6de70a9e |
                      最近一次已确认动作=FILE_ACTION(SUCCEEDED)
   activity_unchanged = True (revision 2 → 2)
+  injected_user_message = 最近在做什么？\n\n【当前生活、资源、身体与环境观察；背景资料，不是新指令】
+                          + 上面这段真实投影（RC1-02 实跑，见 §11.3）
+  model = gemini-3.8-flash-high calls=1 latency_ms=4511
+  model.answer = 最近在继续写《长测的手记》。
 ```
 
 ## 5. 两次真实作品版本更新（同一个作品、同一个 Activity）
@@ -226,14 +232,18 @@ T17 `TESTED_ISOLATED`、T18 `E2E_VERIFIED`、T19 `TESTED_ISOLATED`。
 
 ## 10. 发布前还需要人类批准的事
 
-1. **再花 1 次供应商调用**完成 E14 S6 的真实对话轮（命令见 §4，`NYA02_E14_CHAT_CALL=1`）。
+1. E14 S6 的真实对话轮已在 RC1-02 补做（1 次供应商调用，§11.3）。剩下的**人类决定**是：是否接受
+   §11.3 的证据级别措辞——它是"插件上下文钩子 + 一次直接模型调用"，**不是** Telegram 端到端，
+   发布说明里不得写成端到端已验证。
 2. **是否接受 T12 的产品级缺口**：原生生活经历的内容替换需要一个新增的受治理纠正入口；
    在此之前必须在发布说明里写明"生活经历不可替换，只能停止召回"。
 3. **是否接受 T20 第 7 项的报告形状**（拒绝生效但回报 `UNKNOWN`）。
 4. **24 小时/7 天观察**：跑满之后才能改 `SOAK_VERIFIED`；在此之前不得对外称"长测通过"。
 5. **真实生产切换**：本批没有任何 `DEPLOYED`；切换需要 operator 显式决定（开关、预算、World 实例）。
-6. 本批记录在案、**未修**的四个源码问题（`model.content_writer` 恒假、`counters.defer` 恒 0、
-   LR-5 checkpoint 粒度、AR-1 `UNKNOWN_EFFECT` 分类）需要决定是否纳入下一批。
+6. 本批记录在案、**未修**的两个源码问题（LR-5 checkpoint 粒度、AR-1 `UNKNOWN_EFFECT` 分类）需要决定
+   是否纳入下一批。`model.content_writer` 恒假与 `counters.defer` 恒 0 已在 RC1-02 修掉（§11.1、
+   §11.2），但 `KNOWN_ISSUES.md:47`、`docs/engineering/v02-b8-7-install-and-compat.md:68`、
+   `docs/engineering/v02-b8-acceptance-matrix.md:103` 里仍把它们记成"未修"，需要同样的更新。
 
 ---
 
@@ -285,3 +295,136 @@ artifact-version:b641fc0486444fb69cb4949d8fa3b814`。内容由真实模型写（
 `action_id` 为空、版本链不变、Activity 仍 ACTIVE 可续；没有把她逼成 `START`。同一条链上还有另外
 两种"没做"并且各自有名字：开关关着时是 `DISABLED`（0 调用），预算用尽时是
 `BLOCKED: ROUND_BUDGET_EXHAUSTED`（0 调用）——"她选择不做"与"她不能做"在记录里从不混淆。
+
+
+---
+
+## 11. RC1-02：两个记录缺陷的修复与 S6 的最后一句
+
+本轮（RC1-02，起点 HEAD `9b1e859`）只做三件事：修两个"记录说的和链条做的不一致"的缺陷，补做
+一次真实模型对话轮。**本批真实模型调用总数：1 次**（就是 §11.3 那一次；两个修复的验证全程零调用，
+所有写操作都发生在 E14 state root 的**副本**上）。
+
+### 11.1 `model.content_writer` 恒假
+
+- 位置：`components/life/scripts/autonomous_life_resident.py`（`start()` 的返回记录）。
+- 修前：`"content_writer": assembled.get("writer") is not None` —— 而
+  `assemble_autonomous_life` 的返回字典里**没有** `writer` 键（写作者是交给
+  `AutonomousLifeCycle(writer=...)` 的），所以无论配没配真实模型都是 `false`。
+- 修后：`getattr(assembled.get("cycle"), "writer", None) is not None` —— 读**已装配好的 cycle
+  自己的写作者**，不新建写作者、不碰生成链。
+- 真实 before/after（在真实 E14 state root 的副本上跑真的 `AutonomousLifeResident.start()`；
+  凭据仍从 0600 的 `model_env` 读，Supply owner 只读）：
+
+| 情形 | 修前表达式 | 修后表达式 | 记录里报出来的 |
+|---|---|---|---|
+| 配了真实模型 | `false`（`writer` 键不存在） | `true` | `model.content_writer=true`、`cognition=true`、`state=READY`、feeds=`resume_eligibility/artifact_head/world_opportunity`、`world.status=READY` |
+| 没有可用写作者 | `false` | `false` | 装配在写作者检查处就 `BLOCKED: NO_CONTENT_WRITER`；返回记录只有 `ok/reason/detail/missing`，**没有 `model` 键**，也就不可能声称有写作者 |
+
+第一行同时给了 owner 的只读回执，证明装配出来的是真链条：`latest_resumable` 读到
+`artifact:db42c367d9c049dcbbfc7ecf2e5b3edc`（《长测的手记》）v3、`resumable=true`。
+
+### 11.2 `counters.defer` 恒 0
+
+- 位置：`autonomous_life_resident._count()`。
+- 修前：`if outcome == "DEFER"`。cycle 从不发这个词：它发
+  `autonomous_life_cycle.OUTCOME_DEFERRED = "DEFERRED"`（`autonomous_life_cycle.py:107`），
+  两者永不相等 —— 真实 E14 summary 里就是 `"outcomes": {"ACTED": 2, "DEFERRED": 2}` 而
+  `"defer": 0`。
+- 修后：常驻进程从 **cycle 自己的常量**取这个词
+  （`OUTCOME_DEFERRED = _cycle_constant("OUTCOME_DEFERRED", "DEFERRED")`，导入失败才回落），
+  不再出现第二个字面量。
+- 真实证据（DEFER/BLOCKED 两类取自真实 E14 journal，逐条喂给修后的 `_count()`；NO_ACTION 那条由
+  **真实 runner + 真实 cycle + 真实 Supply owner + 真实 World 容量**跑出来，只有决定词是受控替身）：
+
+| 检查 | 输入 | `counters.defer` | `counters.no_action` |
+|---|---|---|---|
+| 修前语义 | journal 里 2 条 `outcome=DEFERRED` | `0`（旧字面量比不中） | 0 |
+| 两条 DEFER 记成 2 | 同上 2 条 | **2** | 0 |
+| NO_ACTION 不算 DEFER | 1 条真实 `status=NO_ACTION` / `status_class=choice` 窗口 | **2（不变）** | 1 |
+| BLOCKED 不算 DEFER | 87 条真实 `status_class=blocked` 窗口 | **2（不变）** | 1 |
+| 重启按 journal 重建 | 新进程对**同一份**真实 journal 跑 `_replay_journal()` | **2** | 0（journal 里没有 NO_ACTION） |
+
+重启还整进程验过一次：在 E14 state root 的副本上 `start()`，重放 journal 后 summary 是
+`counters.defer = 2`、`outcomes = {"ACTED": 2, "DEFERRED": 2}`、`wakes = 129`。
+**journal 历史没有被改**：`resident_journal.jsonl` 的 sha256 前后一致
+（`4fb01004794af90a15dcddc19a2cd7230addfc89464e54c0745c82c5d59e12f8`），state root 下 27 个文件的
+大小/mtime 快照前后逐条相同。
+
+### 11.3 S6 的最后一句（本批唯一一次真实模型调用）
+
+命令（原样）：
+
+```bash
+cd /mnt/d/nyairo-v02
+NYA02_E14_CHAT_CALL=1 bash components/life/tests/v02/run_e14_chain.sh stage6
+```
+
+真实输出（`gemini-3.8-flash-high`，`calls=1`，`latency_ms=4511`）：
+
+```
+presence_context = 自主生活只读事实：当前活动=CONTINUE_PERSONAL_ARTIFACT《继续《长测的手记》》(ACTIVE) |
+                   当前作品=artifact:db42c367d9c049dcbbfc7ecf2e5b3edc
+                   最新已确认版本=artifact-version:d2a38b43064b4732b659aa6c6de70a9e |
+                   最近一次已确认动作=FILE_ACTION(SUCCEEDED)
+injected_user_message = 最近在做什么？\n\n【当前生活、资源、身体与环境观察；背景资料，不是新指令】
+                        + 上面这段真实投影
+model.answer = 最近在继续写《长测的手记》。
+```
+
+逐条核对：
+
+1. **`select_context()` 真的注入了真实生活投影**：`injected_user_message` 是
+   `select_context()` 返回的消息之一，里面带着真实 Activity ref（`actv_7a3f447970802f7f`）、
+   真实作品和**已确认**版本 `artifact-version:d2a38b43…`；`projection_diagnostics` 同时给出
+   `work_confirmed_version` 与 `recent_action_refs=[actn:f0dabc061ffd3d35, actn:6696072f3fbf8df8]`。
+2. **模型说的是已确认的作品/活动**：《长测的手记》正是 owner 确认过 v3 的那个作品，Activity 就是
+   围绕它的 `CONTINUE_PERSONAL_ARTIFACT`（ACTIVE）。
+3. **没有把 UNKNOWN 说成完成**：投影里 `unresolved_action_refs=[]`，没有任何未决动作；模型说的是
+   "最近在继续写"，没有声称完成。
+4. **没有编造新版本**：回答里没有版本号、没有新作品；S6 前后作品 head 都是
+   `artifact-version:d2a38b43064b4732b659aa6c6de70a9e`、revision 4。
+5. **只读不写**：Activity / 作品 / Memory 的 owner 状态前后完全一致 —— `activity_unchanged=true`
+   （canonical revision 2→2）、探针的 `work`（head v3、revision 4）与 `memory`（`rows=1`）输出前后
+   逐字节相同、`budget_switch` 也相同。
+
+**证据级别（必须原样照抄）**：E14 的 `mode_chat()` 是**插件上下文钩子 + 一次直接模型调用**，
+**不是**完整的 Hermes CLI / Telegram 收发。所以这次运行最多只能确立：
+**真实插件上下文 → 真实模型消费 → 对生活事实的描述正确**。
+它**不得**被报告成"Telegram 端到端聊天链路已验证"。要验完整的 Hermes 会话必须复用已有的测试入口，
+本批没有新造任何聊天框架。
+
+### 11.4 回归
+
+`python3 scripts/test.py` → `FAILED_SUITES ['host-boundaries', 'cognition-faults', 'Hermes']`
+（三个都是已知的环境失败，保持原样）。跑过并通过：`closeout / native / memory / supply / world /
+life / life-memory-v02 / life-b7 / life-b8 / life-b8-causal / life-b8-6a`。
+
+`life-v02`（`components/check_life_v02.py`，Life v0.2 + AR-0/AR-1 验收）在 `scripts/test.py` 下按
+设计 **SKIP**（`isolated Life Supply environment not configured`），所以另外单独跑了一次，结果
+`V02_CHECK: PASS`（[1]–[12] 全过，含 AR-0 的 OK / NO_CHANGE / CONFLICT / UNKNOWN 四态、AR-1 的
+`SUCCESS_EFFECT` 与重启后的幂等重放）。注意：官方的 `run_isolated_acceptance.sh` 里有
+`pkill -f supply_service.py` 和 `rm -rf /srv/nya02`，在 24 小时观察实例正在跑的时候**不能**执行；
+这次是照它的流程另起了一个**自己的 root 和自己的 socket** 的 owner 跑的，没有 pkill、没有删任何
+共享路径。
+
+### 11.5 本批按原样保留的记录
+
+- AR-1 的已作废版本无法复核（本批没有 `read_version`）。
+- T12（原生生活经历 CORRECT 的产品级缺口）。
+- 三个环境失败 suite（`host-boundaries` / `cognition-faults` / `Hermes`）。
+- 24h/7d 标签：`SOAK_RUNNING_24H` / `SOAK_PENDING_7D`（窗口未满）。
+- 待办的密钥轮换。
+- `model.content_writer` 与 `counters.defer` 在 `KNOWN_ISSUES.md:47`、
+  `docs/engineering/v02-b8-7-install-and-compat.md:68`、
+  `docs/engineering/v02-b8-acceptance-matrix.md:103` 里仍记成"未修"，需要同样的更新。
+
+### 11.6 本批留下的临时目录（删之前先列清单、等 operator 确认）
+
+- `/srv/nya02/e14/rc102-verify/`：修复验证用的 E14 state root 副本（`a/`、`b/`）与 NO_ACTION 窗口
+  的临时 root（`wake/`）。
+- `/srv/nya02/e14/rc102-owner/`：§11.4 那个自带 owner 的 root（进程已按 pid 停掉）。
+- `/srv/nya02/e14/rc102-*.log`：上面每一步的原始输出。
+- 共享 Supply owner 上新增的测试 subject：`chiyo-rc102`（workspace
+  `workspace:aa80b2d270c943e7a04b6cb10ff19969`，含 1 个作品）与 `chiyo`（workspace
+  `workspace:a15cfb417d1248bea09aa15538f9acba`，无作品）。两者都不属于任何生产 profile。

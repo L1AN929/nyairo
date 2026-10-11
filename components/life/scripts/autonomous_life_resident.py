@@ -76,6 +76,24 @@ CLASS_ACTED = "acted"
 CLASS_UNKNOWN = "unknown"
 REASON_MODEL_CONNECTION = "BLOCKED: MODEL_CONNECTION"
 
+def _cycle_constant(name: str, fallback: str) -> str:
+    """One of the cycle's own constants, read from the cycle instead of re-typed here.
+
+    The record and the chain have to spell an outcome the same way.  A literal the cycle never
+    emits counts as zero forever, which is exactly what ``counters.defer`` did: the cycle
+    reports ``OUTCOME_DEFERRED`` while the record was compared against ``"DEFER"``.
+    """
+
+    try:
+        import autonomous_life_cycle as alc
+    except Exception:
+        return fallback
+    return str(getattr(alc, name, fallback))
+
+
+#: The cycle's own word for a round it deferred, so the two cannot drift apart.
+OUTCOME_DEFERRED = _cycle_constant("OUTCOME_DEFERRED", "DEFERRED")
+
 
 def _flag(environment: Mapping[str, str], name: str, default: bool) -> bool:
     raw = str(environment.get(name, "true" if default else "false")).strip().lower()
@@ -309,7 +327,12 @@ class AutonomousLifeResident:
                 "world": assembled.get("world"), "feeds": assembled.get("feeds"),
                 "autonomous_enabled": assembled.get("enabled"),
                 "model": {"probe": self.model_probe, "cognition": cognition is not None,
-                          "content_writer": assembled.get("writer") is not None},
+                          # The assembly does not hand the writer back on its own key: the writer
+                          # it built *is* the cycle's writer, and that is the one that will really
+                          # produce the text.  Reading it there is what makes the record match the
+                          # chain that was assembled, instead of reporting "no writer" forever.
+                          "content_writer": getattr(assembled.get("cycle"), "writer", None)
+                                            is not None},
                 "reconciled_at_start": reconciled}
 
     def baseline(self) -> dict[str, Any]:
@@ -421,7 +444,7 @@ class AutonomousLifeResident:
             self.counters["windows_with_material"] += 1
         if outcome == "NO_ACTION":
             self.counters["no_action"] += 1
-        if outcome == "DEFER":
+        if outcome == OUTCOME_DEFERRED:
             self.counters["defer"] += 1
         if status_class == CLASS_BLOCKED:
             text = ("%s %s" % (outcome, wake.get("detail") or "")).strip()
