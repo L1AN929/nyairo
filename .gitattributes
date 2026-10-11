@@ -1,0 +1,75 @@
+# nyairo line-ending policy (repository root).
+#
+# Why this file exists: the v0.2 native recall components are sealed by the sha256 of their
+# bytes (`components/native/memory_runtime_v1/production_resolver.py: SEALED_SHA256`), and the
+# patch baseline records the digest of `patches/baseline.json`.  A checkout that rewrites text
+# files to CRLF therefore fails three ways at once:
+#
+#   * `RuntimeError: memory resolver unavailable: sealed_component_mismatch:<name>`
+#   * `baseline checksum mismatch` from patches/check-baseline.sh
+#   * `scripts/bootstrap.sh` cannot even run under bash
+#     (`set: pipefail: invalid option name`), so the installer tests go red
+#
+# One policy for the whole tree fixes all three: text is stored with LF in the repository and
+# checked out with LF on every platform, Windows included.  The same one-line rule already
+# exists in `website/.gitattributes`; this file applies it to the rest of the tree.
+#
+# `text=auto` lets Git keep deciding what is text, so the tracked PNG / JPG / ICO / WOFF2 / PDF
+# assets are left byte-for-byte alone.  The explicit lines below only make that promise visible
+# and cover the file kinds the release toolchain depends on.  `vendor/hermes/.gitattributes`
+# stays in charge inside the vendored tree (its `*.ps1 text eol=crlf` is deliberate).
+* text=auto eol=lf
+
+# Shell, Python and configuration text: LF everywhere.
+*.sh       text eol=lf
+*.bash     text eol=lf
+*.py       text eol=lf
+*.pyi      text eol=lf
+*.json     text eol=lf
+*.jsonl    text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.toml     text eol=lf
+*.cfg      text eol=lf
+*.ini      text eol=lf
+*.service  text eol=lf
+*.patch    text eol=lf
+*.md       text eol=lf
+*.txt      text eol=lf
+*.ts       text eol=lf
+*.tsx      text eol=lf
+*.mjs      text eol=lf
+*.js       text eol=lf
+*.css      text eol=lf
+*.html     text eol=lf
+
+# Text files that are stored with CRLF *inside the repository* today.  `-text` means "never
+# convert, in either direction", so the bytes on disk stay identical to the bytes in the
+# repository on every platform and no `git add` can silently rewrite them.
+#
+# The first one is load-bearing: `production_resolver.SEALED_SHA256` seals it as
+# 6667ff66fe8105f28f436609f0cd8d744b185c0580e7f1642aafef0b873af78a, which is the sha256 of the
+# CRLF bytes.  A renormalising `git add` would flip the blob to LF and the v0.2 native recall
+# would stop assembling with `sealed_component_mismatch:readonly_recall_adapter.py`.
+#
+# The other five carry no recorded digest; they are listed so that the stored bytes stay
+# deterministic instead of leaving a latent "renormalise" diff for the next batch.
+#
+# The root `.gitignore` is the one entry that had already drifted: its committed blob is
+# mixed (lines 1-9 LF, lines 10-21 CRLF), so `text=auto` leaves it alone on checkout but a
+# `git add` would silently flip the whole file to LF.  It is anchored with a leading `/` so
+# the rule cannot leak onto the many `.gitignore` files under `vendor/`.
+/.gitignore                                                       -text
+components/native/native_recall/readonly_recall_adapter.py        -text
+MANIFEST.json                                                     -text
+components/.gitignore                                             -text
+components/alpha/tests/acceptance/e_safety.py                     -text
+vendor/hermes/contributors/emails/uperLu@users.noreply.github.com -text
+
+# Assets that must never be normalised.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.ico      binary
+*.woff2    binary
+*.pdf      binary
