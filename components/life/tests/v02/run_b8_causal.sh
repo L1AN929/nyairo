@@ -182,15 +182,23 @@ echo "== mode=$MODE model=$MODEL_MODE call-cap=$MAX_CALLS"
 GROUP_VAR="NYA02_CAUSAL_GROUPS"
 [ "$MODE" = "b" ] && GROUP_VAR="NYA02_CAUSAL_B_GROUPS"
 
+# The provider key goes into a 0600 file the service identity owns, never onto the command line:
+# `ps` shows a command line to every user on the box, an inherited environment it does not.  The
+# harness loads the file itself (``autonomous_life_assembly.load_model_env_file``).
+MODEL_ENV_FILE="${NYA02_MODEL_ENV_FILE:-$ROOT/model_env}"
+( umask 077; printf 'NYA02_MODEL_PROVIDER=%s\nNYA02_MODEL_NAME=%s\nNYA02_MODEL_BASE_URL=%s\nNYA02_MODEL_API_KEY=%s\n' \
+    "${NYA02_MODEL_PROVIDER:-}" "${NYA02_MODEL_NAME:-}" "${NYA02_MODEL_BASE_URL:-}" \
+    "${NYA02_MODEL_API_KEY:-}" > "$MODEL_ENV_FILE" )
+chown "$SVC_USER:$SVC_USER" "$MODEL_ENV_FILE"
+chmod 600 "$MODEL_ENV_FILE"
+
 runuser -u "$SVC_USER" -- env \
   NYA02_SUPPLY_SOCKET="$SOCKET" \
   NYA02_CAUSAL_ROOT="$CA_ROOT" \
   "$GROUP_VAR=$CA_GROUPS" \
   NYA02_MAX_MODEL_CALLS="$MAX_CALLS" \
   NYA02_MODEL_PROVIDER="${NYA02_MODEL_PROVIDER:-}" \
-  NYA02_MODEL_NAME="${NYA02_MODEL_NAME:-}" \
-  NYA02_MODEL_BASE_URL="${NYA02_MODEL_BASE_URL:-}" \
-  NYA02_MODEL_API_KEY="${NYA02_MODEL_API_KEY:-}" \
+  NYA02_MODEL_ENV_FILE="$MODEL_ENV_FILE" \
   python3 "$ROOT/app/components/life/tests/v02/$HARNESS" "$@"
 RC=$?
 echo "rc=$RC"

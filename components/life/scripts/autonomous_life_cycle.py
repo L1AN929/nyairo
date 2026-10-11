@@ -442,6 +442,9 @@ class AutonomousLifeCycle:
         #: *real* observation supports; it never picks one.  With no provider wired the World is
         #: not consulted at all, and this cycle behaves exactly as before.
         self.world_opportunity_provider = world_opportunity_provider
+        #: Told about a version *we* just committed, so the artifact feed can advance its cursor
+        #: and our own edit is not an event to ourselves.  ``None`` keeps the previous behaviour.
+        self.own_write_recorder: Optional[Callable[[str, str], None]] = None
         self.last_world_observation: Optional[dict[str, Any]] = None
         self.last_world_error: Optional[str] = None
         self.last_world_opportunities: list[dict[str, Any]] = []
@@ -1098,6 +1101,15 @@ class AutonomousLifeCycle:
         """
         import activity_progress_completion_lr5 as lr5
 
+        # The owner confirmed this version and we are the ones who wrote it.  Handing it to the
+        # artifact feed advances that feed's cursor, which is how our own edit stops being an
+        # event to ourselves -- the feed's own bookkeeping, not a suppression of the work's
+        # future changes: another writer's version still differs from the cursor and still wakes.
+        if version_id and self.own_write_recorder is not None:
+            try:
+                self.own_write_recorder(str(artifact_id or ""), str(version_id))
+            except Exception as exc:  # a bookkeeping failure is reported, never hidden
+                base["own_write_record_error"] = "%s: %s" % (type(exc).__name__, exc)
         if not activity_ref or not version_id:
             return
         artifact_bare = str(artifact_id or "").split(":", 1)[-1]

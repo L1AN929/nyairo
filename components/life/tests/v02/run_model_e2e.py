@@ -62,6 +62,11 @@ class CallLedger:
 
 
 def main() -> int:
+    # The provider key arrives in a 0600 file, never on the command line (see the launcher).
+    import autonomous_life_assembly as _assembly
+
+    _assembly.load_model_env_file()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("smoke", "run", "ab"))
     parser.add_argument("--max-calls", type=int, default=6)

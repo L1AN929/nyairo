@@ -278,6 +278,11 @@ def _model_factory(counter: dict, cfg: dict):
 
 
 def main() -> int:
+    # The provider key arrives in a 0600 file, never on the command line (see the launcher).
+    import autonomous_life_assembly as _assembly
+
+    _assembly.load_model_env_file()
+
     from life_artifact_port import LifeArtifactPort
     from life_experience_memory_consumer import MemoryAdmissionExperienceConsumer
 
