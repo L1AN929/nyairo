@@ -2,7 +2,7 @@
 
 本文帮助你在自己的电脑或服务器上安装 nyairo，开始聊天，再按需要连接机器人和额外功能。网页只放教程，聊天在实际程序里进行。
 
-当前公开体验版本是 v0.1.0-rc6，使用配套的 Hermes 0.21.0。已知问题与实际检查结果在后面的对应章节说明。
+当前公开发行版本是 v0.1.0-rc9（2026-10-09），使用配套的 Hermes 0.21.0；rc6、rc7、rc8 是更早的发行版，历史验收记录保持原样。已知问题与实际检查结果在后面的对应章节说明。
 
 ## 00 第一次使用，从这里开始
 
@@ -22,7 +22,7 @@ Windows 用户先按 [Windows 安装](https://nyairo.com/#windows) 打开 WSL / 
 curl -fsSL https://www.nyairo.com/install.sh | bash
 ```
 
-不需要先下载 Git 仓库，也不用自己装 uv 或 Python。安装器会下载固定的 `v0.1.0-rc6`，核对文件，准备运行环境，再创建独立的个人配置，开启记忆与生活状态，并允许当前 Linux 账号通过本地命令行使用。
+不需要先下载 Git 仓库，也不用自己装 uv 或 Python。安装器会下载固定的 `v0.1.0-rc9`，核对文件，准备运行环境，再创建独立的个人配置，开启记忆与生活状态，并允许当前 Linux 账号通过本地命令行使用。
 
 看到 `[5/5] 程序安装完成` 后，会自动进入 Hermes 模型设置。选择自己的服务和模型，填写 API Key；自定义服务还要填写 Base URL。设置结束后进入聊天，先发一句话检查能否收到回复。账号与密钥仍需你自己提供。
 
@@ -30,7 +30,7 @@ curl -fsSL https://www.nyairo.com/install.sh | bash
 
 以后重新打开 Ubuntu / Linux 终端，输入 `nyairo` 就能继续；重新选择模型用 `nyairo setup model`。刚装完若当前窗口找不到命令，打开新终端，或直接运行 `~/.local/bin/nyairo`。
 
-程序保存在 `~/.local/share/nyairo/releases/v0.1.0-rc6`，个人数据保存在 `~/.nyairo`。名字与人格改 `~/.nyairo/SOUL.md`；聊天、记忆和模型配置也在这套个人目录里。重复运行安装命令会核对程序并保留已有个人数据，再打开模型向导；它不会自动升级到别的版本。
+程序保存在 `~/.local/share/nyairo/releases/v0.1.0-rc9`，个人数据保存在 `~/.nyairo`。名字与人格改 `~/.nyairo/SOUL.md`；聊天、记忆和模型配置也在这套个人目录里。重复运行安装命令会核对程序并保留已有个人数据，再打开模型向导；它不会自动升级到别的版本。
 
 这条路线已完成 Linux 和 Windows WSL / Ubuntu 的普通账号首次安装复核。Windows 用户仍需先装好 WSL。Telegram、认知、World/Body 和资源服务仍按对应章节另外配置。
 
@@ -38,7 +38,7 @@ curl -fsSL https://www.nyairo.com/install.sh | bash
 
 后面的 Git / ZIP 手动路线使用 `~/apps/chiyo-v0.1` 和 `~/.chiyo-v1`；一条命令安装使用上述新目录。已经完成引导安装，就跳过手动下载和创建配置，不要再建立第二套个人数据。
 
-阅读后面的模块、更新或备份示例时，将程序路径 `~/apps/chiyo-v0.1` 换成 `~/.local/share/nyairo/releases/v0.1.0-rc6`，将个人路径 `~/.chiyo-v1` 换成 `~/.nyairo`。`bash scripts/hermes.sh` 可直接换成 `nyairo`；需要在程序目录执行的其他脚本仍先进入实际程序目录。
+阅读后面的模块、更新或备份示例时，将程序路径 `~/apps/chiyo-v0.1` 换成 `~/.local/share/nyairo/releases/v0.1.0-rc9`，将个人路径 `~/.chiyo-v1` 换成 `~/.nyairo`。`bash scripts/hermes.sh` 可直接换成 `nyairo`；需要在程序目录执行的其他脚本仍先进入实际程序目录。
 
 ### 手动安装的路线（可选）
 
@@ -109,11 +109,11 @@ Native Runtime 也随包提供，用于独立运行及研发验证，但本手�
 
 **Git 下载**：复制教程中的命令，就能拿到指定的体验版本；适合第一次按命令安装，也便于以后查看改动。
 
-**ZIP 下载**：从 [GitHub Releases](https://github.com/L1AN929/nyairo/releases/tag/v0.1.0-rc6) 下载 `v0.1.0-rc6` 的源码 ZIP，检查文件后再解压；适合希望先把压缩包保存好的用户。
+**ZIP 下载**：从 [GitHub Releases](https://github.com/L1AN929/nyairo/releases/tag/v0.1.0-rc9) 下载 `v0.1.0-rc9` 的源码 ZIP，检查文件后再解压；适合希望先把压缩包保存好的用户。
 
 无论选哪种，都下载 nyairo 整套项目，随后运行 `bash scripts/install.sh`。请按下一章操作，不要只下载其中一个插件文件夹。
 
-程序 ZIP 是 `nyairo-v0.1.0-rc6.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用 rc6。
+程序 ZIP 是 `nyairo-v0.1.0-rc9.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用当前公开发行版 rc9。
 
 ### 电脑和网络需要满足什么
 
@@ -618,12 +618,12 @@ rc5 没有这个入口。先退出聊天并停止自己的服务，确认原来�
 
 ```bash
 export HERMES_HOME="$HOME/.chiyo-v1"
-git clone --branch v0.1.0-rc6 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc6"
-cd "$HOME/apps/nyairo-rc6"
+git clone --branch v0.1.0-rc9 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc9"
+cd "$HOME/apps/nyairo-rc9"
 bash scripts/update.sh --migrate-from "$HOME/apps/chiyo-v0.1"
 ```
 
-新目录必须尚不存在。最后一条命令会检查两份程序、安装新依赖、备份个人目录、更新标准插件副本并切换入口。原来的程序目录保留，可用于回退。ZIP 用户也可以把 **Release 附件中的** `nyairo-v0.1.0-rc6.zip` 校验后解压到新目录，再执行同一条迁移命令。
+新目录必须尚不存在。最后一条命令会检查两份程序、安装新依赖、备份个人目录、更新标准插件副本并切换入口。原来的程序目录保留，可用于回退。ZIP 用户也可以把 **Release 附件中的** `nyairo-v0.1.0-rc9.zip` 校验后解压到新目录，再执行同一条迁移命令。
 
 如果用旧的引导安装器装过 rc5，个人目录改用 `$HOME/.nyairo`，旧程序路径改用 `$HOME/.local/share/nyairo/releases/v0.1.0-rc5`。迁移时明确使用这两个实际路径，别再创建第二份个人设置。
 
@@ -661,7 +661,7 @@ World / Supply 独立服务目录、个人目录里链接到外部的文件，�
 
 这条只恢复中断的插件切换，不下载新版、不恢复旧聊天数据库。
 
-需要指定一个已发布且带有完整附件的版本时，使用 `~/.local/bin/nyairo update --version v0.1.0-rc6`。
+需要指定一个已发布且带有完整附件的版本时，使用 `~/.local/bin/nyairo update --version v0.1.0-rc9`。
 
 ### 已经设置了开机启动
 
@@ -834,7 +834,7 @@ R16 的完整运行数字目前无法独立核验：旧证据条目复制了 R17
 
 ### 公开后仍需验证什么
 
-公开仓库为 https://github.com/L1AN929/nyairo ，当前体验候选标签 `v0.1.0-rc6`；源码与下载以仓库及 Releases 页面为准。作者于 2026-10-04 确认 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；Hermes 及第三方继续保留原许可证。公开不等于所有平台已验收；另一台电脑的完整安装、长期自然使用及尚未覆盖的平台仍需独立验证。
+公开仓库为 https://github.com/L1AN929/nyairo ，当前公开发行标签 `v0.1.0-rc9`（更早的 rc6 / rc7 / rc8 仍可下载）；源码与下载以仓库及 Releases 页面为准。作者于 2026-10-04 确认 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；Hermes 及第三方继续保留原许可证。公开不等于所有平台已验收；另一台电脑的完整安装、长期自然使用及尚未覆盖的平台仍需独立验证。
 
 暂未完成的安装方式、自主活动或自助授权向导，应作为待办写入路线，而不是写成已有功能。本次网站维护同步了本页列出的定向复核结果；没有重新执行运行时全量测试，不把历史验收数字作为本次网站检查结果。
 
@@ -974,7 +974,7 @@ World/Body 的同账号 socket、Life Supply 的 operator/service 权限与有�
 
 ## 15 rc5 隐私修复与自定义
 
-首次安装请选 rc5。旧 rc4 标签和 ZIP 保持原样，不会因为网站更新而自动获得修复。
+首次安装请使用当前公开发行版（`v0.1.0-rc9`）。旧 rc4 标签和 ZIP 保持原样，不会因为网站更新而自动获得修复。
 
 新建实例使用中性人设，不带作者的私人身份、关系或历史。打开自己数据目录中的 `SOUL.md`，写入你希望的名字、说话方式和边界；程序不会替换已有的人设。
 
@@ -983,3 +983,364 @@ World/Body 的同账号 socket、Life Supply 的 operator/service 权限与有�
 启用记忆时，模型调用的终端、读文件、浏览器、委派等工具默认全部拦截，避免读回已经停止召回的聊天。`/chiyo_*` 命令和普通聊天仍保留。若你明确需要完整 Hermes 工具，可以在自己 `chiyo/config.json` 中设置 `"memory_tool_policy": "unrestricted"` 并重启；这样就不能再承诺工具不会读回原始历史。忘记不是擦除备份，也不是隔离本地管理员。
 
 已有用户先备份自己的数据目录，安装新程序后更新插件与授权设置，不要删除原目录或重建人设。具体步骤、Native HTTP 的访问口令、本次测试与尚存限制见 [隐私修复与升级](https://github.com/L1AN929/nyairo/blob/v0.1.0-rc6/PRIVACY_REVIEW.md)。
+
+## 17 v0.2 自主生活（开发候选，未发布）
+
+本节讲的是**开发分支上的能力**，不是当前发行内容。请先看清楚边界，再决定要不要按它操作。
+
+### 先看清楚这是什么
+
+- 当前公开发行版仍是 **`v0.1.0-rc9`**；自主生活在分支 `v0.2-autonomous-life`（本批记录提交 `e471241`），**没有标签、没有 Release、没有部署到任何真实用户实例**。上面的引导安装命令装到的是 rc9，不会给你这一节的功能。
+- 这一节里的命令与输出，都是在隔离测试环境里**实际执行过**的：两个真实非 root 身份、真实 Life Supply owner、真实模型（`gemini-3.8-flash-high`）。不是示意，也不是手写的"预期输出"。
+- **隔离环境不等于生产交付。** 逐能力判定见 [验收与复测](https://github.com/L1AN929/nyairo/blob/main/TESTING.md) 的 E13 门禁；本节的最后两张表写明"已验证"和"不得声称"。
+
+### 先认识四个词，够用就行
+
+| 词 | 一句话 | 你需要知道的 |
+| --- | --- | --- |
+| **state root** | 这套生活的状态根目录，默认 `<安装根>/state` | 开关、每日预算、唤醒与步骤日志、Activity 快照都在里面。**一个 state root 只允许一个写入进程**：第二个进程会被拒绝，这是防止"出现两个她"的机制，不要为了让第二个进程起来去取消租约。 |
+| **subject** | 主体身份 | 授权、工作区、作品都挂在它上面。换一个 subject 就是另一份生活，看不到别人的作品。 |
+| **Supply socket** | 本机连接资源服务（Life Supply）的 Unix socket 文件 | 它不是网络端口、不对外；默认权限 `0600`，只允许它的所有者账号连接。 |
+| **grant** | 由管理身份签发的一张权限凭据 | 写明"谁、能做什么、作用在哪个目标、能用几次"。写自己的作品需要一份 `COMMIT_MANAGED_ARTIFACT`（限定到自己的工作区）。没有它，写请求会被资源服务拒绝；授权编号必须由服务真实签发，随手写一串不会生效。 |
+
+### 真实走通：从全新个人目录到一次自主写入
+
+下面的每一步都实际执行过，输出是真实结果（已截断；密钥值从不打印）。环境：WSL Ubuntu，`/srv/nya02/**` 隔离目录，两个真实非 root 身份 `nyaop`（管理身份，只签发授权）与 `nyasvc`（服务身份）。
+
+```bash
+cd /path/to/nyairo          # 程序目录（开发分支的工作副本）
+
+# 1) 全新的一套目录，不碰任何现有实例
+rm -rf /srv/nya02/inst && mkdir -p /srv/nya02/inst/profile
+chown nyasvc:nyasvc /srv/nya02/inst/profile && chmod 700 /srv/nya02/inst/profile
+
+# 2) 把已经配置好的模型供应商设置放进这套个人目录
+#    （真实安装里这一步由 nyairo setup model 向导写入；这里用文件复制代替交互式向导）
+install -m 600 /root/.nyairo/config.yaml /srv/nya02/inst/profile/config.yaml
+install -m 600 /root/.nyairo/.env        /srv/nya02/inst/profile/.env
+chown nyasvc:nyasvc /srv/nya02/inst/profile/config.yaml /srv/nya02/inst/profile/.env
+
+# 3) 初始化这套个人目录：安装器用的同一个入口
+runuser -u nyasvc -- python3 scripts/setup_profile.py \
+  --home /srv/nya02/inst/profile --owner chiyo-install --memory --life --allow-local-owner
+```
+
+```text
+Profile ready. Set HERMES_HOME to this directory, then use the normal Hermes CLI / gateway setup.
+```
+
+确认供应商设置真的能被解析（只报告"有没有密钥"，不打印密钥）：
+
+```bash
+python3 - /srv/nya02/inst/profile <<'PY'
+import sys
+sys.path.insert(0, "components/life/scripts")
+from profile_model_config import describe_model_config, load_configured_model_config
+print(describe_model_config(load_configured_model_config(hermes_home=sys.argv[1])))
+PY
+```
+
+```text
+{'provider': 'custom', 'model': 'gemini-3.8-flash-high', 'base_url': 'https://gw.929711.xyz/v1', 'key_env': None, 'api_key_present': True, 'hermes_home': '/srv/nya02/inst/profile', 'resolved_by': 'profile_shape_resolver', 'usable': True}
+```
+
+```bash
+# 4) 实例自己的环境文件（隔离环境沿用 $ROOT/env.sh 的约定）
+cat > /srv/nya02/inst/env.sh <<'EOF'
+export LIFE_SUPPLY_SOCKET=/srv/nya02/sock/life-supply.sock
+export LIFE_SUPPLY_OPERATOR_UIDS=1001
+export LIFE_SUPPLY_SERVICE_UIDS=1002
+export NYA02_SUBJECT=chiyo-install
+EOF
+. /srv/nya02/inst/env.sh
+
+# 5) 管理身份签发工作区授权 → 服务身份开通工作区 → 签发作品授权 → 由合法 owner 操作建立第一版作品
+export NYA02_ROOT=/srv/nya02/inst
+export NYA02_RESIDENT_DIR=/srv/nya02/inst/resident
+export NYA02_RESIDENT_SUBJECT=chiyo-install
+export NYA02_WORLD_ENV_FILE=/srv/nya02/inst/no-world-env   # 这套 profile 没有 World 服务：观测记录 UNAVAILABLE
+bash components/life/tests/v02/run_resident_soak.sh prepare
+```
+
+```text
+== operator issues the workspace grant
+== service principal provisions the workspace
+== operator issues the artifact grant for workspace:workspace:9ba2cd4c8b164d028abe38efcd990132
+workspace=workspace:9ba2cd4c8b164d028abe38efcd990132 grant=grant:2fce125a99c540f6948f21ed0e51af78
+== the first real work, created by a legal owner operation
+memory ready: /srv/nya02/inst/resident/memory/evidence.db (controls /srv/nya02/inst/resident/memory/controls.db)
+created: artifact:be778d6d32e94796abffdbf392f7a54c status=OK reason=
+head=artifact-version:d5904244225447b3b5e8190bd01ef6b9 v1
+```
+
+**自主写入默认是关的**。新 state root 里还没有开关文件：
+
+```bash
+runuser -u nyasvc -- env PYTHONPATH="$PWD" python3 -m chiyo_bundle life \
+  --state /srv/nya02/inst/resident --action status
+```
+
+```text
+# 真实输出的关键行（budget_today 三项此时全为 null，中间字段省略）
+ "autonomous_switch": {"enabled": null, "changed_at": null, "changed_by": null},
+ "last_wake": null, "recent_wakes": [], "recent_steps": [], "pending_unknown_actions": []
+```
+
+缺东西时它不会假装成功，而是给出具名拒绝（下面两次都是 `rc=3`，而且**没有任何模型调用**）：
+
+```text
+# 缺作品授权
+{"started": {"ok": false, "reason": "SUPPLY_CONFIGURATION_MISSING",
+             "missing": ["CHIYO_LIFE_SUPPLY_ARTIFACT_GRANT"],
+             "detail": "no autonomous execution is possible without the Supply socket, the subject and a real artifact grant"}}
+
+# 有授权，但这套 profile 没有可用供应商
+{"started": {"ok": false, "reason": "NO_CONTENT_WRITER",
+             "detail": "the profile has no usable provider for the content writer"}}
+```
+
+打开开关，然后**只跑一个**真实考虑窗口：
+
+```bash
+runuser -u nyasvc -- env PYTHONPATH="$PWD" python3 -m chiyo_bundle life \
+  --state /srv/nya02/inst/resident --action enable
+export NYA02_PROFILE_HOME=/srv/nya02/inst/profile
+export CHIYO_AUTONOMOUS_MAX_COGNITION_CALLS_PER_DAY=2
+export CHIYO_AUTONOMOUS_MAX_ACTIONS_PER_DAY=1
+bash components/life/tests/v02/run_resident.sh foreground --once
+```
+
+```text
+{"recorded": true, "changed_at": "2026-10-11T02:04:47.601761+00:00", "changed_by": "operator"}
+# 真实输出的关键字段（其余字段省略）
+ "autonomous_enabled": true,
+ "feeds": ["resume_eligibility", "artifact_head"],
+ "model": {"cognition": true, "probe": {"host": "gw.929711.xyz", "port": 443, "status": "REACHABLE"}},
+ "world": {"status": "UNAVAILABLE", "reason": "WORLD_NOT_CONFIGURED"},
+ "counters": {"wakes": 2, "outcomes": {"ACTED": 1}, "owner_confirmed_versions": 1, "actions": 1,
+              "model_calls": 1, "pending_unknown_last": 0, "pending_unknown_max": 0},
+ "budget": {"cognition_used_today": 1, "max_cognition_calls_per_day": 2,
+            "actions_used_today": 1, "max_actions_per_day": 1}
+```
+
+回读真实结果：
+
+```bash
+tail -1 /srv/nya02/inst/resident/state/autonomous_wakes.jsonl
+```
+
+```text
+{"kind": "CHECK_WINDOW", "status": "ACTED", "status_class": "acted", "outcome": "ACTED",
+ "decision": "START", "llm_calls": 1, "action_id": "actn:ba85fba2b0ee8de6",
+ "action_status": "SUCCEEDED", "activity_ref": "actv_d19a84f0063e250b",
+ "detail": "owner committed artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd"}
+```
+
+```text
+# 步骤日志（资源服务自己的回执）
+{"effect_state": "APPLIED", "status": "SUCCEEDED", "reason": "OK",
+ "expected_head": "artifact-version:d5904244225447b3b5e8190bd01ef6b9",
+ "version_id": "artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd", "version_number": 2,
+ "operation_key": "life:2fe3393e392267d4489827e6d96dde9c"}
+
+# 直接问资源服务（窄端口 read_head / read_artifact）
+head    : {"version_id": "artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd", "version_number": 2,
+           "parent_version_id": "artifact-version:d5904244225447b3b5e8190bd01ef6b9", ...}
+content : "# 长测的手记\n\n第一段：先写一句，看看她会不会自己接着写。\n\n\n其实没有谁在真正注视，屏幕另一端只有光标在规律地闪动。隔壁工位的咖啡机响了第三回，今天的天气比预想中更早凉下来。\n"
+```
+
+这一轮**没有任何用户消息**：考虑由到期窗口触发，决策来自真实模型，写入由资源服务确认，新正文是模型写的散文而不是模板。整套走通共 **2 次**真实模型调用（1 次决策 + 1 次内容生成）。
+
+### 日常使用
+
+#### 1) 打开 / 暂停 / 关闭自主生活
+
+```bash
+IR=/srv/nya02/inst/resident          # 安装根目录（state root 的上一层）
+runuser -u nyasvc -- env PYTHONPATH="$PWD" python3 -m chiyo_bundle life --state "$IR" --action enable
+runuser -u nyasvc -- env PYTHONPATH="$PWD" python3 -m chiyo_bundle life --state "$IR" --action disable
+```
+
+```text
+{"recorded": true, "changed_at": "2026-10-11T02:04:47.601761+00:00", "changed_by": "operator"}
+{"recorded": false, "changed_at": "2026-10-11T02:12:20.641971+00:00", "changed_by": "operator"}
+```
+
+目前只有 `enable` / `disable` 两个动词，**没有单独的"暂停"**：`disable` 就是暂停 —— 停止新的决策和新的提交，但**不删除**作品、Activity、记忆或历史记录，已提交但结果未知的操作仍然照原样对账。开关是持久化的，重启之后仍然是关。默认就是关。
+
+#### 2) 设置每日认知与动作预算
+
+四个真实的环境变量名：
+
+| 变量 | 含义 | 默认 |
+| --- | --- | --- |
+| `CHIYO_AUTONOMOUS_MAX_ROUNDS_PER_DAY` | 每天最多"考虑"几轮。没走到模型就结束的轮次不占额度 | 4 |
+| `CHIYO_AUTONOMOUS_MAX_COGNITION_CALLS_PER_DAY` | 每天最多花几次认知调用 | 12 |
+| `CHIYO_AUTONOMOUS_MAX_ACTIONS_PER_DAY` | 每天最多执行几个真实动作 | 8 |
+| `CHIYO_AUTONOMOUS_CHECK_INTERVAL_MINUTES` | 两次"检查窗口"之间至少隔多少分钟 | 120 |
+
+用法与注意：
+
+- 它们是**启动常驻进程时的环境变量**（隔离环境写在实例的 `env.sh`，由启动脚本带进去）。改完必须**重启常驻进程**才生效。
+- 计数落在 state root 的 `autonomous_budget.json`，按本机日期分日；重启不会清零。
+- 真实例子（本次用的值：认知 2、动作 1）。一轮成功写入之后：`cognition_used_today 1`、`actions_used_today 1`、`actions_remaining_today 0`、`remaining_today 3`。
+- **如实提醒**：`counters.model_calls` 和 `cognition_used_today` 统计的是**决策**调用；一次成功写入还会再发生一次"内容生成"调用（`purpose=artifact_edit`），它**不计入**这个数字。要估算"今天花了多少次模型调用"，把决策次数和写入次数相加。
+
+#### 3) 查看当前 Activity、作品版本与最近动作
+
+```bash
+# 常驻进程自己持久化的记录（它没在运行也能读）
+runuser -u nyasvc -- env NYA02_RESIDENT_STATE="$IR/state" \
+  python3 components/life/scripts/autonomous_life_resident.py --status --state-root "$IR/state"
+
+# 开关 + 今日预算 + 最近唤醒 + 最近步骤 + 待处理 UNKNOWN
+runuser -u nyasvc -- env PYTHONPATH="$PWD" python3 -m chiyo_bundle life --state "$IR" --action status
+
+# 真实动作列表（含未确认的）
+runuser -u nyasvc -- env PYTHONPATH="$PWD" python3 -m chiyo_bundle life \
+  --state "$IR" --action list-recent-actions --limit 3
+```
+
+```text
+# 真实输出的关键字段（其余字段省略）
+ "budget": {"cognition_used_today": 1, "max_cognition_calls_per_day": 2,
+            "actions_used_today": 1, "max_actions_per_day": 1, "spent_today": 1, "remaining_today": 3},
+ "counters": {"outcomes": {"ACTED": 1}, "owner_confirmed_versions": 1, "actions": 1, "model_calls": 1}
+```
+
+```text
+[{"action_id": "actn:ba85fba2b0ee8de6", "action_kind": "FILE_ACTION",
+  "target_ref": "artifact:artifact:be778d6d32e94796abffdbf392f7a54c", "status": "SUCCEEDED",
+  "created_at": "2026-10-11T02:04:48.915722+00:00",
+  "provider_operation_ref": "life:2fe3393e392267d4489827e6d96dde9c",
+  "idempotency_key": "ar0_act:step:5ec11689825834cb"}]
+```
+
+作品本身的"当前版本"以资源服务为准（`read_head` / `read_artifact`，见上面走通的第 5 步）。当前 Activity 与它的 checkpoint 在 `--status` 的 `baseline.foreground_activity_ref` 与步骤日志里。
+
+#### 4) 看 UNKNOWN / 待处理，不要当成成功
+
+- `pending_unknown_actions`（控制面）与 `unresolved_actions`（只读投影）里的东西是**"提交了但没拿到确认结果"**：既不是成功，也不是失败。
+- 处理方式：常驻进程**每次启动、每个 tick** 都会按**原来的操作编号**去对账（`reconcile_pending()`），不会重试、不会另开一笔；关闭开关也仍然对账。
+- 本次真实结果：`pending_unknown_last 0`、`pending_unknown_max 0`。如果它不为 0，先确认是不是同一笔操作反复出现，**不要手工删记录**。
+- 已提交但结果未知的写入**不会**变成"她做完了"。只有在资源服务真的确认了新版本时，`owner_confirmed_versions` 才会 +1。
+
+#### 5) 给某个作品授予 / 撤回写权限
+
+授权由**管理身份**签发，不是聊天里的一句话：
+
+```bash
+# 授予：capability=COMMIT_MANAGED_ARTIFACT、scope=artifact:personal、target=workspace:<你的工作区>
+runuser -u nyaop -- env LIFE_SUPPLY_SOCKET=/srv/nya02/sock/life-supply.sock \
+  python3 /srv/nya02/tools/rpc.py \
+  '{"op": "issue_grant", "grant": {"subject": "chiyo-install", "operation_id": "op:e13:demo:grant:artifact:2",
+    "capability": "COMMIT_MANAGED_ARTIFACT", "scope": "artifact:personal",
+    "target": "workspace:workspace:9ba2cd4c8b164d028abe38efcd990132", "use_mode": "REUSABLE"}}'
+
+# 读当前 revision：撤回要带 expected_revision
+runuser -u nyaop -- env LIFE_SUPPLY_SOCKET=/srv/nya02/sock/life-supply.sock \
+  python3 /srv/nya02/tools/rpc.py '{"op": "get_grant", "grant_id": "grant:0980bf59adbb47869eb1c3d646b523b6"}'
+
+# 撤回
+runuser -u nyaop -- env LIFE_SUPPLY_SOCKET=/srv/nya02/sock/life-supply.sock \
+  python3 /srv/nya02/tools/rpc.py \
+  '{"op": "revoke_grant", "grant_id": "grant:0980bf59adbb47869eb1c3d646b523b6",
+    "expected_revision": 1, "operation_id": "op:e13:demo:revoke:2"}'
+```
+
+```text
+{"detail": "grant issued", "grant_id": "grant:0980bf59adbb47869eb1c3d646b523b6", "operation_id": "op:e13:demo:grant:artifact:2", "reservation_id": null, "revision": 1, "status": "ALLOW", "writer": {"epoch": 1, "instance_id": "L1AN929:91", "owner": "Governance"}}
+...
+{"grant": {"grant_id": "grant:0980bf59adbb47869eb1c3d646b523b6", "capability": "COMMIT_MANAGED_ARTIFACT",
+           "scope": "artifact:personal", "target": "workspace:workspace:9ba2cd4c8b164d028abe38efcd990132",
+           "subject": "chiyo-install", "use_mode": "REUSABLE", "revision": 1, "revocation_state": "ACTIVE",
+           "uses": 0, ...},
+ "status": "OK"}
+...
+{"detail": "grant revoked", "grant_id": "grant:0980bf59adbb47869eb1c3d646b523b6", "operation_id": "op:e13:demo:revoke:2", "reservation_id": null, "revision": 2, "status": "REVOKED"}
+```
+
+再用这套 profile 自己的作品授权（`grant:2fce125a…`）做一遍：撤回之后用同一授权写入，会被资源服务拒绝，作品 head 不变（实测，0 次模型调用）。
+
+```text
+{"detail": "grant revoked", "grant_id": "grant:2fce125a99c540f6948f21ed0e51af78", "operation_id": "op:inst:revoke:artifact:chiyo-install", "reservation_id": null, "revision": 2, "status": "REVOKED"}
+{'status': 'REVOKED', 'reason': 'GOVERNANCE_REFUSED', 'detail': 'reserve_use refused',
+ 'stage': 'reserve_use', 'grant_id': 'grant:2fce125a99c540f6948f21ed0e51af78',
+ 'effect_state': 'UNKNOWN'}
+head: {"version_id": "artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd", "version_number": 2}
+```
+
+**口径要说清楚**：这枚"明确拒绝"的回答，经 Life 侧窄端口分类时是 `effect_state: UNKNOWN` —— 端口只把 `BLOCKED` / `DENY` 当作明确拒绝，`REVOKED` 落进了"未确认"。所以"已发授权被在线撤回之后，整条自主路径会怎么报告"**仍需单独测试**（见 [已知边界](https://github.com/L1AN929/nyairo/blob/main/KNOWN_ISSUES.md) 的 T13）。不要把这次实测说成"整条自主路径已验证撤回"。
+
+工作区授权（`PROVISION_PERSONAL_WORKSPACE`）只在第一次开通工作区时需要，之后不用重复签发。
+
+#### 6) 停止与重启常驻进程
+
+```bash
+bash components/life/tests/v02/run_resident.sh start
+bash components/life/tests/v02/run_resident.sh status
+bash components/life/tests/v02/run_resident.sh stop
+```
+
+```text
+== commit e4712418748e26265d76be2011e28646ce0babf9 state_root=/srv/nya02/inst/resident/state subject=chiyo-install poll=180s
+== model=gemini-3.8-flash-high key=present
+STARTED pids=3452
+3454 launcher=3452 log=/srv/nya02/inst/resident/resident.log
+（启动包装进程与常驻进程各一个 pid，所以是两行数字）
+...
+pids=3452
+3454
+...
+stopping pids=3452
+3454
+STOPPED
+```
+
+- 重启**不会补跑**停机期间错过的窗口（`last_check_at` 保留），开关与预算也不会重置（`starts` 累加）。
+- 同一个 state root 同时只允许一个进程：第二个进程会被既有的 `ActivityLockError` 拒绝，启动脚本另有一层 `ALREADY_RUNNING` 前置检查。**不要**为了让第二个进程起来去取消租约。
+- 停止后不会再有新的自主写入；`reconcile_pending()` 仍会在下一次启动时对账。
+
+#### 7) 备份 / 更新 / 回滚之前要检查什么
+
+1. 先停常驻进程，确认 `status` 里 `pids=none`，并且没有第二个写入者。
+2. 要备份的是**四份**：① 个人目录（模型配置、人设、记忆）；② 整个 state root（开关、预算、journal、Activity 快照）；③ 资源服务的 data root（授权、工作区、作品数据库与正文投影）；④ World 实例的数据根（如果启用了 World）。
+3. 不要只拷一个 `.db`：Life 侧的状态是 JSON 快照 + JSONL 日志 + flock 租约，资源服务侧是 sqlite 加投影文件；停机后整目录备份最稳。
+4. 更新与回滚走的是 v0.1 的整包入口（`nyairo update` / `nyairo update --rollback`）。**v0.2 开发候选没有发行包，也没有 v0.2 的升级或回滚路径**；不要把开发分支当成升级渠道。
+5. 重启后核对四件事：`starts` 是否 +1、开关是否还是你要的状态、观察起点 `started_at` 是否保持（重启不会重新计时）、`pending_unknown_last` 是否为 0。
+
+#### 8) 让普通 Hermes / Telegram 被动聊天继续可用
+
+- 自主生活**不依赖**用户消息，也**不接管**聊天：常驻进程是独立进程，聊天照旧走 Hermes 命令行或网关。
+- 但同一个 state root 只能有一个写入者。常驻进程持有 writer lease 时，聊天侧**不能**再为同一个 state root 建第二个写入 Runtime；要读生活状态，走只读投影（`chiyo_bundle/presence.py` 的 `life_projection`）。
+- 本次实测的只读投影（0 次模型调用，且不干扰常驻进程）：
+
+```text
+当前作品=artifact:be778d6d32e94796abffdbf392f7a54c 最新已确认版本=artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd
+```
+
+- 投影只给"事实"，不给权限；读不到资源服务或记忆时它会显示 `degraded`，不会编。
+- 本次**没有**在隔离环境里做真实 Telegram 收发（不在本批范围）。所以只能说"结构上互不干扰 + 只读投影可用"，**不能**说"Telegram 聊天已经验证"。
+
+### 能力边界
+
+**在隔离环境里已经验证过（含真实 owner；标注为真实模型的项含真实模型调用）**
+
+| 能力 | 证据层级 | 依据 |
+| --- | --- | --- |
+| 没有用户消息也能自主考虑 | `E2E_VERIFIED` | 本次走通：一次到期窗口、真实模型决策、无任何用户消息 |
+| 真实模型驱动的有界作品创作 | `E2E_VERIFIED` | `artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd` 由 owner 确认，正文是模型写的散文 |
+| 对同一件作品的持续编辑 | `E2E_VERIFIED` | 长测里同一件作品由真实模型连续推进（v1→v5 / v1→v3），每次都有 owner 回执；受控替身版本见 E12.3 的 T03 |
+| 有界的 World MOVE | `E2E_VERIFIED` | 真实 World 服务 + 真 gateway：`home`→`nearby_street`、revision 1→2、重启后保持；不可达的 MOVE 被拒、UNKNOWN 用原 operation 对账（E12.3 的 T16） |
+| 真实结果形成受控的生活经历 | `TESTED_ISOLATED` | 本次写入产生了 `LIFE_VERIFIED_OUTCOME` 记录（正文由结构化字段拼成）；三个不同性质的真实结果（成功/冲突/放弃）的准入见 B8-5 实验 B1。经历**改变决策**这件事没有证据 |
+| 预算、静默、重启恢复 | `TESTED_ISOLATED` | 预算耗尽→`BLOCKED`（不是"她选择休息"）；空窗口零模型调用零动作；重启不补跑、开关与预算不重置（T14/T15/T18/T19 + 本次走通） |
+| 只读生活投影与 Hermes 聊天并存 | `TESTED_ISOLATED` | 投影真实渲染出当前作品与版本；T19 证明关闭开关后聊天投影与 status 仍工作。真实 Telegram 收发未测 |
+
+**不得声称**
+
+- 不会主动给用户发 Telegram 消息：这一批的主动外发开关固定为关（`proactive_enabled=False`），没有任何外发路径。
+- 不能执行任意 shell / 浏览器操作：生产装配里 World / 工具 / 消息 / 文件适配器都是 fail-closed，只有"作品版本提交"这一个窄动作接了真实适配器。
+- 不会自动付款、不会公开发布：仓库里没有这类路径，也不在本阶段范围内。
+- 不是完整的虚拟世界活动系统：当前只做了有界 MOVE 这一条世界动作，`POSE` / `PICK_UP` / `PLACE` 经 AR-0 的真实映射没有做。
+- 不是"科学验证过的长期自主人格"：单次文本差异不构成人格证据；经历是否改变长期行为分布需要多轮、跨天、跨重启观察，本批没有做。
+- **v0.2 没有部署给任何用户**：没有标签、没有 Release、没有生产切换；上面所有结论都来自隔离环境。

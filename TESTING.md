@@ -60,3 +60,47 @@ bash scripts/run_tests.sh -j 8 --file-timeout 900 --file-retries 0
 ## rc6 更新验收
 
 本轮整包更新与失败恢复的实际结果见 `UPDATE_TEST_EVIDENCE.json`。rc5 隐私证据仍保留为 rc5 的结果，不作为 rc6 的新运行记录。没有宣称完整 Hermes 套件、Hermes 0.21.5 或真实生产机器升级已通过。
+
+## E13 发布证据门禁（v0.2 自主生活，2026-10-11）
+
+本节只判定 `v0.2-autonomous-life` 分支（本批起点 `e471241`）的**自主生活**能力。判定一律从实际跑过的证据出发，不按设计意图给分。**本节没有任何一项写 `DEPLOYED`**：没有真实生产切换，也没有对真实用户实例做过交付。
+
+### 判定口径
+
+| 等级 | 含义 |
+| --- | --- |
+| `IMPLEMENTED` | 代码存在、单元级检查通过，但没有走过真实 owner 链 |
+| `TESTED_ISOLATED` | 隔离环境里用**真实 owner**（真实 Supply socket、真实 World 服务）跑过，但决策来自受控替身 |
+| `E2E_VERIFIED` | 真实 owner 链 **且** 真实供应商（真实模型调用），没有替身 |
+| `SOAK_VERIFIED` | 24 小时 / 7 天的真实时长已经跑完并留有记录 |
+| `DEPLOYED` | 已经切换到真实生产实例（真实用户 profile / 真实服务） |
+
+硬规则：
+
+- 24 小时 / 7 天没有跑完 → **不得写 `SOAK_VERIFIED`**。
+- 没有真实生产切换 → **不得写 `DEPLOYED`**。
+- 只证明"机制"的（受控替身、受控时钟、隔离 harness）不得升级成 `E2E_VERIFIED`；单次文本差异不得当成长期人格证据。
+
+### 逐能力判定
+
+| 能力 | 等级 | 判定依据（实际证据） | 不得越级的部分 |
+| --- | --- | --- | --- |
+| 没有用户消息也能自主考虑 | `E2E_VERIFIED` | E13 走通：全新 profile 上由到期窗口触发一次考虑，全程无用户消息，决策来自真实模型（`gemini-3.8-flash-high`）。机制侧另有 E12.3 的 T01（`B8_ASSEMBLY PASS`，受控替身） | 只跑了**一个**窗口；没有长时间无人值守的统计 |
+| 真实模型驱动的有界作品创作 | `E2E_VERIFIED` | E13 走通：owner 确认了 `artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd`（v2，parent 为 v1），正文是模型写的散文而非模板；步骤日志 `effect_state=APPLIED` | 只验证了一件作品、一次写入；没有跨作品/跨主题的样本 |
+| 对同一件作品的持续编辑 | `E2E_VERIFIED` | B8-6 / B8-6A 长测：同一件作品由真实模型连续推进（v1→v5、v1→v3），每次都有 owner 回执；E13 走通也在同一件作品上把 v1 推进到 v2。受控替身版本见 T03（同一 Activity、`parent_version_id` = 上一版、checkpoint 前移） | 没有做跨天、跨重启的编辑统计 |
+| 有界的 World MOVE | `E2E_VERIFIED` | T16（`run_world_move_e2e.sh`）：真实 World 服务 + 真 gateway，`home`→`nearby_street`、revision 1→2、重启后保持；不可达的 MOVE 被拒且世界不变；UNKNOWN 用原 execution_id 对账、不二次移动（`WORLD_MOVE_ACCEPTANCE PASS`） | 本批**没有**复跑 T16；E13 的隔离 profile 没有配 World（观测记 `UNAVAILABLE`），"自主循环里由真实模型选择一次 MOVE"没有证据 |
+| 真实结果形成受控的生活经历 | `TESTED_ISOLATED` | E13 走通：真实提交在 M0 留下一条 `LIFE_VERIFIED_OUTCOME` 记录（正文由结构化字段拼成，不是手写）；三个不同性质的真实结果（成功提交 / 冲突拒绝 / 放弃）的准入见 B8-5 实验 B1（`accepted=1 / duplicate=0 / defer=0`） | **经历改变决策**没有证据：B8-5 实验 B2 的真实模型半边当时 `NOT_RUN`，本批没有复跑；`NO_CHANGE` 无法成为经历（AG-2 词表缺口） |
+| 预算、静默、重启恢复 | `TESTED_ISOLATED` | T14（空窗口 `IDLE_NO_CANDIDATE`、`llm_calls=0`、无编造经历）、T15（预算耗尽 → `BLOCKED`，不是"她选择休息"）、T18（重启后开关/预算/事件游标保持）、T19（关闭后新决策 `DISABLED`，数据与投影仍可用）；E13 走通实测默认关（`DISABLED`、`model_calls 0`）与真实预算消耗（认知 1/2、动作 1/1） | 真实一整天的预算行为没有证据（长测未达 24 小时） |
+| 只读生活投影与 Hermes 聊天并存 | `TESTED_ISOLATED` | E13 走通：只读投影真实渲染出"当前作品 + 最新已确认版本"（0 次模型调用）；T19 证明关闭自主开关后聊天投影与 status 仍工作；`tests/test_presence_integration.py` 另有投影不暴露 owner 权限与原始状态的检查 | 隔离环境里**没有**做真实 Telegram / 网关收发；投影与聊天同进程共存的端到端路径未验证。`tests/test_presence_integration.py` 属于当前失败的 `host-boundaries` 套件（原因见下） |
+
+### 与本次判定一起读的限定
+
+- 本次走通使用的是一次**真实供应商调用共 2 次**（1 次决策 + 1 次内容生成）。`counters.model_calls` 与每日认知计数只统计决策调用，见 `KNOWN_ISSUES.md` 的记录。
+- 长测的 24 小时 / 7 天状态仍是 `SOAK_RUNNING_24H` / `SOAK_PENDING_7D`（观察起点 `2026-10-11T01:07:06+00:00`，本批结束约 24 分钟），因此**没有** `SOAK_VERIFIED`。修复前的故障发现记录不与修复后的时段拼接。
+- `scripts/test.py` 的三个环境相关失败套件**保持 FAIL 并如实记录**（记录自 B8-6A 在同一提交 `e471241` 上的运行；本批只改文档，没有复跑，也没有据此宣称全绿）：`host-boundaries`（安装器/更新/文件系统安全测试）、`cognition-faults`（`vendor/hermes` 没有 pytest 虚拟环境）、`Hermes`（vendor 测试运行器）。没有为了"全绿"添加无条件跳过或重构安装器。
+- 生产部署形态（systemd 单元）没有在真实硬件上验证；本机 systemd 为 `offline`。
+- 旧供应商密钥曾在进程命令行上暴露过（B8-6 §7.2），代码路径已修（B8-6A §4），**旧密钥的轮换仍由账户持有人在供应商后台完成**，本批没有、也不能代替它。
+
+### 不得声称（与上面的等级表配合阅读）
+
+自主给用户发 Telegram 消息；执行任意 shell / 浏览器操作；自动付款或公开发布；完整的虚拟世界活动系统（`POSE` / `PICK_UP` / `PLACE` 未做）；科学验证过的长期自主人格；v0.2 已交付给所有用户。以上任何一条都**没有**证据，不得写入发布说明或对外材料。
