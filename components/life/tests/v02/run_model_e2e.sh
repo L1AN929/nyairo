@@ -86,6 +86,16 @@ if [ -z "${NYA02_MODEL_API_KEY:-}" ] || [ -z "${NYA02_MODEL_BASE_URL:-}" ] || [ 
 fi
 echo "== provider=${NYA02_MODEL_PROVIDER} model=${NYA02_MODEL_NAME} key=present"
 
+# The provider key goes into a 0600 file the service identity owns, never onto the command line:
+# `ps` shows a command line to every user on the box, an inherited environment it does not.  The
+# harness loads the file itself (``autonomous_life_assembly.load_model_env_file``).
+MODEL_ENV_FILE="${NYA02_MODEL_ENV_FILE:-$ROOT/model_env}"
+( umask 077; printf 'NYA02_MODEL_PROVIDER=%s\nNYA02_MODEL_NAME=%s\nNYA02_MODEL_BASE_URL=%s\nNYA02_MODEL_API_KEY=%s\n' \
+    "${NYA02_MODEL_PROVIDER:-}" "${NYA02_MODEL_NAME:-}" "${NYA02_MODEL_BASE_URL:-}" \
+    "${NYA02_MODEL_API_KEY:-}" > "$MODEL_ENV_FILE" )
+chown "$SVC_USER:$SVC_USER" "$MODEL_ENV_FILE"
+chmod 600 "$MODEL_ENV_FILE"
+
 runuser -u "$SVC_USER" -- env \
   NYA02_SUPPLY_SOCKET="${LIFE_SUPPLY_SOCKET:-}" \
   NYA02_SUBJECT="${NYA02_SUBJECT:-chiyo}" \
@@ -95,5 +105,5 @@ runuser -u "$SVC_USER" -- env \
   NYA02_MODEL_PROVIDER="${NYA02_MODEL_PROVIDER}" \
   NYA02_MODEL_NAME="${NYA02_MODEL_NAME}" \
   NYA02_MODEL_BASE_URL="${NYA02_MODEL_BASE_URL}" \
-  NYA02_MODEL_API_KEY="${NYA02_MODEL_API_KEY}" \
+  NYA02_MODEL_ENV_FILE="$MODEL_ENV_FILE" \
   python3 "$ROOT/app/components/life/tests/v02/run_model_e2e.py" "$@"

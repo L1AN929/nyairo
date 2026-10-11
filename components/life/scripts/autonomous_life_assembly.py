@@ -55,6 +55,32 @@ def _first(environment: Mapping[str, str], names: tuple[str, ...]) -> Optional[s
     return None
 
 
+def load_model_env_file(environment: Any = None, *, path: Optional[str] = None) -> dict[str, Any]:
+    """Fill ``NYA02_MODEL_*`` from a 0600 file, so the key never sits on a command line.
+
+    A key handed over as ``env VAR=... python3`` is world-readable in ``ps``; a 0600 file the
+    service identity owns is not.  A value already present in the environment wins, so an
+    operator who exported one deliberately is never overridden.
+    """
+
+    env = os.environ if environment is None else environment
+    target = path or str(env.get("NYA02_MODEL_ENV_FILE") or "").strip()
+    if not target:
+        return {}
+    try:
+        text = Path(target).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    loaded: dict[str, Any] = {}
+    for line in text.splitlines():
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip()
+        if name.startswith("NYA02_MODEL_") and value and not env.get(name):
+            env[name] = value
+            loaded[name] = True
+    return loaded
+
+
 def resolve_supply_configuration(environment: Mapping[str, str]) -> dict[str, Any]:
     """The three facts, or a named list of what is missing."""
 
@@ -310,6 +336,12 @@ def assemble_autonomous_life(
               "detail": "supplied by the caller"}
              if world_provider is not None else resolve_world_provider(env))
     world_provider = world["provider"]
+
+    # The artifact feed is built before the poller so the cycle can be told about its own
+    # confirmed writes.  Without that, a head we just wrote looks like somebody else's change on
+    # the next poll, and one autonomous write becomes the next autonomous wake.
+    artifact_feed = events.ArtifactChangeFeed(port, root, subject_id=supply["subject_id"])
+    cycle.own_write_recorder = artifact_feed.note_own_write
     # The record must stay serializable: the live provider is an object, so it is handed back on
     # its own key and never inside the descriptive dict.
     world_record = {k: v for k, v in world.items() if k != "provider"}
@@ -319,7 +351,7 @@ def assemble_autonomous_life(
     feeds = [
         events.ResumeEligibilityFeed(getattr(runtime, "waiting_coordinator", None), root)
         if getattr(runtime, "waiting_coordinator", None) is not None else None,
-        events.ArtifactChangeFeed(port, root, subject_id=supply["subject_id"]),
+        artifact_feed,
     ]
     if world_provider is not None:
         feeds.append(events.WorldOpportunityFeed(world_provider, root))

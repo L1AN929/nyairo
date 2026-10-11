@@ -81,17 +81,17 @@ WHICH = sys.argv[1]
 
 if WHICH == "workspace":
     res = call({"op": "issue_grant", "grant": {
-        "subject": SUBJECT, "operation_id": "op:soak:grant:workspace:1",
+        "subject": SUBJECT, "operation_id": "op:soak:grant:workspace:%s" % SUBJECT,
         "capability": "PROVISION_PERSONAL_WORKSPACE", "scope": "workspace:personal",
         "target": "workspace:%s" % SUBJECT, "use_mode": "REUSABLE"}})
 elif WHICH == "artifact":
     res = call({"op": "issue_grant", "grant": {
-        "subject": SUBJECT, "operation_id": "op:soak:grant:artifact:1",
+        "subject": SUBJECT, "operation_id": "op:soak:grant:artifact:%s" % SUBJECT,
         "capability": "COMMIT_MANAGED_ARTIFACT", "scope": "artifact:personal",
         "target": sys.argv[2], "use_mode": "REUSABLE"}})
 else:
     res = call({"op": "provision_workspace", "grant_id": sys.argv[2],
-                "operation_key": "op:soak:workspace:provision:1",
+                "operation_key": "op:soak:workspace:provision:%s" % SUBJECT,
                 "workspace": {"subject_id": SUBJECT, "visibility": "PRIVATE",
                               "artifact_scope": "PERSONAL"}})
 print(json.dumps(res, ensure_ascii=False, sort_keys=True))
@@ -154,7 +154,7 @@ else:
     created = port.create_artifact(
         workspace_id=workspace, title="长测的手记",
         content="# 长测的手记\n\n第一段：先写一句，看看她会不会自己接着写。\n",
-        grant_id=grant, operation_key="op:soak:create:1")
+        grant_id=grant, operation_key="op:soak:create:%s" % subject)
     print("created: %s status=%s reason=%s" % (created.artifact_id, created.status, created.reason))
     head = port.read_head(created.artifact_id) or {}
     print("head=%s v%s" % (head.get("version_id"), head.get("version_number")))

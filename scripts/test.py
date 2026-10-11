@@ -15,6 +15,7 @@ def main():
   ('life-b7','components','life/scripts:native:native/src:native/memory_runtime_v1:.:../chiyo_bundle',['check_life_b7.py']),
   ('life-b8','components','life/scripts:native:native/src:native/memory_runtime_v1:.:../chiyo_bundle',['check_life_b8.py']),
   ('life-b8-causal','components','life/scripts:native:native/src:native/memory_runtime_v1:.:../chiyo_bundle',['check_life_b8_causal.py']),
+  ('life-b8-6a','components','life/scripts:native:native/src:native/memory_runtime_v1:.:../chiyo_bundle',['check_life_b8_6a.py']),
   ('host-boundaries','','.:vendor/hermes',['-m','unittest','discover','-s','tests','-p','test_*.py','-q']),
   ('cognition-faults','','.:vendor/hermes',['-m','pytest','tests/test_cognition_reliability.py','-q'])]
  failed=[]
