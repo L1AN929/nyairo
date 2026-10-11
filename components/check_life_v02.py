@@ -95,6 +95,9 @@ def main() -> int:
         EffectState, LifeArtifactPort, operation_key_for,
     )
     from managed_artifact_action_adapter import SupplyManagedArtifactActionAdapter  # noqa: E402
+    from result_settlement_ar1 import (  # noqa: E402
+        OUTCOME_SUCCESS_EFFECT, SETTLEMENT_STATUS_SETTLED,
+    )
 
     subject = os.environ["NYA02_SUBJECT"]
     workspace_id = os.environ["NYA02_WORKSPACE_ID"]
@@ -249,6 +252,31 @@ def main() -> int:
         v2 = (head or {}).get("version_id")
         check((head or {}).get("version_number") == 2, "second version reached",
               (head or {}).get("version_number"))
+        # The owner confirmed a version.  AR-1's FILE_ACTION rule wants the effect *observed*, so
+        # the adapter re-reads that version through the same Supply read port and AR-0 records the
+        # observation; AR-1 then settles by its own rules instead of staying OPEN.
+        settled_action = str(second.get("action_id"))
+        observed = runtime.action_read.list_result_evidences(settled_action)
+        check(len(observed) == 1 and observed[0]["observer_kind"] == "artifact_observer"
+              and observed[0]["verified"] is True,
+              "AR-0 holds one verified artifact-observer result evidence",
+              [(e["evidence_id"], e["observer_kind"], e["verified"]) for e in observed])
+        check(bool(observed) and observed[0]["details"].get("version_id") == v2
+              and observed[0]["details"].get("operation_key")
+              == second.get("provider_operation_ref"),
+              "the observation names this action's own version and operation",
+              observed[0]["details"] if observed else None)
+        settlement = runtime.settlement_read.get_settlement(settled_action)
+        check(settlement is not None
+              and settlement["settlement_status"] == SETTLEMENT_STATUS_SETTLED
+              and settlement["outcome_kind"] == OUTCOME_SUCCESS_EFFECT,
+              "AR-1 settled the real write as SUCCESS_EFFECT",
+              (settlement or {}).get("outcome_kind"))
+        check("artifact_written_verified"
+              in [c.get("predicate") for c in (settlement or {}).get("effect_claims") or []]
+              and bool((settlement or {}).get("confirmed_effect_refs")),
+              "the settled effect carries a confirmed artifact_written_verified claim",
+              (settlement or {}).get("confirmed_effect_refs"))
     finally:
         runtime.close()
 
@@ -325,6 +353,17 @@ def main() -> int:
         check((head or {}).get("version_number") == versions_before,
               "version count unchanged by NO_CHANGE",
               f"{(head or {}).get('version_number')} != {versions_before}")
+        # A NO_CHANGE commit produced no version, so nothing may claim one.
+        no_change_action = str(same.get("action_id"))
+        check(runtime.action_read.list_result_evidences(no_change_action) == [],
+              "no observed-result evidence claims a version for a NO_CHANGE commit",
+              runtime.action_read.list_result_evidences(no_change_action))
+        no_change_settlement = runtime.settlement_read.get_settlement(no_change_action)
+        check(no_change_settlement is not None
+              and no_change_settlement["outcome_kind"] != OUTCOME_SUCCESS_EFFECT
+              and no_change_settlement["confirmed_effect_refs"] == [],
+              "the NO_CHANGE settlement claims no confirmed effect",
+              (no_change_settlement or {}).get("outcome_kind"))
     finally:
         runtime.close()
 
@@ -347,6 +386,17 @@ def main() -> int:
         head = port.read_head(artifact_id)
         check("我的这一笔" not in (port.read_artifact(artifact_id).get("content") or ""),
               "the refused edit is not in the work", (head or {}).get("version_number"))
+        # A refused write never becomes a settled effect, and never gets an observation.
+        refused_action = str(stale.get("action_id"))
+        check(runtime.action_read.list_result_evidences(refused_action) == [],
+              "no observed-result evidence for the refused write",
+              runtime.action_read.list_result_evidences(refused_action))
+        refused_settlement = runtime.settlement_read.get_settlement(refused_action)
+        check((refused_settlement or {}).get("outcome_kind") != OUTCOME_SUCCESS_EFFECT
+              and not [c for c in (refused_settlement or {}).get("effect_claims") or []
+                       if c.get("epistemic_status") == "CONFIRMED"],
+              "the refused write did not settle as success",
+              (refused_settlement or {}).get("outcome_kind"))
     finally:
         runtime.close()
 
@@ -382,6 +432,24 @@ def main() -> int:
               "AR-0 resolved the UNKNOWN action from owner evidence",
               (resolved.get("action") or {}).get("status"))
         check(adapter.submit_call_count == 1, "the adapter was called exactly once",
+              adapter.submit_call_count)
+        # Resolving the UNKNOWN was allowed to establish the effect through the *original*
+        # operation; it must not have written again, and the established observation must name the
+        # version the lost receipt would have named.
+        landed_version = (after or {}).get("version_id")
+        resolved_observed = runtime.action_read.list_result_evidences(str(action_id))
+        check(len(resolved_observed) == 1 and resolved_observed[0]["verified"] is True
+              and resolved_observed[0]["details"].get("version_id") == landed_version,
+              "the resolution carries an observation of the version that really landed",
+              [(e["evidence_id"], e["details"].get("version_id")) for e in resolved_observed])
+        runtime.coordinator.settle_and_propagate_action_result(action_id=str(action_id))
+        resolved_settlement = runtime.settlement_read.get_settlement(str(action_id))
+        check(resolved_settlement is not None
+              and resolved_settlement["settlement_status"] == SETTLEMENT_STATUS_SETTLED
+              and resolved_settlement["outcome_kind"] == OUTCOME_SUCCESS_EFFECT,
+              "AR-1 settles SUCCESS_EFFECT once the original operation is confirmed",
+              (resolved_settlement or {}).get("outcome_kind"))
+        check(adapter.submit_call_count == 1, "settling it did not write a second version",
               adapter.submit_call_count)
     finally:
         runtime.close()
@@ -453,6 +521,7 @@ def main() -> int:
         activity = runtime.canonical_state()["activities"].get(activity_ref) or {}
         check(activity.get("status") == "ACTIVE",
               "the canonical Activity did not roll back either", activity.get("status"))
+        restart_action = str(refused.get("action_id"))
     finally:
         runtime.close()
 
@@ -482,6 +551,30 @@ def main() -> int:
         check(rows and rows[0]["speaker"] == "chiyo" and rows[0]["delivery_status"] == "VERIFIED",
               "the delivered row is the verified one",
               (rows[0]["speaker"], rows[0]["delivery_status"]) if rows else None)
+        # A restart must not settle the same confirmed action twice, nor repeat its side effect.
+        settlement_before_restart = runtime.settlement_read.get_settlement(restart_action)
+        check(settlement_before_restart is not None,
+              "the already-confirmed settlement survived the restart",
+              settlement_before_restart)
+        replay = runtime.settlement_service.settle_action(action_id=restart_action)
+        check(replay.get("idempotent_replay") is True
+              and replay["settlement"]["settlement_id"]
+              == settlement_before_restart["settlement_id"],
+              "re-settling it after a restart is an idempotent replay",
+              (replay.get("idempotent_replay"), replay["settlement"]["settlement_id"]))
+        check(len(runtime.settlement_read.get_settlement_history(restart_action)) == 1,
+              "the action still has exactly one settlement",
+              len(runtime.settlement_read.get_settlement_history(restart_action)))
+        check(len(runtime.settlement_read.list_outbox_events(action_id=restart_action)) == 1,
+              "the action still has exactly one outbox event",
+              len(runtime.settlement_read.list_outbox_events(action_id=restart_action)))
+        head_after_restart = port.read_head(artifact_id) or {}
+        check(head_after_restart.get("version_number") == head_after.get("version_number"),
+              "no duplicate side effect: the work did not advance again",
+              (head_after.get("version_number"), head_after_restart.get("version_number")))
+        check(len(store.recent_verified_outcomes(memory_owner=subject, limit=10)) == 1,
+              "no duplicate memory experience",
+              len(store.recent_verified_outcomes(memory_owner=subject, limit=10)))
     finally:
         runtime.close()
 
