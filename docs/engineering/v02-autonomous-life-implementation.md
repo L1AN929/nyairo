@@ -20,7 +20,7 @@
 | AG-2 采纳 | `life_integration_ag2.py` | Adoption、Integration，把决定落到 Activity 上 |
 | LR-2 Activity | `activity_continuity.ActivityCommandService` | Activity 状态与不可变 transition/receipt |
 | AR-0 动作 | `action_reality_ledger.py` + `managed_artifact_action_adapter.py` | 提案、提交栅栏、尝试、回执、UNKNOWN 对账 |
-| AR-1 结算 | `result_settlement_ar1.py` | Settlement（本轮两次都是 `UNKNOWN_EFFECT`/`OPEN`，见矩阵 §本批发现） |
+| AR-1 结算 | `result_settlement_ar1.py` | Settlement。**当时**（E14/B8-8 两轮）两次成功写入都记成 `UNKNOWN_EFFECT`/`OPEN`（见矩阵 §本批发现）；**RC1-01 之后**，owner 确认版本后用同一个官方读端口重读该版本，四条全中才记成已验证，AR-1 再按自己的规则结算（判定没有放宽）。已不再是 head 的旧版本拿不到证据、保持 OPEN |
 | LR-5 进度 | `activity_progress_completion_lr5.py` | checkpoint、progress evidence、完成判定 |
 | 作品 owner | Life Supply 服务（`components/supply/lifesupply`） | workspace、grant、ManagedArtifact 版本链 |
 | World owner | `components/world/service/world_body_service.py` | 位置、revision、动作空间、授权 |
@@ -88,7 +88,8 @@ NYA02_RESIDENT_STATE=/srv/nya02/e14/resident/state \
   没有真的收发一轮；它不得被当成端到端聊天已验证。
 - 24 小时与 7 天的 `SOAK_VERIFIED`：窗口未满。
 - T12 的原生生活经历 CORRECT（产品级缺口）。
-- T20 第 7 项：拒绝生效但报告为 `UNKNOWN`，保留为实际失败。
+- T20 第 7 项（**已由 B8-8 修好，不再是缺口**）：owner 的 `GOVERNANCE_REFUSED` 映射为确定拒绝，
+  `T20: PASS (38 checks passed)` 在已提交字节上复验。
 - 没有创建 Release、没有切 `main`、没有真实生产切换（因此没有任何 `DEPLOYED`）。
 
 ## 4. E14 单实例长链的可复跑命令
@@ -207,28 +208,42 @@ E14 S4（`--no-act`，`CHIYO_AUTONOMOUS_CHECK_INTERVAL_MINUTES=1`）：
 - 两次真实位置改变都各自被下一次观测读到，且候选集只包含 World 自己暴露的地方——World 的变化没有
   变成模型的全知。
 
-## 8. T01–T20 的最终状态
+## 8. T01–T20 的最终状态（RC1-03 复核）
 
 `PASS`：T01 `E2E_VERIFIED`、T02 `E2E_VERIFIED`、T03 `E2E_VERIFIED`、T04 `TESTED_ISOLATED`、
 T05 `TESTED_ISOLATED`、T06 `TESTED_ISOLATED`、T07 `TESTED_ISOLATED`、T08/T09/T10/T11
 `TESTED_ISOLATED`、T13 `TESTED_ISOLATED`、T14（机制）、T15 `TESTED_ISOLATED`、T16 `E2E_VERIFIED`、
-T17 `TESTED_ISOLATED`、T18 `E2E_VERIFIED`、T19 `TESTED_ISOLATED`。
-`DEFERRED`：T12。`PASS(7/8) 保留实际失败`：T20。
-`SOAK_VERIFIED`：无（24h 未满）。`DEPLOYED`：无（没有生产切换）。逐行证据见矩阵。
+T17 `TESTED_ISOLATED`、T18 `E2E_VERIFIED`、T19 `TESTED_ISOLATED`、T20 `E2E_VERIFIED`
+（B8-8：八项全过、38 项断言，在**已提交字节**上复验 `T20: PASS (38 checks passed)`）。
+`DEFERRED`：T12（原生生活经历 CORRECT 未实现）。
+`SOAK_VERIFIED`：无。真实长测（`/srv/nya02/resident2`）到 RC1-03 快照为止只跑了 **8.23h**，判定
+**RUNNING**，不是 PASS；7 天不提前判定。`DEPLOYED`：无（没有生产切换）。逐行证据见矩阵。
 
 ## 9. 真实 24 小时 / 7 天观察状态
 
+RC1-03 只读快照 `2026-10-11T09:56:56Z`（**没有停止或重置**这个实例）：
+
 - 窗口：`/srv/nya02/resident2/state`，起点 `2026-10-11T01:41:31+00:00`，本进程 `01:46:04`，
-  复核时刻（`2026-10-11T08:04:02Z`）`observed_seconds = 22796s ≈ 6.33h`，仍在运行
-  （`starts=2`、`ticks=145`）。
-- 真实调用 4 次、真实动作 4 次、owner 确认版本 4 个；有材料的窗口只有 4 个，全在前 2 小时 05 分内。
-- 86 次 `NOT_DUE`（0 调用）、46 次 `ROUND_BUDGET_EXHAUSTED`（0 调用）、1 次事件唤醒
+  `observed_seconds = 29637s ≈ 8.23h`，最后 tick `09:55:28`，`ticks=183`，仍在运行
+  （`starts=2`、pid 2728 存活，`ps -o etime` = `08:10:52`）。08:04:02Z 那次复核是 `22796s / ticks=145`。
+- **真实有效观察范围 `01:41:31 → 09:55:28`**：唯一空档 53 秒（`01:45:11 → 01:46:04` 的重启边界），
+  逐 tick 最大间隔 197s（tick 59→60），其余 ≤181s；没有进程退出后的长空档，也没有"没人跑"的时段。
+  真正被评估过的检查窗 97 个（10 `DISABLED` + 3 `ACTED` + 84 `BLOCKED`），另有 86 次 `NOT_DUE` 与
+  1 次事件唤醒；评估窗之间的最大间隔 7315s ≈ 2h02m（`CHIYO_AUTONOMOUS_CHECK_INTERVAL_MINUTES=120`
+  的设计值）。
+- 真实调用：**决策 4 次 + 内容生成 4 次 = 8 次 provider 请求**；真实动作 4 次、owner 确认版本 4 个
+  （`83a75499…`、`8c424630…`、`462b901c…`、`bf53a9c5…`）；有材料的窗口只有 4 个，全在前 2 小时 05 分内。
+  84 次 `ROUND_BUDGET_EXHAUSTED`（0 调用）、10 次 `DISABLED`（0 调用）、1 次事件唤醒
   （外部写入 `op:b86a:external:1` 造成的 `ARTIFACT_CHANGED`，不是她自己的写）。
-- **没有自唤醒级联**：唤醒间隔是 `180s × 113` 与启动期 `10s × 16`，没有任何一次由她自己的写触发。
-  修复前那份记录（`/srv/nya02/resident/**`）里 4 次事件唤醒 + 50 秒内 4 个版本，正是被修掉的那件事。
-- `pending_unknown_max=0`、`unknown_settlements=0`、`reconciliations=0`；重启恢复正常。
+- **没有自唤醒级联**：她自己的 4 次写入（`life:2247d7e6…`、`life:e7a21c1f…`、`life:50c3f592…`、
+  `life:465adf51…`）一次都没有变成事件。修复前那份记录（`/srv/nya02/resident/**`）里 4 次事件唤醒 +
+  50 秒内 4 个版本，正是被 B8-6A 修掉的那件事。
+- AR-0 侧 `pending_unknown_max=0`、`unknown_settlements=0`、`reconciliations=0`、`reconciled_at_start=[]`；
+  AR-1 侧有 **4 条 `UNKNOWN_EFFECT` / `OPEN`**，是旧代码（`e471241`）的记录，正是 RC1-01 修掉的分类
+  缺口——**不能**拿这份长测当"AR-1 现在会结算"的证据。
 - 预算异常（真实、需记录）：每日 4 轮在 `03:46` 前用完，之后整天只剩拒绝。
 - 标签：`soak_24h = SOAK_RUNNING_24H`、`soak_7d = SOAK_PENDING_7D`。**没有** `SOAK_VERIFIED_24H`。
+  这个标签只由墙钟时长推出，不作为"24 小时已满足"的证据；按真实记录判定仍是 **RUNNING**。
 
 ## 10. 发布前还需要人类批准的事
 
@@ -237,13 +252,16 @@ T17 `TESTED_ISOLATED`、T18 `E2E_VERIFIED`、T19 `TESTED_ISOLATED`。
    发布说明里不得写成端到端已验证。
 2. **是否接受 T12 的产品级缺口**：原生生活经历的内容替换需要一个新增的受治理纠正入口；
    在此之前必须在发布说明里写明"生活经历不可替换，只能停止召回"。
-3. **是否接受 T20 第 7 项的报告形状**（拒绝生效但回报 `UNKNOWN`）。
+3. ~~是否接受 T20 第 7 项的报告形状（拒绝生效但回报 `UNKNOWN`）~~ → **已由 B8-8 修好**：`GOVERNANCE_REFUSED`
+   映射为确定拒绝，`T20: PASS (38 checks passed)` 在已提交字节上复验，不再是需要人类批准的口径。
 4. **24 小时/7 天观察**：跑满之后才能改 `SOAK_VERIFIED`；在此之前不得对外称"长测通过"。
 5. **真实生产切换**：本批没有任何 `DEPLOYED`；切换需要 operator 显式决定（开关、预算、World 实例）。
-6. 本批记录在案、**未修**的两个源码问题（LR-5 checkpoint 粒度、AR-1 `UNKNOWN_EFFECT` 分类）需要决定
-   是否纳入下一批。`model.content_writer` 恒假与 `counters.defer` 恒 0 已在 RC1-02 修掉（§11.1、
-   §11.2），但 `KNOWN_ISSUES.md:47`、`docs/engineering/v02-b8-7-install-and-compat.md:68`、
-   `docs/engineering/v02-b8-acceptance-matrix.md:103` 里仍把它们记成"未修"，需要同样的更新。
+6. 本批记录在案、**仍未修**的源码问题：LR-5 checkpoint 粒度、窄端口把 `REVOKED` 归成 `UNKNOWN`、
+   `NYA02_SUPPLY_SOCKET` 不被接受、M0 owner 名与 Supply subject 名是两件事，需要决定是否纳入下一批。
+   `model.content_writer` 恒假与 `counters.defer` 恒 0 已在 RC1-02 修掉（§11.1、§11.2）；
+   AR-1 的 `UNKNOWN_EFFECT` 分类已由 RC1-01 修掉；`counters.model_calls` 的口径**没有改**，只加了
+   显示标签（§12）。三处文档的"未修"表述（`KNOWN_ISSUES.md`、`docs/engineering/v02-b8-7-install-and-compat.md`、
+   `docs/engineering/v02-b8-acceptance-matrix.md`）已由 RC1-03 一并更新。
 
 ---
 
@@ -400,6 +418,11 @@ model.answer = 最近在继续写《长测的手记》。
 （三个都是已知的环境失败，保持原样）。跑过并通过：`closeout / native / memory / supply / world /
 life / life-memory-v02 / life-b7 / life-b8 / life-b8-causal / life-b8-6a`。
 
+RC1-03 在**只装测试依赖的隔离 venv** 里按原命令重跑了这三个套件（未删测试、未改产品行为、未加无条件
+跳过）：`cognition-faults` **1 passed**、`Hermes` **29 passed / 0 failed**、`host-boundaries` 在 LF 树上
+只剩 1 个**真实**失败（`scripts/bootstrap.sh` 固定 `v0.1.0-rc6` vs `website/install.sh` 固定
+`v0.1.0-rc9`）。逐条原因与命令见 §12 与 `docs/engineering/v02-rc1-release-readiness.md`。
+
 `life-v02`（`components/check_life_v02.py`，Life v0.2 + AR-0/AR-1 验收）在 `scripts/test.py` 下按
 设计 **SKIP**（`isolated Life Supply environment not configured`），所以另外单独跑了一次，结果
 `V02_CHECK: PASS`（[1]–[12] 全过，含 AR-0 的 OK / NO_CHANGE / CONFLICT / UNKNOWN 四态、AR-1 的
@@ -410,14 +433,17 @@ life / life-memory-v02 / life-b7 / life-b8 / life-b8-causal / life-b8-6a`。
 
 ### 11.5 本批按原样保留的记录
 
-- AR-1 的已作废版本无法复核（本批没有 `read_version`）。
+- AR-1 的已作废版本无法复核（本批没有 `read_version`）。RC1-01 之后这条边界仍然成立，而且后果写明了：
+  一个已经不再是 head 的旧版本拿不到观察证据，正确地保持 OPEN，而不是被猜成成功。
 - T12（原生生活经历 CORRECT 的产品级缺口）。
-- 三个环境失败 suite（`host-boundaries` / `cognition-faults` / `Hermes`）。
-- 24h/7d 标签：`SOAK_RUNNING_24H` / `SOAK_PENDING_7D`（窗口未满）。
-- 待办的密钥轮换。
-- `model.content_writer` 与 `counters.defer` 在 `KNOWN_ISSUES.md:47`、
-  `docs/engineering/v02-b8-7-install-and-compat.md:68`、
-  `docs/engineering/v02-b8-acceptance-matrix.md:103` 里仍记成"未修"，需要同样的更新。
+- 三个环境失败 suite（`host-boundaries` / `cognition-faults` / `Hermes`）——**RC1-03 已把原因查清**，
+  见 §12 与 `docs/engineering/v02-rc1-release-readiness.md`。
+- 24h/7d 标签：`SOAK_RUNNING_24H` / `SOAK_PENDING_7D`（窗口未满；RC1-03 只读复核后判定仍是 RUNNING）。
+- 待办的密钥轮换（账户持有人在供应商后台完成）。
+- ~~`model.content_writer` 与 `counters.defer` 在 `KNOWN_ISSUES.md:47`、
+  `docs/engineering/v02-b8-7-install-and-compat.md:68`、`docs/engineering/v02-b8-acceptance-matrix.md:103`
+  里仍记成"未修"，需要同样的更新。~~ → **RC1-03 已经把这四处更新完**：两个缺陷都标成"已修（RC1-02）"，
+  发现时的事实原样保留；同一批还把 `counters.model_calls` 的口径加了显示标签（§12）。
 
 ### 11.6 本批留下的临时目录（删之前先列清单、等 operator 确认）
 
@@ -428,3 +454,59 @@ life / life-memory-v02 / life-b7 / life-b8 / life-b8-causal / life-b8-6a`。
 - 共享 Supply owner 上新增的测试 subject：`chiyo-rc102`（workspace
   `workspace:aa80b2d270c943e7a04b6cb10ff19969`，含 1 个作品）与 `chiyo`（workspace
   `workspace:a15cfb417d1248bea09aa15538f9acba`，无作品）。两者都不属于任何生产 profile。
+
+---
+
+## 12. RC1-03：发布验收（2026-10-11，HEAD `c4671c9`）
+
+本批只做发布验收：不改自主生活功能、不建 Release、不建标签、不合 `main`、不碰任何生产实例、不停止或
+重置 `/srv/nya02/resident2`。**真实模型调用 0 次**（全部结论只用已记录的证据）。
+
+### 12.1 三处文档的过期表述已更新
+
+`model.content_writer` 与 `counters.defer` 被 RC1-02 修掉之后，下面三处仍把它们写成"未修"；RC1-03 按
+"发现时的事实原样保留 + 标注当前状态"的方式更新：
+
+* `KNOWN_ISSUES.md`（原第 47 行那条）
+* `docs/engineering/v02-b8-7-install-and-compat.md`（§4 第 2 条 + 新增 §7 复核表）
+* `docs/engineering/v02-b8-acceptance-matrix.md`（"本批发现、但未修的源码问题" 第 1、2 条，以及第 4 条 AR-1）
+
+同一批还更新了：24 小时观察表的真实数字、E14 S6 的证据级别措辞、T20 的状态（`PASS`，38 项断言）、
+T14 那一行把"预算用尽后的 86 次窗口"更正为"84 次 `BLOCKED` + 86 次 `NOT_DUE`"。
+
+### 12.2 长测只读复核：判定 RUNNING，不是 PASS
+
+快照 `2026-10-11T09:56:56Z`：真实起点 `01:41:31+00:00`、本进程 `01:46:04`（`starts=2`）、最后 tick
+`09:55:28`、`observed_seconds = 29637s ≈ 8.23h`、`ticks=183`、pid 2728 存活。唯一空档 53 秒，逐 tick
+最大间隔 197s。**墙钟标签 `SOAK_RUNNING_24H` 与真实记录一致，没有虚报**；24 小时未满足，7 天不提前判定。
+该实例跑的是 `e471241`（不含 RC1-01/RC1-02），所以它跑满 24 小时也不能验证 RC1。数字见 §9 与矩阵。
+
+### 12.3 预算口径：真实是 8 次请求，不是 4 次
+
+真实长窗里：**决策（认知）调用 4 次 + 内容生成调用 4 次 = 8 次 provider 请求**；`counters.model_calls = 4`、
+`cognition_used = 4`、`actions_used = 4`、每日上限 `max_cognition_calls_per_day = 6` /
+`max_actions_per_day = 4` / `max_rounds_per_day = 4`。也就是说"6 次认知调用/天"只管决策那一半。
+**没有加预算框架**，只在 `summary()` 里加了 `model_calls_detail` 显示字段（§12.4）。
+
+### 12.4 本批唯一的代码改动
+
+`components/life/scripts/autonomous_life_resident.py`：新增 `_model_calls_detail()` 并在 `summary()` 里输出
+`model_calls_detail`（`cognition_calls` / `content_generation_calls` / `total_requests` /
+`content_generation_scope` / `daily_budget_counts: "cognition calls only"`）。`counters`、`budget` 的键与
+语义未动，没有新增上限、没有改判定。回归：`B7_CHECK`、`B8_CHECK`、`B8_6A_CHECK`、`B8_CAUSAL_CHECK`
+全部 PASS。
+
+### 12.5 三个失败套件的结论
+
+* `cognition-faults`：缺 `pytest`（环境）→ 装上后 **1 passed**。
+* `Hermes`：缺 `python-dotenv`（环境）→ 装上后 **29 passed, 0 failed**。
+* `host-boundaries`：缺 `httpx`/`psutil`/`PyYAML`（环境）+ 工作区 CRLF（检出配置，根目录没有
+  `.gitattributes`）+ **1 个真实缺陷**：`scripts/bootstrap.sh` 固定 `v0.1.0-rc6`、`website/install.sh` 固定
+  `v0.1.0-rc9`。LF 树上 `Ran 71 tests / FAILED (failures=1)`。
+
+细节、命令与逐条对应见 `docs/engineering/v02-rc1-release-readiness.md`。
+
+### 12.6 发布判定
+
+见 `docs/engineering/v02-rc1-release-readiness.md`（含 T01–T20 最终状态、六条必须披露的限制、
+GO / CONDITIONAL_GO / NO_GO）。

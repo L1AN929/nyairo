@@ -528,6 +528,28 @@ class AutonomousLifeResident:
             if name.startswith("NYA02_MODEL_") and value.strip() and not self.env.get(name):
                 self.env[name] = value.strip()
 
+    def _model_calls_detail(self) -> dict[str, Any]:
+        """The two kinds of provider request, named separately instead of added into one number.
+
+        ``counters.model_calls`` counts what the cycle reports as ``llm_calls``: the *decision*
+        (cognition) call, which is also the number the daily ``max_cognition_calls_per_day``
+        budget bounds.  Producing the text for an adopted step is a *second* provider request
+        per acted round, made by the cycle's own writer, and it is not counted there.  The split
+        is stated here so that "6 cognition calls a day" cannot be read as "6 requests in total".
+        ``content_generation_calls`` is the live writer's own counter for *this* process; after a
+        restart it starts at zero again, while the cognition count is replayed from the journal.
+        """
+
+        cognition = int(self.counters.get("model_calls") or 0)
+        writer = getattr((self.assembled or {}).get("cycle"), "writer", None)
+        content = getattr(writer, "call_count", None)
+        total = cognition + content if isinstance(content, int) else None
+        return {"cognition_calls": cognition,
+                "content_generation_calls": content,
+                "total_requests": total,
+                "content_generation_scope": "this process (not replayed from the journal)",
+                "daily_budget_counts": "cognition calls only"}
+
     # -- the record ----------------------------------------------------------------------
 
     def summary(self) -> dict[str, Any]:
@@ -570,6 +592,9 @@ class AutonomousLifeResident:
                       "cognition_attached": getattr(cycle, "runtime", None) is not None},
             "budget": budget,
             "counters": self.counters,
+            # A reader must not read the cognition counter as the whole provider bill: one acted
+            # round makes a decision call *and* a content call, and only the first is budgeted.
+            "model_calls_detail": self._model_calls_detail(),
             "baseline": self.baseline_facts,
             "reconciled_at_start": self.reconciled_at_start,
             "last_error": self.last_error,
