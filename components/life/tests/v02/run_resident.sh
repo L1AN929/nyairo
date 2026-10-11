@@ -173,8 +173,14 @@ start_resident() {
   echo "== commit $(cat "$COMMITFILE") state_root=$STATE_ROOT subject=$SUBJECT poll=${POLL}s"
   echo "== model=${NYA02_MODEL_NAME:-none} key=$([ -n "${NYA02_MODEL_API_KEY:-}" ] && echo present || echo absent)"
 
+  # The assembly resolves the socket from its own accepted names (``SUPPLY_SOCKET_ENV``:
+  # CHIYO_NATIVE_LIFE_SUPPLY_SOCKET / LIFE_SUPPLY_SOCKET / CHIYO_LIFE_SUPPLY_SOCKET), which do
+  # not include this harness's ``NYA02_`` spelling.  Map the one name onto the other here rather
+  # than widening the assembly's list; without it the first ``--once`` is refused with
+  # ``SUPPLY_CONFIGURATION_MISSING / missing:["CHIYO_NATIVE_LIFE_SUPPLY_SOCKET"]``.
   runuser -u "$SVC_USER" -- env \
     NYA02_SUPPLY_SOCKET="$SOCKET" \
+    LIFE_SUPPLY_SOCKET="$SOCKET" \
     NYA02_SUBJECT="$SUBJECT" \
     NYA02_WORKSPACE_ID="$workspace" \
     NYA02_ARTIFACT_GRANT="$grant" \
@@ -247,8 +253,10 @@ case "${1:-status}" in
     chmod 600 "$RESIDENT_DIR/model_env"
     grant="$(cat "$RESIDENT_DIR/artifact_grant")"
     workspace="$(cat "$RESIDENT_DIR/workspace_id" 2>/dev/null || true)"
+    # The same socket mapping as `start`: the assembly does not accept this harness's ``NYA02_``
+    # spelling of the socket name (see start_resident).
     exec runuser -u "$SVC_USER" -- env \
-      NYA02_SUPPLY_SOCKET="$SOCKET" NYA02_SUBJECT="$SUBJECT" \
+      NYA02_SUPPLY_SOCKET="$SOCKET" LIFE_SUPPLY_SOCKET="$SOCKET" NYA02_SUBJECT="$SUBJECT" \
       NYA02_WORKSPACE_ID="$workspace" NYA02_ARTIFACT_GRANT="$grant" \
       NYA02_RESIDENT_STATE="$STATE_ROOT" CHIYO_LIFE_INSTALL_ROOT="$RESIDENT_DIR" \
       CHIYO_LIFE_SUPPLY_WORKSPACE_ID="$workspace" \

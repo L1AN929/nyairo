@@ -60,6 +60,11 @@ STATUS_UNKNOWN = "UNKNOWN"
 STATUS_CONFLICT = "CONFLICT"
 STATUS_KNOWN = "KNOWN"
 
+#: The owner's own reason code for a command its Governance layer refused.  ``life_supply``
+#: emits it only *before* the artifact store is touched, so it is a definite refusal and not an
+#: unknown effect.
+REASON_GOVERNANCE_REFUSED = "GOVERNANCE_REFUSED"
+
 
 class LifeArtifactError(RuntimeError):
     """Base class for this port's refusals."""
@@ -432,6 +437,18 @@ class LifeArtifactPort:
             return ArtifactOutcome(effect_state=EffectState.CONFLICT, status=status, **base)
         if status in {STATUS_BLOCKED, STATUS_DENY}:
             return ArtifactOutcome(effect_state=EffectState.REFUSED, status=status, **base)
+        if base["reason"] == REASON_GOVERNANCE_REFUSED:
+            # The owner's own Governance layer refused this command, and it says so by name.
+            # ``GOVERNANCE_REFUSED`` is emitted only *before* the owner reaches the artifact
+            # store (``life_supply._reserve``, ``validate_grant``, the artifact-lifecycle
+            # reservation), so it is the owner's authoritative statement that the write did not
+            # land -- the owner's own reason code, not an inference from "the head did not
+            # change".  The owner forwards the Governance store's own status verbatim, which for
+            # a grant it does not hold is the store's UNKNOWN ("grant not found"); forwarding
+            # that verbatim would report a definite refusal as an unestablished effect.  A lost
+            # answer, or an effect the owner could not finalize
+            # (``GOVERNANCE_FINALIZATION_UNCERTAIN``), has a different reason and stays UNKNOWN.
+            return ArtifactOutcome(effect_state=EffectState.REFUSED, status=status, **base)
         # Anything else -- including the service's own UNKNOWN -- is an unknown effect.
         return ArtifactOutcome(effect_state=EffectState.UNKNOWN, status=status or STATUS_UNKNOWN,
                                **base)
@@ -457,6 +474,7 @@ __all__ = [
     "parse_grant_ids",
     "COMMAND_OPS",
     "READ_OPS",
+    "REASON_GOVERNANCE_REFUSED",
     "STATUS_BLOCKED",
     "STATUS_DENY",
     "STATUS_NOT_FOUND",
