@@ -28,6 +28,7 @@ What this module does, and the rules it obeys
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -71,20 +72,75 @@ def resolve_supply_configuration(environment: Mapping[str, str]) -> dict[str, An
             "missing": missing}
 
 
-def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0) -> Any:
-    """The real content writer, over the instance's own provider.
+#: The World's own configuration names.  A profile that carries neither of these has no World
+#: service, and the feed is then recorded UNAVAILABLE instead of being invented.
+WORLD_SOCKET_ENV = "WORLD_BODY_SOCKET"
+WORLD_BRIDGE_DIR_ENV = "NYAIRO_WORLD_BRIDGE_DIR"
 
-    The writer is the one place a model produces text for a work, so it is built from
-    the same profile resolution the rest of the instance uses.  A profile that cannot
-    be resolved yields ``None`` and the caller blocks -- it never substitutes a
-    deterministic writer, because that would be fabricated content.
+
+def resolve_world_provider(environment: Mapping[str, str], *,
+                           bridge_dir: Optional[str] = None) -> dict[str, Any]:
+    """The World observation seam, or a named reason there is none.
+
+    ``READY`` means a real provider was built *and* the World answered a bounded status read.
+    Everything else returns no provider plus a reason, so the caller records the feed as
+    ``UNAVAILABLE`` rather than pretending the World was consulted.  Nothing here guesses an
+    opportunity: an unreadable World yields nothing at all.
     """
+
+    env = dict(environment or {})
+    configured = bool(str(env.get(WORLD_SOCKET_ENV) or "").strip()
+                      or str(env.get(WORLD_BRIDGE_DIR_ENV) or "").strip()
+                      or bridge_dir)
+    if not configured:
+        return {"provider": None, "status": "UNAVAILABLE", "reason": "WORLD_NOT_CONFIGURED",
+                "detail": "no %s and no %s in this profile"
+                          % (WORLD_SOCKET_ENV, WORLD_BRIDGE_DIR_ENV)}
+    try:
+        here = str(Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        from world_action_bridge_adapter import WorldBridgeResolver, discover_bridge_dir
+        import world_move_opportunity_source as wmos
+    except Exception as exc:
+        return {"provider": None, "status": "UNAVAILABLE",
+                "reason": "WORLD_ADAPTER_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+
+    directory = (bridge_dir or str(env.get(WORLD_BRIDGE_DIR_ENV) or "").strip()
+                 or discover_bridge_dir())
+    if not directory:
+        return {"provider": None, "status": "UNAVAILABLE", "reason": "WORLD_BRIDGE_NOT_FOUND",
+                "detail": "set %s to <repo>/components/world/service/bridge"
+                          % WORLD_BRIDGE_DIR_ENV}
+    text = str(directory)
+    try:
+        if text not in sys.path:
+            sys.path.insert(0, text)
+        import action_intent as world_action_intent
+        import world_body_client as wbc
+        client = WorldBridgeResolver(environment=env, bridge_dir=directory).client
+        status = client.get_status()
+    except Exception as exc:
+        return {"provider": None, "status": "UNAVAILABLE", "reason": "WORLD_UNREACHABLE",
+                "detail": "%s: %s" % (type(exc).__name__, exc), "bridge_dir": text}
+
+    ready = (getattr(status, "outcome", None) == wbc.OK
+             and bool((getattr(status, "data", None) or {}).get("ready")))
+    if not ready:
+        return {"provider": None, "status": "UNAVAILABLE", "reason": "WORLD_NOT_READY",
+                "detail": "status=%s" % (getattr(status, "outcome", None),),
+                "bridge_dir": text}
+    provider = wmos.WorldMoveOpportunityProvider(
+        client=client, action_intent=world_action_intent, bridge_dir=text)
+    return {"provider": provider, "status": "READY", "reason": "", "bridge_dir": text}
+
+
+def _model_config(environment: Mapping[str, str]) -> Any:
+    """The instance's own provider, resolved once for both the decision and the writing."""
 
     try:
         from profile_model_config import describe_model_config, load_configured_model_config
-        from profile_model_transport import OpenAICompatibleTransport
-        from agency_model_client import AgencyModelClient
-        from model_continuation_writer import ModelContinuationWriter
     except Exception:
         return None
     config = None
@@ -98,10 +154,32 @@ def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0) ->
     if config is None:
         try:
             config = load_configured_model_config(
-                hermes_home=environment.get("NYA02_PROFILE_HOME") or environment.get("CHIYO_PROFILE_HOME"))
+                hermes_home=environment.get("NYA02_PROFILE_HOME")
+                or environment.get("CHIYO_PROFILE_HOME"))
         except Exception:
             config = None
     if not config or not describe_model_config(config).get("usable"):
+        return None
+    return config
+
+
+def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0) -> Any:
+    """The real content writer, over the instance's own provider.
+
+    The writer is the one place a model produces text for a work, so it is built from the
+    same profile resolution the rest of the instance uses.  A profile that cannot
+    be resolved yields ``None`` and the caller blocks -- it never substitutes a
+    deterministic writer, because that would be fabricated content.
+    """
+
+    try:
+        from profile_model_transport import OpenAICompatibleTransport
+        from agency_model_client import AgencyModelClient
+        from model_continuation_writer import ModelContinuationWriter
+    except Exception:
+        return None
+    config = _model_config(environment)
+    if config is None:
         return None
     transport = OpenAICompatibleTransport(
         base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
@@ -110,6 +188,35 @@ def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0) ->
     client = AgencyModelClient(config=config, transport=transport, purpose="artifact_edit",
                                timeout_s=timeout_s, max_output_tokens=512)
     return ModelContinuationWriter(client, max_new_chars=300)
+
+
+def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0) -> Any:
+    """The real decision adapter over the same provider, or ``None``.
+
+    The decision is the one place a model may speak, so it is built from the same profile
+    resolution the content writer uses.  A profile with no usable provider yields ``None``
+    and the caller blocks; nothing here substitutes a stand-in, because a fabricated
+    decision is not a decision.
+    """
+
+    try:
+        from profile_model_transport import OpenAICompatibleTransport
+        from agency_model_client import AgencyModelClient
+        from agency_cognition_adapter import ProductionAgencyCognitionAdapter
+    except Exception:
+        return None
+    config = _model_config(environment)
+    if config is None:
+        return None
+    transport = OpenAICompatibleTransport(
+        base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
+        provider=config.get("provider") or "custom", timeout_s=timeout_s,
+        purpose="agency_cognition", request_json_object=True)
+    client = AgencyModelClient(config=config, transport=transport,
+                               purpose="agency_cognition", timeout_s=timeout_s,
+                               max_output_tokens=512)
+    return ProductionAgencyCognitionAdapter(client=client, timeout_s=timeout_s,
+                                            max_output_tokens=512)
 
 
 def assemble_autonomous_life(
@@ -196,13 +303,27 @@ def assemble_autonomous_life(
         enabled=True,
         env=env,
     )
+    # The World feed is assembled only when a real observation seam exists.  Without one the
+    # cycle must not consult the World at all -- that is the behaviour every pre-B6 profile
+    # keeps -- and a profile with no World service must never be handed a guessed opportunity.
+    world = ({"provider": world_provider, "status": "READY", "reason": "",
+              "detail": "supplied by the caller"}
+             if world_provider is not None else resolve_world_provider(env))
+    world_provider = world["provider"]
+    # The record must stay serializable: the live provider is an object, so it is handed back on
+    # its own key and never inside the descriptive dict.
+    world_record = {k: v for k, v in world.items() if k != "provider"}
+
     runner = alr.AutonomousLifeRunner(cycle, state_root=root, env=env,
                                       enabled=bool(enabled))
-    poller = events.EventFeedPoller([
+    feeds = [
         events.ResumeEligibilityFeed(getattr(runtime, "waiting_coordinator", None), root)
         if getattr(runtime, "waiting_coordinator", None) is not None else None,
         events.ArtifactChangeFeed(port, root, subject_id=supply["subject_id"]),
-    ] + ([events.WorldOpportunityFeed(world_provider, root)] if world_provider else []))
+    ]
+    if world_provider is not None:
+        feeds.append(events.WorldOpportunityFeed(world_provider, root))
+    poller = events.EventFeedPoller(feeds)
     poller.feeds = [feed for feed in poller.feeds if feed is not None]
 
     return {
@@ -216,6 +337,9 @@ def assemble_autonomous_life(
         "artifact_grant_id": supply["artifact_grant_id"],
         "state_root": str(root),
         "enabled": runner.enabled,
+        "world": world_record,
+        "world_provider": world_provider,
+        "feeds": [getattr(feed, "name", type(feed).__name__) for feed in poller.feeds],
         "lease_instance": getattr(lease, "instance_id", None),
     }
 
@@ -260,7 +384,11 @@ __all__ = [
     "READY",
     "SUPPLY_SOCKET_ENV",
     "SUPPLY_SUBJECT_ENV",
+    "WORLD_BRIDGE_DIR_ENV",
+    "WORLD_SOCKET_ENV",
     "assemble_autonomous_life",
+    "model_cognition",
+    "resolve_world_provider",
     "resolve_supply_configuration",
     "run_once",
     "runner_tick",
