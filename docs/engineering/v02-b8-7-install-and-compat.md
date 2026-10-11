@@ -4,6 +4,9 @@
 `docs/USER_GUIDE.zh-CN.md`、`TESTING.md`、`KNOWN_ISSUES.md`、`README.md` 与本文件），
 没有修改任何运行时代码、没有改安装器、没有创建标签或 Release。
 
+> RC1-03（2026-10-11，HEAD `c4671c9`）在文末 **§7** 只读复核了本文 §4 的五个问题与 §6 的三个失败
+> 套件。§4 与 §6 的发现原话保留不改写，只在其前面加当前状态；新的实测数字与命令都在 §7。
+
 ## 1. 这次真的跑了什么
 
 在一套**全新**的隔离目录 `/srv/nya02/inst/**` 上，用现有入口完整走了一遍：
@@ -55,27 +58,38 @@
 rc6 更新验收）保持原样。**没有改任何安装器**：网站脚本本来就指向 rc9，仓库内那份副本的漂移只记录、
 不修改（改它会让"仓库内脚本"变成一个新的发行决定，不属于文档工作）。
 
-## 4. 测量中发现、本批未修的问题
+## 4. 测量中发现的问题（逐条标当前状态；发现时的事实原样保留）
 
-1. **`NYA02_SUPPLY_SOCKET` 不是被接受的 socket 名字。**
+以下五条是 E13 当时实测到的原话。RC1-03（§7）逐条复核，每条前面标出**现在的状态**：
+
+1. **[仍未修] `NYA02_SUPPLY_SOCKET` 不是被接受的 socket 名字。**
    `autonomous_life_assembly.SUPPLY_SOCKET_ENV` 只接受 `CHIYO_NATIVE_LIFE_SUPPLY_SOCKET` /
    `LIFE_SUPPLY_SOCKET` / `CHIYO_LIFE_SUPPLY_SOCKET`；而 `NYA02_SUBJECT`、`NYA02_ARTIFACT_GRANT`
    是被接受的。`run_resident.sh` 只显式传 `NYA02_SUPPLY_SOCKET`，之所以一直能跑，是因为
    `runuser -- env` 保留了启动者环境里由 `$ROOT/env.sh` 导出的 `LIFE_SUPPLY_SOCKET`。
    在新目录里没有 `env.sh` 时，常驻进程会以 `SUPPLY_CONFIGURATION_MISSING` 拒绝启动
-   （实测 `missing: ["CHIYO_NATIVE_LIFE_SUPPLY_SOCKET"]`）。本批只在实例环境文件里补上这个变量，
-   没有改产品代码。
-2. **`model.content_writer` 恒为 `false`。** `autonomous_life_resident.start()` 读
-   `assembled.get("writer")`，而 `assemble_autonomous_life()` 的返回字典里没有 `writer` 键，
-   所以即使内容写作者真的存在也报 false（本轮它确实存在：写出的正文是真实模型散文）。
-3. **预算计数少算一次调用。** `RoundBudget` 的注释说"决策和内容生成都计入认知调用"，但 AR-0 路径
-   在 `_classify_ar0_step` 里固定 `llm_calls=1`，所以一次成功写入（1 次决策 + 1 次内容生成）
-   只记 1。`counters.model_calls` 同样只反映决策调用。
-4. **`REVOKED` 被窄端口分类成 `UNKNOWN`。** `life_artifact_port._outcome()` 只把 `BLOCKED`/`DENY`
-   当作明确拒绝；资源服务对已撤回授权回答的是 `status=REVOKED, reason=GOVERNANCE_REFUSED`，
-   于是落进"未确认"（实测 `effect_state: UNKNOWN`）。结果是：撤回后的一次写请求虽然确实被拒绝、
-   作品未变，但"这是明确拒绝"这一事实在 Life 侧丢失，需要走对账流程才能定性。
-5. **M0 的 owner 名与 Supply subject 名是两件事。** 生活经历写入 M0 时用的是事件自己的
+   （实测 `missing: ["CHIYO_NATIVE_LIFE_SUPPLY_SOCKET"]`）。当时只在实例环境文件里补上这个变量，
+   没有改产品代码；**现在仍然如此**。
+2. **[已修 · RC1-02] `model.content_writer` 恒为 `false`（当时的现象）。** `autonomous_life_resident.start()`
+   读 `assembled.get("writer")`，而 `assemble_autonomous_life()` 的返回字典里没有 `writer` 键，
+   所以即使内容写作者真的存在也报 false（那一轮它确实存在：写出的正文是真实模型散文）。现在改读已装配
+   cycle 自己的 `writer`；没有可用写作者时装配在 `NO_CONTENT_WRITER` 处 BLOCKED，返回记录里没有 `model`
+   键，也就不可能声称有写作者。修的是**报告**，生成链未动。
+3. **[仍未修；RC1-03 只加了显示标签] 预算计数少算一次调用。** `RoundBudget` 的注释说"决策和内容生成都
+   计入认知调用"，但 AR-0 路径在 `_classify_ar0_step` 里固定 `llm_calls=1`，所以一次成功写入（1 次决策
+   + 1 次内容生成）只记 1。`counters.model_calls` 同样只反映决策调用。RC1-03 在真实长窗上量到的数是
+   **4 次决策 + 4 次内容生成 = 8 次 provider 请求**，而 `counters.model_calls = 4`；只加了
+   `model_calls_detail` 这个显示字段（§7.3），**没有改预算语义、没有加新框架**。
+4. **[部分已修 · B8-8；撤回路径未复测] `REVOKED` 被窄端口分类成 `UNKNOWN`（当时的现象）。**
+   `life_artifact_port._outcome()` 当时只把 `BLOCKED`/`DENY` 当作明确拒绝；资源服务对已撤回授权回答的是
+   `status=REVOKED, reason=GOVERNANCE_REFUSED`，于是落进"未确认"（实测 `effect_state: UNKNOWN`）。
+   结果是：撤回后的一次写请求虽然确实被拒绝、作品未变，但"这是明确拒绝"这一事实在 Life 侧丢失，需要走
+   对账流程才能定性。**RC1-03 复核 HEAD 代码后的现状**：B8-8 给 `_outcome()` 加了
+   `reason == GOVERNANCE_REFUSED → REFUSED` 这一支（`life_artifact_port.py:440-451`），而撤回授权在 reserve
+   步返回的正是 `status=REVOKED, reason=GOVERNANCE_REFUSED`（`life_supply.py:1184`），所以**按现在的代码**
+   这次写请求会被分类成 `REFUSED`。但撤回路径**在 B8-8 之后没有重跑过**，所以只能说"当前代码会这样分类"，
+   不得写成"撤回路径已验证"。
+5. **[仍未修] M0 的 owner 名与 Supply subject 名是两件事。** 生活经历写入 M0 时用的是事件自己的
    `subject_id`，AG-2 的 handoff 不带它，于是回落到 `chiyo`（与 B8-5 §10 的记录一致）。
    隔离 profile 的 subject 是 `chiyo-install` 时，按 subject 读经历会读到空视图
    （实测：`subject=chiyo-install → 0`，`subject=chiyo → 1`）。单一主体的真实产品里两者同名，
@@ -100,5 +114,60 @@ rc6 更新验收）保持原样。**没有改任何安装器**：网站脚本本
 
 没有创建标签或 Release；没有部署到任何真实用户实例；没有改动 `main`；没有轮换或改动任何凭据
 （旧密钥的轮换仍是账户持有人在供应商后台的事）；没有在真实 Telegram 账号上做收发；
-没有跑完 24 小时/7 天；没有修 §4 列出的五个问题；没有重跑 `host-boundaries` /
-`cognition-faults` / `Hermes` 三个环境相关失败套件（原因见 `KNOWN_ISSUES.md`）。
+没有跑完 24 小时/7 天；没有重跑 `host-boundaries` / `cognition-faults` / `Hermes` 三个环境相关失败套件
+（原因见 `KNOWN_ISSUES.md`）。
+
+## 7. RC1-03 只读复核（2026-10-11，HEAD `c4671c9`）
+
+本文 §4 的五个问题与 §6 的三个套件在 RC1-03 被逐条复核了一遍。**§4 的发现原话不改写**，这里只写
+"现在的状态"和新的实测数字；RC1-03 没有改产品代码（唯一的代码改动见 §7.3）。
+
+| # | 当时的问题 | 现在 | 依据 |
+|---|---|---|---|
+| 4.1 | `NYA02_SUPPLY_SOCKET` 不被接受 | **仍未修** | 代码未动 |
+| 4.2 | `model.content_writer` 恒 `false` | **已修（RC1-02）** | 改读已装配 cycle 自己的 `writer`；配了真实模型报 `true`，无写作者时 `NO_CONTENT_WRITER` BLOCKED 且返回记录里没有 `model` 键。修的是报告，生成链未动（`docs/engineering/v02-autonomous-life-implementation.md §11.1`） |
+| 4.3 | 预算计数少算一次调用 | **仍未修；RC1-03 只加了显示标签** | 真实长窗量到 **4 次决策 + 4 次内容生成 = 8 次 provider 请求**，而 `counters.model_calls = 4`、`cognition_used = 4`。见 §7.3 |
+| 4.4 | `REVOKED` 被窄端口分类成 `UNKNOWN` | **部分已修（B8-8）；撤回路径未复测** | `_outcome()` 现在有 `reason == GOVERNANCE_REFUSED → REFUSED` 这一支（`life_artifact_port.py:440-451`），撤回授权返回的正是这个 reason（`life_supply.py:1184`），所以按现在的代码会分类成 `REFUSED`；但 B8-8 之后没有重跑撤回路径，不得写成"已验证" |
+| 4.5 | M0 owner 名与 Supply subject 名是两件事 | **仍未修** | 代码未动 |
+
+### 7.1 三个失败套件：原因查清了
+
+只装测试依赖的隔离 venv（`/tmp/rc103-venv`：`httpx` / `pytest` / `psutil` / `PyYAML` / `python-dotenv`
+/ `requests` / `httpx[socks]` / `pytest-asyncio` / `ruamel.yaml`），按 `scripts/test.py` 的**原命令**重跑，
+未删测试、未改产品行为、未加无条件跳过：
+
+* `cognition-faults`：缺 `pytest` → 装上后 **1 passed**。
+* `Hermes`（`test_context_engine.py` / `test_context_engine_host_contract.py` /
+  `test_context_engine_select_context.py` / `test_plugin_context_engine_init.py`）：缺 `python-dotenv`
+  （先报 `ModuleNotFoundError: No module named 'dotenv'`，5 failed + 1 collection error）→ 装上后
+  **29 passed, 0 failed**。
+* `host-boundaries`：缺 `httpx` / `psutil` / `PyYAML`；装上后工作区（CRLF）仍是 **8 failures / 2 errors**，
+  把 HEAD 导出成 LF 树（`git archive HEAD | tar -x -C /tmp/rc103-pristine`）后只剩 **1 failure**。
+  逐条对应关系：
+
+  | 现象 | 数量 | 性质 |
+  |---|---|---|
+  | `scripts/bootstrap.sh: line 3: set: pipefail / : invalid option name`（安装器边界 6 项） | 6 | 工作区 CRLF：bash 把 `pipefail\r` 当选项名 |
+  | `patches/baseline.sha256` 失配 | 1 | 同上（基线哈希按 LF 计算） |
+  | `sealed_component_mismatch:production_consumption_evaluator_v0_3.py` | 2 | 同上（`production_resolver.SEALED_SHA256`）；CRLF→LF 归一后三个文件哈希**逐字符相等** |
+  | `test_website_and_repository_installers_are_identical` | 1 | **真实缺陷**：`scripts/bootstrap.sh:6` = `v0.1.0-rc6`，`website/install.sh:6` = `v0.1.0-rc9`，只差这 2 行 |
+
+  根因：**仓库根目录没有 `.gitattributes`**，而 `website/.gitattributes` 写了 `* text=auto eol=lf`。
+  所以同一棵树里 `website/install.sh` 是 LF、`scripts/bootstrap.sh` 是 CRLF。这不是产品缺陷，是检出配置
+  缺陷；但在 Windows 上足以让 `host-boundaries` 变红。**§3 的结论不变**：改那 2 行版本号等于做一次发行
+  决定，RC1-03 仍然只记录、不改。
+
+### 7.2 复核时没有做的事
+
+`components/life/tests/v02/run_isolated_acceptance.sh` 含 `pkill -f supply_service.py` 与
+`rm -rf /srv/nya02`，`run_world_instance.sh` / `run_world_move_e2e.sh` 也含 `pkill`：在
+`/srv/nya02/resident2` 的长测正在跑的时候**没有**执行它们，因此 T16（World MOVE）与 isolated acceptance
+**没有重跑**，只做只读复核。`/srv/nya02/resident2` 没有被停止、重置或删除。
+
+### 7.3 RC1-03 唯一的代码改动（显示标签，不是预算框架）
+
+`components/life/scripts/autonomous_life_resident.py` 的 `summary()` 增加一个 `model_calls_detail` 字段
+（`cognition_calls` / `content_generation_calls` / `total_requests` / `content_generation_scope` /
+`daily_budget_counts: "cognition calls only"`），把"决策调用"和"内容生成调用"分开命名，这样"每天 6 次
+认知调用"不会被读成"一天总共 6 次 provider 请求"。`counters` 与 `budget` 的语义和键都没有改，
+没有新增预算、没有改上限、没有改判定。
