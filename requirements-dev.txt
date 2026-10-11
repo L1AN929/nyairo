@@ -1,0 +1,20 @@
+# Test-only dependencies for this repository's own test entry point.
+#
+# `scripts/test.py` runs every suite with `sys.executable`, so a clean machine that has
+# none of these fails `cognition-faults`, `Hermes` and `host-boundaries` for reasons that
+# have nothing to do with the product.  Installing them into a throwaway virtual
+# environment is the supported way to get a meaningful result:
+#
+#     python3 -m venv .venv-dev
+#     .venv-dev/bin/python -m pip install -r requirements-dev.txt
+#     .venv-dev/bin/python scripts/test.py
+#
+# Nothing listed here is a runtime dependency of a shipped instance; see TESTING.md.
+pytest
+httpx
+psutil
+PyYAML
+python-dotenv
+requests
+pytest-asyncio
+ruamel.yaml

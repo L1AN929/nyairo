@@ -574,10 +574,14 @@ class AutonomousLifeResident:
             "ticks": self.ticks,
             "last_tick_at": (self.last_tick or {}).get("at"),
             "observed_seconds": observed,
-            # Only a window that really lasted 24 hours may carry the verified label.
-            "soak_24h": ("SOAK_VERIFIED_24H" if observed >= SOAK_24H_SECONDS
+            # A wall clock can only report that the time threshold has been reached.  It cannot
+            # read the journal, cannot prove the process stayed up and cannot see the owner's
+            # results, so it must never mint the acceptance label itself: `SOAK_VERIFIED_24H`
+            # is a judgement a reviewer records after reading those three, not a number this
+            # counter can produce.  The recorded history is left exactly as it is.
+            "soak_24h": ("SOAK_THRESHOLD_REACHED_24H" if observed >= SOAK_24H_SECONDS
                          else "SOAK_RUNNING_24H"),
-            "soak_7d": ("SOAK_VERIFIED_7D" if observed >= SOAK_7D_SECONDS
+            "soak_7d": ("SOAK_THRESHOLD_REACHED_7D" if observed >= SOAK_7D_SECONDS
                         else "SOAK_RUNNING_7D" if observed >= SOAK_24H_SECONDS
                         else "SOAK_PENDING_7D"),
             "poll_seconds": self.poll_seconds,

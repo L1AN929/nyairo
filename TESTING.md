@@ -39,6 +39,32 @@ bash scripts/run_tests.sh -j 8 --file-timeout 900 --file-retries 0
 
 2026-10-04 核对实际工作流后，GitHub 当前只有 Pages 网站构建与部署，运行时功能 CI 模板仍在 `ci/templates/`，尚未启用。网站发布成功不能代表组件、宿主、真实模型或平台测试通过。完整宿主、真实模型和真实平台需要分别验证；最终 ZIP 的冷安装与完整性按其实际哈希关联。
 
+## 测试依赖与运行环境（RC1-04）
+
+`python3 scripts/test.py` 用 `sys.executable` 逐个套件地跑，所以"装了哪些包"直接决定结果是绿还是红。干净主机上缺 `pytest` / `httpx` / `psutil` / `PyYAML` / `python-dotenv` / `requests` / `pytest-asyncio` / `ruamel.yaml` 时，`cognition-faults`、`Hermes`、`host-boundaries` 会因为没有模块而失败——那是缺依赖，不是产品缺陷。
+
+依赖清单在仓库根的 `requirements-dev.txt`，**只用于测试**，不是任何发行实例的运行时依赖。安装与运行：
+
+```bash
+python3 -m venv .venv-dev
+.venv-dev/bin/python -m pip install -r requirements-dev.txt
+.venv-dev/bin/python scripts/test.py            # 官方入口；--full-hermes 才跑完整 vendor 套件
+```
+
+`scripts/test.py` 按顺序打印 `SUITE <名字>`，最后一行 `FAILED_SUITES [...]` 是唯一结论：**列表为空才算全绿**，非空时把列出来的名字当成失败套件。它给每个套件准备一个临时 HOME，不读也不写 `~/.nyairo`。
+
+环境要求分三档：
+
+| 档 | 需要什么 | 覆盖哪些套件 |
+| --- | --- | --- |
+| 任何平台 | 只要上面的依赖 | `closeout`、`native`、`memory`、`supply`、`world`、`life`、`life-v02`、`life-memory-v02`、`life-b7`、`life-b8`、`life-b8-causal`、`life-b8-6a` |
+| Linux / WSL | 真 Unix 语义：`runuser`、`pgrep`、`/proc`、POSIX 权限位、`bash`。安装器与文件系统安全用例在 Windows 上会跳过或直接失败 | `host-boundaries`、`cognition-faults` |
+| 隔离实例 | 一条真实 owner 链：`/srv/nya02` 下的 Supply socket、World 服务，外加该实例自己的 subject / workspace / artifact grant / Memory 数据库。**真实长测实例在跑的时候不要执行** `run_isolated_acceptance.sh` / `run_world_instance.sh` / `run_world_move_e2e.sh`：它们会 `pkill` 共享 owner 并 `rm -rf /srv/nya02` | `components/life/tests/v02/` 下的 T16 / T20 / B8 端到端脚本 |
+
+**真实模型调用**只有两条线需要：E13 的"没有用户消息也能自主考虑"，以及 B8-6A 的长测。其余套件全部走受控替身或受控时钟，不需要真实供应商密钥。要跑真实模型，先确认配额，密钥只放在 owner 的 0600 配置文件或进程环境变量里，不要写进仓库。
+
+**长测标签的读法**：`summary()` 只报告时长阈值**是否到达**（`SOAK_THRESHOLD_REACHED_24H` / `SOAK_THRESHOLD_REACHED_7D`），它**不**能自己判定验收通过。`SOAK_VERIFIED` 是复核过 journal、进程连续性和 owner 结果之后由人写下的结论，口径见下面的 E13 表。
+
 ## rc5 本次复测
 
 本次源码修复的实际命令、结果和日志摘要记录在 `PRIVACY_TEST_EVIDENCE.json`，修复范围与保留边界见 `PRIVACY_REVIEW.md`。历史 45,071 记录不会被改写成本次新运行的结果；本次完成 534 项计数测试（504 项组件/边界 unittest、1 项认知故障测试、29 项官方宿主接线测试），另有真实 Life 装配检查；Alpha 五个脚本通过，N8 相关脚本保留 PARTIAL。完整宿主复跑因可选依赖和测试机资源压力没有完成，不宣称新一轮全量通过，也未发送真实 Telegram 测试消息。
