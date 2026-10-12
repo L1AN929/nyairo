@@ -1,0 +1,3117 @@
+{
+  "assets": {},
+  "placements": {
+    "bakery_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "bakery_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    "bakery_dispenser04": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    "bakery_plant05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    "bakery_table03": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    "bookstore_book05": {
+      "actions": [
+        "pick_up",
+        "place",
+        "read"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "read": {
+          "energy_cost": 3,
+          "minutes": 15
+        }
+      },
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "book",
+      "portable": true,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 67
+    },
+    "bookstore_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 22
+    },
+    "bookstore_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 22
+    },
+    "bookstore_cabinet03": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 22
+    },
+    "bookstore_chair07": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 67
+    },
+    "bookstore_lamp08": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 27
+    },
+    "bookstore_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 67
+    },
+    "bookstore_table06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 72,
+      "y": 62
+    },
+    "cafe_chair06": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 67,
+      "y": 67
+    },
+    "cafe_chair08": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 52
+    },
+    "cafe_cup04": {
+      "actions": [
+        "pick_up",
+        "place",
+        "drink"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "drink": {
+          "hydration_gain": 20
+        }
+      },
+      "capacity": 0,
+      "initial_status": "empty",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cup",
+      "portable": true,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 22,
+      "y": 17
+    },
+    "cafe_dispenser03": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 17
+    },
+    "cafe_lamp10": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 27
+    },
+    "cafe_plant09": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 87
+    },
+    "cafe_table01": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 22,
+      "y": 17
+    },
+    "cafe_table02": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 17
+    },
+    "cafe_table05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 67
+    },
+    "cafe_table07": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 22,
+      "y": 52
+    },
+    "community_center_cabinet05": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    "community_center_chair01": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "community_center_chair02": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    "community_center_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    "community_center_lamp07": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    "community_center_plant06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    "community_center_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 52
+    },
+    "convenience_store_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 27
+    },
+    "convenience_store_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 27
+    },
+    "convenience_store_cabinet03": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 27
+    },
+    "convenience_store_cabinet04": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 27
+    },
+    "convenience_store_cabinet05": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 47
+    },
+    "convenience_store_cabinet06": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 47
+    },
+    "convenience_store_dispenser08": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 32
+    },
+    "convenience_store_table07": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 82,
+      "y": 72
+    },
+    "home_bed01": {
+      "actions": [
+        "rest"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "rest": {
+          "energy_gain": 15,
+          "minutes": 30
+        }
+      },
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "bed",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 22,
+      "y": 17
+    },
+    "home_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 82,
+      "y": 17
+    },
+    "home_cabinet08": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 77
+    },
+    "home_chair07": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 72
+    },
+    "home_dispenser09": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 72,
+      "y": 67
+    },
+    "home_goods_store_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "home_goods_store_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    "home_goods_store_dispenser04": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    "home_goods_store_plant05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    "home_goods_store_table03": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    "home_lamp03": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 32
+    },
+    "home_lamp05": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 47
+    },
+    "home_plant04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 32
+    },
+    "home_table06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 72
+    },
+    "library_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 22
+    },
+    "library_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 22
+    },
+    "library_cabinet03": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 22
+    },
+    "library_cabinet04": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 22
+    },
+    "library_chair06": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 57
+    },
+    "library_chair08": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 67,
+      "y": 57
+    },
+    "library_lamp09": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 27
+    },
+    "library_table05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 52
+    },
+    "library_table07": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 52
+    },
+    "market_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 47
+    },
+    "market_cabinet04": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 47
+    },
+    "market_cabinet06": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 47
+    },
+    "market_dispenser07": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 22
+    },
+    "market_plant08": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 82
+    },
+    "market_table01": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 27
+    },
+    "market_table03": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 27
+    },
+    "market_table05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 27
+    },
+    "school_cabinet26": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 22
+    },
+    "school_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 42
+    },
+    "school_chair05": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 42
+    },
+    "school_chair07": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 42
+    },
+    "school_chair09": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 42
+    },
+    "school_chair11": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 57
+    },
+    "school_chair13": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 57
+    },
+    "school_chair15": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 57
+    },
+    "school_chair17": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 57
+    },
+    "school_chair19": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 72
+    },
+    "school_chair21": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 72
+    },
+    "school_chair23": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 72
+    },
+    "school_chair25": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 72
+    },
+    "school_plant27": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 17
+    },
+    "school_table01": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    "school_table02": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 37
+    },
+    "school_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 37
+    },
+    "school_table06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 37
+    },
+    "school_table08": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 37
+    },
+    "school_table10": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 52
+    },
+    "school_table12": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 52
+    },
+    "school_table14": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 52
+    },
+    "school_table16": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 52
+    },
+    "school_table18": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 67
+    },
+    "school_table20": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 67
+    },
+    "school_table22": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 67
+    },
+    "school_table24": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 67
+    },
+    "shrine_cabinet05": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    "shrine_chair01": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "shrine_chair02": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    "shrine_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    "shrine_lamp07": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    "shrine_plant06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    "shrine_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 47
+    },
+    "station_cabinet05": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    "station_chair01": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "station_chair02": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    "station_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    "station_lamp07": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    "station_plant06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    "station_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 52,
+      "y": 42
+    }
+  },
+  "schema_version": "worldgen.scene.v1",
+  "spaces": {
+    "bakery": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#ece7dc",
+          "h": 100,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "bookstore": {
+      "doors": [
+        {
+          "actions": [
+            "open_door",
+            "close_door"
+          ],
+          "color": "#bd976e",
+          "id": "w1-door",
+          "length": 15,
+          "offset": 80,
+          "state": "closed",
+          "wall_id": "w1"
+        }
+      ],
+      "enabled": true,
+      "entry": {
+        "x": 3,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e8e8dc",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 60,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#e4e9df",
+          "h": 100,
+          "id": "f2",
+          "texture": "planks",
+          "w": 40,
+          "x": 60,
+          "y": 0
+        }
+      ],
+      "walls": [
+        {
+          "color": "#8c8a7d",
+          "id": "w1",
+          "width": 7,
+          "x1": 60,
+          "x2": 60,
+          "y1": 0,
+          "y2": 100
+        }
+      ],
+      "windows": [
+        {
+          "color": "#9fc3cf",
+          "id": "w1-win",
+          "length": 15,
+          "offset": 15,
+          "wall_id": "w1"
+        }
+      ]
+    },
+    "cafe": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 11,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e3d8c8",
+          "h": 40,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#f0e8dd",
+          "h": 55,
+          "id": "f2",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 45
+        }
+      ],
+      "walls": [
+        {
+          "color": "#9a8f7f",
+          "id": "w1",
+          "width": 7,
+          "x1": 50,
+          "x2": 50,
+          "y1": 0,
+          "y2": 45
+        }
+      ],
+      "windows": []
+    },
+    "community_center": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e7e3d8",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "convenience_store": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 11,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e6ecee",
+          "h": 100,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#eef3f4",
+          "h": 30,
+          "id": "f2",
+          "texture": "tiles",
+          "w": 30,
+          "x": 40,
+          "y": 70
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "home": {
+      "doors": [
+        {
+          "actions": [
+            "open_door",
+            "close_door"
+          ],
+          "color": "#bd976e",
+          "id": "w1-door",
+          "length": 15,
+          "offset": 40,
+          "state": "closed",
+          "wall_id": "w1"
+        },
+        {
+          "actions": [
+            "open_door",
+            "close_door"
+          ],
+          "color": "#bd976e",
+          "id": "w2-door",
+          "length": 15,
+          "offset": 30,
+          "state": "closed",
+          "wall_id": "w2"
+        }
+      ],
+      "enabled": true,
+      "entry": {
+        "x": 8,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#f0e3d3",
+          "h": 45,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#e9e2d3",
+          "h": 55,
+          "id": "f2",
+          "texture": "planks",
+          "w": 60,
+          "x": 0,
+          "y": 45
+        },
+        {
+          "asset_id": null,
+          "color": "#dbe5e2",
+          "h": 55,
+          "id": "f3",
+          "texture": "tiles",
+          "w": 40,
+          "x": 60,
+          "y": 45
+        }
+      ],
+      "walls": [
+        {
+          "color": "#9a8f7f",
+          "id": "w1",
+          "width": 5,
+          "x1": 0,
+          "x2": 100,
+          "y1": 45,
+          "y2": 45
+        },
+        {
+          "color": "#8c8a7d",
+          "id": "w2",
+          "width": 6,
+          "x1": 60,
+          "x2": 60,
+          "y1": 45,
+          "y2": 100
+        }
+      ],
+      "windows": []
+    },
+    "home_goods_store": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#ece7dc",
+          "h": 100,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "library": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e6e6da",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "market": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e9e6da",
+          "h": 100,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "school": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 2,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#ece6da",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#dfe4e8",
+          "h": 20,
+          "id": "f2",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [
+        {
+          "color": "#3d4a5c",
+          "id": "w1",
+          "width": 5,
+          "x1": 40,
+          "x2": 70,
+          "y1": 10,
+          "y2": 10
+        }
+      ],
+      "windows": []
+    },
+    "shrine": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e7e3d8",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "station": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e7e3d8",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    }
+  }
+}

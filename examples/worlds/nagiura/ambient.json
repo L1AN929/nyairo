@@ -1,0 +1,82 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "location_id": "school",
+      "start_hour": 0,
+      "summary": "校门口的告示板换了新通知"
+    },
+    {
+      "end_hour": 11,
+      "event_type": "beach_tide_low",
+      "location_id": "beach",
+      "start_hour": 6,
+      "summary": "退潮后沙滩上留下大片水洼"
+    },
+    {
+      "end_hour": 18,
+      "event_type": "street_construction",
+      "location_id": "street_1",
+      "start_hour": 8,
+      "summary": "街上有一段在铺新的路面"
+    },
+    {
+      "end_hour": 12,
+      "event_type": "shrine_sweeping",
+      "location_id": "shrine",
+      "start_hour": 8,
+      "summary": "神社的巫女在换绘马架"
+    },
+    {
+      "end_hour": 10,
+      "event_type": "harbor_fish_unload",
+      "location_id": "fish_market",
+      "start_hour": 5,
+      "summary": "港口的收鱼车排到了路边"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "location_id": "home",
+      "start_hour": 0,
+      "summary": "窗外雨声变大"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_84c6305c",
+      "location_id": "fish_market",
+      "start_hour": 0,
+      "summary": "朝市鱼店每日午间开始冲洗水槽并拉下铁卷门。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_cdb57d5a",
+      "location_id": "school",
+      "start_hour": 0,
+      "summary": "海岬学园每周五傍晚会播放广播提醒学生及时离校。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_c7ffd833",
+      "location_id": "park",
+      "start_hour": 0,
+      "summary": "松原公园的老人晨练队每天清晨七点准时开始体操。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_7af8a44e",
+      "location_id": "convenience_store",
+      "start_hour": 0,
+      "summary": "青叶便利店每周二和周五清晨由配送车补充便当与乳品。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_7ce74cbc",
+      "location_id": "station",
+      "start_hour": 0,
+      "summary": "凪浦站每周二清晨更换张贴在候车室的列车时刻表与海报。"
+    }
+  ]
+}

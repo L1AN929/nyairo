@@ -1,0 +1,47 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 21,
+      "event_type": "street_lantern",
+      "location_id": "street_1",
+      "start_hour": 16,
+      "summary": "街道石阶被扫得干干净净"
+    },
+    {
+      "end_hour": 11,
+      "event_type": "trail_check",
+      "location_id": "hiking_trail",
+      "start_hour": 6,
+      "summary": "登山道入口贴出了新的熊出没警示"
+    },
+    {
+      "end_hour": 22,
+      "event_type": "store_evening_sale",
+      "location_id": "convenience_store",
+      "start_hour": 18,
+      "summary": "补货车正在卸登山用品"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "location_id": "home",
+      "start_hour": 0,
+      "summary": "远处的汤烟被风吹散"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "location_id": "school",
+      "start_hour": 0,
+      "summary": "公告栏贴出了冬季滑雪课的分组"
+    },
+    {
+      "end_hour": 14,
+      "event_type": "inn_linens",
+      "location_id": "inn",
+      "start_hour": 9,
+      "summary": "旅馆的庭院晒满了替换的浴衣"
+    }
+  ]
+}

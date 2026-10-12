@@ -1,0 +1,635 @@
+{
+  "objects": [
+    {
+      "kind": "cabinet",
+      "location_id": "barn_store",
+      "name": "陈列柜1",
+      "note": "",
+      "object_id": "barn_store_cabinet01"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "barn_store",
+      "name": "陈列柜2",
+      "note": "",
+      "object_id": "barn_store_cabinet02"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "barn_store",
+      "name": "陈列柜3",
+      "note": "",
+      "object_id": "barn_store_cabinet03"
+    },
+    {
+      "kind": "table",
+      "location_id": "barn_store",
+      "name": "柜台",
+      "note": "",
+      "object_id": "barn_store_counter04"
+    },
+    {
+      "kind": "dispenser",
+      "location_id": "barn_store",
+      "name": "饮水机",
+      "note": "",
+      "object_id": "barn_store_dispenser05"
+    },
+    {
+      "kind": "plant",
+      "location_id": "barn_store",
+      "name": "门口盆栽",
+      "note": "",
+      "object_id": "barn_store_plant06"
+    },
+    {
+      "kind": "chair",
+      "location_id": "community_center",
+      "name": "靠墙椅1",
+      "note": "",
+      "object_id": "community_center_chair01"
+    },
+    {
+      "kind": "chair",
+      "location_id": "community_center",
+      "name": "靠墙椅2",
+      "note": "",
+      "object_id": "community_center_chair02"
+    },
+    {
+      "kind": "chair",
+      "location_id": "community_center",
+      "name": "靠墙椅3",
+      "note": "",
+      "object_id": "community_center_chair03"
+    },
+    {
+      "kind": "table",
+      "location_id": "community_center",
+      "name": "长桌",
+      "note": "社区公告与杂物桌。",
+      "object_id": "community_center_table04"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "community_center",
+      "name": "储物柜",
+      "note": "",
+      "object_id": "community_center_cabinet05"
+    },
+    {
+      "kind": "plant",
+      "location_id": "community_center",
+      "name": "盆栽",
+      "note": "",
+      "object_id": "community_center_plant06"
+    },
+    {
+      "kind": "lamp",
+      "location_id": "community_center",
+      "name": "角灯",
+      "note": "",
+      "object_id": "community_center_lamp07"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "convenience_store",
+      "name": "货架1",
+      "note": "码得整整齐齐的商品架。",
+      "object_id": "convenience_store_shelf01"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "convenience_store",
+      "name": "货架2",
+      "note": "码得整整齐齐的商品架。",
+      "object_id": "convenience_store_shelf02"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "convenience_store",
+      "name": "货架3",
+      "note": "码得整整齐齐的商品架。",
+      "object_id": "convenience_store_shelf03"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "convenience_store",
+      "name": "中岛货架1",
+      "note": "",
+      "object_id": "convenience_store_shelf04"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "convenience_store",
+      "name": "中岛货架2",
+      "note": "",
+      "object_id": "convenience_store_shelf05"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "convenience_store",
+      "name": "中岛货架3",
+      "note": "",
+      "object_id": "convenience_store_shelf06"
+    },
+    {
+      "kind": "table",
+      "location_id": "convenience_store",
+      "name": "收银台",
+      "note": "摆着关东煮的收银台。",
+      "object_id": "convenience_store_counter07"
+    },
+    {
+      "kind": "dispenser",
+      "location_id": "convenience_store",
+      "name": "冷藏柜",
+      "note": "嗡嗡作响的冷藏饮料柜。",
+      "object_id": "convenience_store_cooler08"
+    },
+    {
+      "kind": "plant",
+      "location_id": "convenience_store",
+      "name": "门口绿植",
+      "note": "",
+      "object_id": "convenience_store_plant09"
+    },
+    {
+      "kind": "table",
+      "location_id": "farm",
+      "name": "摊位1",
+      "note": "摆满当季蔬果的摊位。",
+      "object_id": "farm_stall01"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "farm",
+      "name": "摊柜1",
+      "note": "",
+      "object_id": "farm_cabinet02"
+    },
+    {
+      "kind": "table",
+      "location_id": "farm",
+      "name": "摊位2",
+      "note": "摆满当季蔬果的摊位。",
+      "object_id": "farm_stall03"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "farm",
+      "name": "摊柜2",
+      "note": "",
+      "object_id": "farm_cabinet04"
+    },
+    {
+      "kind": "table",
+      "location_id": "farm",
+      "name": "摊位3",
+      "note": "摆满当季蔬果的摊位。",
+      "object_id": "farm_stall05"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "farm",
+      "name": "摊柜3",
+      "note": "",
+      "object_id": "farm_cabinet06"
+    },
+    {
+      "kind": "table",
+      "location_id": "farm",
+      "name": "摊位4",
+      "note": "摆满当季蔬果的摊位。",
+      "object_id": "farm_stall07"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "farm",
+      "name": "摊柜4",
+      "note": "",
+      "object_id": "farm_cabinet08"
+    },
+    {
+      "kind": "dispenser",
+      "location_id": "farm",
+      "name": "冰柜",
+      "note": "",
+      "object_id": "farm_cooler09"
+    },
+    {
+      "kind": "plant",
+      "location_id": "farm",
+      "name": "摊边盆栽",
+      "note": "",
+      "object_id": "farm_plant10"
+    },
+    {
+      "kind": "table",
+      "location_id": "farmers_market",
+      "name": "摊位1",
+      "note": "摆满当季蔬果的摊位。",
+      "object_id": "farmers_market_stall01"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "farmers_market",
+      "name": "摊柜1",
+      "note": "",
+      "object_id": "farmers_market_cabinet02"
+    },
+    {
+      "kind": "table",
+      "location_id": "farmers_market",
+      "name": "摊位2",
+      "note": "摆满当季蔬果的摊位。",
+      "object_id": "farmers_market_stall03"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "farmers_market",
+      "name": "摊柜2",
+      "note": "",
+      "object_id": "farmers_market_cabinet04"
+    },
+    {
+      "kind": "table",
+      "location_id": "farmers_market",
+      "name": "摊位3",
+      "note": "摆满当季蔬果的摊位。",
+      "object_id": "farmers_market_stall05"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "farmers_market",
+      "name": "摊柜3",
+      "note": "",
+      "object_id": "farmers_market_cabinet06"
+    },
+    {
+      "kind": "dispenser",
+      "location_id": "farmers_market",
+      "name": "冰柜",
+      "note": "",
+      "object_id": "farmers_market_cooler07"
+    },
+    {
+      "kind": "plant",
+      "location_id": "farmers_market",
+      "name": "摊边盆栽",
+      "note": "",
+      "object_id": "farmers_market_plant08"
+    },
+    {
+      "kind": "bed",
+      "location_id": "home",
+      "name": "床",
+      "note": "临窗的单人床。",
+      "object_id": "home_bed01"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "home",
+      "name": "衣柜",
+      "note": "靠墙的衣柜。",
+      "object_id": "home_wardrobe02"
+    },
+    {
+      "kind": "lamp",
+      "location_id": "home",
+      "name": "床头灯",
+      "note": "",
+      "object_id": "home_lamp03"
+    },
+    {
+      "kind": "lamp",
+      "location_id": "home",
+      "name": "落地灯",
+      "note": "",
+      "object_id": "home_lamp04"
+    },
+    {
+      "kind": "table",
+      "location_id": "home",
+      "name": "餐桌",
+      "note": "",
+      "object_id": "home_table05"
+    },
+    {
+      "kind": "chair",
+      "location_id": "home",
+      "name": "椅子",
+      "note": "",
+      "object_id": "home_chair06"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "home",
+      "name": "橱柜",
+      "note": "料理台边的橱柜。",
+      "object_id": "home_cabinet07"
+    },
+    {
+      "kind": "dispenser",
+      "location_id": "home",
+      "name": "饮水机",
+      "note": "",
+      "object_id": "home_dispenser08"
+    },
+    {
+      "kind": "plant",
+      "location_id": "home",
+      "name": "香草盆栽",
+      "note": "",
+      "object_id": "home_plant09"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "library",
+      "name": "书库架1",
+      "note": "按索号排列的书库书架。",
+      "object_id": "library_shelf01"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "library",
+      "name": "书库架2",
+      "note": "按索号排列的书库书架。",
+      "object_id": "library_shelf02"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "library",
+      "name": "书库架3",
+      "note": "按索号排列的书库书架。",
+      "object_id": "library_shelf03"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "library",
+      "name": "书库架4",
+      "note": "按索号排列的书库书架。",
+      "object_id": "library_shelf04"
+    },
+    {
+      "kind": "table",
+      "location_id": "library",
+      "name": "自习桌1",
+      "note": "",
+      "object_id": "library_table05"
+    },
+    {
+      "kind": "chair",
+      "location_id": "library",
+      "name": "自习椅",
+      "note": "",
+      "object_id": "library_chair06"
+    },
+    {
+      "kind": "table",
+      "location_id": "library",
+      "name": "自习桌2",
+      "note": "",
+      "object_id": "library_table07"
+    },
+    {
+      "kind": "chair",
+      "location_id": "library",
+      "name": "自习椅",
+      "note": "",
+      "object_id": "library_chair08"
+    },
+    {
+      "kind": "lamp",
+      "location_id": "library",
+      "name": "阅览灯",
+      "note": "",
+      "object_id": "library_lamp09"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "讲台",
+      "note": "放着粉笔盒的讲台。",
+      "object_id": "school_podium01"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌1",
+      "note": "",
+      "object_id": "school_desk02"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅1",
+      "note": "",
+      "object_id": "school_chair03"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌2",
+      "note": "",
+      "object_id": "school_desk04"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅2",
+      "note": "",
+      "object_id": "school_chair05"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌3",
+      "note": "",
+      "object_id": "school_desk06"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅3",
+      "note": "",
+      "object_id": "school_chair07"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌4",
+      "note": "",
+      "object_id": "school_desk08"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅4",
+      "note": "",
+      "object_id": "school_chair09"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌5",
+      "note": "",
+      "object_id": "school_desk10"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅5",
+      "note": "",
+      "object_id": "school_chair11"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌6",
+      "note": "",
+      "object_id": "school_desk12"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅6",
+      "note": "",
+      "object_id": "school_chair13"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌7",
+      "note": "",
+      "object_id": "school_desk14"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅7",
+      "note": "",
+      "object_id": "school_chair15"
+    },
+    {
+      "kind": "table",
+      "location_id": "school",
+      "name": "课桌8",
+      "note": "",
+      "object_id": "school_desk16"
+    },
+    {
+      "kind": "chair",
+      "location_id": "school",
+      "name": "座椅8",
+      "note": "",
+      "object_id": "school_chair17"
+    },
+    {
+      "kind": "plant",
+      "location_id": "school",
+      "name": "窗台绿植",
+      "note": "",
+      "object_id": "school_plant18"
+    },
+    {
+      "kind": "chair",
+      "location_id": "shrine",
+      "name": "靠墙椅1",
+      "note": "",
+      "object_id": "shrine_chair01"
+    },
+    {
+      "kind": "chair",
+      "location_id": "shrine",
+      "name": "靠墙椅2",
+      "note": "",
+      "object_id": "shrine_chair02"
+    },
+    {
+      "kind": "chair",
+      "location_id": "shrine",
+      "name": "靠墙椅3",
+      "note": "",
+      "object_id": "shrine_chair03"
+    },
+    {
+      "kind": "table",
+      "location_id": "shrine",
+      "name": "长桌",
+      "note": "社区公告与杂物桌。",
+      "object_id": "shrine_table04"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "shrine",
+      "name": "储物柜",
+      "note": "",
+      "object_id": "shrine_cabinet05"
+    },
+    {
+      "kind": "plant",
+      "location_id": "shrine",
+      "name": "盆栽",
+      "note": "",
+      "object_id": "shrine_plant06"
+    },
+    {
+      "kind": "lamp",
+      "location_id": "shrine",
+      "name": "角灯",
+      "note": "",
+      "object_id": "shrine_lamp07"
+    },
+    {
+      "kind": "chair",
+      "location_id": "station",
+      "name": "靠墙椅1",
+      "note": "",
+      "object_id": "station_chair01"
+    },
+    {
+      "kind": "chair",
+      "location_id": "station",
+      "name": "靠墙椅2",
+      "note": "",
+      "object_id": "station_chair02"
+    },
+    {
+      "kind": "chair",
+      "location_id": "station",
+      "name": "靠墙椅3",
+      "note": "",
+      "object_id": "station_chair03"
+    },
+    {
+      "kind": "table",
+      "location_id": "station",
+      "name": "长桌",
+      "note": "社区公告与杂物桌。",
+      "object_id": "station_table04"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "station",
+      "name": "储物柜",
+      "note": "",
+      "object_id": "station_cabinet05"
+    },
+    {
+      "kind": "plant",
+      "location_id": "station",
+      "name": "盆栽",
+      "note": "",
+      "object_id": "station_plant06"
+    },
+    {
+      "kind": "lamp",
+      "location_id": "station",
+      "name": "角灯",
+      "note": "",
+      "object_id": "station_lamp07"
+    }
+  ],
+  "schema_version": "worldgen.objects.v1"
+}

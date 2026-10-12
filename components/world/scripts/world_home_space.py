@@ -23,6 +23,7 @@ try:
 except ImportError:  # pragma: no cover - production is POSIX
     fcntl = None
 
+import world_runtime_data as wrd
 
 FEATURE_ENV = "CHIYO_WORLD_HOME_SPACE_ENABLED"
 WORLD_ID = "shiomi_city"
@@ -329,7 +330,10 @@ def observe_home(
         }
     home = _home(hermes_home)
     state = _world_state(home, world_state)
-    if not isinstance(state, Mapping) or state.get("world_id") != WORLD_ID:
+    if (
+        not isinstance(state, Mapping)
+        or state.get("world_id") != wrd.active_world(environment).world_id
+    ):
         return {
             "kind": PROJECTION_KIND,
             "schema_version": SCHEMA_VERSION,
@@ -376,7 +380,7 @@ def observe_home(
         "kind": PROJECTION_KIND,
         "schema_version": SCHEMA_VERSION,
         "status": "available",
-        "world_id": WORLD_ID,
+        "world_id": wrd.active_world(environment).world_id,
         "home_location": {
             "location_id": HOME_LOCATION_ID,
             "area_id": BEDROOM_ID,

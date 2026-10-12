@@ -1,0 +1,14 @@
+{
+  "files": {
+    "ambient.json": "66060eaa22f6e1aa60156a5d892e5740fd1e368266566e18fef70317ab077369",
+    "content.json": "53092daf911032f3a91aae650e0fdc9234511cef53094ca1c4a1e97eb34fd90a",
+    "npcs.json": "3d9a803700429c962b2b143d250873341da18e4874338cb437f1a02669e9c43b",
+    "objects.json": "31007fd2c81c6ba8d7a311019fd86c67325bd60f3afb837f65bb3de39d8b1947",
+    "rules.json": "0299ca03e953414f70d24ae29ac9ed5ca7669546de1f507097a392fe3021baf3",
+    "scene.json": "74076444182f2d1d7bbe613b9bebee6810aa9b7a4afcf9d21e418702f4aa8ad7",
+    "topology.json": "49c464a5bd98f528316bc16246762a86f7527b27f146c96ebf2c27ac6c82028a",
+    "world.json": "8247b213d80d98648a502487502c5ced6be10fc1a33d2828a8df05397a7d176c"
+  },
+  "package_schema": "worldgen.package.v1",
+  "schema_version": "worldgen.manifest.v1"
+}

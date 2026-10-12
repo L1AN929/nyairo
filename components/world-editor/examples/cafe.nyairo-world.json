@@ -1,0 +1,344 @@
+{
+  "format": "nyairo.world-package.v3",
+  "requires": "nyairo.editor-runtime.v3",
+  "meta": {
+    "id": "sunlit-cafe",
+    "name": "午后咖啡馆",
+    "author": "nyairo 示例",
+    "version": "0.4.0",
+    "description": "穿过门，给空杯装水。两间室内空间、不同地面与可迁移的木质柜台图片。",
+    "license": "CC0-1.0",
+    "cover": "generated-floorplan"
+  },
+  "rooms": [
+    {
+      "id": "cafe",
+      "name": "咖啡馆 · 会客区与水吧",
+      "description": "一个区域内的两个室内空间：左侧会客区、右侧水吧；隔墙上的门控制实际通行。",
+      "kind": "shop",
+      "x": 75,
+      "y": 80,
+      "w": 850,
+      "h": 500,
+      "hours": null,
+      "visual": {
+        "theme": "cafe",
+        "floor": "#eee7df",
+        "texture": "tiles",
+        "border": "#b7a79a",
+        "border_style": "solid",
+        "background": "#faf6ef"
+      },
+      "space": {
+        "enabled": true,
+        "entry": {
+          "x": 5,
+          "y": 10
+        },
+        "walls": [
+          {
+            "id": "partition",
+            "x1": 50,
+            "y1": 0,
+            "x2": 50,
+            "y2": 100,
+            "width": 7,
+            "color": "#8c8a7d"
+          }
+        ],
+        "doors": [
+          {
+            "id": "waterbar-door",
+            "wall_id": "partition",
+            "offset": 45,
+            "length": 15,
+            "color": "#bd976e",
+            "state": "closed",
+            "actions": [
+              "open_door",
+              "close_door",
+              "lock_door",
+              "unlock_door"
+            ]
+          }
+        ],
+        "windows": [
+          {
+            "id": "glass",
+            "wall_id": "partition",
+            "offset": 15,
+            "length": 15,
+            "color": "#90b6cb"
+          }
+        ],
+        "floors": [
+          {
+            "id": "lounge-floor",
+            "x": 0,
+            "y": 0,
+            "w": 50,
+            "h": 100,
+            "color": "#eee7d8",
+            "texture": "planks",
+            "asset_id": null
+          },
+          {
+            "id": "waterbar-floor",
+            "x": 50,
+            "y": 0,
+            "w": 50,
+            "h": 100,
+            "color": "#dce7e5",
+            "texture": "tiles",
+            "asset_id": null
+          }
+        ]
+      }
+    }
+  ],
+  "connections": [],
+  "objects": [
+    {
+      "id": "empty-cup",
+      "name": "空杯",
+      "description": "",
+      "kind": "cup",
+      "room_id": "cafe",
+      "x": 25,
+      "y": 55,
+      "actions": [
+        "pick_up",
+        "place",
+        "drink"
+      ],
+      "portable": true,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 80,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {
+        "drink": {
+          "hydration_gain": 20
+        }
+      },
+      "asset_id": null,
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "initial_status": "empty"
+    },
+    {
+      "id": "water-dispenser",
+      "name": "饮水设备",
+      "description": "",
+      "kind": "dispenser",
+      "room_id": "cafe",
+      "x": 75,
+      "y": 55,
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 110,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "asset_id": null,
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "initial_status": "available"
+    },
+    {
+      "id": "counter",
+      "name": "木质柜台",
+      "description": "",
+      "kind": "table",
+      "room_id": "cafe",
+      "x": 76,
+      "y": 80,
+      "actions": [],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 130,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {},
+      "asset_id": "cafe-counter",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "initial_status": "neutral"
+    },
+    {
+      "id": "round-table",
+      "name": "会客桌",
+      "description": "",
+      "kind": "table",
+      "room_id": "cafe",
+      "x": 25,
+      "y": 28,
+      "actions": [],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 120,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {},
+      "asset_id": null,
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "initial_status": "neutral"
+    },
+    {
+      "id": "cafe-chair",
+      "name": "座椅",
+      "description": "",
+      "kind": "chair",
+      "room_id": "cafe",
+      "x": 25,
+      "y": 80,
+      "actions": [
+        "sit"
+      ],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 100,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {},
+      "asset_id": null,
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "initial_status": "neutral"
+    },
+    {
+      "id": "cabinet",
+      "name": "收纳柜",
+      "description": "",
+      "kind": "cabinet",
+      "room_id": "cafe",
+      "x": 85,
+      "y": 28,
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "portable": false,
+      "capacity": 4,
+      "servings": 0,
+      "visual": {
+        "scale": 110,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {},
+      "asset_id": null,
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "initial_status": "neutral"
+    },
+    {
+      "id": "lamp",
+      "name": "水吧灯",
+      "description": "",
+      "kind": "lamp",
+      "room_id": "cafe",
+      "x": 68,
+      "y": 28,
+      "actions": [
+        "toggle"
+      ],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 100,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "asset_id": null,
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "initial_status": "off"
+    }
+  ],
+  "initial": {
+    "room_id": "cafe",
+    "time": "2026-10-11T09:00",
+    "resident_name": "测试居民"
+  },
+  "scene": {
+    "background": "#f8f9fc",
+    "grid": true,
+    "decorations": true
+  },
+  "assets": {
+    "cafe-counter": {
+      "id": "cafe-counter",
+      "name": "木质咖啡柜台",
+      "category": "家具",
+      "collection": "咖啡馆家具",
+      "mime": "image/svg+xml",
+      "data": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNjAgMTAwIj48cmVjdCB4PSI4IiB5PSIxMCIgd2lkdGg9IjE0NCIgaGVpZ2h0PSI4MCIgcng9IjgiIGZpbGw9IiNiNzk0NzAiLz48cmVjdCB4PSI4IiB5PSIxMCIgd2lkdGg9IjE0NCIgaGVpZ2h0PSIyMiIgcng9IjgiIGZpbGw9IiNlYWQ5YmIiLz48cGF0aCBkPSJNMjIgNDBIMTM4TTYwIDQwVjgwTTEwOCA0MFY4MCIgc3Ryb2tlPSIjOGI3MTU2IiBzdHJva2Utd2lkdGg9IjMiLz48Y2lyY2xlIGN4PSI1MCIgY3k9IjYyIiByPSIzIiBmaWxsPSIjZjRlOWQ1Ii8+PGNpcmNsZSBjeD0iOTgiIGN5PSI2MiIgcj0iMyIgZmlsbD0iI2Y0ZTlkNSIvPjwvc3ZnPg==",
+      "width": 160,
+      "height": 100,
+      "kind": "table",
+      "interactive": false,
+      "visual": {
+        "scale": 100,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      }
+    }
+  }
+}

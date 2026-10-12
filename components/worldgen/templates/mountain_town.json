@@ -1,0 +1,746 @@
+{
+  "ambient_pool": [
+    {
+      "end_hour": 10,
+      "event_type": "onsen_steaming",
+      "slot": "hot_spring",
+      "start_hour": 6,
+      "summaries": [
+        "汤屋的烟囱升起浓白的汤烟",
+        "露天池正在换水清扫"
+      ]
+    },
+    {
+      "end_hour": 11,
+      "event_type": "trail_check",
+      "slot": "hiking_trail",
+      "start_hour": 6,
+      "summaries": [
+        "登山道入口贴出了新的熊出没警示",
+        "步道的木桥刚做过检修"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "slot": "school",
+      "start_hour": 0,
+      "summaries": [
+        "公告栏贴出了冬季滑雪课的分组",
+        "校门口的告示板换了新通知"
+      ]
+    },
+    {
+      "end_hour": 21,
+      "event_type": "street_lantern",
+      "slot": "street",
+      "start_hour": 16,
+      "summaries": [
+        "汤街的灯笼正在逐一点亮",
+        "街道石阶被扫得干干净净"
+      ]
+    },
+    {
+      "end_hour": 14,
+      "event_type": "inn_linens",
+      "slot": "inn",
+      "start_hour": 9,
+      "summaries": [
+        "旅馆的庭院晒满了替换的浴衣",
+        "玄关的木牌更新了空房情报"
+      ]
+    },
+    {
+      "end_hour": 22,
+      "event_type": "store_evening_sale",
+      "slot": "convenience_store",
+      "start_hour": 18,
+      "summaries": [
+        "晚间饭团打折",
+        "补货车正在卸登山用品"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "slot": "home",
+      "start_hour": 0,
+      "summaries": [
+        "窗外传来川流声与鸟鸣",
+        "远处的汤烟被风吹散"
+      ]
+    }
+  ],
+  "fixed_slots": [
+    {
+      "affordances": [
+        [
+          "REST",
+          "在这里休息"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "USE_PHONE",
+          "在这里使用手机"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "坡道高处的研究小屋，窗台上晾着浴衣，夜里能听见川流声。"
+      ],
+      "id": "home",
+      "kind": "home",
+      "names": [
+        "汤泽的住居"
+      ],
+      "open_hour": null,
+      "slot": "home",
+      "weekdays_only": false,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "ATTEND_CLASS",
+          "在学校上课"
+        ],
+        [
+          "SELF_STUDY",
+          "在学校自习"
+        ],
+        [
+          "STAY_AT_SCHOOL",
+          "留在学校"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "山间小镇的学校，冬天教室里有暖炉，操场上能望见对面的雪脊。"
+      ],
+      "id": "school",
+      "kind": "school",
+      "names": [
+        "翠泽学校",
+        "峰谷学园",
+        "岭上学校"
+      ],
+      "open_hour": 8,
+      "slot": "school",
+      "weekdays_only": true,
+      "zone": "education"
+    }
+  ],
+  "flavor_pool": {
+    "festival_candidates": [
+      "冬日的汤祭点灯式",
+      "初夏的登山感谢祭",
+      "秋末的丰收与温泉感谢祭"
+    ],
+    "street_flavor": [
+      "路边的石阶被磨得发亮",
+      "排水沟里流着微微发热的泉水",
+      "墙根摆着一排接泉水的旧水桶"
+    ],
+    "world_intro": [
+      "一条沿川而建的温泉小镇，汤烟常年飘在坡道上空。",
+      "被翠岭环抱的小镇，登山客与疗养客构成了一年四季的潮汐。",
+      "安静的汤宿小镇，石阶与灯笼是这里的日常风景。"
+    ],
+    "zone_flavor": [
+      "石阶缝隙里长着苔藓",
+      "竹篓里装着刚采的山菜",
+      "温泉的热气在坡道尽头缓缓升起",
+      "木牌上用粉笔写着今日的雪况",
+      "川面上漂着几片早落的红叶",
+      "屋檐挂着防雪的竹帘",
+      "旅馆屋檐下挂着登山杖和防滑链",
+      "汤烟在冷空气中格外显眼",
+      "坡道旁的木凳上刻着常客的名字",
+      "店里卖的手织毛袜是邻居婆婆做的",
+      "神社前的石灯笼长着青苔",
+      "山风穿过街道时灯笼轻轻摇晃"
+    ]
+  },
+  "npc_name_pool": {
+    "family": [
+      "汤川",
+      "峰岸",
+      "岳本",
+      "翠川",
+      "岭田",
+      "泽口",
+      "峠田",
+      "川岛"
+    ],
+    "given_adult": [
+      "美津",
+      "健二",
+      "和子",
+      "达夫",
+      "千代",
+      "茂",
+      "凉子",
+      "修"
+    ],
+    "given_minor": [
+      "湊",
+      "雪乃",
+      "岳人",
+      "小百合",
+      "岭太",
+      "梓"
+    ]
+  },
+  "npc_role_pool": [
+    {
+      "age": "adult",
+      "end_hour": 21,
+      "role": "汤屋的看板娘",
+      "slot": "hot_spring",
+      "start_hour": 11,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 20,
+      "role": "旅馆主人",
+      "slot": "inn",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 19,
+      "role": "咖啡屋店主",
+      "slot": "cafe",
+      "start_hour": 10,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 22,
+      "role": "便利店店员",
+      "slot": "convenience_store",
+      "start_hour": 9,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 16,
+      "role": "面包房师傅",
+      "slot": "bakery",
+      "start_hour": 7,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 18,
+      "role": "图书馆管理员",
+      "slot": "library",
+      "start_hour": 9,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 18,
+      "role": "工艺店的匠人",
+      "slot": "craft_shop",
+      "start_hour": 10,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 16,
+      "role": "学校的学生",
+      "slot": "school",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 16,
+      "role": "同班同学",
+      "slot": "school",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  ],
+  "object_pool": [
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "床",
+      "note": "厚实的山区木床。",
+      "object_id": "bed_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "书桌",
+      "note": "能望见山谷的书桌。",
+      "object_id": "desk_home"
+    },
+    {
+      "kind": "item",
+      "location": "home",
+      "name": "暖炉灯",
+      "note": "暖炉边的旧灯。",
+      "object_id": "lamp_home"
+    }
+  ],
+  "slot_pool": [
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "看看汤屋的公告"
+        ],
+        [
+          "SIT",
+          "在休息处坐一会儿"
+        ]
+      ],
+      "close_hour": [
+        21,
+        23
+      ],
+      "descriptions": [
+        "老字号汤屋，露天池正对山谷，入夜汤烟沿坡道飘上半条街。"
+      ],
+      "id": "hot_spring",
+      "kind": "public",
+      "names": [
+        "{world_name}温泉",
+        "翠泽汤屋",
+        "峠之汤"
+      ],
+      "open_hour": [
+        11,
+        13
+      ],
+      "slot": "hot_spring",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "onsen"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在旅馆门厅看看"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "家传三代的旅馆，玄关摆着主人手写的登山路线图。"
+      ],
+      "id": "inn",
+      "kind": "store",
+      "names": [
+        "{world_name}旅馆",
+        "汤宿峰屋",
+        "川端旅馆"
+      ],
+      "open_hour": 8,
+      "slot": "inn",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "onsen"
+    },
+    {
+      "affordances": [
+        [
+          "SIT",
+          "在店里坐下"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ]
+      ],
+      "close_hour": [
+        19,
+        21
+      ],
+      "descriptions": [
+        "坡道转角的咖啡屋，冬天玻璃窗上全是雾气，常客用粉笔在板上看雪况。"
+      ],
+      "id": "cafe",
+      "kind": "cafe",
+      "names": [
+        "{prefix}珈琲",
+        "汤烟咖啡",
+        "岭上咖啡屋"
+      ],
+      "open_hour": [
+        9,
+        10
+      ],
+      "slot": "cafe",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在便利店看看"
+        ]
+      ],
+      "close_hour": 23,
+      "descriptions": [
+        "山上唯一的便利店，货架上有登山用品和暖宝宝。"
+      ],
+      "id": "convenience_store",
+      "kind": "store",
+      "names": [
+        "{world_name}便利店",
+        "汤泽便利店"
+      ],
+      "open_hour": 7,
+      "slot": "convenience_store",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在步道上散步"
+        ],
+        [
+          "LOOK_AROUND",
+          "眺望山谷"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "老练登山客喜欢的步道，入口的告示板记录着最近的熊出没情报。"
+      ],
+      "id": "hiking_trail",
+      "kind": "park",
+      "names": [
+        "{world_name}登山道",
+        "翠岳步道"
+      ],
+      "open_hour": 5,
+      "slot": "hiking_trail",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "onsen"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在神社院子里走走"
+        ],
+        [
+          "PRAY",
+          "在正殿前合掌"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "守护登山的神社，绘马上写着求好天气的愿望。"
+      ],
+      "id": "shrine",
+      "kind": "shrine",
+      "names": [
+        "{world_name}神社",
+        "峰宫",
+        "翠山神社"
+      ],
+      "open_hour": 6,
+      "slot": "shrine",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "SELF_STUDY",
+          "在这里自习"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "小镇图书馆，山岳与温泉疗养的书架占了整整一面墙。"
+      ],
+      "id": "library",
+      "kind": "library",
+      "names": [
+        "{world_name}图书馆",
+        "翠泽文库"
+      ],
+      "open_hour": 9,
+      "slot": "library",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "education"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在面包房看看"
+        ]
+      ],
+      "close_hour": [
+        18,
+        19
+      ],
+      "descriptions": [
+        "登山客的补给站，红豆面包配牛奶是最受欢迎的组合。"
+      ],
+      "id": "bakery",
+      "kind": "store",
+      "names": [
+        "{world_name}面包房",
+        "岳麦面包店"
+      ],
+      "open_hour": [
+        7,
+        8
+      ],
+      "slot": "bakery",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "眺望汤街"
+        ],
+        [
+          "SIT",
+          "在长椅上坐一会儿"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "能看到整条汤街的地方，长椅被晒得温热。"
+      ],
+      "id": "viewpoint",
+      "kind": "public",
+      "names": [
+        "{world_name}观景台",
+        "翠岭展望台"
+      ],
+      "open_hour": null,
+      "slot": "viewpoint",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "onsen"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在工艺店看看"
+        ]
+      ],
+      "close_hour": 19,
+      "descriptions": [
+        "卖木雕与手工陶器的店，店主偶尔现场削木头。"
+      ],
+      "id": "craft_shop",
+      "kind": "store",
+      "names": [
+        "{world_name}工艺店",
+        "汤泽民艺店"
+      ],
+      "open_hour": 10,
+      "slot": "craft_shop",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在公园散步"
+        ],
+        [
+          "SIT",
+          "在长椅上坐一会儿"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": 22,
+      "descriptions": [
+        "川边的小公园，有村妇们洗菜用的旧石阶。"
+      ],
+      "id": "park",
+      "kind": "park",
+      "names": [
+        "{world_name}公园",
+        "川端绿地"
+      ],
+      "open_hour": 6,
+      "slot": "park",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "residential"
+    }
+  ],
+  "street_names": [
+    "温泉通",
+    "峠坂",
+    "汤泽小路",
+    "翠岭道",
+    "川端町"
+  ],
+  "street_slot": {
+    "affordances": [
+      [
+        "WALK",
+        "在街道上散步"
+      ],
+      [
+        "LOOK_AROUND",
+        "在这里看看周围"
+      ]
+    ],
+    "kind": "street",
+    "slot": "street"
+  },
+  "theme_id": "mountain_town",
+  "theme_name": "山间温泉小镇",
+  "weather": [
+    {
+      "condition": "clear",
+      "description": "晴朗"
+    },
+    {
+      "condition": "mountain_fog",
+      "description": "山雾"
+    },
+    {
+      "condition": "light_snow",
+      "description": "小雪"
+    },
+    {
+      "condition": "cloudy",
+      "description": "多云"
+    }
+  ],
+  "world_name_fragments": {
+    "prefix": [
+      "汤",
+      "峰",
+      "岳",
+      "翠",
+      "岭",
+      "峡"
+    ],
+    "suffix": [
+      "泽",
+      "谷",
+      "坂",
+      "原",
+      "宿",
+      "川"
+    ]
+  },
+  "zones": [
+    {
+      "color": "#8fae9a",
+      "name": "温泉宿场区",
+      "zone_id": "residential"
+    },
+    {
+      "color": "#c7a3a3",
+      "name": "汤烟区",
+      "zone_id": "onsen"
+    },
+    {
+      "color": "#c7b76f",
+      "name": "汤街",
+      "zone_id": "town"
+    },
+    {
+      "color": "#a98fc7",
+      "name": "学区",
+      "zone_id": "education"
+    }
+  ]
+}

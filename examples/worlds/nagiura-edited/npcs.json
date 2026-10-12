@@ -1,0 +1,71 @@
+{
+  "npcs": [
+    {
+      "age_classification": "adult",
+      "display_name": "藤原美绪",
+      "home_base_area": "bookstore",
+      "npc_id": "coastal_npc_bookstore_01",
+      "public_description": "凪浦的书店店员。",
+      "public_role": "书店店员",
+      "windows": [
+        {
+          "end_minute": 1140,
+          "location_id": "bookstore",
+          "start_minute": 600,
+          "weekdays": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "minor",
+      "display_name": "森下悠斗",
+      "home_base_area": "school",
+      "npc_id": "coastal_npc_school_02",
+      "public_description": "凪浦的学校的另一名学生。",
+      "public_role": "学校的另一名学生",
+      "windows": [
+        {
+          "end_minute": 1080,
+          "location_id": "school",
+          "start_minute": 720,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "高桥千惠",
+      "home_base_area": "library",
+      "npc_id": "coastal_npc_library_03",
+      "public_description": "凪浦的图书馆管理员。",
+      "public_role": "图书馆管理员",
+      "windows": [
+        {
+          "end_minute": 1080,
+          "location_id": "library",
+          "start_minute": 540,
+          "weekdays": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    }
+  ],
+  "schema_version": "worldgen.npcs.v1"
+}
