@@ -329,7 +329,17 @@ class WorldTimelineStore:
 
 
 def is_supported_world_id(value: Any) -> bool:
-    return isinstance(value, str) and value in SUPPORTED_WORLD_IDS
+    """支持内建两代 world_id，以及当前活动世界包的 world_id（WorldGen）。"""
+    if not isinstance(value, str):
+        return False
+    if value in SUPPORTED_WORLD_IDS:
+        return True
+    try:
+        import world_runtime_data as wrd
+
+        return value == wrd.active_world().world_id
+    except Exception:
+        return False
 
 
 def build_initial_timeline(world_id: str = WORLD_ID) -> dict[str, Any]:

@@ -1,0 +1,2681 @@
+{
+  "assets": {},
+  "navigation": {
+    "bakery": {
+      "areas": [
+        {
+          "area_id": "shop_floor",
+          "kind": "sales",
+          "name": "店面"
+        }
+      ],
+      "connections": [],
+      "entrance": "shop_floor",
+      "furniture_map": {
+        "shop_floor": [
+          "bakery_cabinet01",
+          "bakery_cabinet02",
+          "bakery_cabinet03",
+          "bakery_counter04",
+          "bakery_dispenser05",
+          "bakery_plant06"
+        ]
+      }
+    },
+    "cafe": {
+      "areas": [
+        {
+          "area_id": "bar",
+          "kind": "counter",
+          "name": "吧台区"
+        },
+        {
+          "area_id": "seating",
+          "kind": "seating",
+          "name": "座位区"
+        }
+      ],
+      "connections": [
+        {
+          "from": "bar",
+          "to": "seating"
+        }
+      ],
+      "entrance": "bar",
+      "furniture_map": {
+        "bar": [
+          "cafe_counter01",
+          "cafe_counter02",
+          "cafe_machine03",
+          "cafe_cup04",
+          "cafe_lamp12"
+        ],
+        "seating": [
+          "cafe_table05",
+          "cafe_chair06",
+          "cafe_table07",
+          "cafe_chair08",
+          "cafe_table09",
+          "cafe_chair10",
+          "cafe_plant11"
+        ]
+      }
+    },
+    "craft_shop": {
+      "areas": [
+        {
+          "area_id": "shop_floor",
+          "kind": "sales",
+          "name": "店面"
+        }
+      ],
+      "connections": [],
+      "entrance": "shop_floor",
+      "furniture_map": {
+        "shop_floor": [
+          "craft_shop_cabinet01",
+          "craft_shop_cabinet02",
+          "craft_shop_counter03",
+          "craft_shop_dispenser04",
+          "craft_shop_plant05"
+        ]
+      }
+    },
+    "home": {
+      "areas": [
+        {
+          "area_id": "living",
+          "kind": "living",
+          "name": "客厅"
+        },
+        {
+          "area_id": "bedroom",
+          "kind": "bedroom",
+          "name": "卧室"
+        },
+        {
+          "area_id": "kitchen",
+          "kind": "kitchen",
+          "name": "厨房"
+        }
+      ],
+      "connections": [
+        {
+          "from": "living",
+          "to": "bedroom"
+        },
+        {
+          "from": "living",
+          "to": "kitchen"
+        }
+      ],
+      "entrance": "living",
+      "furniture_map": {
+        "bedroom": [
+          "home_bed01",
+          "home_wardrobe02",
+          "home_lamp03"
+        ],
+        "kitchen": [
+          "home_cabinet07",
+          "home_dispenser08"
+        ],
+        "living": [
+          "home_lamp04",
+          "home_table05",
+          "home_chair06"
+        ]
+      }
+    },
+    "hot_spring": {
+      "areas": [
+        {
+          "area_id": "hall",
+          "kind": "hall",
+          "name": "门厅"
+        }
+      ],
+      "connections": [],
+      "entrance": "hall",
+      "furniture_map": {
+        "hall": [
+          "hot_spring_chair01",
+          "hot_spring_chair02",
+          "hot_spring_chair03",
+          "hot_spring_table04",
+          "hot_spring_cabinet05",
+          "hot_spring_plant06",
+          "hot_spring_lamp07"
+        ]
+      }
+    },
+    "inn": {
+      "areas": [
+        {
+          "area_id": "shop_floor",
+          "kind": "sales",
+          "name": "店面"
+        }
+      ],
+      "connections": [],
+      "entrance": "shop_floor",
+      "furniture_map": {
+        "shop_floor": [
+          "inn_cabinet01",
+          "inn_cabinet02",
+          "inn_counter03",
+          "inn_dispenser04",
+          "inn_plant05"
+        ]
+      }
+    },
+    "library": {
+      "areas": [
+        {
+          "area_id": "reading_hall",
+          "kind": "reading",
+          "name": "阅览区"
+        },
+        {
+          "area_id": "stacks",
+          "kind": "stacks",
+          "name": "书库区"
+        }
+      ],
+      "connections": [
+        {
+          "from": "reading_hall",
+          "to": "stacks"
+        }
+      ],
+      "entrance": "reading_hall",
+      "furniture_map": {
+        "reading_hall": [
+          "library_table04",
+          "library_chair05",
+          "library_table06",
+          "library_chair07",
+          "library_lamp08"
+        ],
+        "stacks": [
+          "library_shelf01",
+          "library_shelf02",
+          "library_shelf03"
+        ]
+      }
+    },
+    "school": {
+      "areas": [
+        {
+          "area_id": "classroom",
+          "kind": "classroom",
+          "name": "教室"
+        }
+      ],
+      "connections": [],
+      "entrance": "classroom",
+      "furniture_map": {
+        "classroom": [
+          "school_podium01",
+          "school_desk02",
+          "school_chair03",
+          "school_desk04",
+          "school_chair05",
+          "school_desk06",
+          "school_chair07",
+          "school_desk08",
+          "school_chair09",
+          "school_desk10",
+          "school_chair11",
+          "school_desk12",
+          "school_chair13",
+          "school_desk14",
+          "school_chair15",
+          "school_desk16",
+          "school_chair17",
+          "school_desk18",
+          "school_chair19",
+          "school_plant20"
+        ]
+      }
+    },
+    "shrine": {
+      "areas": [
+        {
+          "area_id": "hall",
+          "kind": "hall",
+          "name": "门厅"
+        }
+      ],
+      "connections": [],
+      "entrance": "hall",
+      "furniture_map": {
+        "hall": [
+          "shrine_chair01",
+          "shrine_chair02",
+          "shrine_chair03",
+          "shrine_table04",
+          "shrine_cabinet05",
+          "shrine_plant06",
+          "shrine_lamp07"
+        ]
+      }
+    },
+    "viewpoint": {
+      "areas": [
+        {
+          "area_id": "hall",
+          "kind": "hall",
+          "name": "门厅"
+        }
+      ],
+      "connections": [],
+      "entrance": "hall",
+      "furniture_map": {
+        "hall": [
+          "viewpoint_chair01",
+          "viewpoint_chair02",
+          "viewpoint_chair03",
+          "viewpoint_table04",
+          "viewpoint_cabinet05",
+          "viewpoint_plant06",
+          "viewpoint_lamp07"
+        ]
+      }
+    }
+  },
+  "placements": {
+    "bakery_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "bakery_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    "bakery_cabinet03": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 22
+    },
+    "bakery_counter04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    "bakery_dispenser05": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    "bakery_plant06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    "cafe_chair06": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 67,
+      "y": 72
+    },
+    "cafe_chair08": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 57
+    },
+    "cafe_chair10": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 52
+    },
+    "cafe_counter01": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 17
+    },
+    "cafe_counter02": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 17
+    },
+    "cafe_cup04": {
+      "actions": [
+        "pick_up",
+        "place",
+        "drink"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "drink": {
+          "hydration_gain": 20
+        }
+      },
+      "capacity": 0,
+      "initial_status": "empty",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cup",
+      "portable": true,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 17
+    },
+    "cafe_lamp12": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 27
+    },
+    "cafe_machine03": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 17
+    },
+    "cafe_plant11": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 87
+    },
+    "cafe_table05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 67
+    },
+    "cafe_table07": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 57
+    },
+    "cafe_table09": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 22,
+      "y": 52
+    },
+    "craft_shop_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "craft_shop_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    "craft_shop_counter03": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    "craft_shop_dispenser04": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    "craft_shop_plant05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    "home_bed01": {
+      "actions": [
+        "rest"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "rest": {
+          "energy_gain": 15,
+          "minutes": 30
+        }
+      },
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "bed",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 17
+    },
+    "home_cabinet07": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 77
+    },
+    "home_chair06": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 57
+    },
+    "home_dispenser08": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 72,
+      "y": 67
+    },
+    "home_lamp03": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 32
+    },
+    "home_lamp04": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 47
+    },
+    "home_table05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 62
+    },
+    "home_wardrobe02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 82,
+      "y": 17
+    },
+    "hot_spring_cabinet05": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    "hot_spring_chair01": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "hot_spring_chair02": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    "hot_spring_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    "hot_spring_lamp07": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    "hot_spring_plant06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    "hot_spring_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 52,
+      "y": 57
+    },
+    "inn_cabinet01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "inn_cabinet02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    "inn_counter03": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    "inn_dispenser04": {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    "inn_plant05": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    "library_chair05": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 57
+    },
+    "library_chair07": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 52
+    },
+    "library_lamp08": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 27
+    },
+    "library_shelf01": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 22
+    },
+    "library_shelf02": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 22
+    },
+    "library_shelf03": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 22
+    },
+    "library_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 52
+    },
+    "library_table06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 47
+    },
+    "school_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 42
+    },
+    "school_chair05": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 42
+    },
+    "school_chair07": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 42
+    },
+    "school_chair09": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 57
+    },
+    "school_chair11": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 57
+    },
+    "school_chair13": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 57
+    },
+    "school_chair15": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 72
+    },
+    "school_chair17": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 72
+    },
+    "school_chair19": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 72
+    },
+    "school_desk02": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 37
+    },
+    "school_desk04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 37
+    },
+    "school_desk06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 37
+    },
+    "school_desk08": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 52
+    },
+    "school_desk10": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 52
+    },
+    "school_desk12": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 52
+    },
+    "school_desk14": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 67
+    },
+    "school_desk16": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 67
+    },
+    "school_desk18": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 67
+    },
+    "school_plant20": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 17
+    },
+    "school_podium01": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 17
+    },
+    "shrine_cabinet05": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    "shrine_chair01": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "shrine_chair02": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    "shrine_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    "shrine_lamp07": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    "shrine_plant06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    "shrine_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 47
+    },
+    "viewpoint_cabinet05": {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    "viewpoint_chair01": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    "viewpoint_chair02": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    "viewpoint_chair03": {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    "viewpoint_lamp07": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    "viewpoint_plant06": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    "viewpoint_table04": {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 42
+    }
+  },
+  "schema_version": "worldgen.scene.v1",
+  "spaces": {
+    "bakery": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#ece7dc",
+          "h": 100,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "cafe": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 11,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e8ddd0",
+          "h": 50,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#efe6da",
+          "h": 55,
+          "id": "f2",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 45
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "craft_shop": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#ece7dc",
+          "h": 100,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "home": {
+      "doors": [
+        {
+          "actions": [
+            "open_door",
+            "close_door"
+          ],
+          "color": "#bd976e",
+          "id": "w1-door",
+          "length": 15,
+          "offset": 35,
+          "state": "closed",
+          "wall_id": "w1"
+        },
+        {
+          "actions": [
+            "open_door",
+            "close_door"
+          ],
+          "color": "#bd976e",
+          "id": "w2-door",
+          "length": 15,
+          "offset": 20,
+          "state": "closed",
+          "wall_id": "w2"
+        }
+      ],
+      "enabled": true,
+      "entry": {
+        "x": 8,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#f0e3d3",
+          "h": 45,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#e9e2d3",
+          "h": 55,
+          "id": "f2",
+          "texture": "planks",
+          "w": 55,
+          "x": 0,
+          "y": 45
+        },
+        {
+          "asset_id": null,
+          "color": "#dbe5e2",
+          "h": 55,
+          "id": "f3",
+          "texture": "tiles",
+          "w": 45,
+          "x": 55,
+          "y": 45
+        }
+      ],
+      "walls": [
+        {
+          "color": "#8c8a7d",
+          "id": "w1",
+          "width": 7,
+          "x1": 0,
+          "x2": 100,
+          "y1": 45,
+          "y2": 45
+        },
+        {
+          "color": "#8c8a7d",
+          "id": "w2",
+          "width": 7,
+          "x1": 55,
+          "x2": 55,
+          "y1": 45,
+          "y2": 100
+        }
+      ],
+      "windows": []
+    },
+    "hot_spring": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e7e3d8",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "inn": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#ece7dc",
+          "h": 100,
+          "id": "f1",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "library": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e6e6da",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "school": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 3,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#ece6da",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "asset_id": null,
+          "color": "#dfe4e8",
+          "h": 15,
+          "id": "f2",
+          "texture": "tiles",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [
+        {
+          "color": "#3d4a5c",
+          "id": "w1",
+          "width": 5,
+          "x1": 30,
+          "x2": 60,
+          "y1": 10,
+          "y2": 10
+        }
+      ],
+      "windows": []
+    },
+    "shrine": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e7e3d8",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    },
+    "viewpoint": {
+      "doors": [],
+      "enabled": true,
+      "entry": {
+        "x": 10,
+        "y": 17
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e7e3d8",
+          "h": 100,
+          "id": "f1",
+          "texture": "planks",
+          "w": 100,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [],
+      "windows": []
+    }
+  }
+}

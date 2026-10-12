@@ -1,0 +1,172 @@
+{
+  "npcs": [
+    {
+      "age_classification": "minor",
+      "display_name": "穗积花音",
+      "home_base_area": "school",
+      "npc_id": "rural_npc_school_01",
+      "public_description": "泽乡的同班同学。",
+      "public_role": "同班同学",
+      "windows": [
+        {
+          "end_minute": 960,
+          "location_id": "school",
+          "start_minute": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "minor",
+      "display_name": "田边稔",
+      "home_base_area": "school",
+      "npc_id": "rural_npc_school_02",
+      "public_description": "泽乡的村里的学生。",
+      "public_role": "村里的学生",
+      "windows": [
+        {
+          "end_minute": 960,
+          "location_id": "school",
+          "start_minute": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "桥本绢代",
+      "home_base_area": "farmers_market",
+      "npc_id": "rural_npc_farmers_market_03",
+      "public_description": "泽乡的早市菜摊的大婶。",
+      "public_role": "早市菜摊的大婶",
+      "windows": [
+        {
+          "end_minute": 660,
+          "location_id": "farmers_market",
+          "start_minute": 360,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        },
+        {
+          "end_minute": 780,
+          "location_id": "street_2",
+          "start_minute": 720,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "原田绢代",
+      "home_base_area": "library",
+      "npc_id": "rural_npc_library_04",
+      "public_description": "泽乡的图书室管理员。",
+      "public_role": "图书室管理员",
+      "windows": [
+        {
+          "end_minute": 1020,
+          "location_id": "library",
+          "start_minute": 540,
+          "weekdays": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        },
+        {
+          "end_minute": 1020,
+          "location_id": "cafe",
+          "start_minute": 660,
+          "weekdays": [
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "泽井正雄",
+      "home_base_area": "community_center",
+      "npc_id": "rural_npc_community_center_05",
+      "public_description": "泽乡的公民馆的事务员。",
+      "public_role": "公民馆的事务员",
+      "windows": [
+        {
+          "end_minute": 1080,
+          "location_id": "community_center",
+          "start_minute": 540,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "桥本和江",
+      "home_base_area": "cafe",
+      "npc_id": "rural_npc_cafe_06",
+      "public_description": "泽乡的茶屋的老板娘。",
+      "public_role": "茶屋的老板娘",
+      "windows": [
+        {
+          "end_minute": 1020,
+          "location_id": "cafe",
+          "start_minute": 600,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        },
+        {
+          "end_minute": 1140,
+          "location_id": "street_3",
+          "start_minute": 1080,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    }
+  ],
+  "schema_version": "worldgen.npcs.v1"
+}

@@ -1,0 +1,10 @@
+{
+  "description": "岭谷——山间温泉小镇主题的生成世界。",
+  "generator_version": "worldgen.v0.1",
+  "name": "岭谷",
+  "schema_version": "worldgen.world.v1",
+  "seed": 424242,
+  "theme": "mountain_town",
+  "timezone": "Asia/Tokyo",
+  "world_id": "mountain_town_424242"
+}

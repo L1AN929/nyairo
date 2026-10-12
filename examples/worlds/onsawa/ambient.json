@@ -1,0 +1,75 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "location_id": "home",
+      "start_hour": 0,
+      "summary": "窗外传来川流声与鸟鸣"
+    },
+    {
+      "end_hour": 14,
+      "event_type": "inn_linens",
+      "location_id": "inn",
+      "start_hour": 9,
+      "summary": "玄关的木牌更新了空房情报"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "location_id": "school",
+      "start_hour": 0,
+      "summary": "校门口的告示板换了新通知"
+    },
+    {
+      "end_hour": 10,
+      "event_type": "onsen_steaming",
+      "location_id": "hot_spring",
+      "start_hour": 6,
+      "summary": "露天池正在换水清扫"
+    },
+    {
+      "end_hour": 21,
+      "event_type": "street_lantern",
+      "location_id": "street_3",
+      "start_hour": 16,
+      "summary": "街道石阶被扫得干干净净"
+    },
+    {
+      "end_hour": 11,
+      "event_type": "trail_check",
+      "location_id": "hiking_trail",
+      "start_hour": 6,
+      "summary": "步道的木桥刚做过检修"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_981b5175",
+      "location_id": "shrine",
+      "start_hour": 0,
+      "summary": "每周日清晨在神社前空地举办的山货蔬菜早市。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_eecec097",
+      "location_id": "hiking_trail",
+      "start_hour": 0,
+      "summary": "每月初各街坊联合进行的公共水渠与汤池清扫日。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_4303a5ae",
+      "location_id": "hiking_trail",
+      "start_hour": 0,
+      "summary": "每双周在社区中心开展的药草茶与土产交流会。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_a3548439",
+      "location_id": "hiking_trail",
+      "start_hour": 0,
+      "summary": "每月十五傍晚沿溪边散步巡查的日常祈安活动。"
+    }
+  ]
+}

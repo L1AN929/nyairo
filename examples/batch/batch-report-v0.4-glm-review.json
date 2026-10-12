@@ -1,0 +1,1266 @@
+{
+  "glm_review": {
+    "note": "模型评价仅作辅助，结构质检结论不受影响",
+    "reviews": [
+      {
+        "review": "{\n  \"evaluation\": \"小镇具鲜明日系海滨特色；建筑用途与市井风貌契合。但存在明显不合理：环境文本机械复用严重，如海滩场景突兀出现十字路口与屋檐，多处共享相同细节导致空间界限割裂混乱。\"\n}",
+        "usage": {
+          "completion_tokens": 719,
+          "model": "gemini-3.8-flash-n",
+          "prompt_tokens": 447,
+          "total_tokens": 1166
+        },
+        "world_id": "coastal_town_500001"
+      },
+      {
+        "review": "{\n  \"comment\": \"日式海滨小镇特色鲜明，生活气息浓郁；建筑用途与环境细节高度契合。逻辑上无明显不合理之处，整体真实自然。唯独部分环境碎片（如褪色路面、吉祥物井盖、老照相馆）在多处机械式重复，略显模板化痕迹。\"\n}",
+        "usage": {
+          "completion_tokens": 752,
+          "model": "gemini-3.8-flash-n",
+          "prompt_tokens": 450,
+          "total_tokens": 1202
+        },
+        "world_id": "coastal_town_500002"
+      },
+      {
+        "review": "{\n  \"evaluation\": \"具备鲜明的日式海滨小镇特色；建筑本身用途与氛围细节高度匹配，生活气息浓厚；但存在明显的文本复用与场景错位问题（如书店条目中突兀插入了杂货店冰柜与防波堤渔网等描述），导致局部空间逻辑不够合理。\"\n}",
+        "usage": {
+          "completion_tokens": 571,
+          "model": "gemini-3.8-flash-n",
+          "prompt_tokens": 457,
+          "total_tokens": 1028
+        },
+        "world_id": "coastal_town_500003"
+      }
+    ]
+  },
+  "kind": "worldgen_batch_report",
+  "report_path": "/tmp/wg-batch5/batch-report.json",
+  "seeds": [
+    500001,
+    500002,
+    500003,
+    500004,
+    500005,
+    500006,
+    500007,
+    500008,
+    500009,
+    500010
+  ],
+  "summary": {
+    "issues": 0,
+    "ok": 40,
+    "seeds_per_theme": 10,
+    "themes": 4,
+    "total": 40
+  },
+  "themes": [
+    "coastal_town",
+    "residential_town",
+    "mountain_town",
+    "rural_farming"
+  ],
+  "worlds": [
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500001,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 10,
+        "locations": 14,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500001"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500002,
+      "status": "ok",
+      "structure": {
+        "edges": 17,
+        "interiors": 13,
+        "locations": 18,
+        "navigation_buildings": 13,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500002"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500003,
+      "status": "ok",
+      "structure": {
+        "edges": 19,
+        "interiors": 13,
+        "locations": 18,
+        "navigation_buildings": 13,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500003"
+    },
+    {
+      "consistency": {
+        "checks": 252,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500004,
+      "status": "ok",
+      "structure": {
+        "edges": 14,
+        "interiors": 10,
+        "locations": 14,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500004"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500005,
+      "status": "ok",
+      "structure": {
+        "edges": 17,
+        "interiors": 13,
+        "locations": 17,
+        "navigation_buildings": 13,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500005"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.07
+      },
+      "rc9_loadable": true,
+      "seed": 500006,
+      "status": "ok",
+      "structure": {
+        "edges": 14,
+        "interiors": 10,
+        "locations": 15,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500006"
+    },
+    {
+      "consistency": {
+        "checks": 210,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500007,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 10,
+        "locations": 13,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500007"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.12
+      },
+      "rc9_loadable": true,
+      "seed": 500008,
+      "status": "ok",
+      "structure": {
+        "edges": 17,
+        "interiors": 13,
+        "locations": 17,
+        "navigation_buildings": 13,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500008"
+    },
+    {
+      "consistency": {
+        "checks": 210,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.07
+      },
+      "rc9_loadable": true,
+      "seed": 500009,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 9,
+        "locations": 14,
+        "navigation_buildings": 9,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500009"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.11
+      },
+      "rc9_loadable": true,
+      "seed": 500010,
+      "status": "ok",
+      "structure": {
+        "edges": 19,
+        "interiors": 13,
+        "locations": 18,
+        "navigation_buildings": 13,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "coastal_town",
+      "validation": "passed",
+      "world_id": "coastal_town_500010"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500001,
+      "status": "ok",
+      "structure": {
+        "edges": 16,
+        "interiors": 12,
+        "locations": 16,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500001"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500002,
+      "status": "ok",
+      "structure": {
+        "edges": 17,
+        "interiors": 12,
+        "locations": 16,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500002"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.06
+      },
+      "rc9_loadable": true,
+      "seed": 500003,
+      "status": "ok",
+      "structure": {
+        "edges": 17,
+        "interiors": 12,
+        "locations": 17,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 6,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500003"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.12
+      },
+      "rc9_loadable": true,
+      "seed": 500004,
+      "status": "ok",
+      "structure": {
+        "edges": 18,
+        "interiors": 12,
+        "locations": 17,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500004"
+    },
+    {
+      "consistency": {
+        "checks": 210,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500005,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 10,
+        "locations": 13,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500005"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.12
+      },
+      "rc9_loadable": true,
+      "seed": 500006,
+      "status": "ok",
+      "structure": {
+        "edges": 18,
+        "interiors": 12,
+        "locations": 17,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500006"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.06
+      },
+      "rc9_loadable": true,
+      "seed": 500007,
+      "status": "ok",
+      "structure": {
+        "edges": 17,
+        "interiors": 12,
+        "locations": 17,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 6,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500007"
+    },
+    {
+      "consistency": {
+        "checks": 210,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.08
+      },
+      "rc9_loadable": true,
+      "seed": 500008,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 9,
+        "locations": 13,
+        "navigation_buildings": 9,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500008"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.06
+      },
+      "rc9_loadable": true,
+      "seed": 500009,
+      "status": "ok",
+      "structure": {
+        "edges": 16,
+        "interiors": 12,
+        "locations": 17,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500009"
+    },
+    {
+      "consistency": {
+        "checks": 273,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.19
+      },
+      "rc9_loadable": true,
+      "seed": 500010,
+      "status": "ok",
+      "structure": {
+        "edges": 17,
+        "interiors": 12,
+        "locations": 16,
+        "navigation_buildings": 12,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "residential_town",
+      "validation": "passed",
+      "world_id": "residential_town_500010"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500001,
+      "status": "ok",
+      "structure": {
+        "edges": 14,
+        "interiors": 10,
+        "locations": 15,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500001"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500002,
+      "status": "ok",
+      "structure": {
+        "edges": 16,
+        "interiors": 10,
+        "locations": 15,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500002"
+    },
+    {
+      "consistency": {
+        "checks": 252,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500003,
+      "status": "ok",
+      "structure": {
+        "edges": 16,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500003"
+    },
+    {
+      "consistency": {
+        "checks": 252,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500004,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 11,
+        "locations": 16,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500004"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.14
+      },
+      "rc9_loadable": true,
+      "seed": 500005,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 10,
+        "locations": 14,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 6,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500005"
+    },
+    {
+      "consistency": {
+        "checks": 252,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.13
+      },
+      "rc9_loadable": true,
+      "seed": 500006,
+      "status": "ok",
+      "structure": {
+        "edges": 16,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 6,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500006"
+    },
+    {
+      "consistency": {
+        "checks": 210,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.15
+      },
+      "rc9_loadable": true,
+      "seed": 500007,
+      "status": "ok",
+      "structure": {
+        "edges": 12,
+        "interiors": 9,
+        "locations": 13,
+        "navigation_buildings": 9,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500007"
+    },
+    {
+      "consistency": {
+        "checks": 252,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500008,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500008"
+    },
+    {
+      "consistency": {
+        "checks": 252,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500009,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 11,
+        "locations": 16,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 6,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500009"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.13
+      },
+      "rc9_loadable": true,
+      "seed": 500010,
+      "status": "ok",
+      "structure": {
+        "edges": 16,
+        "interiors": 10,
+        "locations": 15,
+        "navigation_buildings": 10,
+        "npc_conflicts": 0,
+        "npcs": 6,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "mountain_town",
+      "validation": "passed",
+      "world_id": "mountain_town_500010"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500001,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 6,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500001"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500002,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 11,
+        "locations": 14,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500002"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500003,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500003"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500004,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500004"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500005,
+      "status": "ok",
+      "structure": {
+        "edges": 14,
+        "interiors": 11,
+        "locations": 14,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500005"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500006,
+      "status": "ok",
+      "structure": {
+        "edges": 15,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 3,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500006"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500007,
+      "status": "ok",
+      "structure": {
+        "edges": 16,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500007"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.07
+      },
+      "rc9_loadable": true,
+      "seed": 500008,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 11,
+        "locations": 14,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500008"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500009,
+      "status": "ok",
+      "structure": {
+        "edges": 14,
+        "interiors": 11,
+        "locations": 15,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 4,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500009"
+    },
+    {
+      "consistency": {
+        "checks": 231,
+        "days": 7,
+        "ok": true,
+        "problems": []
+      },
+      "content": {
+        "cross_theme_overlap": 0.0,
+        "ok": true,
+        "problems": [],
+        "same_theme_overlap": 0.0
+      },
+      "rc9_loadable": true,
+      "seed": 500010,
+      "status": "ok",
+      "structure": {
+        "edges": 13,
+        "interiors": 11,
+        "locations": 14,
+        "navigation_buildings": 11,
+        "npc_conflicts": 0,
+        "npcs": 5,
+        "ok": true,
+        "problems": []
+      },
+      "theme": "rural_farming",
+      "validation": "passed",
+      "world_id": "rural_farming_500010"
+    }
+  ]
+}

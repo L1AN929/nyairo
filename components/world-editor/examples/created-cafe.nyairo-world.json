@@ -1,0 +1,370 @@
+{
+  "assets": {
+    "asset-daf449b8a58b": {
+      "category": "家具",
+      "collection": "咖啡馆家具",
+      "data": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNjAgMTAwIj48cmVjdCB4PSI4IiB5PSIxMCIgd2lkdGg9IjE0NCIgaGVpZ2h0PSI4MCIgcng9IjgiIGZpbGw9IiNiNzk0NzAiLz48cmVjdCB4PSI4IiB5PSIxMCIgd2lkdGg9IjE0NCIgaGVpZ2h0PSIyMiIgcng9IjgiIGZpbGw9IiNlYWQ5YmIiLz48cGF0aCBkPSJNMjIgNDBIMTM4TTYwIDQwVjgwTTEwOCA0MFY4MCIgc3Ryb2tlPSIjOGI3MTU2IiBzdHJva2Utd2lkdGg9IjMiLz48Y2lyY2xlIGN4PSI1MCIgY3k9IjYyIiByPSIzIiBmaWxsPSIjZjRlOWQ1Ii8+PGNpcmNsZSBjeD0iOTgiIGN5PSI2MiIgcj0iMyIgZmlsbD0iI2Y0ZTlkNSIvPjwvc3ZnPg==",
+      "height": 100,
+      "id": "asset-daf449b8a58b",
+      "interactive": false,
+      "kind": "table",
+      "mime": "image/svg+xml",
+      "name": "木质柜台",
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 130,
+        "show_name": true
+      },
+      "width": 160
+    }
+  },
+  "connections": [],
+  "format": "nyairo.world-package.v3",
+  "initial": {
+    "resident_name": "测试居民",
+    "room_id": "room-3ce95dfa-fcf",
+    "time": "2026-10-11T09:00"
+  },
+  "meta": {
+    "author": "创作者",
+    "cover": "generated-floorplan",
+    "description": "从空白绘制会客区和水吧，隔墙门控制通行，导入并复用柜台图片。",
+    "id": "qa-created-cafe",
+    "license": "CC0-1.0",
+    "name": "自建午后咖啡馆",
+    "version": "0.4.0"
+  },
+  "objects": [
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "table-2726a834",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "会客桌",
+      "portable": false,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 25,
+      "y": 28
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "chair-11c31ffb",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅",
+      "portable": false,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 25,
+      "y": 80
+    },
+    {
+      "actions": [
+        "pick_up",
+        "place",
+        "drink"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "drink": {
+          "hydration_gain": 20
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "cup-fbee888b",
+      "initial_status": "empty",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "cup",
+      "name": "空杯",
+      "portable": true,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 25,
+      "y": 55
+    },
+    {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 3,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "dispenser-ed3c956b",
+      "initial_status": "available",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "name": "饮水设备",
+      "portable": false,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 75,
+      "y": 55
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "lamp-3187711f",
+      "initial_status": "off",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "水吧灯",
+      "portable": false,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 68,
+      "y": 28
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "cabinet-52142504",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "收纳柜",
+      "portable": false,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 85,
+      "y": 28
+    },
+    {
+      "actions": [],
+      "asset_id": "asset-daf449b8a58b",
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "table-417f2111",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "木质柜台",
+      "portable": false,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 130,
+        "show_name": true
+      },
+      "x": 76,
+      "y": 80
+    },
+    {
+      "actions": [],
+      "asset_id": "asset-daf449b8a58b",
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "table-1ecebeee",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "复用柜台",
+      "portable": false,
+      "room_id": "room-3ce95dfa-fcf",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 130,
+        "show_name": true
+      },
+      "x": 20,
+      "y": 70
+    }
+  ],
+  "requires": "nyairo.editor-runtime.v3",
+  "rooms": [
+    {
+      "description": "",
+      "h": 500,
+      "hours": null,
+      "id": "room-3ce95dfa-fcf",
+      "kind": "room",
+      "name": "自建咖啡馆",
+      "space": {
+        "doors": [
+          {
+            "actions": [
+              "open_door",
+              "close_door",
+              "lock_door",
+              "unlock_door"
+            ],
+            "color": "#bd976e",
+            "id": "space-189b7269-0",
+            "length": 15,
+            "offset": 45,
+            "state": "closed",
+            "wall_id": "space-124ec625-a"
+          }
+        ],
+        "enabled": true,
+        "entry": {
+          "x": 5,
+          "y": 10
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#eee7d8",
+            "h": 100,
+            "id": "space-56cf08fc-8",
+            "texture": "planks",
+            "w": 50,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "asset_id": null,
+            "color": "#dce7e5",
+            "h": 100,
+            "id": "space-ead0654d-f",
+            "texture": "tiles",
+            "w": 50,
+            "x": 50,
+            "y": 0
+          }
+        ],
+        "walls": [
+          {
+            "color": "#8c8a7d",
+            "id": "space-124ec625-a",
+            "width": 7,
+            "x1": 50,
+            "x2": 50,
+            "y1": 0,
+            "y2": 100
+          }
+        ],
+        "windows": [
+          {
+            "color": "#90b6cb",
+            "id": "space-3fee4a29-a",
+            "length": 10,
+            "offset": 15,
+            "wall_id": "space-124ec625-a"
+          }
+        ]
+      },
+      "visual": {
+        "background": "#f8f0e7",
+        "border": "#b99d89",
+        "border_style": "solid",
+        "floor": "#f0e3d3",
+        "texture": "planks",
+        "theme": "bedroom"
+      },
+      "w": 850,
+      "x": 75,
+      "y": 80
+    }
+  ],
+  "scene": {
+    "background": "#f8f9fc",
+    "decorations": true,
+    "grid": true
+  }
+}

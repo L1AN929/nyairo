@@ -1,0 +1,141 @@
+{
+  "npcs": [
+    {
+      "age_classification": "adult",
+      "display_name": "田中由美",
+      "home_base_area": "community_center",
+      "npc_id": "residential_npc_community_center_01",
+      "public_description": "在公民馆工作多年，负责活动室预约与借用登记。",
+      "public_role": "公民馆的事务员",
+      "windows": [
+        {
+          "end_minute": 1080,
+          "location_id": "community_center",
+          "start_minute": 540,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "山口美咲",
+      "home_base_area": "bakery",
+      "npc_id": "residential_npc_bakery_02",
+      "public_description": "麦丘面包店的师傅，每天清晨五点就进店揉面发酵。",
+      "public_role": "面包房师傅",
+      "windows": [
+        {
+          "end_minute": 960,
+          "location_id": "bakery",
+          "start_minute": 420,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "minor",
+      "display_name": "木村美羽",
+      "home_base_area": "school",
+      "npc_id": "residential_npc_school_03",
+      "public_description": "南泽学校的学生，放学后常去图书馆温习功课。",
+      "public_role": "同班同学",
+      "windows": [
+        {
+          "end_minute": 960,
+          "location_id": "school",
+          "start_minute": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "木村刚",
+      "home_base_area": "bookstore",
+      "npc_id": "residential_npc_bookstore_04",
+      "public_description": "栞泽书店的店员，负责每周新刊拆箱与书架陈列。",
+      "public_role": "书店店员",
+      "windows": [
+        {
+          "end_minute": 1140,
+          "location_id": "bookstore",
+          "start_minute": 600,
+          "weekdays": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "山口理惠",
+      "home_base_area": "convenience_store",
+      "npc_id": "residential_npc_convenience_store_05",
+      "public_description": "便利店晚班兼职店员，做事利落，待客态度和善。",
+      "public_role": "便利店店员",
+      "windows": [
+        {
+          "end_minute": 1320,
+          "location_id": "convenience_store",
+          "start_minute": 540,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "渡边美咲",
+      "home_base_area": "cafe",
+      "npc_id": "residential_npc_cafe_06",
+      "public_description": "向阳咖啡店的店主，对单品手冲咖啡很有自己的心得。",
+      "public_role": "咖啡店店主",
+      "windows": [
+        {
+          "end_minute": 1200,
+          "location_id": "cafe",
+          "start_minute": 600,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    }
+  ],
+  "schema_version": "worldgen.npcs.v1"
+}

@@ -1,0 +1,707 @@
+{
+  "ambient_pool": [
+    {
+      "end_hour": 9,
+      "event_type": "field_irrigation",
+      "slot": "farm",
+      "start_hour": 5,
+      "summaries": [
+        "田里正在放水灌溉",
+        "有人沿着田埂检查水路"
+      ]
+    },
+    {
+      "end_hour": 11,
+      "event_type": "market_morning",
+      "slot": "farmers_market",
+      "start_hour": 6,
+      "summaries": [
+        "早市的摊位正在摆菜",
+        "早市快收摊了，剩菜打折"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_farm_break",
+      "slot": "school",
+      "start_hour": 0,
+      "summaries": [
+        "广播通知农忙假的安排",
+        "学校的菜园在等学生浇水"
+      ]
+    },
+    {
+      "end_hour": 16,
+      "event_type": "street_drying",
+      "slot": "street",
+      "start_hour": 9,
+      "summaries": [
+        "路边晒着刚收的稻谷",
+        "村道上扬起小小的尘土"
+      ]
+    },
+    {
+      "end_hour": 12,
+      "event_type": "shrine_prep",
+      "slot": "shrine",
+      "start_hour": 8,
+      "summaries": [
+        "神社在为秋祭搭棚子",
+        "石阶上的落叶被扫成一堆"
+      ]
+    },
+    {
+      "end_hour": 21,
+      "event_type": "store_evening_sale",
+      "slot": "convenience_store",
+      "start_hour": 18,
+      "summaries": [
+        "晚间饭团打折",
+        "冰箱补上了新的冷饮"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "slot": "home",
+      "start_hour": 0,
+      "summaries": [
+        "窗外传来远处的水车声",
+        "谁家的狗在村道上追自行车"
+      ]
+    }
+  ],
+  "fixed_slots": [
+    {
+      "affordances": [
+        [
+          "REST",
+          "在这里休息"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "USE_PHONE",
+          "在这里使用手机"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "村道旁的平房，屋檐下挂着农具，院子里种着自家吃的菜。"
+      ],
+      "id": "home",
+      "kind": "home",
+      "names": [
+        "稻边村的住居"
+      ],
+      "open_hour": null,
+      "slot": "home",
+      "weekdays_only": false,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "ATTEND_CLASS",
+          "在学校上课"
+        ],
+        [
+          "SELF_STUDY",
+          "在学校自习"
+        ],
+        [
+          "STAY_AT_SCHOOL",
+          "留在学校"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "全村唯一的学校，从一年级到六年级只有一间教室，农忙假全村出动。"
+      ],
+      "id": "school",
+      "kind": "school",
+      "names": [
+        "稻边村学校",
+        "北泽乡村学校",
+        "穗原学园"
+      ],
+      "open_hour": 8,
+      "slot": "school",
+      "weekdays_only": true,
+      "zone": "education"
+    }
+  ],
+  "flavor_pool": {
+    "festival_candidates": [
+      "秋天的丰收祭",
+      "初夏的插秧体验会",
+      "年末的捣麻糬大会"
+    ],
+    "street_flavor": [
+      "路边堆着刚编好的草绳",
+      "电线杆上贴着手写的农事互助告示",
+      "村口的自动贩卖机嗡嗡作响"
+    ],
+    "world_intro": [
+      "被水田包围的小村庄，一天的声音由水车与蝉鸣组成。",
+      "沿河展开的农业村，米仓与温室散落在村道两旁。",
+      "以稻作为主的小乡村，傍晚家家户户飘出洗澡水的热气。"
+    ],
+    "zone_flavor": [
+      "田埂边停着一辆掉了漆的轻卡",
+      "稻草人穿着褪色的旧工作服",
+      "水渠里的水声整日不停",
+      "电线上排着一列歇脚的麻雀",
+      "路边堆着编好的稻草绳",
+      "屋后的柿子树挂着最后一茬果子",
+      "村道上能闻到稻田与泥土的味道",
+      "农户门口堆着刚编好的菜筐",
+      "水渠口的闸门用铁丝拴着",
+      "向日葵朝着下午的太阳低头",
+      "谷仓墙上钉着旧农协的日历",
+      "村口的黑板报写着明日集会的安排"
+    ]
+  },
+  "npc_name_pool": {
+    "family": [
+      "田边",
+      "穗积",
+      "泽井",
+      "北村",
+      "稻垣",
+      "原田",
+      "桥本",
+      "野口"
+    ],
+    "given_adult": [
+      "正雄",
+      "和江",
+      "勇",
+      "美智",
+      "辰巳",
+      "绢代",
+      "信一",
+      "百合子"
+    ],
+    "given_minor": [
+      "稔",
+      "花音",
+      "大禾",
+      "小穗",
+      "泽人",
+      "乃亚"
+    ]
+  },
+  "npc_role_pool": [
+    {
+      "age": "adult",
+      "end_hour": 11,
+      "role": "早市菜摊的大婶",
+      "slot": "farmers_market",
+      "start_hour": 6,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 17,
+      "role": "农协店的店员",
+      "slot": "barn_store",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 17,
+      "role": "茶屋的老板娘",
+      "slot": "cafe",
+      "start_hour": 10,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 21,
+      "role": "便利店夜班店员",
+      "slot": "convenience_store",
+      "start_hour": 7,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 17,
+      "role": "图书室管理员",
+      "slot": "library",
+      "start_hour": 9,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 16,
+      "role": "村里的学生",
+      "slot": "school",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 16,
+      "role": "同班同学",
+      "slot": "school",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 18,
+      "role": "公民馆的事务员",
+      "slot": "community_center",
+      "start_hour": 9,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  ],
+  "object_pool": [
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "床",
+      "note": "铺着草席的木床。",
+      "object_id": "bed_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "书桌",
+      "note": "放着农事历的书桌。",
+      "object_id": "desk_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "农具架",
+      "note": "擦得干净的农具架。",
+      "object_id": "shelf_home"
+    }
+  ],
+  "slot_pool": [
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "看看田里的作物"
+        ],
+        [
+          "WALK",
+          "沿田埂走走"
+        ]
+      ],
+      "close_hour": [
+        17,
+        19
+      ],
+      "descriptions": [
+        "村主要的水田与菜地，清晨能看见白鹭落在田埂上。"
+      ],
+      "id": "farm",
+      "kind": "market",
+      "names": [
+        "{world_name}农田",
+        "穗原田圃",
+        "北泽田地"
+      ],
+      "open_hour": [
+        5,
+        6
+      ],
+      "slot": "farm",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "farming"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在早市逛逛"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": [
+        11,
+        12
+      ],
+      "descriptions": [
+        "只在上午开的村民早市，摊位上都是自家种的菜与腌菜。"
+      ],
+      "id": "farmers_market",
+      "kind": "market",
+      "names": [
+        "{world_name}早市",
+        "石桥朝市"
+      ],
+      "open_hour": [
+        6,
+        7
+      ],
+      "slot": "farmers_market",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "market"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在店里看看农资"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "农协开的直营店，收着全村的米和鸡蛋，也卖种子和肥料。"
+      ],
+      "id": "barn_store",
+      "kind": "store",
+      "names": [
+        "{world_name}农产品店",
+        "穗原农协直营店"
+      ],
+      "open_hour": 8,
+      "slot": "barn_store",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "market"
+    },
+    {
+      "affordances": [
+        [
+          "SIT",
+          "在店里坐下"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ]
+      ],
+      "close_hour": [
+        17,
+        19
+      ],
+      "descriptions": [
+        "由旧民宅改的茶屋，周末有城里来的自行车客。"
+      ],
+      "id": "cafe",
+      "kind": "cafe",
+      "names": [
+        "{prefix}茶屋",
+        "田边茶店",
+        "泽口咖啡"
+      ],
+      "open_hour": [
+        9,
+        10
+      ],
+      "slot": "cafe",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "market"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在便利店看看"
+        ]
+      ],
+      "close_hour": 22,
+      "descriptions": [
+        "村口唯一的便利店，晚上是村里年轻人碰头的地方。"
+      ],
+      "id": "convenience_store",
+      "kind": "store",
+      "names": [
+        "{world_name}便利店",
+        "北泽便利店"
+      ],
+      "open_hour": 7,
+      "slot": "convenience_store",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "market"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在公园散步"
+        ],
+        [
+          "SIT",
+          "在长椅上坐一会儿"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "有旧水车的小公园，傍晚老人在这里摇着蒲扇聊天。"
+      ],
+      "id": "park",
+      "kind": "park",
+      "names": [
+        "{world_name}公园",
+        "水车公园"
+      ],
+      "open_hour": 6,
+      "slot": "park",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "SELF_STUDY",
+          "在这里自习"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "公民馆里的乡村图书室，农业图鉴和小说摆在同一排。"
+      ],
+      "id": "library",
+      "kind": "library",
+      "names": [
+        "{world_name}图书室",
+        "穗原文库"
+      ],
+      "open_hour": 9,
+      "slot": "library",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "education"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在神社院子里走走"
+        ],
+        [
+          "PRAY",
+          "在正殿前合掌"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "祈求丰收的神社，秋天祭典时田埂上会摆满摊子。"
+      ],
+      "id": "shrine",
+      "kind": "shrine",
+      "names": [
+        "{world_name}神社",
+        "稻荷分社"
+      ],
+      "open_hour": 6,
+      "slot": "shrine",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "看看布告栏"
+        ],
+        [
+          "SIT",
+          "在门厅坐一会儿"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "村里开会和办婚丧酒席的地方，布告栏贴着农事历。"
+      ],
+      "id": "community_center",
+      "kind": "public",
+      "names": [
+        "{world_name}公民馆",
+        "北泽公民馆"
+      ],
+      "open_hour": 9,
+      "slot": "community_center",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "market"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "在站前看看"
+        ],
+        [
+          "WALK",
+          "在站台走走"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "无人售票的小站，一天只有几班车，站台边种着向日葵。"
+      ],
+      "id": "station",
+      "kind": "station",
+      "names": [
+        "{world_name}站",
+        "稻边站"
+      ],
+      "open_hour": null,
+      "slot": "station",
+      "weekdays_only": false,
+      "weight": 1,
+      "zone": "market"
+    }
+  ],
+  "street_names": [
+    "田间道",
+    "稻香通",
+    "北泽小路",
+    "水车巷",
+    "石桥本町"
+  ],
+  "street_slot": {
+    "affordances": [
+      [
+        "WALK",
+        "在街道上散步"
+      ],
+      [
+        "LOOK_AROUND",
+        "在这里看看周围"
+      ]
+    ],
+    "kind": "street",
+    "slot": "street"
+  },
+  "theme_id": "rural_farming",
+  "theme_name": "农田乡村",
+  "weather": [
+    {
+      "condition": "clear",
+      "description": "晴朗"
+    },
+    {
+      "condition": "cloudy",
+      "description": "多云"
+    },
+    {
+      "condition": "rain",
+      "description": "有雨"
+    },
+    {
+      "condition": "haze",
+      "description": "田雾"
+    }
+  ],
+  "world_name_fragments": {
+    "prefix": [
+      "稻",
+      "麦",
+      "北",
+      "泽",
+      "穗",
+      "田"
+    ],
+    "suffix": [
+      "边",
+      "村",
+      "野",
+      "桥",
+      "原",
+      "乡"
+    ]
+  },
+  "zones": [
+    {
+      "color": "#95b578",
+      "name": "村宅区",
+      "zone_id": "residential"
+    },
+    {
+      "color": "#c9b878",
+      "name": "农田区",
+      "zone_id": "farming"
+    },
+    {
+      "color": "#c79f6f",
+      "name": "集市区",
+      "zone_id": "market"
+    },
+    {
+      "color": "#a98fc7",
+      "name": "学区",
+      "zone_id": "education"
+    }
+  ]
+}

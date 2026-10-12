@@ -1,0 +1,75 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 17,
+      "event_type": "market_closing",
+      "location_id": "market",
+      "start_hour": 14,
+      "summary": "市场在收摊，摊主们互相打招呼"
+    },
+    {
+      "end_hour": 18,
+      "event_type": "park_maintenance",
+      "location_id": "park",
+      "start_hour": 8,
+      "summary": "公园的沙坑刚翻过新沙"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "location_id": "school",
+      "start_hour": 0,
+      "summary": "学校广播通知了体检日期"
+    },
+    {
+      "end_hour": 22,
+      "event_type": "store_evening_sale",
+      "location_id": "convenience_store",
+      "start_hour": 18,
+      "summary": "晚间饭团打折"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "location_id": "home",
+      "start_hour": 0,
+      "summary": "窗外雨声变大"
+    },
+    {
+      "end_hour": 20,
+      "event_type": "station_rush",
+      "location_id": "station",
+      "start_hour": 17,
+      "summary": "末班车的时间表换了"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_e52b04dd",
+      "location_id": "home_goods_store",
+      "start_hour": 0,
+      "summary": "书店每周二下午拆包上架新到的一批文库本。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_6c985cec",
+      "location_id": "home_goods_store",
+      "start_hour": 0,
+      "summary": "麦丘面包店每天早上七点准时出炉第一批红豆吐司。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_e1522264",
+      "location_id": "community_center",
+      "start_hour": 0,
+      "summary": "公民馆每周四上午向居民免费开放阅览室练书法。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_dad2bfd0",
+      "location_id": "street_1",
+      "start_hour": 0,
+      "summary": "环卫车逢周一与周四清晨沿栞泽小路收运生活垃圾。"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "description": "泽乡——农田乡村主题的生成世界。",
+  "generator_version": "worldgen.v0.1",
+  "name": "泽乡",
+  "schema_version": "worldgen.world.v1",
+  "seed": 848484,
+  "theme": "rural_farming",
+  "timezone": "Asia/Tokyo",
+  "world_id": "rural_farming_848484"
+}
