@@ -121,6 +121,16 @@ nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 
 本项目新增代码（包含 Life Supply）遵循 [Apache-2.0](LICENSE) 许可证；内置 Hermes 及第三方组件保留原有开源许可证。
 
+## 贡献者 / Contributors
+
+<div align="center">
+  <a href="https://github.com/claude">
+    <img src="https://avatars.githubusercontent.com/u/81847?s=128&v=4" width="56px" height="56px" alt="Claude" style="border-radius:50%;margin:6px 12px;border:1px solid #30363d;"/>
+    <br />
+    <sub><b>Claude</b></sub>
+  </a>
+</div>
+
 ---
 
 ## 致谢
