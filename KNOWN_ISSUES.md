@@ -2,6 +2,49 @@
 
 本版供个人体验。自动化验收的结果见 `TEST_EVIDENCE.json`，没有据此宣称所有平台或所有外部服务都已验证。
 
+## v0.2.0-rc1 公开测试版边界（2026-10-13）
+
+发行提交以 `v0.2.0-rc1` 标签为准，来自 `v0.2-world-integration`，未合入 `main`，未切生产。
+逐项证据见 [TESTING.md](TESTING.md)。下列限制保留，不将测试版描述为稳定交付。
+
+1. **T12：原生生活经历没有 CORRECT 入口（未实现）。** `components/native/memory_control.py:131-133`
+   要求替换事件来自直接用户输入（`speaker != 'user'` 或 `source_origin != 'USER_VISIBLE_INPUT'` 直接
+   `ValueError`）。生活经历没有用户事件，伪造一条用户消息会违反 E07，所以本版不实现、也不伪造。
+   已通过的只有 DELETE / 停止召回那一半。**停止召回不能代替纠正**：它让旧错误不再进入视图，但不能把
+   一条记错的经历改写成正确内容。
+2. **已被取代的版本可能拿不到 AR-1 的观察证据（结构性，不是缺陷）。** AR-1 的成功结算要求 owner 确认的
+   那个版本**就是当前 head**（`resolve_operation` + `read_head` + operation_key + content_sha256 四条）。
+   一个已经不再是 head 的旧版本拿不到这份证据，于是**正确地**保持 `OPEN / UNKNOWN_EFFECT`，而不是被
+   猜成成功。看到一条长期 OPEN 的旧写入时，先确认它是不是已经被后续版本取代。
+3. **24h 只验证冻结自主生活基线，不是最终整包长测。** 香港 `35df37f` 窗口已观察
+   `144939s`（40h15m39s）、805 个连续 tick、最大间隔 204s、8 个真实新版本，无自醒或 UNKNOWN。
+   按 RC1 第一阶段的连续性与 owner 闭环标准通过；该实例未配置 World，生成世界另做隔离融合验收。
+   7 天仍在观察，不是本次 prerelease 前置条件。没有重启测试，不宣称最终整包 `SOAK_VERIFIED`。
+4. **systemd 范围有限。** 香港独立 owner/resident 单元实际 enabled/active、`NRestarts=0`；
+   没有做机器重启或故障重启注入。WSL 的 systemd offline，不能把香港部署当所有平台验收。
+5. **旧供应商密钥仍需账户持有人轮换。** 代码侧已经改好（0600 的 `model_env` 交接，命令行里不再出现
+   密钥），但**旧密钥的撤销只能在供应商后台做**，代码修复不能代替。这条是账户持有人的动作，本版未做。
+6. **自主 Telegram 联系不会投递。** `components/life/scripts/autonomous_life_resident.py:269` 硬编码
+   `proactive_enabled=False`。本版没有任何"她自己给你发消息"的能力；只有你主动发起时才有对话。
+7. **自主生活第一次自主选择 World 动作不是每次都成（本次新发现，未定性）。** 同样的隔离实例连跑 5 次，
+   3 次在第 1 个检查窗就选中世界候选并完成 MOVE，2 次同一个窗口给出**空候选集**
+   （`RULE_RESOLVED` + `NO_LEGAL_CANDIDATE` + `candidate_refs=[]`），随后 120 分钟的间隔让那一轮不再
+   重来。进程内诊断显示 World provider 连续 40 次都正常返回同一条机会、记录环节也没有报错，**根因本次
+   没有定位**。所以：集成是通的，但"她第一次自己走出去"存在失败概率，不要当成稳定行为。
+8. **模型观测有口径限制。** 从 `model_env` 文件载入凭据时，启动 probe 在载入前执行，可能显示
+   `NOT_CONFIGURED`；环境中已有凭据则不一定如此。`model_calls` / 日预算主要计认知调用，
+   内容 writer 的 `call_count` 仅成功返回时增加，失败请求会漏计，不能拿 summary 总数当完整费用。
+   香港快照 summary 为 9 认知 + 8 成功内容；另有 1 次内容超时，即至少 18 次请求尝试。
+9. **经历不是每个作品版本各记一条。** 香港 8 个真实版本写入仅形成 1 个 Activity milestone handoff，
+   M0 有 1 条 `LIFE_VERIFIED_OUTCOME`，后续重复投递不增行。这是已知 checkpoint 粒度限制。
+   通用结算 Memory 消费者仍 fail-closed：8 条 `ProductionExecutionRefused` / 8 个 pending outbox；
+   正式生活经历走 AG-2 → M0 handoff，已 ACCEPT、pending 清零。不能把两条投递路径混淆。
+10. **安装与发布边界。** 源码包及安装器是 Linux / WSL 路线；macOS、原生 Windows、完整 Docker
+    与所有外部服务未完成同范围验收。清单和 `.sha256` 证明内容完整性，不证明发布者身份或凭据撤销。
+    `scripts/bootstrap.sh` 与 `website/install.sh` 的 rc6/rc9 漂移已在 `35df37f` 修复，不是当前缺陷。
+
+## 历史边界（v0.1 及更早）
+
 - 单独的统一核心候选仍未接管现役聊天；本体验版采用标准 Hermes 与千代插件装配。Alpha 的独立策略验收代码包含，不等于自主执行已启用。
 - 自主活动执行、主动 Contact、N8 撤销权限的正式 owner 接口未交付。认知只运行 Shadow，判断不改变活动、发送消息或执行动作；通用安装默认关闭模型费用。
 - Life Supply 新 Open Inquiry 入库返回 `INQUIRY_ADMISSION_OWNER_STUB`。个人 Workspace 和经正式 Governance 授权的资源文档保存/读取可用；机会集合可以为空。

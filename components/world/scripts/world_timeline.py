@@ -328,8 +328,14 @@ class WorldTimelineStore:
         return normalized
 
 
-def is_supported_world_id(value: Any) -> bool:
-    """支持内建两代 world_id，以及当前活动世界包的 world_id（WorldGen）。"""
+def is_supported_world_id(value: Any,
+                          environment: Optional[Mapping[str, str]] = None) -> bool:
+    """支持内建两代 world_id，以及当前活动世界包的 world_id（WorldGen）。
+
+    ``environment`` 必须透传给 ``world_runtime_data.active_world``：调用方在显式环境
+    （例如 WorldGen 用世界包初始化一个实例）里判断白名单时，环境就是唯一的依据，
+    不能回落到进程的 ``os.environ``，否则包世界 id 会被误判成不支持。
+    """
     if not isinstance(value, str):
         return False
     if value in SUPPORTED_WORLD_IDS:
@@ -337,15 +343,16 @@ def is_supported_world_id(value: Any) -> bool:
     try:
         import world_runtime_data as wrd
 
-        return value == wrd.active_world().world_id
+        return value == wrd.active_world(environment).world_id
     except Exception:
         return False
 
 
-def build_initial_timeline(world_id: str = WORLD_ID) -> dict[str, Any]:
+def build_initial_timeline(world_id: str = WORLD_ID,
+                           environment: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
     """Return the deliberately empty World Timeline V1 genesis document."""
 
-    if not is_supported_world_id(world_id):
+    if not is_supported_world_id(world_id, environment):
         raise WorldTimelineError("world_id is not supported")
     return validate_timeline(
         {
@@ -365,7 +372,8 @@ def _claim_path(path: Path) -> Path:
     return path.with_name(f".{path.name}.genesis-claim")
 
 
-def create_genesis(path: Path | str, world_state_path: Path | str) -> dict[str, Any]:
+def create_genesis(path: Path | str, world_state_path: Path | str,
+                   environment: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
     """Create one empty Timeline only after validating the existing World State."""
 
     target = Path(path)
@@ -379,7 +387,7 @@ def create_genesis(path: Path | str, world_state_path: Path | str) -> dict[str, 
     world_state = WorldStateStore(world_path).load()
     if world_state is None:
         raise WorldTimelineGenesisError("World State is missing or malformed")
-    if not is_supported_world_id(world_state["world_id"]):
+    if not is_supported_world_id(world_state["world_id"], environment):
         raise WorldTimelineGenesisError("World State world_id is not supported")
 
     target.parent.mkdir(parents=True, exist_ok=True)
