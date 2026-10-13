@@ -15,7 +15,7 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fafc">
 
   <!-- 图标与样式 -->
-  <link rel="stylesheet" href="style.css?v=1791615135795">
+  <link rel="stylesheet" href="style.css?v=20261013-healthcheck">
   <link rel="icon" href="assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
@@ -1112,11 +1112,11 @@
       <div class="home-hero">
         <!-- 顶部版本与架构通告栏 (现代开发者高光胶囊) -->
         <div class="hero-banner-wrap">
-          <a href="#changelog-v0-2-0-rc1" class="hero-status-banner" title="看看这一版更新了什么">
+          <a href="#changelog-v0-2-0-rc2" class="hero-status-banner" title="看看这一版更新了什么">
             <span class="banner-beacon">
               <span class="beacon-core"></span>
             </span>
-            <span class="banner-beta-badge font-mono"><span class="badge-pulse"></span>BETA</span><span class="banner-chip font-mono">v0.2.0-rc1</span>
+            <span class="banner-beta-badge font-mono"><span class="badge-pulse"></span>BETA</span><span class="banner-chip font-mono">v0.2.0-rc2</span>
             <span class="banner-title">查看最新版本更新动态</span>
             <span class="banner-arrow">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1185,7 +1185,7 @@
           </div>
 
           <div class="install-panel" id="install-panel-cli" role="tabpanel" aria-labelledby="install-tab-cli">
-            <p id="nyairo-rc1-release" class="hero-install-note">装好之后，她不仅能在你亲手布置的小世界里走动，还会按自己的节奏把没做完的事接着做完。如果你之前装过旧版，升级前请记得先备份个人目录，更多变化可查看<a href="#changelog-v0-2-0-rc1">版本记录</a>。</p>
+            <p id="nyairo-rc1-release" class="hero-install-note">基础安装启用记忆与生活状态；世界服务和自主生活需另外配置，自主开关默认关闭。配置完成后，她可以在世界里走动、继续已有作品。如果你之前装过旧版，升级前请记得先备份个人目录，更多变化可查看<a href="#changelog-v0-2-0-rc2">版本记录</a>。</p>
           <div class="hero-cmd-pill" id="hero-cmd" title="点击复制安装命令">
             <span class="cmd-prefix">$</span>
             <code class="cmd-text">curl -fsSL https://nyairo.com/install.sh | bash</code>
@@ -1230,7 +1230,7 @@
 【背景资料】
 - 官方仓库：https://github.com/L1AN929/nyairo
 - 官方 Agent 安装规范：仓库里的 docs/AGENT_INSTALL.zh-CN.md（如果你能读仓库或网络，先读它；读不到就按下面步骤做，本指令已经包含全部要求）
-- 当前公开测试版本：v0.2.0-rc1（Prerelease，不是稳定版；只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
+- 当前公开测试版本：v0.2.0-rc2（Prerelease，不是稳定版；只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
 
 【第一步：先检查环境，先不要安装】
 请检查并用中文汇报：
@@ -1252,7 +1252,7 @@
 
 【第二步：说明将要改动什么，并等我确认】
 这次安装会：
-- 在 ~/.local/share/nyairo/releases/v0.2.0-rc1 放程序（约 460 MB，含配套 Hermes 的运行环境）；
+- 在 ~/.local/share/nyairo/releases/v0.2.0-rc2 放程序（约 460 MB，含配套 Hermes 的运行环境）；
 - 在 ~/.nyairo 建个人数据目录（人设、模型配置、记忆与生活状态数据）；
 - 在 ~/.local/bin/nyairo 放启动入口；
 - 用 uv 下载一份 Python 3.13 到 ~/.local/share/uv。
@@ -1261,22 +1261,22 @@
 
 【第三步：安装（只用官方发行包，并且校验）】
 1) 下载官方发行包与校验值：
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc1/nyairo-v0.2.0-rc1.zip
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc1/nyairo-v0.2.0-rc1.zip.sha256
-   sha256sum -c nyairo-v0.2.0-rc1.zip.sha256
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc2/nyairo-v0.2.0-rc2.zip
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc2/nyairo-v0.2.0-rc2.zip.sha256
+   sha256sum -c nyairo-v0.2.0-rc2.zip.sha256
    ZIP 的 SHA256 必须是：6136af4c03a6ce2d5db01607424ba06232e839333d71765abb4763e61052b0e7
    不一致就立刻停止，把实际值告诉我，不要继续。
 2) 解压并使用包内的官方安装器安装（不要自己另写一套安装脚本）：
-   python3 -m zipfile -e nyairo-v0.2.0-rc1.zip "$HOME/apps/nyairo-v0.2.0-rc1"
-   cd "$HOME/apps/nyairo-v0.2.0-rc1" &amp;&amp; bash scripts/bootstrap.sh
+   python3 -m zipfile -e nyairo-v0.2.0-rc2.zip "$HOME/apps/nyairo-v0.2.0-rc2"
+   cd "$HOME/apps/nyairo-v0.2.0-rc2" &amp;&amp; bash scripts/bootstrap.sh
    如果你的终端无法交互（没有 TTY），改用：bash scripts/bootstrap.sh --no-setup --no-launch
    装完再单独引导我配置模型：~/.local/bin/nyairo setup model
 
 【第四步：装完必须实际验证，不要只看命令有没有报错】
-- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.2.0-rc1；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.2.0-rc1。
+- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.2.0-rc2；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.2.0-rc2。
   （注意：nyairo --version 显示的是配套 Hermes 的版本，不是 nyairo 的版本。）
 - 完整性：用包内解释器校验清单：
-  ~/.local/share/nyairo/releases/v0.2.0-rc1/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.2.0-rc1/scripts/verify_manifest.py
+  ~/.local/share/nyairo/releases/v0.2.0-rc2/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.2.0-rc2/scripts/verify_manifest.py
   输出里应该有 "valid": true。
 - 个人数据目录：~/.nyairo 下应该有 SOUL.md、config.yaml、chiyo/config.json。
 - 启动：~/.local/bin/nyairo --help 能正常输出帮助。
@@ -1284,7 +1284,7 @@
 - 模型与 Telegram：在我没有提供自己的密钥之前，这两项属于「尚未验证」，请如实说明，不要报告为成功。
 
 【第五步：最后给我一份中文说明】
-用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.2.0-rc1 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
+用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.2.0-rc2 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
 
 【安全要求】
 - 不要擅自创建系统用户，也不要擅自使用 sudo；需要时先说明你要执行的命令并征得我同意。
@@ -1311,110 +1311,78 @@
       <!-- 核心多维形态互动演示专区 -->
       <section class="showcase-section" aria-labelledby="showcase-title">
         <div class="section-intro showcase-intro">
-          <h2 id="showcase-title">真实日常 · 互动体验演示</h2>
-          <p>它不仅是一个被动问答的文字框。从持续流转的生活状态、实体留痕的房间，到随时兼任开发搭子，切换下方场景体验它在你身边的真实模样。</p>
+          <h2 id="showcase-title">数字个体日常 · 功能示意</h2>
+          <p>以下为虚构对话示意，展示世界观察、生活状态与记忆管理的使用方式；具体结果取决于模块配置，未配置的能力不会自动启用。</p>
         </div>
 
         <div class="daily-showcase" id="daily-showcase" aria-label="数字个体日常形态展示">
         <div class="showcase-header">
-          <div class="showcase-tabs" role="tablist">
-            <button class="showcase-tab active" data-tab="presence" role="tab" aria-selected="true">凌晨两点 · 还没睡</button>
-            <button class="showcase-tab" data-tab="room" role="tab" aria-selected="false">书桌一角 · 安静陪着</button>
-            <button class="showcase-tab" data-tab="agent" role="tab" aria-selected="false">排查 Bug · 切过去干活</button>
-            <button class="showcase-tab" data-tab="memory" role="tab" aria-selected="false">随口一句话 · 她都记得</button>
+          <div class="showcase-tabs" role="tablist" aria-label="功能示意场景">
+            <button class="showcase-tab active" id="showcase-tab-presence" data-tab="presence" role="tab" aria-controls="showcase-panel-presence" aria-selected="true">生活状态 · 重启接续</button>
+            <button class="showcase-tab" id="showcase-tab-room" data-tab="room" role="tab" aria-controls="showcase-panel-room" aria-selected="false">世界身体 · 环境观察</button>
+            <button class="showcase-tab" id="showcase-tab-agent" data-tab="agent" role="tab" aria-controls="showcase-panel-agent" aria-selected="false">认知判断 · 分析建议</button>
+            <button class="showcase-tab" id="showcase-tab-memory" data-tab="memory" role="tab" aria-controls="showcase-panel-memory" aria-selected="false">长期记忆 · 查看管理</button>
           </div>
           <div class="showcase-header-right font-mono">
-            底座 · Gemini 3.8 flash
+            功能示意 · 非真实运行回执
           </div>
         </div>
 
         <div class="showcase-viewport">
           <div class="showcase-track" id="showcase-track">
-          <!-- 场景 1: 凌晨两点 · 还没睡 -->
-          <div class="showcase-panel active" id="showcase-panel-presence">
+          <!-- 场景 1: 生活状态 · 重启接续 -->
+          <div class="showcase-panel active" id="showcase-panel-presence" role="tabpanel" aria-labelledby="showcase-tab-presence">
             <div class="showcase-context-bar">
               <span class="context-tag">夜深了 · 房间台灯还亮着</span>
               <span class="context-meta font-mono">02:18 CST · 伴工状态</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">
-                搞定了，终于把跨机反代的证书握手全调通了。
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                你可算弄完了，这都后半夜两点了。屏幕光晃得我眼睛都酸，赶紧把终端关了去洗漱。
-              </div>
-              <div class="chat-bubble chat-bubble-user">
-                有点饿，刚点了个关东煮。
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                别吃太辣的，待会儿吃完喝口温水就老老实实去睡，明天早八起不来我可不管你。
-              </div>
+              <div class="chat-bubble chat-bubble-user">/chiyo_status</div>
+              <div class="chat-bubble chat-bubble-ai">记忆与 Life 状态按配置显示；未配置的 World、认知或资源模块显示不可用。</div>
+              <div class="chat-bubble chat-bubble-user">关掉聊天窗口，状态会丢吗？</div>
+              <div class="chat-bubble chat-bubble-ai">已落盘状态可在重启后接续。自主生活需要另开 resident，并默认关闭。</div>
             </div>
           </div>
 
-          <!-- 场景 2: 书桌一角 · 安静陪着 -->
-          <div class="showcase-panel" id="showcase-panel-room">
+          <!-- 场景 2: 世界身体 · 环境观察 -->
+          <div class="showcase-panel" id="showcase-panel-room" role="tabpanel" aria-labelledby="showcase-tab-room">
             <div class="showcase-context-bar">
               <span class="context-tag">各自忙碌 · 无声的默契</span>
               <span class="context-meta font-mono">下午 16:30 · 窗外有风</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">
-                刚开完组会，脑子嗡嗡响。你刚才在干嘛呢？
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                在书桌前翻之前摘录的笔记呢，顺便把桌上的耳机收了一下。看你刚才一直在敲键盘，就没出声吵你。
-              </div>
-              <div class="chat-bubble chat-bubble-user">
-                挺好，有时候就想屋子里安安静静的。
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                那当然，不用时刻找话聊。你忙你的，我呆我的，一抬头能看见就行。
-              </div>
+              <div class="chat-bubble chat-bubble-user">你现在在哪里？</div>
+              <div class="chat-bubble chat-bubble-ai">示意：配置 World 服务后，可观察房间、位置、姿态与环境状态。</div>
+              <div class="chat-bubble chat-bubble-user">我也能布置这个世界吗？</div>
+              <div class="chat-bubble chat-bubble-ai">v0.2 提供世界生成器与编辑器；编辑后的世界需按教程接入运行服务。</div>
             </div>
           </div>
 
-          <!-- 场景 3: 排查 Bug · 切过去干活 -->
-          <div class="showcase-panel" id="showcase-panel-agent">
+          <!-- 场景 3: 认知判断 · 分析建议 -->
+          <div class="showcase-panel" id="showcase-panel-agent" role="tabpanel" aria-labelledby="showcase-tab-agent">
             <div class="showcase-context-bar">
-              <span class="context-tag">挂载工作区 · 协同排查</span>
-              <span class="context-meta font-mono">/agent · 日志诊断中</span>
+              <span class="context-tag">有界认知 · 分析建议</span>
+              <span class="context-meta font-mono">/chiyo_consider · Shadow 判断</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">
-                这个容器重启后端口一直被占着，查了半天没看出来哪锁死了。
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                把目录挂过来，我切过去看眼进程树和端口占用。
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                查到了，是旧 worker 退出时没响应 SIGTERM，成了僵尸进程卡着 socket。改好的 systemd 配置写进 <code>deploy/service.patch</code> 了，你跑下试试。
-              </div>
-              <div class="chat-bubble chat-bubble-user">
-                妥了！起来了。
-              </div>
+              <div class="chat-bubble chat-bubble-user">/chiyo_consider 分析服务重启失败可能有哪些原因</div>
+              <div class="chat-bubble chat-bubble-ai">示意：Shadow 判断给出排查方向、约束与风险；不会执行命令。</div>
+              <div class="chat-bubble chat-bubble-user">能直接修配置吗？</div>
+              <div class="chat-bubble chat-bubble-ai">这条命令只做分析。修改文件与运行工具需通过实际工具入口及相应授权。</div>
             </div>
           </div>
 
-          <!-- 场景 4: 随口一句话 · 她都记得 -->
-          <div class="showcase-panel" id="showcase-panel-memory">
+          <!-- 场景 4: 长期记忆 · 查看管理 -->
+          <div class="showcase-panel" id="showcase-panel-memory" role="tabpanel" aria-labelledby="showcase-tab-memory">
             <div class="showcase-context-bar">
               <span class="context-tag">本地记忆 · 自然沉淀</span>
               <span class="context-meta font-mono">SQLite 账本 · 细枝末节</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">
-                晚上打算去吃学校门口那家小馆子。
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                那别点那个带香菜的汤了，上回你挑了半天。还有，你前两天嗓子不太舒服，少喝冰水。
-              </div>
-              <div class="chat-bubble chat-bubble-user">
-                随口提了一嘴你都记下了。
-              </div>
-              <div class="chat-bubble chat-bubble-ai">
-                关于你的事我哪用特意去背呀，天天在眼前晃悠，想忘都忘不掉。
-              </div>
+              <div class="chat-bubble chat-bubble-user">/chiyo_memory list</div>
+              <div class="chat-bubble chat-bubble-ai">示意：列出已采用的记忆，选择实际记录 ID 后可查看或管理。</div>
+              <div class="chat-bubble chat-bubble-user">/chiyo_memory delete 记录ID</div>
+              <div class="chat-bubble chat-bubble-ai">停止采用该记忆；原始聊天、审计和备份仍保留。生活经历暂不支持直接纠正。</div>
             </div>
           </div>
         </div>
@@ -1444,7 +1412,7 @@
               </div>
             </div>
             <h3 class="pillar-title">长期记忆</h3>
-            <p class="pillar-desc">跨越会话记住重要经历，随时能查、能纠正、能遗忘，数据纯本地私有，告别模型失忆。</p>
+            <p class="pillar-desc">跨会话召回重要经历，可查看、纠正用户记忆或停止召回。数据库本地保存；遗忘不等于擦除原始聊天和备份。</p>
             <span class="pillar-link">查看记忆用法 <span class="pillar-arrow">→</span></span>
           </a>
 
@@ -1502,9 +1470,9 @@
                 <span class="cmd-badge">/chiyo_consider</span>
               </div>
             </div>
-            <h3 class="pillar-title">切换 Agent 模式</h3>
-            <p class="pillar-desc">需要解决复杂技术任务时，脱离生活空间挂载工作区，自动生成脚本、写代码并推演。</p>
-            <span class="pillar-link">查看工程协同 <span class="pillar-arrow">→</span></span>
+            <h3 class="pillar-title">有界认知判断</h3>
+            <p class="pillar-desc">显式提交问题，获得有界的 Shadow 分析与建议。判断不会切换模式、执行动作或发送消息。</p>
+            <span class="pillar-link">查看认知用法 <span class="pillar-arrow">→</span></span>
           </a>
         </div>
       </section>
@@ -1527,7 +1495,7 @@
             <button class="stage-step-btn active" data-phase="0" role="tab" aria-selected="true" aria-controls="phase-panel-0">
               <span class="step-num font-mono">01</span>
               <div class="step-text-wrap">
-                <span class="step-version font-mono">v0.1 · 当前基线</span>
+                <span class="step-version font-mono">v0.1 · 历史基线</span>
                 <span class="step-title">双重形态闭环</span>
               </div>
             </button>
@@ -1535,8 +1503,8 @@
             <button class="stage-step-btn" data-phase="1" role="tab" aria-selected="false" aria-controls="phase-panel-1">
               <span class="step-num font-mono">02</span>
               <div class="step-text-wrap">
-                <span class="step-version font-mono">v0.2 · 攻坚推进</span>
-                <span class="step-title">随身手机与空间</span>
+                <span class="step-version font-mono">v0.2 · 公开测试</span>
+                <span class="step-title">世界编辑与自主生活</span>
               </div>
             </button>
 
@@ -1571,7 +1539,7 @@
               </div>
               <h3 class="phase-heading">本地记忆与双重形态闭环</h3>
               <p class="phase-summary">
-                对话永不遗忘，数据全部私有保存在本地 SQLite。关机重启后生活记录不丢，兼任开发搭子排查代码，基础世界与身体感知已全面接通。
+                重要记录保存在本地 SQLite，按配置跨会话召回。关机重启后生活记录不丢，兼任开发搭子排查代码，世界与身体观察需要单独配置服务。
               </p>
               
               <div class="phase-columns-grid">
@@ -1580,7 +1548,7 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
                   </div>
                   <h4 class="col-title">本地私有 SQLite 记忆</h4>
-                  <p class="col-desc">所有对话事实与羁绊落盘到本地数据库，完全不经过第三方云端，掌控感在手里。</p>
+                  <p class="col-desc">本地保存获准记录；连接外部模型时，参与回复的上下文会发送到所配置的模型服务。</p>
                 </div>
                 <div class="phase-col-card">
                   <div class="col-icon-box">
@@ -1593,8 +1561,8 @@
                   <div class="col-icon-box">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline><line x1="14" y1="4" x2="10" y2="20"></line></svg>
                   </div>
-                  <h4 class="col-title">平滑切换 Agent 模式</h4>
-                  <p class="col-desc">日常对话中随时挂载代码目录，从生活伴侣无缝转变为严肃排错的技术搭子。</p>
+                  <h4 class="col-title">显式 Shadow 判断</h4>
+                  <p class="col-desc">通过 /chiyo_consider 提交分析问题；只读判断，不自动改变活动或执行工具。</p>
                 </div>
               </div>
             </div>
@@ -1603,37 +1571,35 @@
             <div class="phase-panel" id="phase-panel-1" role="tabpanel">
               <div class="phase-header-row">
                 <div class="phase-meta-left">
-                  <span class="phase-status-pill font-mono">IN PROGRESS</span>
+                  <span class="phase-status-pill font-mono">PUBLIC TEST</span>
                   <span class="phase-sub-meta font-mono">v0.2.0-milestone</span>
                 </div>
                 <div class="phase-counter font-mono">02 / 04</div>
               </div>
-              <h3 class="phase-heading">随身虚拟手机与实体空间留痕</h3>
-              <p class="phase-summary">
-                赋予她真正可交互的虚拟随身设备与实体留痕空间。你在忙碌敲代码时，她看书发呆安静共在；书桌与房间物件留存真实痕迹。
-              </p>
+              <h3 class="phase-heading">世界生成、编辑与有界自主生活</h3>
+              <p class="phase-summary">生成并编辑自己的世界，接入真实 World 服务。开启自主 resident 后，可有界续写作品、尝试移动；开关默认关闭，所有结果按 owner 回执确认。</p>
               
               <div class="phase-columns-grid">
                 <div class="phase-col-card">
                   <div class="col-icon-box">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><line x1="12" x2="12.01" y1="18" y2="18"></line></svg>
                   </div>
-                  <h4 class="col-title">虚拟随身手机系统</h4>
-                  <p class="col-desc">拥有属于她自己的私密日记本、合影相册相簿、离线歌单与收藏备忘，随时唤出。</p>
+                  <h4 class="col-title">世界生成与编辑</h4>
+                  <p class="col-desc">提供 7 个示例世界，编辑墙、门与家具；需要按教程接入 World 服务。</p>
                 </div>
                 <div class="phase-col-card">
                   <div class="col-icon-box">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v3"></path><path d="M20 18v3"></path><path d="M3 7h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path></svg>
                   </div>
-                  <h4 class="col-title">实体空间六大留痕</h4>
-                  <p class="col-desc">书桌上未写完的草稿、夹着书签的小说、窗边光线联动，告别空壳死板背景。</p>
+                  <h4 class="col-title">有界作品续写</h4>
+                  <p class="col-desc">配置资源服务、模型和自主 resident 后继续已有作品；预算与开关独立管理。</p>
                 </div>
                 <div class="phase-col-card">
                   <div class="col-icon-box">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>
                   </div>
-                  <h4 class="col-title">非阻塞安静共在机制</h4>
-                  <p class="col-desc">不再是你发一句她回一句；你全神贯注工作时，她在一旁安静做自己的事，不打扰。</p>
+                  <h4 class="col-title">结果确认与记账</h4>
+                  <p class="col-desc">只有 owner 确认的结果才按规则结算；不确定的结果保持 UNKNOWN。</p>
                 </div>
               </div>
             </div>
@@ -1727,7 +1693,7 @@
           <div class="start-strip-left">
             <div class="start-strip-badge font-mono">GET STARTED</div>
             <h2 id="start-title">第一次使用，从一句你好开始</h2>
-            <p>一行命令全自动配置 → 填入你的模型 Key → 收到第一句回复，就是这么简单。</p>
+            <p>引导安装 → 配置模型 → 检查第一句回复。世界、资源服务与自主生活按教程另行配置。</p>
           </div>
           <a href="#quickstart" class="btn-primary start-strip-btn">
             <span>跟着教程安装</span>
@@ -1769,13 +1735,13 @@
     <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
     <!-- 左侧边栏：文档目录树 -->
     <aside id="docs-sidebar" class="docs-sidebar">
-      <!-- 由 app.js?v=1791528645 动态渲染 DOCS_TREE -->
+      <!-- 由 app.js?v=20261013-healthcheck 动态渲染 DOCS_TREE -->
     </aside>
 
     <!-- 中间正文阅读区 -->
     <main class="docs-content">
       <div class="content-inner" id="doc-container">
-        <!-- 由 app.js?v=1791528645 动态加载当前选中文档内容 -->
+        <!-- 由 app.js?v=20261013-healthcheck 动态加载当前选中文档内容 -->
       </div>
     </main>
 
@@ -1783,7 +1749,7 @@
     <aside class="docs-aside">
       <div class="aside-title">本页目录</div>
       <ul id="toc-list" class="toc-list">
-        <!-- 由 app.js?v=1791528645 动态解析当前正文 h2/h3 -->
+        <!-- 由 app.js?v=20261013-healthcheck 动态解析当前正文 h2/h3 -->
       </ul>
     </aside>
   </div>
@@ -1806,13 +1772,13 @@
   </div>
 
   <!-- 引入文档数据与逻辑控制器 -->
-  <script src="docs-data.js?v=1791887283751"></script>
-  <script src="app.js?v=1791615135795"></script>
+  <script src="docs-data.js?v=20261013-healthcheck"></script>
+  <script src="app.js?v=20261013-healthcheck"></script>
   <!-- 爬虫与无 JS 环境语义保全 (确保百度 / Google 等轻量爬虫完整索引全站要点) -->
   <noscript>
     <div class="noscript-seo" style="max-width: 900px; margin: 40px auto; padding: 24px; font-family: sans-serif; line-height: 1.7; border: 1px solid #334155; border-radius: 8px;">
-      <h2>nyairo 核心文档与使用导航</h2>
-      <p>nyairo 是一个以虚拟世界为核心的开源数字个体框架。一键全自动安装命令：<code>curl -fsSL https://nyairo.com/install.sh | bash</code></p>
+      <h2>nyairo 核心文档与使用导航</h2><p>浏览器未启用 JavaScript 时，请阅读 <a href="USER_GUIDE.zh-CN.md">完整中文教程</a>，或打开 <a href="https://github.com/L1AN929/nyairo/releases">发行下载</a>。</p>
+      <p>nyairo 是一个以虚拟世界为核心的开源数字个体框架。引导安装命令：<code>curl -fsSL https://nyairo.com/install.sh | bash</code></p>
       <h3>核心特性与文档速览</h3>
       <ul>
         <li><a href="#intro">项目定位与核心能力</a>：四大核心能力、准备工作与架构说明。</li>
