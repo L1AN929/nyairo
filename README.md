@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.1.0-rc9"><img src="https://img.shields.io/badge/release-v0.1.0--rc9-1f2937.svg" alt="Release" /></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc1"><img src="https://img.shields.io/badge/release-v0.2.0--rc1-e11d48" alt="v0.2.0-rc1"></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -16,6 +16,10 @@
 > **给 AI 一个世界，让它拥有属于自己的日常。**
 > 
 > 虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次交流，都发生在一串有前因与后来的真实日常里。
+>
+> **当前版本：v0.2.0-rc1（公开测试版）** — 2026 年 10 月 13 日发布。她开始有自己的生活，能在 7 个示例世界里走动、按自己的节奏做自己的事。
+> 当前并非稳定版（旧版 rc9 仍可下载），部分细节仍在完善中。
+> Linux 或 Windows 的 WSL 一条命令安装：`curl -fsSL https://nyairo.com/install.sh | bash`
 
 ---
 
@@ -98,7 +102,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 
-- **程序核心**：`~/.local/share/nyairo/releases/v0.1.0-rc9`（只读程序包，更新时整体切换）
+- **程序核心**：`~/.local/share/nyairo/releases/v0.2.0-rc1`（只读程序包，更新时整体切换）
 - **个人数据**：`~/.nyairo`（完全独立的本地目录，包含人设、数据库、记忆、密钥与配置）
 - **命令入口**：`~/.local/bin/nyairo`（系统 PATH 启动项）
 
@@ -113,7 +117,7 @@ nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 - **Telegram 官方频道**：[https://t.me/nyairoai](https://t.me/nyairoai)
 - **快速起步上手指南**：[https://nyairo.com/#quickstart](https://nyairo.com/#quickstart)
 - **版本更新动态与说明**：[https://nyairo.com/#changelog](https://nyairo.com/#changelog)
-- **最新 Release 下载与校验包**：[GitHub Releases v0.1.0-rc9](https://github.com/L1AN929/nyairo/releases/tag/v0.1.0-rc9)
+- **最新 Release 下载与校验包**：[GitHub Releases v0.2.0-rc1](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc1)
 
 ---
 
