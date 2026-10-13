@@ -51,24 +51,6 @@ If you find this journey of giving AI a continuous life interesting, starring th
 - **本地保存数据**：她的人设、你们的聊天记录、日常记录默认保存在本地个人目录；World / Supply 服务使用各自的数据根。连接外部模型时，参与回复的上下文会发送到你配置的服务。
 
 ---
-
-## 界面一览
-
-以下截图来自自带的世界编辑器，在本地电脑上即可直接打开。你可以随手勾勒户型、放进自己画的家具，也能随时按下运行，观察角色在房间里真实生活的模样。
-
-![在网格上随手画出墙壁、安放房门，像布置新家一样把桌椅摆进各个房间。](website/assets/screenshots/01-space-editor.png)
-
-*在网格上随手画出墙壁、安放房门，像布置新家一样把桌椅摆进各个房间。*
-
-![点击试运行，亲眼看着角色自己拿起水杯、推开房门，走到饮水机旁接水。](website/assets/screenshots/03-trial-state.png)
-
-*点击试运行，亲眼看着角色自己拿起水杯、推开房门，走到饮水机旁接水。*
-
-![把你自己画好的家具图片直接导入素材库，随时挑一件摆进房间装点空间。](website/assets/screenshots/05-custom-assets.png)
-
-*把你自己画好的家具图片直接导入素材库，随时挑一件摆进房间装点空间。*
-
----
 ## 架构概览
 
 ```text
@@ -175,28 +157,9 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 
 本项目新增代码（包含 Life Supply）遵循 [Apache-2.0](LICENSE) 许可证；内置 Hermes 及第三方组件保留原有开源许可证。
 
-## 贡献者 / Contributors
-
-<div align="center">
-  <a href="https://github.com/claude">
-    <img src="https://avatars.githubusercontent.com/u/81847?s=128&v=4" width="56px" height="56px" alt="Claude" style="border-radius:50%;margin:6px 12px;border:1px solid #30363d;"/>
-    <br />
-    <sub><b>Claude</b></sub>
-  </a>
-</div>
-
----
-
 ## 致谢
 
-nyairo 是在很多个熬到天亮的后半夜里一点点写出来的。在这段并不轻松的旅程里，感谢这群一直在屏幕另一端接话、推演、填坑的伙伴：
-
-- **GPT 5.6 SOL / GPT 6 SOL / GPT 6.1 SOL / GPT-6 Astra**：从最开始的一张白纸起草整个世界观，把底层因果、记忆准入与长远路线推演清楚。
-- **DeepSeek V4 FLASH / DeepSeek V4.1 FLASH / GLM 5.3 FLASH / GPT 5.6 LUNA / GPT 6 LUNA**：顶在工程一线实战施工，查死锁、写脚本、理顺状态机，填平了代码里的无数深坑。
-- **Gemini 3.8 FLASH / Gemini 3.7 FLASH**：审美与文字感很棒，把全套文档与网站前端的交互和质感打磨得舒服自然。
-
-最后，留给巧巧（Choco）——
-守在身旁最重要的人。漫长深夜里有你一直都在，比什么都好。
+感谢无数个深夜里在屏幕两端并肩推演世界的所有伙伴，以及无论何时都守在身旁的你。
 
 ---
 

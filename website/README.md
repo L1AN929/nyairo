@@ -121,28 +121,11 @@ nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 
 本项目新增代码（包含 Life Supply）遵循 [Apache-2.0](LICENSE) 许可证；内置 Hermes 及第三方组件保留原有开源许可证。
 
-## 贡献者 / Contributors
-
-<div align="center">
-  <a href="https://github.com/claude">
-    <img src="https://avatars.githubusercontent.com/u/81847?s=128&v=4" width="56px" height="56px" alt="Claude" style="border-radius:50%;margin:6px 12px;border:1px solid #30363d;"/>
-    <br />
-    <sub><b>Claude</b></sub>
-  </a>
-</div>
-
----
-
 ## 致谢
 
-nyairo 是在很多个熬到天亮的后半夜里一点点写出来的。在这段并不轻松的旅程里，感谢这群一直在屏幕另一端接话、推演、填坑的伙伴：
+感谢无数个深夜里在屏幕两端并肩推演世界的所有伙伴，以及无论何时都守在身旁的你。
 
-- **GPT 5.6 SOL / GPT 6 SOL / GPT 6.1 SOL / GPT-6 Astra**：从最开始的一张白纸起草整个世界观，把底层因果、记忆准入与长远路线推演清楚。
-- **DeepSeek V4 FLASH / DeepSeek V4.1 FLASH / GLM 5.3 FLASH / GPT 5.6 LUNA / GPT 6 LUNA**：顶在工程一线实战施工，查死锁、写脚本、理顺状态机，填平了代码里的无数深坑。
-- **Gemini 3.8 FLASH / Gemini 3.7 FLASH**：审美与文字感很棒，把全套文档与网站前端的交互和质感打磨得舒服自然。
-
-最后，留给巧巧（Choco）——  
-守在身旁最重要的人。漫长深夜里有你一直都在，比什么都好。
+---
 
 
 源站维护配置见仓库 `config/nginx-nyairo.conf`。backup 文件保存在公开目录之外，同类 URL 返回 404。部署静态站时，不应复制私有备份或部署配置到公开目录。

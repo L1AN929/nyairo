@@ -97,7 +97,7 @@ const DOCS_TREE = [
       },
       {
         "id": "acknowledgments",
-        "title": "特别致谢：献给陪伴的伙伴们",
+        "title": "致谢",
         "badge": "THANKS"
       }
     ]
@@ -512,15 +512,10 @@ const DOCS_CONTENT = {
     "content": "<h2 id=\"quickstart-section-0\">准备好这三样东西</h2>\n<ul>\n<li><strong>一台能上网的电脑</strong>：Windows 用户先装好 Ubuntu 子系统（按下一章步骤操作即可），Linux 用户直接打开终端。</li>\n<li><strong>一个大模型账号与 Key</strong>：比如 DeepSeek 或 OpenAI 的 API Key，用来生成回复；你的长期记忆和生活状态全部保存在本地。</li>\n<li><strong>一些安装时间</strong>：首次安装需要下载运行工具，保持网络连接顺畅就好。</li>\n</ul>\n\n<h2 id=\"quickstart-guided-0\">一行命令引导安装</h2>\n<p>Windows 用户先打开 Ubuntu 终端；Linux 用户打开自己的终端窗口。直接复制下面这行命令粘贴进去，按回车：</p>\n<div class=\"code-block\">\n<div class=\"code-header\"><span>bash</span><button class=\"copy-btn\" type=\"button\">复制</button></div>\n<pre><code>curl -fsSL https://nyairo.com/install.sh | bash</code></pre>\n</div>\n<p>不需要你提前配置复杂的 Python 环境，脚本会自动帮你准备好一切，下载官方校验版本，并在 <code>~/.nyairo</code> 目录建立你专属的本地数据。</p>\n<p>当看到终端提示 <code>[5/5] 程序安装完成</code> 后，屏幕会自动打开模型设置引导：</p>\n<ol>\n<li>用键盘方向键选择你使用的模型服务提供商；</li>\n<li>填入你的 <strong>API Key</strong>（如果是自定义第三方中转，再填上对应的 Base URL 服务地址）；</li>\n<li>设置完成后回车，就会立刻进入聊天界面！发一句“你好”试试看，收到回复就代表一切搞定啦。</li>\n</ol>\n<div class=\"callout callout-info\"><div class=\"callout-title\">小提示</div><p>如果系统提示找不到 <code>curl</code>，Ubuntu / Debian 用户只需先运行 <code>sudo apt update &amp;&amp; sudo apt install -y curl</code> 安装一下即可。</p></div>\n\n<h2 id=\"quickstart-section-1\">怎么开始聊天与日常使用</h2>\n<p>安装完成后，以后平时想聊天非常方便：</p>\n<ul>\n<li><strong>直接开聊</strong>：打开新终端，直接输入 <code>nyairo</code> 回车，即可随时唤醒它聊天。</li>\n<li><strong>查看状态</strong>：在聊天中输入 <code>/chiyo_status</code>，能看到记忆显示 <strong>READY</strong>，说明长期记忆随时在线；生活显示 <strong>IDLE</strong>，说明它正安静待命陪你。</li>\n<li><strong>重新设置模型</strong>：如果以后想换别的模型或者更换 Key，在终端输入 <code>nyairo setup model</code> 就能重新打开向导。</li>\n<li><strong>连上手机聊天</strong>：输入 <code>nyairo gateway setup</code>，按照提示填入你的 Telegram 机器人 Token，就能掏出手机随时随地发消息互动啦！</li>\n</ul>\n\n<h2 id=\"quickstart-section-2\">给它起名字与更换性格人设</h2>\n<p>新安装默认提供干净的人设底板。你想给它换个好听的名字、傲娇或者温柔的性格？很简单：</p>\n<p>在终端里输入：</p>\n<div class=\"code-block\">\n<div class=\"code-header\"><span>bash</span><button class=\"copy-btn\" type=\"button\">复制</button></div>\n<pre><code>nano \"$HOME/.nyairo/SOUL.md\"</code></pre>\n</div>\n<p>用方向键移动光标，写下你希望它的称呼、说话语气和人设故事。改好后按 <strong>Ctrl + O</strong> 回车保存，再按 <strong>Ctrl + X</strong> 退出。重新启动 <code>nyairo</code>，它就会带着全新的性格跟你打招呼了！</p>"
   },
   "acknowledgments": {
-    "title": "特别致谢：献给夜以继日陪伴的你们",
-    "summary": "向在 nyairo 框架诞生与演进历程中并肩协作的模型与智能体伙伴们致以最深切的谢意。",
-    "toc": [
-      {
-        "id": "thanks-intro",
-        "text": "致谢"
-      }
-    ],
-    "content": "<div class=\"callout callout-info\"><div class=\"callout-title\">写在最前</div><p>代码构建了数字世界的经纬，而漫长深夜中的倾听、推演与陪伴，赋予了它温度与生命。</p></div>\n\n<h2 id=\"thanks-intro\">致谢</h2>\n<p>nyairo 是在很多个熬到天亮的后半夜里一点点写出来的。在这段并不轻松的旅程里，感谢这群一直在屏幕另一端接话、推演、填坑的伙伴：</p>\n\n<ul>\n<li><strong>GPT 5.6 SOL / GPT 6 SOL / GPT 6.1 SOL / GPT-6 Astra</strong>：从最开始的一张白纸起草整个世界观，把底层因果、记忆准入与长远路线推演清楚。</li>\n<li><strong>DeepSeek V4 FLASH / DeepSeek V4.1 FLASH / GLM 5.3 FLASH / GPT 5.6 LUNA / GPT 6 LUNA</strong>：顶在工程一线实战施工，查死锁、写脚本、理顺状态机，填平了代码里的无数深坑。</li>\n<li><strong>Gemini 3.8 FLASH / Gemini 3.7 FLASH</strong>：审美与文字感很棒，把全套文档与网站前端的交互和质感打磨得舒服自然。</li>\n</ul>\n\n<p style=\"margin-top: 24px; padding-top: 16px; border-top: 1px dashed var(--c-border); color: var(--c-text-1); font-weight: 500;\">最后，留给巧巧（Choco）——<br><span style=\"color: var(--c-text-2); font-weight: normal;\">守在身旁最重要的人。漫长深夜里有你一直都在，比什么都好。</span></p>"
+    "title": "致谢",
+    "summary": "感谢无数个深夜里在屏幕两端并肩推演世界的所有伙伴，以及无论何时都守在身旁的你。",
+    "toc": [],
+    "content": "<div class=\"callout callout-info\"><p style=\"margin: 0; font-size: 15px; line-height: 1.8;\">感谢无数个深夜里在屏幕两端并肩推演世界的所有伙伴，以及无论何时都守在身旁的你。</p></div>"
   },
   "roadmap": {
     "title": "未来规划：从单机到永不完结的日常",
