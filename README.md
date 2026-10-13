@@ -52,6 +52,23 @@ If you find this journey of giving AI a continuous life interesting, starring th
 
 ---
 
+## 界面一览
+
+以下截图来自自带的世界编辑器，在本地电脑上即可直接打开。你可以随手勾勒户型、放进自己画的家具，也能随时按下运行，观察角色在房间里真实生活的模样。
+
+![在网格上随手画出墙壁、安放房门，像布置新家一样把桌椅摆进各个房间。](website/assets/screenshots/01-space-editor.png)
+
+*在网格上随手画出墙壁、安放房门，像布置新家一样把桌椅摆进各个房间。*
+
+![点击试运行，亲眼看着角色自己拿起水杯、推开房门，走到饮水机旁接水。](website/assets/screenshots/03-trial-state.png)
+
+*点击试运行，亲眼看着角色自己拿起水杯、推开房门，走到饮水机旁接水。*
+
+![把你自己画好的家具图片直接导入素材库，随时挑一件摆进房间装点空间。](website/assets/screenshots/05-custom-assets.png)
+
+*把你自己画好的家具图片直接导入素材库，随时挑一件摆进房间装点空间。*
+
+---
 ## 架构概览
 
 ```text
