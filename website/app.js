@@ -53,11 +53,13 @@ function updateThemeIcon(theme) {
       <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
     `;
     btnEl.setAttribute('title', '切换为亮色模式');
+    btnEl.setAttribute('aria-label', '切换为亮色模式');
   } else {
     iconEl.innerHTML = `
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
     `;
     btnEl.setAttribute('title', '切换为暗色模式');
+    btnEl.setAttribute('aria-label', '切换为暗色模式');
   }
 }
 
@@ -77,7 +79,7 @@ function initCommandCopy() {
     btn.setAttribute('aria-label', copied ? '已复制安装命令' : '请手动复制安装命令');
     btn.classList.toggle('copied', copied);
     const feedback = document.getElementById('hero-copy-feedback');
-    if (feedback) feedback.textContent = '';
+    if (feedback) feedback.textContent = copied ? '已复制安装命令' : '已选中命令，请按快捷键手动复制';
     setTimeout(() => {
       btn.setAttribute('aria-label', '复制安装命令');
       btn.classList.remove('copied');
@@ -100,12 +102,23 @@ function initInstallMethods() {
     tabAgent.classList.toggle('is-active', useAgent);
     tabCli.setAttribute('aria-selected', String(!useAgent));
     tabAgent.setAttribute('aria-selected', String(useAgent));
+    tabCli.tabIndex = useAgent ? -1 : 0;
+    tabAgent.tabIndex = useAgent ? 0 : -1;
     panelCli.hidden = useAgent;
     panelAgent.hidden = !useAgent;
   }
 
   tabCli.addEventListener('click', () => select(false));
   tabAgent.addEventListener('click', () => select(true));
+  [tabCli, tabAgent].forEach((tab, index) => tab.addEventListener('keydown', e => {
+    let next;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') next = 1 - index;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End') next = 1;
+    if (next === undefined) return;
+    e.preventDefault(); select(next === 1); [tabCli, tabAgent][next].focus();
+  }));
+  select(false);
 
   // 抽屉展开折叠
   const drawerBtn = document.getElementById('agent-toggle-drawer');
@@ -344,7 +357,7 @@ function loadDoc(docId, anchor = null) {
     requestAnimationFrame(() => {
       const targetEl = document.getElementById(anchor);
       if (targetEl) {
-        targetEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        targetEl.scrollIntoView({ block: 'start', behavior: preferredScrollBehavior() });
       } else {
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
@@ -419,8 +432,8 @@ function renderTOC(tocList) {
       const anchorId = link.getAttribute('data-anchor');
       const targetEl = document.getElementById(anchorId);
       if (targetEl) {
-        targetEl.scrollIntoView({ behavior: 'smooth' });
-        history.replaceState(null, '', `#${docAnchorPage(anchorId)}`);
+        targetEl.scrollIntoView({ behavior: preferredScrollBehavior() });
+        history.replaceState(null, '', `#${anchorId}`);
       }
     });
   });
@@ -581,7 +594,7 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function docAnchorPage(anchorId) { return anchorId.split("-section-")[0]; }
+function preferredScrollBehavior() { return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'; }
 
 async function copyTextOrSelect(code) {
   try {
@@ -631,7 +644,7 @@ function initShowcaseTabs() {
         bubbles.forEach((b, bIdx) => {
           b.style.animation = 'none';
           b.offsetHeight; /* 强制重绘回流 */
-          b.style.animation = `bubble-pop 0.35s cubic-bezier(0.16, 1, 0.3, 1) ${bIdx * 0.045}s both`;
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) b.style.animation = `bubble-pop 0.35s cubic-bezier(0.16, 1, 0.3, 1) ${bIdx * 0.045}s both`;
         });
       } else {
         p.classList.remove('active');
@@ -641,9 +654,11 @@ function initShowcaseTabs() {
     // 手机端标签行是单行横向滑动，选中的标签自动滚入视野
     const tabsEl = tabs[0] && tabs[0].parentElement;
     if (tabsEl && tabsEl.scrollWidth > tabsEl.clientWidth + 1) {
-      tabs[targetIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      tabs[targetIndex].scrollIntoView({ behavior: preferredScrollBehavior(), block: 'nearest', inline: 'nearest' });
     }
   };
+
+  activate(0);
 
   tabs.forEach((tab, index) => {
     tab.addEventListener('click', (e) => {
@@ -696,60 +711,36 @@ function initInteractiveRoadmap() {
   const fill = document.getElementById('stage-progress-fill');
   if (!buttons.length || !panels.length) return;
 
-  let currentIndex = 0;
-  let timer = null;
-  let isHovered = false;
-
-  function setPhase(index) {
-    currentIndex = index;
-    // 更新步骤按钮状态
+  function setPhase(index, focus = false) {
     buttons.forEach((btn, i) => {
       const active = i === index;
+      btn.id = `phase-tab-${i}`;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-selected', String(active));
+      btn.tabIndex = active ? 0 : -1;
+      if (active && focus) btn.focus();
     });
-    // 更新展示面板
-    panels.forEach((p, i) => {
+    panels.forEach((panel, i) => {
       const active = i === index;
-      p.classList.toggle('active', active);
+      panel.classList.toggle('active', active);
+      panel.hidden = !active;
+      panel.setAttribute('aria-labelledby', `phase-tab-${i}`);
     });
-    // 更新顶部时间轴填充条宽度
-    if (fill) {
-      const pct = (index / (buttons.length - 1)) * 100;
-      fill.style.width = `${pct}%`;
-    }
+    if (fill) fill.style.width = `${buttons.length > 1 ? index / (buttons.length - 1) * 100 : 0}%`;
   }
-
-  // 点击事件
-  buttons.forEach((btn, i) => {
-    btn.addEventListener('click', () => {
-      setPhase(i);
-      resetAutoTimer();
+  buttons.forEach((btn, index) => {
+    btn.addEventListener('click', () => setPhase(index));
+    btn.addEventListener('keydown', e => {
+      let next;
+      if (e.key === 'ArrowRight') next = (index + 1) % buttons.length;
+      if (e.key === 'ArrowLeft') next = (index + buttons.length - 1) % buttons.length;
+      if (e.key === 'Home') next = 0;
+      if (e.key === 'End') next = buttons.length - 1;
+      if (next === undefined) return;
+      e.preventDefault(); setPhase(next, true);
     });
   });
-
-  // 鼠标悬停时暂停自动播放，移开时继续轮播
-  stage.addEventListener('mouseenter', () => { isHovered = true; clearInterval(timer); });
-  stage.addEventListener('mouseleave', () => { isHovered = false; startAutoTimer(); });
-
-  function startAutoTimer() {
-    clearInterval(timer);
-    timer = setInterval(() => {
-      if (!isHovered) {
-        const next = (currentIndex + 1) % buttons.length;
-        setPhase(next);
-      }
-    }, 6000);
-  }
-
-  function resetAutoTimer() {
-    clearInterval(timer);
-    startAutoTimer();
-  }
-
-  // 初始化设置
   setPhase(0);
-  startAutoTimer();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -33,6 +33,14 @@ def verify(root):
  if hashlib.sha256(lines.encode()).hexdigest()!=data['tree_sha256']:errors.append('tree_sha256')
  if len(files)!=data['file_count']:errors.append('file_count')
  if data.get('status') not in VALID_STATUSES:errors.append('unsupported_status')
+ # Both installation registration and update admission read release.json. A
+ # correctly hashed archive with a stale version is still not a usable release.
+ metadata=root/'scripts/release.json'
+ if metadata.is_file() and data.get('version'):
+  try:
+   declared=json.loads(metadata.read_text(encoding='utf8')).get('version')
+   if declared!='v'+str(data['version']).removeprefix('v'):errors.append('release_version_mismatch')
+  except (OSError,ValueError,TypeError):errors.append('invalid_release_metadata')
  return {'files':len(files),'changed_or_missing':errors,'unexpected_files':extras,'status':data.get('status'),'valid':not errors and not extras}
 
 def main():

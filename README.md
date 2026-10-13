@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc1"><img src="https://img.shields.io/badge/release-v0.2.0--rc1-e11d48" alt="v0.2.0-rc1"></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc2"><img src="https://img.shields.io/badge/release-v0.2.0--rc2-e11d48" alt="v0.2.0-rc2"></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -14,12 +14,12 @@
 </p>
 
 > **给 AI 一个世界，让她拥有属于自己的日常。**
-> 
+>
 > 虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 想做的事情很简单：让住在你电脑里的这位伙伴，拥有连续不断的生活。你们的每一次对话，都不再是每次从零开始的客套，而是发生在一串有前因后果的真实日常里。
 >
-> **当前版本：v0.2.0-rc1（公开测试版）** — 2026 年 10 月 13 日发布。在这个版本里，她开始学着过自己的生活，可以在 7 个示例世界里走走停停，做点属于自己的事情。这还不是最终的稳定版（如果你需要，旧版 rc9 依然可以下载），很多细节我们还在用心打磨。
-> 
-> 在 Linux 或 Windows 的 WSL 终端里，输入这一行就能装好：  
+> **当前版本：v0.2.0-rc2（公开测试版）** — 2026 年 10 月 13 日发布。在这个版本里，她开始学着过自己的生活，可以在 7 个示例世界里走走停停，做点属于自己的事情。这还不是最终的稳定版（如果你需要，旧版 rc9 依然可以下载），很多细节我们还在用心打磨。
+>
+> 在 Linux 或 Windows 的 WSL 终端里，输入这一行就能装好：
 > `curl -fsSL https://nyairo.com/install.sh | bash`
 
 ---
@@ -34,7 +34,7 @@ NyAiro is an open-source (Apache-2.0) digital life framework that provides an AI
 Install via Linux or WSL:
 `curl -fsSL https://nyairo.com/install.sh | bash`
 
-*Note: This is an open test version (v0.2.0-rc1), not a stable release.*
+*Note: This is an open test version (v0.2.0-rc2), not a stable release.*
 
 If you find this journey of giving AI a continuous life interesting, starring the repo is the best support for us.
 
@@ -45,10 +45,10 @@ If you find this journey of giving AI a continuous life interesting, starring th
 - **她开始有自己的生活**：哪怕你没有发消息找她，她也会按自己的节奏醒来看一眼，决定要不要做点什么，或者把之前没写完的东西接着写下去。这项功能默认是关闭的，如果你想让她自己忙起来，可以手动打开。
 - **她做完的事是真的**：她不会随口敷衍你。光说一句“写好了”不算数，只有系统确认事情真正办妥了，才会记进账本；遇到说不清的情况，她会老老实实标成“不确定”，绝不假装成功。
 - **世界可以自己画**：这一版带来了世界生成器和世界编辑器，还附带了 7 个现成的示例世界。你可以自己画一面墙、装一扇门、摆几件家具。她在里面能清楚感知自己的位置，能在屋子里走动，也能动身去别的地方。
-- **长久的记忆**：今天聊过的事、以前一起经历过的心情，关掉窗口也不会丢。随时聊起，她都记得；你可以随时查看她记住了什么，能帮她修正记错的事，也能让她彻底忘掉不想留存的记录。
+- **长久的记忆**：今天聊过的事、以前一起经历过的心情，关掉窗口也不会丢。重要经历可跨会话召回，召回效果取决于配置与记录质量；你可以随时查看她记住了什么，能帮她修正记错的事，也能停止采用不想继续召回的记录；原始聊天、审计和备份仍保留。
 - **生活不会中断**：即使你合上电脑或者重启系统，她的状态依然是连续的，不会退化成那种点一下才动一下的一次性对话框。
 - **认真的工作帮手**：需要处理复杂事情时，她也可以从日常状态切换出来，接管本地工作区，帮你写代码、推演方案或者运行脚本。
-- **只留在你本地**：她的人设、你们的聊天记录、所有记下的日常，全都在你本地电脑的 `~/.nyairo` 目录里。数据属于你，绝不会悄悄上传到别处。
+- **本地保存数据**：她的人设、你们的聊天记录、日常记录默认保存在本地个人目录；World / Supply 服务使用各自的数据根。连接外部模型时，参与回复的上下文会发送到你配置的服务。
 
 ---
 
@@ -116,7 +116,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 | --- | --- | --- |
 | `nyairo` | 启动终端聊天 | 想和她聊聊天、说说话 |
 | `nyairo setup model` | 更换模型或更新密钥 | 想换一家模型供应商，或者填入新的 API Key |
-| `nyairo setup messaging` | 配置消息平台 | 想要连上 Telegram 机器人在手机上找她 |
+| `nyairo gateway setup` | 配置消息平台 | 想要连上 Telegram 机器人在手机上找她 |
 | `nyairo update` | 升级软件 | 想要更新到最新发布的版本 |
 | `nyairo update --rollback` | 回退到上一个版本 | 遇到不习惯或有问题时，直接退回旧版本 |
 | `nano "$HOME/.nyairo/SOUL.md"` | 编辑人设与性格 | 调整她的性格、说话习惯和对你的称呼 |
@@ -140,7 +140,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 nyairo 把软件本身和属于你的生活数据分得很清楚：
 
-- **程序文件**：`~/.local/share/nyairo/releases/v0.2.0-rc1`（运行程序的地方，更新时会整体替换）
+- **程序文件**：`~/.local/share/nyairo/releases/v0.2.0-rc2`（运行程序的地方，更新时会整体替换）
 - **你的数据**：`~/.nyairo`（存放人设、日常数据库、记忆与配置文件）
 - **启动入口**：`~/.local/bin/nyairo`（在终端里唤醒她的快捷入口）
 
@@ -152,7 +152,7 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 
 因为这还是公开测试版，有几件事我们想先坦诚告诉你：
 
-- 如果有些事情她之前记错了，目前暂时还不太方便直接修改；
+- 用户聊天记忆可纠正；自主生活经历暂不支持直接纠正，可停止召回错误记录；
 - 虽然她有了自己的日常节律，但目前还做不到在没有你呼唤的时候，主动在聊天软件里弹消息找你；
 - 刚搭好的新世界里，她第一次想要出门时，偶尔可能会因为不熟悉路线而没走成。
 
@@ -167,7 +167,7 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 - **Telegram 官方频道**：[https://t.me/nyairoai](https://t.me/nyairoai)
 - **快速起步上手指南**：[https://nyairo.com/#quickstart](https://nyairo.com/#quickstart)
 - **版本更新动态与说明**：[https://nyairo.com/#changelog](https://nyairo.com/#changelog)
-- **最新 Release 下载与校验包**：[GitHub Releases v0.2.0-rc1](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc1)
+- **最新 Release 下载与校验包**：[GitHub Releases v0.2.0-rc2](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc2)
 
 ---
 
@@ -185,7 +185,7 @@ nyairo 是在很多个熬到天亮的后半夜里一点点写出来的。在这�
 - **DeepSeek V4 FLASH / DeepSeek V4.1 FLASH / GLM 5.3 FLASH / GPT 5.6 LUNA / GPT 6 LUNA**：顶在工程一线实战施工，查死锁、写脚本、理顺状态机，填平了代码里的无数深坑。
 - **Gemini 3.8 FLASH / Gemini 3.7 FLASH**：审美与文字感很棒，把全套文档与网站前端的交互和质感打磨得舒服自然。
 
-最后，留给巧巧（Choco）——  
+最后，留给巧巧（Choco）——
 守在身旁最重要的人。漫长深夜里有你一直都在，比什么都好。
 
 ---

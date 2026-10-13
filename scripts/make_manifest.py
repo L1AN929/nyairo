@@ -65,7 +65,7 @@ def collect(root: Path) -> dict[str, str]:
                 dirs.remove(directory)
         for name in names:
             relative = (base / name).relative_to(root)
-            if relative.as_posix() == "MANIFEST.json":
+            if relative.as_posix() in ("MANIFEST.json", ".git"):
                 continue
             files[relative.as_posix()] = hashlib.sha256((base / name).read_bytes()).hexdigest()
     return files
@@ -102,7 +102,7 @@ def main() -> int:
                "wrote": bool(args.write)}
     if args.write:
         manifest_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-                                 encoding="utf-8")
+                                 encoding="utf-8", newline="\n")
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 0
 
