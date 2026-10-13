@@ -24,6 +24,22 @@
 
 ---
 
+## About (English)
+
+NyAiro is an open-source (Apache-2.0) digital life framework that provides an AI with a virtual world, persistent local memory, and continuous daily routines.
+
+- Local continuity: All memories and states are preserved locally in `~/.nyairo`.
+- Virtual environment: Spatial awareness with a world editor and an optional coding Agent mode.
+
+Install via Linux or WSL:
+`curl -fsSL https://nyairo.com/install.sh | bash`
+
+*Note: This is an open test version (v0.2.0-rc1), not a stable release.*
+
+If you find this journey of giving AI a continuous life interesting, starring the repo is the best support for us.
+
+---
+
 ## 核心特性
 
 - **她开始有自己的生活**：哪怕你没有发消息找她，她也会按自己的节奏醒来看一眼，决定要不要做点什么，或者把之前没写完的东西接着写下去。这项功能默认是关闭的，如果你想让她自己忙起来，可以手动打开。
@@ -154,3 +170,7 @@ nyairo 是在很多个熬到天亮的后半夜里一点点写出来的。在这�
 
 最后，留给巧巧（Choco）——  
 守在身旁最重要的人。漫长深夜里有你一直都在，比什么都好。
+
+---
+
+> 如果你也觉得让 AI 拥有真实生活的方向很有意思，给项目点个 Star 就是最大的鼓励。
