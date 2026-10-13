@@ -43,6 +43,9 @@ logger = logging.getLogger("chiyo_life_cognition")
 #: Hard cap on how much of the request JSON we are willing to send.
 MAX_PROMPT_CHARS = 12000
 MAX_CANDIDATES_IN_PROMPT = 16
+#: E07: how many admitted experiences may enter a decision prompt, and how much text in total.
+MAX_EXPERIENCES_IN_PROMPT = 3
+MAX_EXPERIENCE_CHARS = 600
 
 #: LPC0B-R2 Gap 2: the adapter's own outcome word for a result that arrived after its deadline.
 #: Must stay identical to ``agency_cognition_budget.OUTCOME_LATE_DISCARDED``.
@@ -144,10 +147,13 @@ class ProductionAgencyCognitionAdapter:
 
     @staticmethod
     def _compact_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
-        # Stable identifiers and free-form source summaries can contain private/user-authored
-        # text. The model only needs bounded decision structure; never send those fields.
-        keep = ("source_kind", "candidate_kind", "hard_constraint_status", "capacity_state",
-                "executable_now", "candidate_revision", "candidate_set_revision")
+        # The decision schema requires the model to name the candidate it chose, so the candidate
+        # id has to be in the prompt.  It is an opaque reference ("cand:<hash>"), not private text:
+        # free-form source summaries and titles are still withheld, which is what this method is
+        # actually protecting.  Without the id the model can only ever answer NO_ACTION.
+        keep = ("candidate_id", "source_kind", "candidate_kind", "hard_constraint_status",
+                "capacity_state", "executable_now", "candidate_revision",
+                "candidate_set_revision")
         return {k: candidate.get(k) for k in keep if k in candidate}
 
     @staticmethod
@@ -185,12 +191,40 @@ class ProductionAgencyCognitionAdapter:
             "observed_fact_keys": [str(k)[:48] for k in
                                     list(getattr(request, "observed_fact_keys", []) or [])[:24]
                                     if str(k).isascii() and str(k).replace("_", "").isalnum()],
+            # E07: her own admitted experiences, already filtered by the Memory boundary port.
+            # Unlike the enum sanitiser above, these are free text on purpose -- a memory the model
+            # may weigh is exactly the thing being conveyed -- so the bound is count and length,
+            # and each item stays attributable.
+            "prior_experiences": self._bounded_experiences(
+                getattr(request, "prior_experiences", None)),
             "candidates": candidates,
         }
         text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         if len(text) > self.max_prompt_chars:
             text = text[: self.max_prompt_chars] + ' ...(truncated)"}'
         return text, payload
+
+    @staticmethod
+    def _bounded_experiences(raw: Any) -> list[dict[str, Any]]:
+        """A small, attributed slice of admitted experiences.  Never a command, never unbounded."""
+        out: list[dict[str, Any]] = []
+        budget = MAX_EXPERIENCE_CHARS
+        for item in list(raw or ())[:MAX_EXPERIENCES_IN_PROMPT]:
+            if not isinstance(item, Mapping):
+                continue
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            if budget > 0:
+                text = text[:budget]
+                budget -= len(text)
+            out.append({
+                "experience_id": str(item.get("experience_id") or "")[:64] or None,
+                "text": text,
+                "artifact_ref": str(item.get("artifact_ref") or "")[:96] or None,
+                "version_ref": str(item.get("version_ref") or "")[:96] or None,
+            })
+        return out
 
     # -- observe ---------------------------------------------------------------------
 

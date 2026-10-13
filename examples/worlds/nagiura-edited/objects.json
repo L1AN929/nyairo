@@ -1,0 +1,33 @@
+{
+  "objects": [
+    {
+      "kind": "furniture",
+      "location_id": "home",
+      "name": "床",
+      "note": "普通的单人床。",
+      "object_id": "bed_home"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "home",
+      "name": "书桌",
+      "note": "靠窗的书桌。",
+      "object_id": "desk_home"
+    },
+    {
+      "kind": "item",
+      "location_id": "home",
+      "name": "台灯",
+      "note": "暖色的旧台灯。",
+      "object_id": "lamp_home"
+    },
+    {
+      "kind": "bed",
+      "location_id": "bookstore",
+      "name": "读书榻",
+      "note": "书店里供客人小憩的榻。",
+      "object_id": "reading_bed"
+    }
+  ],
+  "schema_version": "worldgen.objects.v1"
+}

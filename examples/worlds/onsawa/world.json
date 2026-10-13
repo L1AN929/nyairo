@@ -1,0 +1,10 @@
+{
+  "description": "汤川——依山傍溪的静谧木构聚落，常年水汽蒸腾，空气中带着淡淡的硫磺与松木气息。依托地热温泉与林下山货维生，保留着街坊轮流打理公共浴场与山道的自治传统。",
+  "generator_version": "worldgen.v0.1",
+  "name": "汤川",
+  "schema_version": "worldgen.world.v1",
+  "seed": 700001,
+  "theme": "mountain_town",
+  "timezone": "Asia/Tokyo",
+  "world_id": "mountain_town_700001"
+}

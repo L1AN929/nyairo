@@ -171,6 +171,24 @@ def build_action_space(
                     })
             if entry.get("verb") == "PLACE":
                 offer_place = True
+            if entry.get("verb") == "MOVE":
+                # B6-3: reachable destinations arrive from the World's own
+                # catalog (through the gateway's availability truth).  A
+                # destination the World does not offer is never synthesised
+                # here, and the model still only ever SELECTs a candidate_id.
+                for offered in entry.get("candidates") or []:
+                    if not isinstance(offered, Mapping):
+                        continue
+                    destination = str(offered.get("location_id") or "").strip()
+                    if not destination:
+                        continue
+                    label = str(offered.get("label") or destination)
+                    candidates.append({
+                        "candidate_id": "move:%s" % destination,
+                        "verb": "MOVE",
+                        "summary": "去%s" % label,
+                        "params": {"destination_location_id": destination},
+                    })
 
     for target_pose in poses:
         if target_pose == pose:

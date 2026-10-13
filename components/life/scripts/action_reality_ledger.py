@@ -2924,9 +2924,15 @@ class ActionCommandService:
             outcome.receipt,
             fault_hook=fault_hook,
         )
+        # An adapter that declares ``supports_observed_result`` may return the observed result of
+        # the effect it just produced (ResultEvidence, Section 9/34/37/77).  Recording it is the
+        # only thing that makes it readable by Result Settlement; an adapter that returns none
+        # changes nothing here, and the receipt above remains the sole evidence.
+        if outcome.result_evidence is not None:
+            self.record_result_evidence(outcome.result_evidence)
         return {
             "idempotent_replay": False,
-            "action": ingested["action"],
+            "action": self.read_service.get_action(action_id),
             "attempt": copy.deepcopy(self.store.load_state(_mutable=True)["attempts"][attempt_id]),
             "receipt": ingested["receipt"],
         }
@@ -3265,6 +3271,14 @@ class ActionCommandService:
                 "to_status": resolved_status,
             },
         )
+        # A confirmed success is a resolution, not yet an observed effect.  An adapter that can
+        # observe the effect it established (``supports_observed_result``) hands one back with the
+        # query above; recording it here lets Result Settlement decide on the owner's own evidence
+        # instead of on the reconciliation's word, and adds nothing when it hands back none.
+        observed = q_info.get("result_evidence") if resolved_status == ACTION_STATUS_SUCCEEDED else None
+        if isinstance(observed, ResultEvidence):
+            self.record_result_evidence(observed)
+            act = self.read_service.get_action(action_id)
         return {
             "action": copy.deepcopy(act),
             "reconciliation": rec_record.to_dict(),

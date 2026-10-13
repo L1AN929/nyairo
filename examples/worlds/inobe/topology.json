@@ -1,0 +1,321 @@
+{
+  "edges": [
+    {
+      "from": "street_1",
+      "to": "street_2",
+      "walk_seconds": 175
+    },
+    {
+      "from": "street_1",
+      "to": "street_3",
+      "walk_seconds": 178
+    },
+    {
+      "from": "home",
+      "to": "street_2",
+      "walk_seconds": 124
+    },
+    {
+      "from": "school",
+      "to": "street_1",
+      "walk_seconds": 124
+    },
+    {
+      "from": "convenience_store",
+      "to": "street_3",
+      "walk_seconds": 310
+    },
+    {
+      "from": "shrine",
+      "to": "street_2",
+      "walk_seconds": 209
+    },
+    {
+      "from": "park",
+      "to": "street_2",
+      "walk_seconds": 198
+    },
+    {
+      "from": "station",
+      "to": "street_3",
+      "walk_seconds": 295
+    },
+    {
+      "from": "farm",
+      "to": "street_1",
+      "walk_seconds": 203
+    },
+    {
+      "from": "community_center",
+      "to": "street_3",
+      "walk_seconds": 300
+    },
+    {
+      "from": "barn_store",
+      "to": "street_3",
+      "walk_seconds": 288
+    },
+    {
+      "from": "library",
+      "to": "street_1",
+      "walk_seconds": 213
+    },
+    {
+      "from": "farmers_market",
+      "to": "street_3",
+      "walk_seconds": 304
+    },
+    {
+      "from": "home",
+      "to": "shrine",
+      "walk_seconds": 192
+    }
+  ],
+  "locations": [
+    {
+      "area_id": "bedroom",
+      "description": "村道旁的平房，屋檐下挂着农具，院子里种着自家吃的菜。",
+      "kind": "home",
+      "location_id": "home",
+      "map": {
+        "x": 337.3,
+        "y": 415.3
+      },
+      "name": "稻边村的住居",
+      "reachable": [
+        "shrine",
+        "street_2"
+      ],
+      "rooms": [
+        {
+          "description": "自己的房间，有一张床和一张书桌。",
+          "name": "自己的房间",
+          "room_id": "bedroom"
+        }
+      ],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "school",
+      "description": "全村唯一的学校，从一年级到六年级只有一间教室，农忙假全村出动。",
+      "kind": "school",
+      "location_id": "school",
+      "map": {
+        "x": 406.8,
+        "y": 419.0
+      },
+      "name": "穗原学园",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "education"
+    },
+    {
+      "area_id": "convenience_store",
+      "description": "村口唯一的便利店，晚上是村里年轻人碰头的地方。",
+      "kind": "store",
+      "location_id": "convenience_store",
+      "map": {
+        "x": 135.8,
+        "y": 601.4
+      },
+      "name": "穗村便利店",
+      "reachable": [
+        "street_3"
+      ],
+      "rooms": [],
+      "zone_id": "market"
+    },
+    {
+      "area_id": "shrine",
+      "description": "祈求丰收的神社，秋天祭典时田埂上会摆满摊子。",
+      "kind": "shrine",
+      "location_id": "shrine",
+      "map": {
+        "x": 226.5,
+        "y": 92.6
+      },
+      "name": "稻荷分社",
+      "reachable": [
+        "home",
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "park",
+      "description": "有旧水车的小公园，傍晚老人在这里摇着蒲扇聊天。",
+      "kind": "park",
+      "location_id": "park",
+      "map": {
+        "x": 206.9,
+        "y": 130.9
+      },
+      "name": "水车公园",
+      "reachable": [
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "station",
+      "description": "无人售票的小站，一天只有几班车，站台边种着向日葵。",
+      "kind": "station",
+      "location_id": "station",
+      "map": {
+        "x": 179.1,
+        "y": 575.6
+      },
+      "name": "穗村站",
+      "reachable": [
+        "street_3"
+      ],
+      "rooms": [],
+      "zone_id": "market"
+    },
+    {
+      "area_id": "farm",
+      "description": "村主要的水田与菜地，清晨能看见白鹭落在田埂上。",
+      "kind": "market",
+      "location_id": "farm",
+      "map": {
+        "x": 845.9,
+        "y": 198.7
+      },
+      "name": "穗村农田",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "farming"
+    },
+    {
+      "area_id": "community_center",
+      "description": "村里开会和办婚丧酒席的地方，布告栏贴着农事历。",
+      "kind": "public",
+      "location_id": "community_center",
+      "map": {
+        "x": 168.3,
+        "y": 590.3
+      },
+      "name": "穗村公民馆",
+      "reachable": [
+        "street_3"
+      ],
+      "rooms": [],
+      "zone_id": "market"
+    },
+    {
+      "area_id": "barn_store",
+      "description": "农协开的直营店，收着全村的米和鸡蛋，也卖种子和肥料。",
+      "kind": "store",
+      "location_id": "barn_store",
+      "map": {
+        "x": 240.4,
+        "y": 620.4
+      },
+      "name": "穗原农协直营店",
+      "reachable": [
+        "street_3"
+      ],
+      "rooms": [],
+      "zone_id": "market"
+    },
+    {
+      "area_id": "library",
+      "description": "公民馆里的乡村图书室，农业图鉴和小说摆在同一排。",
+      "kind": "library",
+      "location_id": "library",
+      "map": {
+        "x": 850.5,
+        "y": 564.7
+      },
+      "name": "穗村图书室",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "education"
+    },
+    {
+      "area_id": "farmers_market",
+      "description": "只在上午开的村民早市，摊位上都是自家种的菜与腌菜。",
+      "kind": "market",
+      "location_id": "farmers_market",
+      "map": {
+        "x": 144.3,
+        "y": 577.7
+      },
+      "name": "石桥朝市",
+      "reachable": [
+        "street_3"
+      ],
+      "rooms": [],
+      "zone_id": "market"
+    },
+    {
+      "area_id": "street_1",
+      "description": "石桥本町，镇上的主要街道之一。",
+      "kind": "street",
+      "location_id": "street_1",
+      "map": {
+        "x": 500.0,
+        "y": 350.0
+      },
+      "name": "石桥本町",
+      "reachable": [
+        "farm",
+        "library",
+        "school",
+        "street_2",
+        "street_3"
+      ],
+      "rooms": [],
+      "zone_id": "streets"
+    },
+    {
+      "area_id": "street_2",
+      "description": "水车巷，镇上的主要街道之一。",
+      "kind": "street",
+      "location_id": "street_2",
+      "map": {
+        "x": 250.0,
+        "y": 490.0
+      },
+      "name": "水车巷",
+      "reachable": [
+        "home",
+        "park",
+        "shrine",
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "streets"
+    },
+    {
+      "area_id": "street_3",
+      "description": "田间道，镇上的主要街道之一。",
+      "kind": "street",
+      "location_id": "street_3",
+      "map": {
+        "x": 750.0,
+        "y": 196.0
+      },
+      "name": "田间道",
+      "reachable": [
+        "barn_store",
+        "community_center",
+        "convenience_store",
+        "farmers_market",
+        "station",
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "streets"
+    }
+  ],
+  "schema_version": "worldgen.topology.v1"
+}

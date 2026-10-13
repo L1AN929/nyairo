@@ -1,0 +1,252 @@
+{
+  "location_rules": {
+    "barn_store": {
+      "affordances": [
+        {
+          "affordance_id": "BROWSE_STORE",
+          "description": "在店里看看农资"
+        }
+      ],
+      "close_hour": 18,
+      "open_hour": 8,
+      "weekdays_only": false
+    },
+    "cafe": {
+      "affordances": [
+        {
+          "affordance_id": "SIT",
+          "description": "在店里坐下"
+        },
+        {
+          "affordance_id": "READ",
+          "description": "在这里阅读"
+        }
+      ],
+      "close_hour": 18,
+      "open_hour": 10,
+      "weekdays_only": false
+    },
+    "community_center": {
+      "affordances": [
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "看看布告栏"
+        },
+        {
+          "affordance_id": "SIT",
+          "description": "在门厅坐一会儿"
+        }
+      ],
+      "close_hour": 21,
+      "open_hour": 9,
+      "weekdays_only": false
+    },
+    "convenience_store": {
+      "affordances": [
+        {
+          "affordance_id": "BROWSE_STORE",
+          "description": "在便利店看看"
+        }
+      ],
+      "close_hour": 22,
+      "open_hour": 7,
+      "weekdays_only": false
+    },
+    "farm": {
+      "affordances": [
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "看看田里的作物"
+        },
+        {
+          "affordance_id": "WALK",
+          "description": "沿田埂走走"
+        }
+      ],
+      "close_hour": 17,
+      "open_hour": 6,
+      "weekdays_only": false
+    },
+    "farmers_market": {
+      "affordances": [
+        {
+          "affordance_id": "BROWSE_STORE",
+          "description": "在早市逛逛"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在这里看看周围"
+        }
+      ],
+      "close_hour": 11,
+      "open_hour": 6,
+      "weekdays_only": false
+    },
+    "home": {
+      "affordances": [
+        {
+          "affordance_id": "REST",
+          "description": "在这里休息"
+        },
+        {
+          "affordance_id": "READ",
+          "description": "在这里阅读"
+        },
+        {
+          "affordance_id": "USE_PHONE",
+          "description": "在这里使用手机"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    },
+    "library": {
+      "affordances": [
+        {
+          "affordance_id": "READ",
+          "description": "在这里阅读"
+        },
+        {
+          "affordance_id": "SELF_STUDY",
+          "description": "在这里自习"
+        }
+      ],
+      "close_hour": 18,
+      "open_hour": 9,
+      "weekdays_only": false
+    },
+    "park": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "在公园散步"
+        },
+        {
+          "affordance_id": "SIT",
+          "description": "在长椅上坐一会儿"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在这里看看周围"
+        }
+      ],
+      "close_hour": 21,
+      "open_hour": 6,
+      "weekdays_only": false
+    },
+    "school": {
+      "affordances": [
+        {
+          "affordance_id": "ATTEND_CLASS",
+          "description": "在学校上课"
+        },
+        {
+          "affordance_id": "SELF_STUDY",
+          "description": "在学校自习"
+        },
+        {
+          "affordance_id": "STAY_AT_SCHOOL",
+          "description": "留在学校"
+        }
+      ],
+      "close_hour": 18,
+      "open_hour": 8,
+      "weekdays_only": true
+    },
+    "shrine": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "在神社院子里走走"
+        },
+        {
+          "affordance_id": "PRAY",
+          "description": "在正殿前合掌"
+        }
+      ],
+      "close_hour": 20,
+      "open_hour": 6,
+      "weekdays_only": false
+    },
+    "station": {
+      "affordances": [
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在站前看看"
+        },
+        {
+          "affordance_id": "WALK",
+          "description": "在站台走走"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    },
+    "street_1": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "在街道上散步"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在这里看看周围"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    },
+    "street_2": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "在街道上散步"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在这里看看周围"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    },
+    "street_3": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "在街道上散步"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在这里看看周围"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    }
+  },
+  "schema_version": "worldgen.rules.v1",
+  "weather_candidates": [
+    {
+      "condition": "clear",
+      "description": "晴朗"
+    },
+    {
+      "condition": "cloudy",
+      "description": "多云"
+    },
+    {
+      "condition": "rain",
+      "description": "有雨"
+    },
+    {
+      "condition": "haze",
+      "description": "田雾"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 11,
+      "event_type": "market_morning",
+      "location_id": "farmers_market",
+      "start_hour": 6,
+      "summary": "早市快收摊了，剩菜打折"
+    },
+    {
+      "end_hour": 21,
+      "event_type": "store_evening_sale",
+      "location_id": "convenience_store",
+      "start_hour": 18,
+      "summary": "晚间饭团打折"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "location_id": "home",
+      "start_hour": 0,
+      "summary": "窗外传来远处的水车声"
+    },
+    {
+      "end_hour": 12,
+      "event_type": "shrine_prep",
+      "location_id": "shrine",
+      "start_hour": 8,
+      "summary": "石阶上的落叶被扫成一堆"
+    },
+    {
+      "end_hour": 9,
+      "event_type": "field_irrigation",
+      "location_id": "farm",
+      "start_hour": 5,
+      "summary": "有人沿着田埂检查水路"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_farm_break",
+      "location_id": "school",
+      "start_hour": 0,
+      "summary": "学校的菜园在等学生浇水"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_7a7658ef",
+      "location_id": "park",
+      "start_hour": 0,
+      "summary": "每周六清晨在空地举办的新鲜农产早市。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_e0e41893",
+      "location_id": "park",
+      "start_hour": 0,
+      "summary": "每月一次的村道杂草清理与水渠疏浚劳作。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_2276b72a",
+      "location_id": "shrine",
+      "start_hour": 0,
+      "summary": "春秋两季农忙结束后的神社参拜与社中聚餐。"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "local_302bc4ad",
+      "location_id": "park",
+      "start_hour": 0,
+      "summary": "隔周在社区中心举办的种植经验交流茶会。"
+    }
+  ]
+}

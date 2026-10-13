@@ -18,10 +18,21 @@ import uuid
 
 USER_ORIGIN = "USER_VISIBLE_INPUT"
 CHIYO_ORIGIN = "CHIYO_VISIBLE_OUTPUT"
+# v0.2 (E07): a third origin for a *verified execution outcome* -- something the subject really
+# did in the world, confirmed by the owning service's own receipt.  It is deliberately not the
+# user's speech and not a chat reply: the triple below keeps that distinction explicit in the
+# data, so a life event can never be mistaken for a conversation turn.
+LIFE_ORIGIN = "LIFE_VERIFIED_OUTCOME"
+
+#: Highest migration this module knows how to produce.  v1 is the chat-only schema; v2 widens the
+#: origin CHECK so a verified execution outcome can be recorded (E07).
+SCHEMA_VERSION = 2
 USER_ROLE = "OBSERVED_EXTERNAL_EXPRESSION"
 CHIYO_ROLE = "SELF_EXPRESSION"
+LIFE_ROLE = "VERIFIED_EXECUTION_OUTCOME"
 RECEIVED = "RECEIVED"
 DELIVERED = "DELIVERED"
+VERIFIED = "VERIFIED"
 
 
 def utc_now() -> str:
@@ -81,6 +92,8 @@ class EvidenceEvent:
             expected = (RECEIVED, USER_ROLE, "user")
         elif self.source_origin == CHIYO_ORIGIN:
             expected = (DELIVERED, CHIYO_ROLE, "chiyo")
+        elif self.source_origin == LIFE_ORIGIN:
+            expected = (VERIFIED, LIFE_ROLE, "chiyo")
         else:
             raise ValueError("unsupported M0 source origin")
         if (self.delivery_status, self.epistemic_role, self.speaker) != expected:
@@ -179,11 +192,16 @@ class EvidenceStore:
                              AND delivery_status='RECEIVED'
                              AND epistemic_role='OBSERVED_EXTERNAL_EXPRESSION'
                              AND speaker='user')
-                            OR
-                            (source_origin='CHIYO_VISIBLE_OUTPUT'
-                             AND delivery_status='DELIVERED'
-                             AND epistemic_role='SELF_EXPRESSION'
-                             AND speaker='chiyo')
+                           OR
+                           (source_origin='CHIYO_VISIBLE_OUTPUT'
+                            AND delivery_status='DELIVERED'
+                            AND epistemic_role='SELF_EXPRESSION'
+                            AND speaker='chiyo')
+                           OR
+                           (source_origin='LIFE_VERIFIED_OUTCOME'
+                            AND delivery_status='VERIFIED'
+                            AND epistemic_role='VERIFIED_EXECUTION_OUTCOME'
+                            AND speaker='chiyo')
                         )
                     );
                     CREATE UNIQUE INDEX IF NOT EXISTS
@@ -209,6 +227,89 @@ class EvidenceStore:
                 )
                 connection.execute(
                     "INSERT INTO schema_migrations(version, applied_at) VALUES(1, ?)",
+                    (utc_now(),),
+                )
+
+            # v0.2 (E07) one-directional migration: an existing M0 database was created with a
+            # CHECK that only knows the two chat origins, so the third origin cannot be inserted
+            # until that constraint is widened.  SQLite cannot alter a CHECK, so the table is
+            # rebuilt once, row for row.  Existing rows keep their exact meaning; nothing is
+            # rewritten, and the append-only triggers are recreated with the new table.
+            applied_v2 = connection.execute(
+                "SELECT version FROM schema_migrations WHERE version=2"
+            ).fetchone()
+            if applied_v2 is None:
+                needs_rebuild = connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='evidence_events'"
+                ).fetchone()
+                if needs_rebuild is not None and "LIFE_VERIFIED_OUTCOME" not in (
+                        needs_rebuild["sql"] or ""):
+                    connection.executescript(
+                        """
+                        DROP TRIGGER IF EXISTS evidence_no_update;
+                        DROP TRIGGER IF EXISTS evidence_no_delete;
+                        CREATE TABLE evidence_events_v2 (
+                            event_id TEXT PRIMARY KEY,
+                            occurred_at TEXT NOT NULL,
+                            memory_owner TEXT NOT NULL,
+                            source_origin TEXT NOT NULL,
+                            delivery_status TEXT NOT NULL,
+                            epistemic_role TEXT NOT NULL,
+                            speaker TEXT NOT NULL,
+                            content TEXT NOT NULL,
+                            conversation_id TEXT NOT NULL,
+                            turn_id TEXT NOT NULL,
+                            primary_source_ref_id TEXT NOT NULL,
+                            source_refs_json TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            CHECK (
+                                (source_origin='USER_VISIBLE_INPUT'
+                                 AND delivery_status='RECEIVED'
+                                 AND epistemic_role='OBSERVED_EXTERNAL_EXPRESSION'
+                                 AND speaker='user')
+                                OR
+                                (source_origin='CHIYO_VISIBLE_OUTPUT'
+                                 AND delivery_status='DELIVERED'
+                                 AND epistemic_role='SELF_EXPRESSION'
+                                 AND speaker='chiyo')
+                                OR
+                                (source_origin='LIFE_VERIFIED_OUTCOME'
+                                 AND delivery_status='VERIFIED'
+                                 AND epistemic_role='VERIFIED_EXECUTION_OUTCOME'
+                                 AND speaker='chiyo')
+                            )
+                        );
+                        INSERT INTO evidence_events_v2
+                            SELECT event_id, occurred_at, memory_owner, source_origin,
+                                   delivery_status, epistemic_role, speaker, content,
+                                   conversation_id, turn_id, primary_source_ref_id,
+                                   source_refs_json, created_at
+                            FROM evidence_events;
+                        DROP TABLE evidence_events;
+                        ALTER TABLE evidence_events_v2 RENAME TO evidence_events;
+                        CREATE UNIQUE INDEX IF NOT EXISTS
+                            evidence_source_id_uq
+                            ON evidence_events(source_origin, primary_source_ref_id);
+                        CREATE INDEX IF NOT EXISTS evidence_occurred_idx
+                            ON evidence_events(occurred_at);
+                        CREATE INDEX IF NOT EXISTS evidence_conversation_idx
+                            ON evidence_events(conversation_id);
+                        CREATE INDEX IF NOT EXISTS evidence_turn_idx
+                            ON evidence_events(turn_id);
+                        CREATE INDEX IF NOT EXISTS evidence_speaker_idx
+                            ON evidence_events(speaker);
+                        CREATE INDEX IF NOT EXISTS evidence_origin_idx
+                            ON evidence_events(source_origin);
+                        CREATE TRIGGER IF NOT EXISTS evidence_no_update
+                            BEFORE UPDATE ON evidence_events
+                            BEGIN SELECT RAISE(ABORT, 'M0 Evidence is append-only'); END;
+                        CREATE TRIGGER IF NOT EXISTS evidence_no_delete
+                            BEFORE DELETE ON evidence_events
+                            BEGIN SELECT RAISE(ABORT, 'M0 Evidence is append-only'); END;
+                        """
+                    )
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES(2, ?)",
                     (utc_now(),),
                 )
             connection.commit()
@@ -317,6 +418,41 @@ class EvidenceStore:
         finally:
             connection.close()
 
+    def recent_verified_outcomes(
+        self,
+        *,
+        memory_owner: str,
+        limit: int = 8,
+        since: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest-first, bounded, origin-filtered verified outcomes (E07).
+
+        ``list_events`` orders ascending and mixes every origin, so it is not a "recent
+        experiences" API.  This one returns only verified execution outcomes for one owner, newest
+        first, hard-capped by ``limit``.  Governance (correction / deletion / stop-recall) is *not*
+        applied here -- that belongs to the boundary port, which owns the control ledger.
+        """
+        if limit < 1:
+            return []
+        connection = self._connect()
+        try:
+            if since is None:
+                rows = connection.execute(
+                    "SELECT * FROM evidence_events WHERE memory_owner=? AND source_origin=? "
+                    "ORDER BY occurred_at DESC, created_at DESC, event_id DESC LIMIT ?",
+                    (memory_owner, LIFE_ORIGIN, int(limit)),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM evidence_events WHERE memory_owner=? AND source_origin=? "
+                    "AND occurred_at > ? "
+                    "ORDER BY occurred_at DESC, created_at DESC, event_id DESC LIMIT ?",
+                    (memory_owner, LIFE_ORIGIN, since, int(limit)),
+                ).fetchall()
+            return [self._row_to_dict(row) for row in rows]
+        finally:
+            connection.close()
+
     def verify(self) -> dict[str, Any]:
         issues: list[str] = []
         connection = self._connect()
@@ -324,8 +460,8 @@ class EvidenceStore:
             version = connection.execute(
                 "SELECT MAX(version) AS version FROM schema_migrations"
             ).fetchone()["version"]
-            if version != 1:
-                issues.append("schema_version_not_1")
+            if version != SCHEMA_VERSION:
+                issues.append("schema_version_unexpected")
             rows = connection.execute(
                 "SELECT * FROM evidence_events ORDER BY occurred_at, created_at"
             ).fetchall()

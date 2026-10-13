@@ -1,0 +1,112 @@
+{
+  "assets": {},
+  "placements": {
+    "lamp_home": {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 60,
+      "y": 65
+    },
+    "reading_bed": {
+      "actions": [
+        "rest"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "rest": {
+          "energy_gain": 20,
+          "minutes": 45
+        }
+      },
+      "capacity": 0,
+      "initial_status": "neutral",
+      "interaction": {
+        "near": true,
+        "radius": 2
+      },
+      "kind": "bed",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 20,
+      "y": 40
+    }
+  },
+  "schema_version": "worldgen.scene.v1",
+  "spaces": {
+    "bookstore": {
+      "doors": [
+        {
+          "actions": [
+            "open_door",
+            "close_door",
+            "lock_door",
+            "unlock_door"
+          ],
+          "color": "#bd976e",
+          "id": "shelf-door",
+          "length": 15,
+          "offset": 40,
+          "state": "closed",
+          "wall_id": "shelf-wall"
+        }
+      ],
+      "enabled": true,
+      "entry": {
+        "x": 5,
+        "y": 10
+      },
+      "floors": [
+        {
+          "asset_id": null,
+          "color": "#e8e8dc",
+          "h": 100,
+          "id": "front",
+          "texture": "planks",
+          "w": 50,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "walls": [
+        {
+          "color": "#8c8a7d",
+          "id": "shelf-wall",
+          "width": 7,
+          "x1": 50,
+          "x2": 50,
+          "y1": 0,
+          "y2": 100
+        }
+      ],
+      "windows": []
+    }
+  }
+}

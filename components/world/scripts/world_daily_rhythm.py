@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import world_runtime_data as wrd
+
 FEATURE_ENV = "CHIYO_WORLD_DAILY_RHYTHM_ENABLED"
 WORLD_ID = "shiomi_city"
 WORLD_TIMEZONE = "Asia/Tokyo"
@@ -87,8 +89,10 @@ def daily_rhythm(
     now: Optional[datetime],
     *,
     timezone_name: str = WORLD_TIMEZONE,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
     local = _local(now, timezone_name)
+    world = wrd.active_world(environment)
     if 5 <= local.hour < 12:
         daypart = "morning"
     elif 12 <= local.hour < 18:
@@ -99,7 +103,7 @@ def daily_rhythm(
         daypart = "night"
     return {
         "schema_version": SCHEMA_VERSION,
-        "world_id": WORLD_ID,
+        "world_id": world.world_id,
         "timezone": timezone_name,
         "local_date": local.date().isoformat(),
         "weekday": local.isoweekday(),
@@ -108,10 +112,24 @@ def daily_rhythm(
     }
 
 
-def _rule(location_id: str) -> _LocationRule:
-    if not isinstance(location_id, str) or location_id not in _RULES:
+def _rule(
+    location_id: str, environment: Optional[Mapping[str, str]] = None
+) -> _LocationRule:
+    """活动世界的地点规则（未配置世界包时即汐见市 _RULES）。"""
+    if not isinstance(location_id, str):
         raise DailyRhythmError("unknown location_id")
-    return _RULES[location_id]
+    world = wrd.active_world(environment)
+    try:
+        data = world.location_rule(location_id)
+    except wrd.WorldDataError:
+        raise DailyRhythmError("unknown location_id") from None
+    return _LocationRule(
+        location_id,
+        data["open_hour"],
+        data["close_hour"],
+        data["weekdays_only"],
+        tuple(data["affordances"]),
+    )
 
 
 def location_availability(
@@ -119,8 +137,9 @@ def location_availability(
     now: Optional[datetime],
     *,
     timezone_name: str = WORLD_TIMEZONE,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, str]:
-    rule = _rule(location_id)
+    rule = _rule(location_id, environment)
     local = _local(now, timezone_name)
     if rule.open_hour is None:
         status, reason = "OPEN", "ALWAYS_AVAILABLE"
@@ -142,9 +161,15 @@ def affordances_for_location(
     now: Optional[datetime],
     *,
     timezone_name: str = WORLD_TIMEZONE,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, str]]:
-    rule = _rule(location_id)
-    if location_availability(location_id, now, timezone_name=timezone_name)["status"] != "OPEN":
+    rule = _rule(location_id, environment)
+    if (
+        location_availability(
+            location_id, now, timezone_name=timezone_name, environment=environment
+        )["status"]
+        != "OPEN"
+    ):
         return []
     return [
         {"affordance_id": affordance_id, "description": description}
@@ -157,10 +182,15 @@ def all_location_availability(
     *,
     timezone_name: str = WORLD_TIMEZONE,
     location_ids: Optional[Iterable[str]] = None,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, str]]:
-    selected = list(_RULES) if location_ids is None else list(location_ids)
+    selected = (
+        list(_RULES) if location_ids is None else list(location_ids)
+    )
     return [
-        location_availability(location_id, now, timezone_name=timezone_name)
+        location_availability(
+            location_id, now, timezone_name=timezone_name, environment=environment
+        )
         for location_id in selected
     ]
 

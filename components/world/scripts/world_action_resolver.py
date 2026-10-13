@@ -803,6 +803,14 @@ class WorldResolver:
             return _reject(
                 normalized, "rejected", CODE_INVALID_PROPOSAL, reason_code=str(error)
             )
+        # v0.4：室内复合节点（place/area）规范化——入口区归一化为 place，
+        # 保证后置条件比较与状态写入一致。
+        try:
+            target_text = world.normalize_location_id(
+                target_text, hermes_home=self.hermes_home, environment=self.environment
+            )
+        except Exception:
+            pass
 
         live = self._dependencies()
         stale = self._stale_keys(normalized["observed_dependencies"], live)

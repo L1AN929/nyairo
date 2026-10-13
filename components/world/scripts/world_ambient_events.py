@@ -17,6 +17,8 @@ from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import world_runtime_data as wrd
+
 
 FEATURE_ENV = "CHIYO_WORLD_AMBIENT_EVENTS_ENABLED"
 WORLD_ID = "shiomi_city"
@@ -140,12 +142,17 @@ def _boundary(local_date: date, hour: int, zone: ZoneInfo) -> datetime:
     return datetime.combine(local_date, time(hour=hour), tzinfo=zone)
 
 
-def _build_event(template: _Template, local_date: date, zone: ZoneInfo) -> dict[str, Any]:
+def _build_event(
+    template: _Template,
+    local_date: date,
+    zone: ZoneInfo,
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
     valid_from = _boundary(local_date, template.start_hour, zone)
     valid_until = _boundary(local_date, template.end_hour, zone)
     event = {
         "event_id": f"ambient-{local_date.isoformat()}-{template.event_type}",
-        "world_id": WORLD_ID,
+        "world_id": wrd.active_world(environment).world_id,
         "local_date": local_date.isoformat(),
         "location_id": template.location_id,
         "event_type": template.event_type,
@@ -154,21 +161,26 @@ def _build_event(template: _Template, local_date: date, zone: ZoneInfo) -> dict[
         "valid_until": valid_until.isoformat(timespec="seconds"),
         "provenance": "world_local_day_deterministic_v1",
     }
-    return _validate_event(event, zone)
+    return _validate_event(event, zone, environment)
 
 
-def _validate_event(event: Mapping[str, Any], zone: ZoneInfo) -> dict[str, Any]:
+def _validate_event(
+    event: Mapping[str, Any],
+    zone: ZoneInfo,
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    world = wrd.active_world(environment)
     if not isinstance(event, Mapping) or set(event) != _EVENT_FIELDS:
         raise AmbientWorldEventError("ambient event has an invalid schema")
     if not isinstance(event["event_id"], str) or not event["event_id"].strip():
         raise AmbientWorldEventError("event_id is invalid")
-    if event["world_id"] != WORLD_ID:
+    if event["world_id"] != world.world_id:
         raise AmbientWorldEventError("ambient event world mismatch")
     try:
         parsed_date = date.fromisoformat(event["local_date"])
     except (TypeError, ValueError) as exc:
         raise AmbientWorldEventError("local_date is invalid") from exc
-    if event["location_id"] not in KNOWN_LOCATION_IDS:
+    if event["location_id"] not in world.known_location_ids:
         raise AmbientWorldEventError("ambient event location is invalid")
     if not isinstance(event["event_type"], str) or not event["event_type"].strip():
         raise AmbientWorldEventError("event_type is invalid")
@@ -199,25 +211,47 @@ def _validate_event(event: Mapping[str, Any], zone: ZoneInfo) -> dict[str, Any]:
     return _copy_json(dict(event))
 
 
+def _active_templates(
+    environment: Optional[Mapping[str, str]] = None,
+) -> tuple[_Template, ...]:
+    """活动世界的环境事件模板（未配置世界包时即汐见市 _TEMPLATES）。"""
+    world = wrd.active_world(environment)
+    return tuple(
+        _Template(
+            event_type=item["event_type"],
+            location_id=item["location_id"],
+            summary=item["summary"],
+            start_hour=item["start_hour"],
+            end_hour=item["end_hour"],
+        )
+        for item in world.ambient_templates
+    )
+
+
 def materialize_ambient_events(
     local_date: date,
     *,
     timezone_name: str = WORLD_TIMEZONE,
     allowed_location_ids: Optional[Iterable[str]] = None,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, Any]]:
     """Derive the stable bounded event set for one World-local calendar day."""
 
     day = _require_date(local_date)
     zone = _zone(timezone_name)
-    allowed = KNOWN_LOCATION_IDS if allowed_location_ids is None else set(allowed_location_ids)
-    if not KNOWN_LOCATION_IDS.issubset(allowed):
+    templates = _active_templates(environment)
+    known = wrd.active_world(environment).known_location_ids
+    allowed = known if allowed_location_ids is None else set(allowed_location_ids)
+    if not known.issubset(allowed):
         raise AmbientWorldEventError("ambient template location catalog is incomplete")
-    start = day.toordinal() % len(_TEMPLATES)
+    start = day.toordinal() % len(templates)
     selected = [
-        _TEMPLATES[(start + offset) % len(_TEMPLATES)]
-        for offset in range(MAX_EVENTS_PER_DAY)
+        templates[(start + offset) % len(templates)]
+        for offset in range(min(MAX_EVENTS_PER_DAY, len(templates)))
     ]
-    events = [_build_event(template, day, zone) for template in selected]
+    events = [
+        _build_event(template, day, zone, environment) for template in selected
+    ]
     if len(events) > MAX_EVENTS_PER_DAY:
         raise AmbientWorldEventError("daily ambient event bound exceeded")
     return _copy_json(events)
@@ -230,6 +264,7 @@ def active_ambient_events(
     timezone_name: str = WORLD_TIMEZONE,
     allowed_location_ids: Optional[Iterable[str]] = None,
     relevant_location_ids: Optional[Iterable[str]] = None,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, Any]]:
     """Return only current, location-relevant facts for one local day."""
 
@@ -240,18 +275,20 @@ def active_ambient_events(
     local_now = now.astimezone(zone)
     if local_now.date() != day:
         return []
+    known = wrd.active_world(environment).known_location_ids
     relevant = None
     if relevant_location_ids is not None:
         if isinstance(relevant_location_ids, (str, bytes)):
             raise AmbientWorldEventError("relevant_location_ids must be an iterable")
         relevant = set(relevant_location_ids)
-        if not relevant.issubset(KNOWN_LOCATION_IDS):
+        if not relevant.issubset(known):
             raise AmbientWorldEventError("relevant location is invalid")
     result: list[dict[str, Any]] = []
     for event in materialize_ambient_events(
         day,
         timezone_name=timezone_name,
         allowed_location_ids=allowed_location_ids,
+        environment=environment,
     ):
         if relevant is not None and event["location_id"] not in relevant:
             continue

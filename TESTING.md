@@ -2,6 +2,101 @@
 
 下列 R17 / R16 数字是相应历史候选的验收记录，不是当前 main 分支、每次文档更新或 GitHub Actions 的最新结果。当前版本与发行标签有差异时，分别核对提交、清单和实际运行结果。
 
+
+## v0.2.0-rc1 预发布：实际证据（2026-10-13）
+
+本节不覆盖历史数字。世界融合基点为 `0c34421`，自主生活冻结基线为 `35df37f`。
+最终发行树以 `v0.2.0-rc1` 标签及包内清单为准；未合 `main`，未切用户生产实例。
+最终包验收独立于下列基线长测，不继承它的 `SOAK_VERIFIED` 结论。
+
+### 1. 世界生成器与自主生活的集成验收（新增，本次唯一的新代码改动）
+
+被验收的代码改动只有一处真实缺陷修复：`components/world/scripts/world_timeline.py` 的
+`is_supported_world_id()` 以前调用 `wrd.active_world()` 时**没有把 `environment` 传下去**，所以在
+显式环境路径（例如 WorldGen 用世界包初始化实例）里，包世界的 world_id 会被判成"不支持"。
+现在它把 `environment` 透传给 `active_world()`，`build_initial_timeline()` / `create_genesis()` 也接受
+并转传该参数；`components/worldgen/instance.py:_build_timeline()` 随之改为**显式传入世界包环境**，
+不再临时改写 `os.environ` 再清缓存。**没有修改任何测试文件。**
+
+复测（LF 检出，命令与 `scripts/test.py` 的 `world` 套件一致）：
+
+```bash
+cd components && PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 \
+  PYTHONPATH="$(pwd)/world:$(pwd)/world/service:$(pwd)/world/service/bridge:$(pwd)/world/scripts" \
+  python3 -B -m unittest discover -s world/service -q
+# Ran 259 tests in 12.329s -- OK
+cd .. && python3 -B -m unittest discover -s components/worldgen/tests -t . -q
+# Ran 91 tests in 19.597s -- OK
+```
+
+**集成验收（一个隔离实例，真实 owner 链）**：真实 Life Supply owner + 真实 World 服务（生成世界包
+`examples/worlds/nagiura`，`world_id = coastal_town_929711`）+ 真实常驻进程，全部在
+`/srv/nyairo-accept-v020` 下，不碰任何其它实例。结果为 `V02_WORLD_INTEGRATION: PASS`（55 项断言全部
+`ok`，0 失败），真实证据：
+
+| 要证的事 | 真实证据 |
+| --- | --- |
+| World 读到 `READY` | 常驻进程自己的 `resident_summary.json`：`world = {"status": "READY", "reason": "", "detail": "supplied by the caller"}`；另有一次独立网关读取 `ready=true` / `readiness=READY` |
+| 常驻进程装配三路 feed | `feeds = ["resume_eligibility", "artifact_head", "world_opportunity"]`（三路齐全，不是两路） |
+| 观察到的是**生成世界**的地点 | 观察到的 `world_id = coastal_town_929711`；地点集合 17 个（`beach` / `pier` / `lighthouse` / `street_1..3` …），与汐见市的 6 个（`nearby_street` 等）不同；`home` 处唯一合法 MOVE 目标是包里的 `street_1`，汐见市的 `nearby_street` 在这个世界里根本不存在 |
+| 一次合法 MOVE 真的落地，有 owner 回执 | Action `actn:983c2c31de2d65c4` / `SUCCEEDED`，Activity `actv_7e8b6ceff37c332c`；World owner 的 `world_state.json`：`location=street_1`、`revision 1→2`；执行账本（用 `ExecutionLedger.frame()` 读）`state=committed`、`action_type=MOVE`、`reason_code=move_committed`、`attempts=1`、`reconciliation_required=false`，落点条目 `after.world_location_id=street_1`、`after.world_revision=2`、`after.world_id=coastal_town_929711` |
+| 决策没有花真实模型调用 | 决策来自本地 stub 端点（**不是**模型），`model_calls_detail.content_generation_calls = 0`，stub 只收到 1 次 `agency_cognition` 请求 |
+
+**证据等级**：这是 `TESTED_ISOLATED` —— 真实 owner 链（真实 Supply socket、真实 World 服务、真实
+网关）都跑通了，但**决策来自受控替身**（本地 stub），所以**不是** `E2E_VERIFIED`。
+
+**本次观察到一个未定性的不稳定现象，必须记下来**：同样的实例配置连跑 5 次，有 3 次常驻进程在第 1 个
+检查窗就选中了世界候选并完成 MOVE，有 2 次同一个窗口给出空候选集（AG-1 记
+`decision_route=RULE_RESOLVED`、`reason_codes=["NO_LEGAL_CANDIDATE"]`、`candidate_refs=[]`，常驻进程记
+`decision=NO_ACTION`），随后 120 分钟的间隔让那一轮不再重来。在同一实例里做的进程内诊断显示：World
+provider 连续 40 次都返回同一条机会（`wopp:move:home:r1:street_1`），`_refresh_world_opportunities()`
+40/40 成功、`last_world_error` 为空，所以**不是** provider 或记录环节坏了；**根因本次没有定位**。
+上面的验收记录用的是把检查窗间隔设为 1 分钟、一旦有 `ACTED` 就立刻停掉常驻进程的那一轮（第 1 个窗口即
+成功）。发布说明必须把这条写出来：**自主生活第一次自主选择 World 动作，不是每次都成。**
+
+### 2. 自主生活基线 24 小时长测（只读复核：通过）
+
+香港 `/srv/nyairo-rc1` 执行冻结基线 `35df37ff67d77a198e0e61714324188947c4c09a`。
+2026-10-13 只读核查，没有停止、重启或重置实例。
+
+| 项 | 真实值 / 来源 |
+| --- | --- |
+| 起点 / 最后 tick | `2026-10-11T14:29:36+00:00` / `2026-10-13T06:45:15+00:00`，summary |
+| 观察时长 | 144939 秒（40h15m39s），超过 24h |
+| journal 连续段 | 805 ticks，编号 1→805 无缺号；间隔 min/median=180s、max=204s；>600s 空档=0 |
+| 进程连续性 | systemd active、`NRestarts=0`；summary `starts=1`、running=true |
+| 结果分类 | 8 ACTED；446 blocked（445 ROUND_BUDGET_EXHAUSTED + 1 内容 TRANSPORT_TIMEOUT）；351 silence。阻断不冒充选择休息 |
+| owner 闭环 | 8 个真实作品版本与 APPLIED 回执、8 个成功动作结算；无重复执行 |
+| UNKNOWN / 自醒 | pending_unknown_last/max=0、unknown_settlements=0、reconciliations=0；event_wakes/real_events=0 |
+| 模型请求口径 | summary 认知9 + 成功内容8=17；另有1次失败内容请求，故至少18次真实请求尝试，不是完整计费统计 |
+| 正式 Memory | M0 `evidence_events` 中 `LIFE_VERIFIED_OUTCOME` 1行；正式 handoff ACCEPT、pending=0。8次版本沿用同一 Activity milestone，不能写成8条经历 |
+| 通用结算 Memory | 另一路 `RefusingSettlementConsumer` 按设计 `LPC0A_MEMORY_WRITE_DISABLED`；8条拒绝与8个pending outbox仍存在，不等于动作 UNKNOWN，也不等于正式 M0 handoff失败 |
+| 自动标签 | `SOAK_THRESHOLD_REACHED_24H` / `SOAK_RUNNING_7D`；人工复核才形成上述24h结论 |
+
+按公开测试版裁定，冻结自主生活基线的24h连续性与作品 owner 闭环通过。
+这不是最终 RC1 整包长测：本实例未配 World（WORLD_NOT_CONFIGURED），没有 World feed；
+最终世界融合另以隔离真实 owner 链验证。7天继续观察，不是 RC1 发布前置条件。
+本窗无重启或故障注入，不能声称验证了机器重启恢复。
+
+### 3. 测试口径
+
+RC1-04 在 LF 检出、补齐 `requirements-dev.txt` 后，14个有效套件通过、`FAILED_SUITES []`，
+无 owner 的常规 life-v02 为 SKIP；独立 T20 为38项 PASS。它们是基线证据，不自动证明最终包。
+两份安装器此前 rc6/rc9 漂移已经修复；本次共同固定 `v0.2.0-rc1`。
+最终发行树重新跑核心套件、worldgen/editor、安装器、包完整性及独立安装/rc9升级；以实际输出为准。
+
+### 4. 边界
+
+2026-10-13 最终代码的 LF 暂存树复测：`scripts/test.py` 实际 `FAILED_SUITES []`（life-v02 无 owner 为 SKIP），
+World 259、host-boundaries 71、Hermes 29、worldgen 91、editor Python 39 / Node 25、安装器7项均通过。
+本轮发行收口随后只同步 INSTALL 文档及清单，不改测试或运行时；最终包的安装/迁移结果另随 Release 记录。
+
+没有合 `main`，没有切真实用户实例；香港长测不重启。
+未运行含共享 `pkill` / `rm -rf /srv/nya02` 的验收脚本。
+本次融合认知为本地 stub、长测核查只读，新增真实模型调用为0。
+发布完成与否以 GitHub prerelease、可下载资产及官网线上字节为准，不以准备文件存在为准。
+
+## 历史记录（R17 及更早）
 最新 R17（2026-10-04）：3,718 文件，**45,071 通过、0 失败、440 条件跳过**，1414.6 秒，8 并发、900 秒文件上限、关闭自动重试。下列早期过程只保留为历史说明，其中 R16 独立结果不可核验。
 
 R17 同时重新执行双 Python 千代组件与每版 36 项宿主边界，四个命令的真实插件发现与完整网关路径、陌生 DM 拒绝、旧代码负对照、41 文件补丁生命周期、F/E9 静态检查通过。17 段 Bash 示例语法与实际会话 key 示例通过；作者确认自然 Telegram `/chiyo_status` 正常返回全部模块状态。
@@ -39,6 +134,32 @@ bash scripts/run_tests.sh -j 8 --file-timeout 900 --file-retries 0
 
 2026-10-04 核对实际工作流后，GitHub 当前只有 Pages 网站构建与部署，运行时功能 CI 模板仍在 `ci/templates/`，尚未启用。网站发布成功不能代表组件、宿主、真实模型或平台测试通过。完整宿主、真实模型和真实平台需要分别验证；最终 ZIP 的冷安装与完整性按其实际哈希关联。
 
+## 测试依赖与运行环境（RC1-04）
+
+`python3 scripts/test.py` 用 `sys.executable` 逐个套件地跑，所以"装了哪些包"直接决定结果是绿还是红。干净主机上缺 `pytest` / `httpx` / `psutil` / `PyYAML` / `python-dotenv` / `requests` / `pytest-asyncio` / `ruamel.yaml` 时，`cognition-faults`、`Hermes`、`host-boundaries` 会因为没有模块而失败——那是缺依赖，不是产品缺陷。
+
+依赖清单在仓库根的 `requirements-dev.txt`，**只用于测试**，不是任何发行实例的运行时依赖。安装与运行：
+
+```bash
+python3 -m venv .venv-dev
+.venv-dev/bin/python -m pip install -r requirements-dev.txt
+.venv-dev/bin/python scripts/test.py            # 官方入口；--full-hermes 才跑完整 vendor 套件
+```
+
+`scripts/test.py` 按顺序打印 `SUITE <名字>`，最后一行 `FAILED_SUITES [...]` 是唯一结论：**列表为空才算全绿**，非空时把列出来的名字当成失败套件。它给每个套件准备一个临时 HOME，不读也不写 `~/.nyairo`。
+
+环境要求分三档：
+
+| 档 | 需要什么 | 覆盖哪些套件 |
+| --- | --- | --- |
+| 任何平台 | 只要上面的依赖 | `closeout`、`native`、`memory`、`supply`、`world`、`life`、`life-v02`、`life-memory-v02`、`life-b7`、`life-b8`、`life-b8-causal`、`life-b8-6a` |
+| Linux / WSL | 真 Unix 语义：`runuser`、`pgrep`、`/proc`、POSIX 权限位、`bash`。安装器与文件系统安全用例在 Windows 上会跳过或直接失败 | `host-boundaries`、`cognition-faults` |
+| 隔离实例 | 一条真实 owner 链：`/srv/nya02` 下的 Supply socket、World 服务，外加该实例自己的 subject / workspace / artifact grant / Memory 数据库。**真实长测实例在跑的时候不要执行** `run_isolated_acceptance.sh` / `run_world_instance.sh` / `run_world_move_e2e.sh`：它们会 `pkill` 共享 owner 并 `rm -rf /srv/nya02` | `components/life/tests/v02/` 下的 T16 / T20 / B8 端到端脚本 |
+
+**真实模型调用**只有两条线需要：E13 的"没有用户消息也能自主考虑"，以及 B8-6A 的长测。其余套件全部走受控替身或受控时钟，不需要真实供应商密钥。要跑真实模型，先确认配额，密钥只放在 owner 的 0600 配置文件或进程环境变量里，不要写进仓库。
+
+**长测标签的读法**：`summary()` 只报告时长阈值**是否到达**（`SOAK_THRESHOLD_REACHED_24H` / `SOAK_THRESHOLD_REACHED_7D`），它**不**能自己判定验收通过。`SOAK_VERIFIED` 是复核过 journal、进程连续性和 owner 结果之后由人写下的结论，口径见下面的 E13 表。
+
 ## rc5 本次复测
 
 本次源码修复的实际命令、结果和日志摘要记录在 `PRIVACY_TEST_EVIDENCE.json`，修复范围与保留边界见 `PRIVACY_REVIEW.md`。历史 45,071 记录不会被改写成本次新运行的结果；本次完成 534 项计数测试（504 项组件/边界 unittest、1 项认知故障测试、29 项官方宿主接线测试），另有真实 Life 装配检查；Alpha 五个脚本通过，N8 相关脚本保留 PARTIAL。完整宿主复跑因可选依赖和测试机资源压力没有完成，不宣称新一轮全量通过，也未发送真实 Telegram 测试消息。
@@ -60,3 +181,47 @@ bash scripts/run_tests.sh -j 8 --file-timeout 900 --file-retries 0
 ## rc6 更新验收
 
 本轮整包更新与失败恢复的实际结果见 `UPDATE_TEST_EVIDENCE.json`。rc5 隐私证据仍保留为 rc5 的结果，不作为 rc6 的新运行记录。没有宣称完整 Hermes 套件、Hermes 0.21.5 或真实生产机器升级已通过。
+
+## E13 发布证据门禁（v0.2 自主生活，2026-10-11）
+
+本节只判定 `v0.2-autonomous-life` 分支（本批起点 `e471241`）的**自主生活**能力。判定一律从实际跑过的证据出发，不按设计意图给分。**本节没有任何一项写 `DEPLOYED`**：没有真实生产切换，也没有对真实用户实例做过交付。
+
+### 判定口径
+
+| 等级 | 含义 |
+| --- | --- |
+| `IMPLEMENTED` | 代码存在、单元级检查通过，但没有走过真实 owner 链 |
+| `TESTED_ISOLATED` | 隔离环境里用**真实 owner**（真实 Supply socket、真实 World 服务）跑过，但决策来自受控替身 |
+| `E2E_VERIFIED` | 真实 owner 链 **且** 真实供应商（真实模型调用），没有替身 |
+| `SOAK_VERIFIED` | 24 小时 / 7 天的真实时长已经跑完并留有记录 |
+| `DEPLOYED` | 已经切换到真实生产实例（真实用户 profile / 真实服务） |
+
+硬规则：
+
+- 24 小时 / 7 天没有跑完 → **不得写 `SOAK_VERIFIED`**。
+- 没有真实生产切换 → **不得写 `DEPLOYED`**。
+- 只证明"机制"的（受控替身、受控时钟、隔离 harness）不得升级成 `E2E_VERIFIED`；单次文本差异不得当成长期人格证据。
+
+### 逐能力判定
+
+| 能力 | 等级 | 判定依据（实际证据） | 不得越级的部分 |
+| --- | --- | --- | --- |
+| 没有用户消息也能自主考虑 | `E2E_VERIFIED` | E13 走通：全新 profile 上由到期窗口触发一次考虑，全程无用户消息，决策来自真实模型（`gemini-3.8-flash-high`）。机制侧另有 E12.3 的 T01（`B8_ASSEMBLY PASS`，受控替身） | 只跑了**一个**窗口；没有长时间无人值守的统计 |
+| 真实模型驱动的有界作品创作 | `E2E_VERIFIED` | E13 走通：owner 确认了 `artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd`（v2，parent 为 v1），正文是模型写的散文而非模板；步骤日志 `effect_state=APPLIED` | 只验证了一件作品、一次写入；没有跨作品/跨主题的样本 |
+| 对同一件作品的持续编辑 | `E2E_VERIFIED` | B8-6 / B8-6A 长测：同一件作品由真实模型连续推进（v1→v5、v1→v3），每次都有 owner 回执；E13 走通也在同一件作品上把 v1 推进到 v2。受控替身版本见 T03（同一 Activity、`parent_version_id` = 上一版、checkpoint 前移） | 没有做跨天、跨重启的编辑统计 |
+| 有界的 World MOVE | `E2E_VERIFIED` | T16（`run_world_move_e2e.sh`）：真实 World 服务 + 真 gateway，`home`→`nearby_street`、revision 1→2、重启后保持；不可达的 MOVE 被拒且世界不变；UNKNOWN 用原 execution_id 对账、不二次移动（`WORLD_MOVE_ACCEPTANCE PASS`） | 本批**没有**复跑 T16；E13 的隔离 profile 没有配 World（观测记 `UNAVAILABLE`），"自主循环里由真实模型选择一次 MOVE"没有证据 |
+| 真实结果形成受控的生活经历 | `TESTED_ISOLATED` | E13 走通：真实提交在 M0 留下一条 `LIFE_VERIFIED_OUTCOME` 记录（正文由结构化字段拼成，不是手写）；三个不同性质的真实结果（成功提交 / 冲突拒绝 / 放弃）的准入见 B8-5 实验 B1（`accepted=1 / duplicate=0 / defer=0`） | **经历改变决策**没有证据：B8-5 实验 B2 的真实模型半边当时 `NOT_RUN`，本批没有复跑；`NO_CHANGE` 无法成为经历（AG-2 词表缺口） |
+| 预算、静默、重启恢复 | `TESTED_ISOLATED` | T14（空窗口 `IDLE_NO_CANDIDATE`、`llm_calls=0`、无编造经历）、T15（预算耗尽 → `BLOCKED`，不是"她选择休息"）、T18（重启后开关/预算/事件游标保持）、T19（关闭后新决策 `DISABLED`，数据与投影仍可用）；E13 走通实测默认关（`DISABLED`、`model_calls 0`）与真实预算消耗（认知 1/2、动作 1/1） | 真实一整天的预算行为没有证据（长测未达 24 小时） |
+| 只读生活投影与 Hermes 聊天并存 | `TESTED_ISOLATED` | E13 走通：只读投影真实渲染出"当前作品 + 最新已确认版本"（0 次模型调用）；T19 证明关闭自主开关后聊天投影与 status 仍工作；`tests/test_presence_integration.py` 另有投影不暴露 owner 权限与原始状态的检查 | 隔离环境里**没有**做真实 Telegram / 网关收发；投影与聊天同进程共存的端到端路径未验证。`tests/test_presence_integration.py` 属于当前失败的 `host-boundaries` 套件（原因见下） |
+
+### 与本次判定一起读的限定
+
+- 本次走通使用的是一次**真实供应商调用共 2 次**（1 次决策 + 1 次内容生成）。`counters.model_calls` 与每日认知计数只统计决策调用，见 `KNOWN_ISSUES.md` 的记录。
+- 长测的 24 小时 / 7 天状态仍是 `SOAK_RUNNING_24H` / `SOAK_PENDING_7D`（观察起点 `2026-10-11T01:07:06+00:00`，本批结束约 24 分钟），因此**没有** `SOAK_VERIFIED`。修复前的故障发现记录不与修复后的时段拼接。
+- `scripts/test.py` 的三个环境相关失败套件**保持 FAIL 并如实记录**（记录自 B8-6A 在同一提交 `e471241` 上的运行；本批只改文档，没有复跑，也没有据此宣称全绿）：`host-boundaries`（安装器/更新/文件系统安全测试）、`cognition-faults`（`vendor/hermes` 没有 pytest 虚拟环境）、`Hermes`（vendor 测试运行器）。没有为了"全绿"添加无条件跳过或重构安装器。
+- 生产部署形态（systemd 单元）没有在真实硬件上验证；本机 systemd 为 `offline`。
+- 旧供应商密钥曾在进程命令行上暴露过（B8-6 §7.2），代码路径已修（B8-6A §4），**旧密钥的轮换仍由账户持有人在供应商后台完成**，本批没有、也不能代替它。
+
+### 不得声称（与上面的等级表配合阅读）
+
+自主给用户发 Telegram 消息；执行任意 shell / 浏览器操作；自动付款或公开发布；完整的虚拟世界活动系统（`POSE` / `PICK_UP` / `PLACE` 未做）；科学验证过的长期自主人格；v0.2 已交付给所有用户。以上任何一条都**没有**证据，不得写入发布说明或对外材料。
