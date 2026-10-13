@@ -626,7 +626,7 @@ function initShowcaseTabs() {
   const panels = [...document.querySelectorAll('.showcase-panel')];
   if (!tabs.length || !panels.length) return;
 
-  const activate = (targetIndex, focus = false) => {
+  const activate = (targetIndex, focus = false, scroll = true) => {
     tabs.forEach((t, i) => {
       const isCurrent = i === targetIndex;
       t.classList.toggle('active', isCurrent);
@@ -653,12 +653,12 @@ function initShowcaseTabs() {
 
     // 手机端标签行是单行横向滑动，选中的标签自动滚入视野
     const tabsEl = tabs[0] && tabs[0].parentElement;
-    if (tabsEl && tabsEl.scrollWidth > tabsEl.clientWidth + 1) {
+    if (scroll && tabsEl && tabsEl.scrollWidth > tabsEl.clientWidth + 1) {
       tabs[targetIndex].scrollIntoView({ behavior: preferredScrollBehavior(), block: 'nearest', inline: 'nearest' });
     }
   };
 
-  activate(0);
+  activate(0, false, false);
 
   tabs.forEach((tab, index) => {
     tab.addEventListener('click', (e) => {
