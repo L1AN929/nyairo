@@ -17,7 +17,7 @@
 > 
 > 虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次交流，都发生在一串有前因与后来的真实日常里。
 
-> **开发分支状态（2026-10-11）**：`v0.2-autonomous-life` 是**未发布的开发候选**（本批记录提交 `e471241`），没有标签、没有 Release、没有部署给任何用户，安装命令也不会装到它。本页与安装命令对应的公开发行版是 `v0.1.0-rc9`（rc6 / rc7 / rc8 为更早版本）。自主生活能力的逐项证据等级见 [验收与复测](TESTING.md) 的 E13 门禁，已知边界见 [已知问题](KNOWN_ISSUES.md)。
+> **v0.2.0-rc1 公开测试版（2026-10-13）**：自主生活基线 `35df37f` 与用户的 World Generator / World Editor 已在 `v0.2-world-integration` 融合，**未合入 main、不是稳定版、未切换用户生产实例**。发行提交以 `v0.2.0-rc1` 标签为准。[Release](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc1) 提供 `nyairo-v0.2.0-rc1.zip` 和 `.sha256`；安装器同步指向 RC1，公开资产验证后再更新官网入口。安装见 [INSTALL.md](INSTALL.md)，实测范围见 [TESTING.md](TESTING.md)，使用前请读 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。自主生活默认关闭。
 
 ---
 

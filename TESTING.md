@@ -2,6 +2,101 @@
 
 下列 R17 / R16 数字是相应历史候选的验收记录，不是当前 main 分支、每次文档更新或 GitHub Actions 的最新结果。当前版本与发行标签有差异时，分别核对提交、清单和实际运行结果。
 
+
+## v0.2.0-rc1 预发布：实际证据（2026-10-13）
+
+本节不覆盖历史数字。世界融合基点为 `0c34421`，自主生活冻结基线为 `35df37f`。
+最终发行树以 `v0.2.0-rc1` 标签及包内清单为准；未合 `main`，未切用户生产实例。
+最终包验收独立于下列基线长测，不继承它的 `SOAK_VERIFIED` 结论。
+
+### 1. 世界生成器与自主生活的集成验收（新增，本次唯一的新代码改动）
+
+被验收的代码改动只有一处真实缺陷修复：`components/world/scripts/world_timeline.py` 的
+`is_supported_world_id()` 以前调用 `wrd.active_world()` 时**没有把 `environment` 传下去**，所以在
+显式环境路径（例如 WorldGen 用世界包初始化实例）里，包世界的 world_id 会被判成"不支持"。
+现在它把 `environment` 透传给 `active_world()`，`build_initial_timeline()` / `create_genesis()` 也接受
+并转传该参数；`components/worldgen/instance.py:_build_timeline()` 随之改为**显式传入世界包环境**，
+不再临时改写 `os.environ` 再清缓存。**没有修改任何测试文件。**
+
+复测（LF 检出，命令与 `scripts/test.py` 的 `world` 套件一致）：
+
+```bash
+cd components && PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 \
+  PYTHONPATH="$(pwd)/world:$(pwd)/world/service:$(pwd)/world/service/bridge:$(pwd)/world/scripts" \
+  python3 -B -m unittest discover -s world/service -q
+# Ran 259 tests in 12.329s -- OK
+cd .. && python3 -B -m unittest discover -s components/worldgen/tests -t . -q
+# Ran 91 tests in 19.597s -- OK
+```
+
+**集成验收（一个隔离实例，真实 owner 链）**：真实 Life Supply owner + 真实 World 服务（生成世界包
+`examples/worlds/nagiura`，`world_id = coastal_town_929711`）+ 真实常驻进程，全部在
+`/srv/nyairo-accept-v020` 下，不碰任何其它实例。结果为 `V02_WORLD_INTEGRATION: PASS`（55 项断言全部
+`ok`，0 失败），真实证据：
+
+| 要证的事 | 真实证据 |
+| --- | --- |
+| World 读到 `READY` | 常驻进程自己的 `resident_summary.json`：`world = {"status": "READY", "reason": "", "detail": "supplied by the caller"}`；另有一次独立网关读取 `ready=true` / `readiness=READY` |
+| 常驻进程装配三路 feed | `feeds = ["resume_eligibility", "artifact_head", "world_opportunity"]`（三路齐全，不是两路） |
+| 观察到的是**生成世界**的地点 | 观察到的 `world_id = coastal_town_929711`；地点集合 17 个（`beach` / `pier` / `lighthouse` / `street_1..3` …），与汐见市的 6 个（`nearby_street` 等）不同；`home` 处唯一合法 MOVE 目标是包里的 `street_1`，汐见市的 `nearby_street` 在这个世界里根本不存在 |
+| 一次合法 MOVE 真的落地，有 owner 回执 | Action `actn:983c2c31de2d65c4` / `SUCCEEDED`，Activity `actv_7e8b6ceff37c332c`；World owner 的 `world_state.json`：`location=street_1`、`revision 1→2`；执行账本（用 `ExecutionLedger.frame()` 读）`state=committed`、`action_type=MOVE`、`reason_code=move_committed`、`attempts=1`、`reconciliation_required=false`，落点条目 `after.world_location_id=street_1`、`after.world_revision=2`、`after.world_id=coastal_town_929711` |
+| 决策没有花真实模型调用 | 决策来自本地 stub 端点（**不是**模型），`model_calls_detail.content_generation_calls = 0`，stub 只收到 1 次 `agency_cognition` 请求 |
+
+**证据等级**：这是 `TESTED_ISOLATED` —— 真实 owner 链（真实 Supply socket、真实 World 服务、真实
+网关）都跑通了，但**决策来自受控替身**（本地 stub），所以**不是** `E2E_VERIFIED`。
+
+**本次观察到一个未定性的不稳定现象，必须记下来**：同样的实例配置连跑 5 次，有 3 次常驻进程在第 1 个
+检查窗就选中了世界候选并完成 MOVE，有 2 次同一个窗口给出空候选集（AG-1 记
+`decision_route=RULE_RESOLVED`、`reason_codes=["NO_LEGAL_CANDIDATE"]`、`candidate_refs=[]`，常驻进程记
+`decision=NO_ACTION`），随后 120 分钟的间隔让那一轮不再重来。在同一实例里做的进程内诊断显示：World
+provider 连续 40 次都返回同一条机会（`wopp:move:home:r1:street_1`），`_refresh_world_opportunities()`
+40/40 成功、`last_world_error` 为空，所以**不是** provider 或记录环节坏了；**根因本次没有定位**。
+上面的验收记录用的是把检查窗间隔设为 1 分钟、一旦有 `ACTED` 就立刻停掉常驻进程的那一轮（第 1 个窗口即
+成功）。发布说明必须把这条写出来：**自主生活第一次自主选择 World 动作，不是每次都成。**
+
+### 2. 自主生活基线 24 小时长测（只读复核：通过）
+
+香港 `/srv/nyairo-rc1` 执行冻结基线 `35df37ff67d77a198e0e61714324188947c4c09a`。
+2026-10-13 只读核查，没有停止、重启或重置实例。
+
+| 项 | 真实值 / 来源 |
+| --- | --- |
+| 起点 / 最后 tick | `2026-10-11T14:29:36+00:00` / `2026-10-13T06:45:15+00:00`，summary |
+| 观察时长 | 144939 秒（40h15m39s），超过 24h |
+| journal 连续段 | 805 ticks，编号 1→805 无缺号；间隔 min/median=180s、max=204s；>600s 空档=0 |
+| 进程连续性 | systemd active、`NRestarts=0`；summary `starts=1`、running=true |
+| 结果分类 | 8 ACTED；446 blocked（445 ROUND_BUDGET_EXHAUSTED + 1 内容 TRANSPORT_TIMEOUT）；351 silence。阻断不冒充选择休息 |
+| owner 闭环 | 8 个真实作品版本与 APPLIED 回执、8 个成功动作结算；无重复执行 |
+| UNKNOWN / 自醒 | pending_unknown_last/max=0、unknown_settlements=0、reconciliations=0；event_wakes/real_events=0 |
+| 模型请求口径 | summary 认知9 + 成功内容8=17；另有1次失败内容请求，故至少18次真实请求尝试，不是完整计费统计 |
+| 正式 Memory | M0 `evidence_events` 中 `LIFE_VERIFIED_OUTCOME` 1行；正式 handoff ACCEPT、pending=0。8次版本沿用同一 Activity milestone，不能写成8条经历 |
+| 通用结算 Memory | 另一路 `RefusingSettlementConsumer` 按设计 `LPC0A_MEMORY_WRITE_DISABLED`；8条拒绝与8个pending outbox仍存在，不等于动作 UNKNOWN，也不等于正式 M0 handoff失败 |
+| 自动标签 | `SOAK_THRESHOLD_REACHED_24H` / `SOAK_RUNNING_7D`；人工复核才形成上述24h结论 |
+
+按公开测试版裁定，冻结自主生活基线的24h连续性与作品 owner 闭环通过。
+这不是最终 RC1 整包长测：本实例未配 World（WORLD_NOT_CONFIGURED），没有 World feed；
+最终世界融合另以隔离真实 owner 链验证。7天继续观察，不是 RC1 发布前置条件。
+本窗无重启或故障注入，不能声称验证了机器重启恢复。
+
+### 3. 测试口径
+
+RC1-04 在 LF 检出、补齐 `requirements-dev.txt` 后，14个有效套件通过、`FAILED_SUITES []`，
+无 owner 的常规 life-v02 为 SKIP；独立 T20 为38项 PASS。它们是基线证据，不自动证明最终包。
+两份安装器此前 rc6/rc9 漂移已经修复；本次共同固定 `v0.2.0-rc1`。
+最终发行树重新跑核心套件、worldgen/editor、安装器、包完整性及独立安装/rc9升级；以实际输出为准。
+
+### 4. 边界
+
+2026-10-13 最终代码的 LF 暂存树复测：`scripts/test.py` 实际 `FAILED_SUITES []`（life-v02 无 owner 为 SKIP），
+World 259、host-boundaries 71、Hermes 29、worldgen 91、editor Python 39 / Node 25、安装器7项均通过。
+本轮发行收口随后只同步 INSTALL 文档及清单，不改测试或运行时；最终包的安装/迁移结果另随 Release 记录。
+
+没有合 `main`，没有切真实用户实例；香港长测不重启。
+未运行含共享 `pkill` / `rm -rf /srv/nya02` 的验收脚本。
+本次融合认知为本地 stub、长测核查只读，新增真实模型调用为0。
+发布完成与否以 GitHub prerelease、可下载资产及官网线上字节为准，不以准备文件存在为准。
+
+## 历史记录（R17 及更早）
 最新 R17（2026-10-04）：3,718 文件，**45,071 通过、0 失败、440 条件跳过**，1414.6 秒，8 并发、900 秒文件上限、关闭自动重试。下列早期过程只保留为历史说明，其中 R16 独立结果不可核验。
 
 R17 同时重新执行双 Python 千代组件与每版 36 项宿主边界，四个命令的真实插件发现与完整网关路径、陌生 DM 拒绝、旧代码负对照、41 文件补丁生命周期、F/E9 静态检查通过。17 段 Bash 示例语法与实际会话 key 示例通过；作者确认自然 Telegram `/chiyo_status` 正常返回全部模块状态。

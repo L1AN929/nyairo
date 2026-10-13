@@ -147,22 +147,17 @@ def init_instance(
 
 
 def _build_timeline(wt, package) -> dict[str, Any]:
-    """用规范构建器产出时间线；白名单按活动世界判断，故在此声明世界包。"""
-    import os
+    """用规范构建器产出时间线；白名单按活动世界判断，故在此显式传入世界包环境。
 
+    v0.2 之前这里靠临时改写 ``os.environ`` 再清缓存，因为 ``is_supported_world_id``
+    不接受环境参数。现在白名单会使用传入的环境，实例初始化不再需要动进程级环境。
+    """
     import world_runtime_data as wrd
 
-    previous = os.environ.get(wrd.CHIYO_WORLD_PACKAGE_ENV)
-    os.environ[wrd.CHIYO_WORLD_PACKAGE_ENV] = str(package.package_dir)
-    wrd.reset_cache()
-    try:
-        return wt.build_initial_timeline(package.world_id)
-    finally:
-        if previous is None:
-            os.environ.pop(wrd.CHIYO_WORLD_PACKAGE_ENV, None)
-        else:
-            os.environ[wrd.CHIYO_WORLD_PACKAGE_ENV] = previous
-        wrd.reset_cache()
+    return wt.build_initial_timeline(
+        package.world_id,
+        {wrd.CHIYO_WORLD_PACKAGE_ENV: str(package.package_dir)},
+    )
 
 
 def read_instance_meta(instance_home: Path | str) -> dict[str, Any]:
