@@ -19,7 +19,7 @@
 | 原公开 rc1 ZIP | SHA256 `6136af4c03a6ce2d5db01607424ba06232e839333d71765abb4763e61052b0e7`；原清单有效，更新登记错配复现 |
 | 版本回归的旧代码负对照 | 3 项中 2 项按预期失败，退出 1；失败为实际包版本错配和哈希有效的错版本包未拒绝 |
 | 修复后的版本回归 | 3 项通过 |
-| scripts/test.py 选择 | Closeout、Native、Memory、Supply、World、7 组 Life、宿主边界、认知故障以及 4 个 Hermes context 文件；FAILED_SUITES 为 [] |
+| scripts/test.py 选择 | Closeout、Native、Memory、Supply、World、6 组 Life、宿主边界、认知故障以及 4 个 Hermes context 文件实际通过；life-v02 缺少隔离 Supply 配置而 SKIP，不能将 FAILED_SUITES 为 [] 等同于全部通过 |
 | 世界生成器 | 91 项通过 |
 | 世界编辑器 Python | 39 项通过 |
 | 世界编辑器 Node | 25 项通过 |
@@ -30,6 +30,8 @@
 ## 保留边界
 
 本次没有启用 GitHub 功能 CI，没有重复执行约 45,000 项完整 Hermes 套件，也没有代填真实模型密钥或发送 Telegram 测试消息。Life 自主行为、预算和 owner 合约未扩展；原生生活经历纠正、主动 Contact 及其他已声明限制继续适用。rc1 和旧 rc9 的标签/资产保持原字节。
+
+2026-10-13 复核原始日志后更正：Life 原先被计为 7 组通过，实际 6 组通过，`check_life_v02.py` 因缺少 `NYA02_SUPPLY_SOCKET`、`NYA02_SUBJECT`、`NYA02_WORKSPACE_ID` 和 `NYA02_ARTIFACT_GRANT` 输出 SKIP。其他 Life 检查中有确定性替身与结构检查，不能证明真实模型自主生活全链已经通过。
 
 
 ## 网站首屏复核
