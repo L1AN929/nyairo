@@ -15,7 +15,7 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fafc">
 
   <!-- 图标与样式 -->
-  <link rel="stylesheet" href="style.css?v=1791596288695">
+  <link rel="stylesheet" href="style.css?v=1791615135795">
   <link rel="icon" href="assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
@@ -496,6 +496,141 @@
 
   <!-- 根除斑马怪胎：双主题绝对统一、全卡浑然一体 -->
   <style id="bulletproof-hero-theme">
+
+    /* =========================================================================
+       BETA 标识设计：醒目、高级、通透、呼吸感
+       ========================================================================= */
+    /* 1. 顶栏品牌旁常驻微标 */
+    .brand-beta-tag {
+      font-family: var(--font-mono) !important;
+      font-size: 0.58rem !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.06em !important;
+      padding: 1px 5px !important;
+      border-radius: 3px !important;
+      background: rgba(56, 189, 248, 0.1) !important;
+      border: 1px solid rgba(56, 189, 248, 0.25) !important;
+      color: var(--c-accent) !important;
+      margin-left: 6px !important;
+      vertical-align: middle !important;
+      line-height: 1.1 !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      backdrop-filter: blur(8px) !important;
+    }
+    html[data-theme="light"] .brand-beta-tag {
+      background: rgba(2, 132, 199, 0.08) !important;
+      border-color: rgba(2, 132, 199, 0.22) !important;
+      color: #0284c7 !important;
+    }
+
+    /* 2. Hero 顶部版本胶囊里的醒目发光 BETA 徽标 */
+    .banner-beta-badge {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 5px !important;
+      font-family: var(--font-mono) !important;
+      font-size: 0.68rem !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.05em !important;
+      padding: 2px 7px !important;
+      border-radius: 4px !important;
+      background: rgba(56, 189, 248, 0.12) !important;
+      border: 1px solid rgba(56, 189, 248, 0.3) !important;
+      color: #ffffff !important;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.25) !important;
+    }
+    html[data-theme="light"] .banner-beta-badge {
+      background: rgba(2, 132, 199, 0.09) !important;
+      border-color: rgba(2, 132, 199, 0.25) !important;
+      color: #0284c7 !important;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.15) !important;
+    }
+    .banner-beta-badge .badge-pulse {
+      width: 5px !important;
+      height: 5px !important;
+      border-radius: 50% !important;
+      background: var(--c-accent) !important;
+      box-shadow: 0 0 6px var(--c-accent) !important;
+      animation: betaPulse 2.4s ease-in-out infinite !important;
+    }
+    @keyframes betaPulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.25); }
+    }
+
+    /* 手机端 340px 级收敛保障 */
+    @media (max-width: 360px) {
+      .brand-beta-tag { display: none !important; }
+    }
+
+    /* =========================================================================
+       Hero 主标题：最初原版现代黑体大字骨架 + Effect D 字符透光辉光呼吸
+       ========================================================================= */
+    .hero-title {
+      font-size: clamp(40px, 5.8vw, 62px) !important;
+      font-weight: 800 !important;
+      letter-spacing: -0.035em !important;
+      line-height: 1.18 !important;
+      margin-bottom: 24px !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+    }
+
+    .hero-title-line {
+      display: block !important;
+    }
+
+    .hero-title-line + .hero-title-line {
+      margin-top: 0.12em !important;
+    }
+
+    .title-text {
+      color: var(--c-text-1) !important;
+      font-weight: 800 !important;
+    }
+
+    .title-keyword {
+      position: relative !important;
+      display: inline-block !important;
+      margin: 0 0.06em !important;
+      font-weight: 800 !important;
+      white-space: nowrap !important;
+      color: #ffffff !important;
+      background: none !important;
+      -webkit-background-clip: unset !important;
+      background-clip: unset !important;
+      -webkit-text-fill-color: initial !important;
+      animation: edgeLuminescence 4.5s ease-in-out infinite alternate !important;
+    }
+
+    html[data-theme="light"] .title-keyword {
+      color: #0284c7 !important;
+      -webkit-text-fill-color: initial !important;
+      animation: edgeLuminescenceLight 4.5s ease-in-out infinite alternate !important;
+    }
+
+    @keyframes edgeLuminescence {
+      0% {
+        text-shadow: 0 0 4px rgba(255, 255, 255, 0.3),
+                     0 0 12px rgba(56, 189, 248, 0.2) !important;
+      }
+      100% {
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.8),
+                     0 0 24px rgba(56, 189, 248, 0.6),
+                     0 0 40px rgba(56, 189, 248, 0.3) !important;
+      }
+    }
+
+    @keyframes edgeLuminescenceLight {
+      0% {
+        text-shadow: 0 1px 2px rgba(2, 132, 199, 0.15) !important;
+      }
+      100% {
+        text-shadow: 0 2px 10px rgba(2, 132, 199, 0.35),
+                     0 0 20px rgba(56, 189, 248, 0.25) !important;
+      }
+    }
+
     .install-methods {
       width: 100% !important;
       max-width: 680px !important;
@@ -814,6 +949,79 @@
     }
   </style>
 
+  <style id="mobile-convergence-20261010">
+    /* ======================================================================
+       手机端收敛（2026-10-10）
+       ----------------------------------------------------------------------
+       背景：10-09 顶栏加入「Web 体验」按钮后，窄屏一行放不下 —— 实测
+            320/360/390/414 宽分别横向溢出 127/87/56/32px，整页可左右拖动。
+       做法：只在 ≤640px 收敛顶栏、安装切换条与次要标签；全部规则都在媒体
+            查询里，>640px 的桌面版式逐像素不变。本块放在最后一个 ，
+            以便压过上面带 !important 的顶栏规则。
+       ====================================================================== */
+    @media (max-width: 640px) {
+      /* 1. 顶栏：收紧左右内边距与元素间距 */
+      .site-header .header-container {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+      }
+      .site-header .header-right { gap: 4px !important; }
+
+      /* 2. GitHub 入口在首屏按钮与页脚各有一份，窄屏从顶栏收掉，把位置让给 Web 体验 */
+      .site-header .header-actions { gap: 0 !important; padding-left: 0 !important; }
+      .site-header .header-actions a.icon-btn { display: none !important; }
+
+      /* 3. Web 体验：去掉 BETA 徽标，保留文字与外链箭头（title 里仍有完整说明） */
+      .site-header .nav-preview-link {
+        height: 40px !important;
+        padding: 0 7px !important;
+        margin-left: 0 !important;
+        gap: 5px !important;
+      }
+      .site-header .nav-preview-link .preview-mini-tag { display: none !important; }
+
+      /* 4. 安装方式切换条：窄屏允许横向滑动，不再撑破页面宽度 */
+      .install-segmented-control,
+      .install-method-tabs {
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      .install-segmented-control::-webkit-scrollbar,
+      .install-method-tabs::-webkit-scrollbar { display: none; }
+      .segmented-tab,
+      .install-tab { flex: 0 0 auto !important; }
+
+      /* 5. 触控热区：把仍低于 40px 的次要按钮抬到可点尺寸 */
+      .hero-status-banner { min-height: 44px !important; }
+      .segmented-tab,
+      .install-tab { min-height: 40px !important; }
+      .home-footer a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+      }
+
+      /* 6. 字号下限：补齐上一轮遗漏的等宽小标签 */
+      .tab-badge,
+      .step-version,
+      .phase-status-pill,
+      .phase-sub-meta { font-size: 0.75rem !important; }
+    }
+
+    /* 360–400px：品牌名缩小一号，给功能入口腾出位置 */
+    @media (max-width: 400px) {
+      .site-header .brand-name { font-size: 0.95rem !important; }
+    }
+
+    /* 320px 级窄屏：品牌名让位给功能入口，顶栏只留图标 */
+    @media (max-width: 340px) {
+      .site-header .brand-text { display: none !important; }
+      .site-header .site-brand { min-width: 40px !important; }
+    }
+  </style>
 </head>
 <body>
 
@@ -835,7 +1043,7 @@
             <img class="brand-icon brand-icon-on-light" src="assets/nyairo-icon.png" alt="" width="22" height="22">
           </div>
           <div class="brand-text">
-            <span class="brand-name">nyairo</span>
+            <span class="brand-name">nyairo</span><span class="brand-beta-tag font-mono">BETA</span>
           </div>
         </a>
       </div>
@@ -858,20 +1066,6 @@
         </nav>
 
         <div class="header-actions">
-          <!-- QQ 交流群 -->
-          <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info" target="_blank" rel="noopener noreferrer" class="icon-btn" title="加入官方 QQ 交流群 (1126943805)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M21.6 15.58c-.37-.28-.85-.5-1.42-.69.21-.86.34-1.8.34-2.89 0-1.84-.4-3.41-1.1-4.57-.7-1.16-1.74-1.92-2.97-2.31C15.86 3.63 14.1 2 12 2S8.14 3.63 7.55 5.12c-1.23.39-2.27 1.15-2.97 2.31-.7 1.16-1.1 2.73-1.1 4.57 0 1.09.13 2.03.34 2.89-.57.19-1.05.41-1.42.69-.74.56-1.08 1.34-.84 2.13.29.96 1.39 1.46 2.73 1.25.43.91 1.05 1.63 1.82 2.12-.22.42-.34.87-.34 1.31 0 1.25 1.05 1.61 2.36 1.61 1.65 0 3.01-.58 3.87-1.48.86.9 2.22 1.48 3.87 1.48 1.31 0 2.36-.36 2.36-1.61 0-.44-.12-.89-.34-1.31.77-.49 1.39-1.21 1.82-2.12 1.34.21 2.44-.29 2.73-1.25.24-.79-.1-1.57-.84-2.13z"/>
-            </svg>
-          </a>
-
-          <!-- Telegram 频道 -->
-          <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer" class="icon-btn" title="关注 Telegram 频道 (@nyairoai)">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 2L11 13"></path>
-              <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
-            </svg>
-          </a>
           <!-- GitHub 链接 -->
           <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="查看 GitHub 仓库">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -918,11 +1112,11 @@
       <div class="home-hero">
         <!-- 顶部版本与架构通告栏 (现代开发者高光胶囊) -->
         <div class="hero-banner-wrap">
-          <a href="#changelog" class="hero-status-banner" title="查看 nyairo v0.1.0-rc9 最新更新动态与说明">
+          <a href="#changelog-v0-2-0-rc1" class="hero-status-banner" title="看看这一版更新了什么">
             <span class="banner-beacon">
               <span class="beacon-core"></span>
             </span>
-            <span class="banner-chip font-mono">v0.1.0-rc9</span>
+            <span class="banner-beta-badge font-mono"><span class="badge-pulse"></span>BETA</span><span class="banner-chip font-mono">v0.2.0-rc1</span>
             <span class="banner-title">查看最新版本更新动态</span>
             <span class="banner-arrow">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -991,6 +1185,7 @@
           </div>
 
           <div class="install-panel" id="install-panel-cli" role="tabpanel" aria-labelledby="install-tab-cli">
+            <p id="nyairo-rc1-release" class="hero-install-note">装好之后，她不仅能在你亲手布置的小世界里走动，还会按自己的节奏把没做完的事接着做完。如果你之前装过旧版，升级前请记得先备份个人目录，更多变化可查看<a href="#changelog-v0-2-0-rc1">版本记录</a>。</p>
           <div class="hero-cmd-pill" id="hero-cmd" title="点击复制安装命令">
             <span class="cmd-prefix">$</span>
             <code class="cmd-text">curl -fsSL https://nyairo.com/install.sh | bash</code>
@@ -1034,8 +1229,8 @@
 
 【背景资料】
 - 官方仓库：https://github.com/L1AN929/nyairo
-- 官方 Agent 安装规范：https://nyairo.com/AGENT_INSTALL.zh-CN.md（仓库里是 website/AGENT_INSTALL.zh-CN.md；如果你能读网络或仓库，先读它；读不到就按下面步骤做，本指令已经包含全部要求）
-- 当前正式候选版本：v0.1.0-rc9（只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
+- 官方 Agent 安装规范：仓库里的 docs/AGENT_INSTALL.zh-CN.md（如果你能读仓库或网络，先读它；读不到就按下面步骤做，本指令已经包含全部要求）
+- 当前公开测试版本：v0.2.0-rc1（Prerelease，不是稳定版；只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
 
 【第一步：先检查环境，先不要安装】
 请检查并用中文汇报：
@@ -1057,7 +1252,7 @@
 
 【第二步：说明将要改动什么，并等我确认】
 这次安装会：
-- 在 ~/.local/share/nyairo/releases/v0.1.0-rc9 放程序（约 460 MB，含配套 Hermes 的运行环境）；
+- 在 ~/.local/share/nyairo/releases/v0.2.0-rc1 放程序（约 460 MB，含配套 Hermes 的运行环境）；
 - 在 ~/.nyairo 建个人数据目录（人设、模型配置、记忆与生活状态数据）；
 - 在 ~/.local/bin/nyairo 放启动入口；
 - 用 uv 下载一份 Python 3.13 到 ~/.local/share/uv。
@@ -1066,22 +1261,22 @@
 
 【第三步：安装（只用官方发行包，并且校验）】
 1) 下载官方发行包与校验值：
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.1.0-rc9/nyairo-v0.1.0-rc9.zip
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.1.0-rc9/nyairo-v0.1.0-rc9.zip.sha256
-   sha256sum -c nyairo-v0.1.0-rc9.zip.sha256
-   ZIP 的 SHA256 必须是：ec181e819e7d203521f28189b640ecb95734f755e715133f455257dcacb5b583
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc1/nyairo-v0.2.0-rc1.zip
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc1/nyairo-v0.2.0-rc1.zip.sha256
+   sha256sum -c nyairo-v0.2.0-rc1.zip.sha256
+   ZIP 的 SHA256 必须是：6136af4c03a6ce2d5db01607424ba06232e839333d71765abb4763e61052b0e7
    不一致就立刻停止，把实际值告诉我，不要继续。
 2) 解压并使用包内的官方安装器安装（不要自己另写一套安装脚本）：
-   python3 -m zipfile -e nyairo-v0.1.0-rc9.zip "$HOME/apps/nyairo-v0.1.0-rc9"
-   cd "$HOME/apps/nyairo-v0.1.0-rc9" &amp;&amp; bash scripts/bootstrap.sh
+   python3 -m zipfile -e nyairo-v0.2.0-rc1.zip "$HOME/apps/nyairo-v0.2.0-rc1"
+   cd "$HOME/apps/nyairo-v0.2.0-rc1" &amp;&amp; bash scripts/bootstrap.sh
    如果你的终端无法交互（没有 TTY），改用：bash scripts/bootstrap.sh --no-setup --no-launch
    装完再单独引导我配置模型：~/.local/bin/nyairo setup model
 
 【第四步：装完必须实际验证，不要只看命令有没有报错】
-- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.1.0-rc9；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.1.0-rc9。
+- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.2.0-rc1；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.2.0-rc1。
   （注意：nyairo --version 显示的是配套 Hermes 的版本，不是 nyairo 的版本。）
 - 完整性：用包内解释器校验清单：
-  ~/.local/share/nyairo/releases/v0.1.0-rc9/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.1.0-rc9/scripts/verify_manifest.py
+  ~/.local/share/nyairo/releases/v0.2.0-rc1/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.2.0-rc1/scripts/verify_manifest.py
   输出里应该有 "valid": true。
 - 个人数据目录：~/.nyairo 下应该有 SOUL.md、config.yaml、chiyo/config.json。
 - 启动：~/.local/bin/nyairo --help 能正常输出帮助。
@@ -1089,7 +1284,7 @@
 - 模型与 Telegram：在我没有提供自己的密钥之前，这两项属于「尚未验证」，请如实说明，不要报告为成功。
 
 【第五步：最后给我一份中文说明】
-用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.1.0-rc9 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
+用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.2.0-rc1 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
 
 【安全要求】
 - 不要擅自创建系统用户，也不要擅自使用 sudo；需要时先说明你要执行的命令并征得我同意。
@@ -1101,10 +1296,8 @@
               <div class="card-foot">
                 <span class="foot-security-note">纯本地自检 · 零数据上传 · 绝不索取任何密钥</span>
                 <div class="foot-links">
-                  <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info" target="_blank" rel="noopener noreferrer" class="foot-link" title="QQ 群: 1126943805">QQ 群</a>
-                  <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer" class="foot-link" title="Telegram 频道">TG 频道</a>
                   <a href="#quickstart" class="foot-link">安装教程</a>
-                  <a href="AGENT_INSTALL.zh-CN.md" target="_blank" rel="noopener noreferrer" class="foot-link">规范协议 ↗</a>
+                  <a href="AGENT_INSTALL.zh-CN.md" target="_blank" rel="noopener noreferrer" class="foot-link">Agent 规范协议 ↗</a>
                 </div>
               </div>
             </div>
@@ -1371,7 +1564,7 @@
             <div class="phase-panel active" id="phase-panel-0" role="tabpanel">
               <div class="phase-header-row">
                 <div class="phase-meta-left">
-                  <span class="phase-status-pill font-mono">ONLINE BASELINE</span>
+                  <span class="phase-status-pill font-mono">PREVIOUS BASELINE</span>
                   <span class="phase-sub-meta font-mono">v0.1.0-rc9</span>
                 </div>
                 <div class="phase-counter font-mono">01 / 04</div>
@@ -1555,10 +1748,6 @@
         <div class="footer-links">
           <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer">GitHub</a>
           <span class="footer-sep">/</span>
-          <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info" target="_blank" rel="noopener noreferrer">QQ 交流群 (1126943805)</a>
-          <span class="footer-sep">/</span>
-          <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer">Telegram 频道</a>
-          <span class="footer-sep">/</span>
           <a href="#intro">使用教程</a>
           <span class="footer-sep">/</span>
           <a href="#roadmap">未来规划</a>
@@ -1617,8 +1806,8 @@
   </div>
 
   <!-- 引入文档数据与逻辑控制器 -->
-  <script src="docs-data.js?v=1791560000000"></script>
-  <script src="app.js?v=1791545785105"></script>
+  <script src="docs-data.js?v=1791887283751"></script>
+  <script src="app.js?v=1791615135795"></script>
   <!-- 爬虫与无 JS 环境语义保全 (确保百度 / Google 等轻量爬虫完整索引全站要点) -->
   <noscript>
     <div class="noscript-seo" style="max-width: 900px; margin: 40px auto; padding: 24px; font-family: sans-serif; line-height: 1.7; border: 1px solid #334155; border-radius: 8px;">

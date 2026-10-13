@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyAiro 高精水墨笔势挥毫 · Master Ink Engine</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --c-bg: #07090c;
+      --c-bg-card: rgba(14, 18, 25, 0.85);
+      --c-border: rgba(255, 255, 255, 0.08);
+      --c-divider: rgba(255, 255, 255, 0.06);
+      --c-accent: #38bdf8;
+      --c-text-1: #f8fafc;
+      --c-text-2: #94a3b8;
+      --c-text-3: #64748b;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, monospace;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --c-bg: #f6f8fb;
+      --c-bg-card: rgba(255, 255, 255, 0.95);
+      --c-border: rgba(0, 0, 0, 0.09);
+      --c-divider: rgba(0, 0, 0, 0.06);
+      --c-accent: #0284c7;
+      --c-text-1: #0f172a;
+      --c-text-2: #334155;
+      --c-text-3: #64748b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--c-bg);
+      color: var(--c-text-1);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      padding: 30px 20px 80px;
+      min-height: 100vh;
+      /* 32px 几何工程网格 */
+      background-image: 
+        linear-gradient(to right, var(--c-divider) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--c-divider) 1px, transparent 1px);
+      background-size: 32px 32px;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    /* 顶部控制栏 */
+    .lab-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      margin-bottom: 30px;
+      border-bottom: 1px solid var(--c-border);
+    }
+    .lab-title-group h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+    }
+    .lab-subtitle {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: var(--c-text-3);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .theme-toggle-btn, .replay-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s ease;
+    }
+    .theme-toggle-btn:hover, .replay-btn:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+    .replay-btn {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.25);
+      color: var(--c-accent);
+      font-weight: 500;
+    }
+    [data-theme="light"] .replay-btn {
+      background: rgba(2, 132, 199, 0.08);
+      border-color: rgba(2, 132, 199, 0.25);
+      color: #0284c7;
+    }
+
+    /* 水墨剧场视窗 */
+    .ink-theater {
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(20px);
+      position: relative;
+    }
+
+    .theater-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--c-divider);
+      background: rgba(0, 0, 0, 0.12);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+    [data-theme="light"] .theater-head {
+      background: rgba(0, 0, 0, 0.02);
+    }
+    .head-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--c-accent);
+    }
+    .beacon-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--c-accent);
+      box-shadow: 0 0 8px var(--c-accent);
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+    .head-mode {
+      color: var(--c-text-3);
+    }
+
+    /* 主画布舞台 */
+    .stage-wrapper {
+      position: relative;
+      width: 100%;
+      height: 520px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* 底层水墨主画布 */
+    #ink-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+    }
+    /* 顶层动态烟雾/飞溅粒子画布 */
+    #mist-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* 写完后平滑浮现的现代排版副标与行动按钮 */
+    .completed-overlay {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 1.5s cubic-bezier(0.16, 1, 0.3, 1), transform 1.5s cubic-bezier(0.16, 1, 0.3, 1);
+      margin-top: 190px;
+    }
+    .completed-overlay.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .hero-desc {
+      font-size: 0.95rem;
+      color: var(--c-text-2);
+      max-width: 580px;
+      margin: 0 auto 20px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .btn-quickstart {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-text-1);
+      color: var(--c-bg);
+      font-weight: 600;
+      font-size: 0.82rem;
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      font-size: 0.82rem;
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+
+    /* 底部工艺注解 */
+    .theater-foot {
+      padding: 14px 22px;
+      border-top: 1px solid var(--c-divider);
+      font-size: 0.78rem;
+      color: var(--c-text-3);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0, 0, 0, 0.06);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header class="lab-header">
+      <div class="lab-title-group">
+        <h1>NYAIRO · 高精水墨笔势挥毫实验室 (v2.0)</h1>
+        <div class="lab-subtitle">多重笔刷簇 (Bristles) · 墨分五色浓淡渗染 · 浅色模式宣纸相生</div>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="replay-btn" onclick="triggerReplay()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+            <path d="M21 3v5h-5"></path>
+            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+            <path d="M3 21v-5h5"></path>
+          </svg>
+          <span>重新挥毫落墨 (Replay)</span>
+        </button>
+        <button type="button" class="theme-toggle-btn" onclick="toggleTheme()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+          </svg>
+          <span id="theme-label">切换浅色模式 (Light)</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="ink-theater">
+      <div class="theater-head">
+        <div class="head-status">
+          <span class="beacon-dot"></span>
+          <span id="stage-status-text">CALLIGRAPHY ENGINE · 笔势运行中</span>
+        </div>
+        <div class="head-mode font-mono" id="canvas-dpr-info">
+          DPR 2.0 · 60 FPS · 物理粒子与湿墨扩散
+        </div>
+      </div>
+
+      <div class="stage-wrapper" id="stage-wrapper">
+        <canvas id="ink-canvas"></canvas>
+        <canvas id="mist-canvas"></canvas>
+
+        <div class="completed-overlay" id="completed-overlay">
+          <p class="hero-desc">虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次对话，都发生在一段有前因与后来的日常里。</p>
+          <div class="hero-actions">
+            <a href="#quickstart" class="btn-quickstart">快速上手指南 →</a>
+            <a href="https://github.com/L1AN929/nyairo" target="_blank" class="btn-ghost">GitHub 仓库</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="theater-foot">
+        <span>工艺细节：毛刷簇物理分丝 (24 Bristles) + 随机枯笔飞白 (Dry-brush) + 生宣边缘渗晕 (Bleed)</span>
+        <span class="font-mono">NYAIRO MASTERWORK</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // NyAiro Master Ink Calligraphy Engine v2.0
+    // =========================================================================
+    const inkCanvas = document.getElementById('ink-canvas');
+    const mistCanvas = document.getElementById('mist-canvas');
+    const stageWrapper = document.getElementById('stage-wrapper');
+    const overlay = document.getElementById('completed-overlay');
+    const statusText = document.getElementById('stage-status-text');
+
+    const ictx = inkCanvas.getContext('2d');
+    const mctx = mistCanvas.getContext('2d');
+
+    let stageW, stageH, dpr;
+
+    function resize() {
+      const rect = stageWrapper.getBoundingClientRect();
+      dpr = window.devicePixelRatio || 1;
+      stageW = rect.width;
+      stageH = rect.height;
+
+      inkCanvas.width = stageW * dpr;
+      inkCanvas.height = stageH * dpr;
+      mistCanvas.width = stageW * dpr;
+      mistCanvas.height = stageH * dpr;
+
+      ictx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+
+    // 水墨粒子云系统 (飞白、水汽、墨烟)
+    let mistParticles = [];
+    class MistParticle {
+      constructor(x, y, vx, vy, isDark) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.life = Math.random() * 50 + 30;
+        this.maxLife = this.life;
+        this.r = Math.random() * 3 + 1;
+        this.isDark = isDark;
+      }
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vx *= 0.95;
+        this.vy *= 0.95;
+        this.r += 0.05;
+        this.life--;
+      }
+      draw(ctx) {
+        const p = this.life / this.maxLife;
+        const alpha = p * 0.18;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = this.isDark
+          ? `rgba(224, 242, 254, ${alpha})`
+          : `rgba(15, 23, 42, ${alpha * 0.75})`;
+        ctx.fill();
+      }
+    }
+
+    // 笔势轨迹采样与毛刷簇推进
+    let strokeWaypoints = [];
+    let progressIdx = 0;
+    let isWriting = false;
+    let animFrameId = null;
+
+    // 24 根虚拟狼毫毛刷偏移量
+    const BRISTLES_COUNT = 24;
+    const bristles = [];
+    for (let i = 0; i < BRISTLES_COUNT; i++) {
+      bristles.push({
+        dx: (Math.random() - 0.5) * 6,
+        dy: (Math.random() - 0.5) * 6,
+        width: Math.random() * 1.6 + 0.6,
+        opacityFactor: Math.random() * 0.6 + 0.4
+      });
+    }
+
+    // 生成极精细的书写骨架点阵与微分路径
+    function generateMasterplan() {
+      strokeWaypoints = [];
+      const fontSize = Math.min(stageW * 0.062, 52);
+      const fontStr = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`;
+
+      // 离屏渲染捕获像素
+      const off = document.createElement('canvas');
+      off.width = stageW;
+      off.height = stageH;
+      const octx = off.getContext('2d');
+      octx.font = fontStr;
+      octx.textAlign = 'center';
+      octx.textBaseline = 'middle';
+      octx.fillStyle = '#ffffff';
+
+      const line1Y = stageH * 0.32;
+      const line2Y = stageH * 0.48;
+
+      octx.fillText("给 AI 一个世界", stageW * 0.5, line1Y);
+      octx.fillText("让它拥有自己的日常", stageW * 0.5, line2Y);
+
+      const img = octx.getImageData(0, 0, stageW, stageH).data;
+
+      // 密集采样
+      const tempPoints = [];
+      for (let y = 0; y < stageH; y += 2) {
+        for (let x = 0; x < stageW; x += 2) {
+          const idx = (y * stageW + x) * 4;
+          if (img[idx + 3] > 100) {
+            // 排序权重：第 1 行从左到右，第 2 行从左到右，加入适度扰动模拟笔锋流转
+            const line = y < stageH * 0.4 ? 1 : 2;
+            const timeOrder = line * 20000 + x * 20 + y * 2 + (Math.random() - 0.5) * 12;
+            tempPoints.push({ x, y, line, timeOrder });
+          }
+        }
+      }
+      tempPoints.sort((a, b) => a.timeOrder - b.timeOrder);
+
+      // 平滑插值成连续 Waypoints
+      strokeWaypoints = tempPoints;
+    }
+
+    // 重新挥毫
+    function startCalligraphy() {
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      resize();
+      generateMasterplan();
+
+      progressIdx = 0;
+      isWriting = true;
+      mistParticles = [];
+
+      ictx.clearRect(0, 0, stageW, stageH);
+      mctx.clearRect(0, 0, stageW, stageH);
+
+      if (overlay) overlay.classList.remove('visible');
+      if (statusText) statusText.textContent = 'CALLIGRAPHY ENGINE · 笔势挥毫中...';
+
+      renderLoop();
+    }
+
+    function renderLoop() {
+      const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+
+      // 1. 推进水墨笔画
+      if (isWriting && strokeWaypoints.length > 0) {
+        // 动态书写速度
+        const speed = Math.max(18, Math.floor(strokeWaypoints.length / 100));
+        let tipPoint = null;
+
+        for (let i = 0; i < speed; i++) {
+          if (progressIdx >= strokeWaypoints.length) {
+            isWriting = false;
+            onCompleteCalligraphy();
+            break;
+          }
+          const pt = strokeWaypoints[progressIdx];
+          tipPoint = pt;
+
+          // 毛刷簇多重划动 (模拟毛笔发丝笔锋)
+          for (let b = 0; b < bristles.length; b++) {
+            // 随机飞白断笔 (Dry-brush effect)
+            if (Math.random() < 0.12) continue;
+
+            const br = bristles[b];
+            const px = pt.x + br.dx;
+            const py = pt.y + br.dy;
+
+            // 笔芯墨色浓郁，外缘透晕
+            const baseAlpha = (isDark ? 0.85 : 0.92) * br.opacityFactor;
+
+            ictx.beginPath();
+            ictx.arc(px, py, br.width * 1.4, 0, Math.PI * 2);
+
+            // 浅色模式：深沉松烟淡墨 (#0f172a / #1e293b)，透光而不死黑
+            // 深色模式：清冽冷月银墨 (#f8fafc / #e2e8f0)
+            if (isDark) {
+              ictx.fillStyle = `rgba(248, 250, 252, ${baseAlpha})`;
+            } else {
+              ictx.fillStyle = `rgba(15, 23, 42, ${baseAlpha})`;
+            }
+            ictx.fill();
+          }
+
+          // 笔锋掠过带出微细飞溅水花
+          if (Math.random() < 0.1) {
+            const vx = (Math.random() - 0.5) * 1.5;
+            const vy = (Math.random() - 0.5) * 1.5;
+            mistParticles.push(new MistParticle(pt.x, pt.y, vx, vy, isDark));
+          }
+
+          progressIdx++;
+        }
+
+        // 笔尖前导光晕 (笔锋行进指示)
+        if (tipPoint && isWriting) {
+          mctx.clearRect(0, 0, stageW, stageH);
+          mctx.beginPath();
+          mctx.arc(tipPoint.x, tipPoint.y, 4, 0, Math.PI * 2);
+          mctx.fillStyle = isDark ? '#38bdf8' : '#0284c7';
+          mctx.shadowBlur = 10;
+          mctx.shadowColor = isDark ? '#38bdf8' : '#0284c7';
+          mctx.fill();
+          mctx.shadowBlur = 0;
+        }
+      }
+
+      // 2. 渲染微水汽与烟雾粒子
+      mctx.clearRect(0, 0, stageW, stageH);
+      for (let i = mistParticles.length - 1; i >= 0; i--) {
+        const mp = mistParticles[i];
+        mp.update();
+        mp.draw(mctx);
+        if (mp.life <= 0) mistParticles.splice(i, 1);
+      }
+
+      animFrameId = requestAnimationFrame(renderLoop);
+    }
+
+    function onCompleteCalligraphy() {
+      // 笔锋完成，字迹沉静入纸
+      if (statusText) statusText.textContent = 'CALLIGRAPHY ENGINE · 墨韵落成';
+      if (overlay) overlay.classList.add('visible');
+    }
+
+    window.triggerReplay = function() {
+      startCalligraphy();
+    };
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+
+      const label = document.getElementById('theme-label');
+      if (label) {
+        label.textContent = next === 'dark' ? '切换浅色模式 (Light)' : '切换深色模式 (Dark)';
+      }
+      // 主题切换后立刻平滑重绘，保证日间/夜间相生相克完美展示
+      startCalligraphy();
+    }
+
+    window.addEventListener('resize', () => {
+      startCalligraphy();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      startCalligraphy();
+    });
+  </script>
+</body>
+</html>

@@ -794,8 +794,8 @@ rc5 没有这个入口。先退出聊天并停止自己的服务，确认原来�
 
 ```bash
 export HERMES_HOME="$HOME/.chiyo-v1"
-git clone --branch v0.2.0-rc1 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc1"
-cd "$HOME/apps/nyairo-rc1"
+git clone --branch v0.2.0-rc1 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc9"
+cd "$HOME/apps/nyairo-rc9"
 bash scripts/update.sh --migrate-from "$HOME/apps/chiyo-v0.1"
 ```
 

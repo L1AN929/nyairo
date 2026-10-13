@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyAiro 真正写意水墨长卷 · Flowing Ink Ribbon Engine</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --c-bg: #07090c;
+      --c-bg-card: rgba(14, 18, 25, 0.85);
+      --c-border: rgba(255, 255, 255, 0.08);
+      --c-divider: rgba(255, 255, 255, 0.06);
+      --c-accent: #38bdf8;
+      --c-text-1: #f8fafc;
+      --c-text-2: #94a3b8;
+      --c-text-3: #64748b;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, monospace;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --c-bg: #f8fafc;
+      --c-bg-card: rgba(255, 255, 255, 0.95);
+      --c-border: rgba(0, 0, 0, 0.08);
+      --c-divider: rgba(0, 0, 0, 0.06);
+      --c-accent: #0284c7;
+      /* 浅色模式绝不用死黑！采用通透温润的青墨/烟云灰 */
+      --c-text-1: #1e293b;
+      --c-text-2: #475569;
+      --c-text-3: #94a3b8;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--c-bg);
+      color: var(--c-text-1);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      padding: 30px 20px 80px;
+      min-height: 100vh;
+      background-image: 
+        linear-gradient(to right, var(--c-divider) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--c-divider) 1px, transparent 1px);
+      background-size: 32px 32px;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    .lab-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      margin-bottom: 30px;
+      border-bottom: 1px solid var(--c-border);
+    }
+    .lab-title-group h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+    }
+    .lab-subtitle {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: var(--c-text-3);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .theme-toggle-btn, .replay-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s ease;
+    }
+    .theme-toggle-btn:hover, .replay-btn:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+    .replay-btn {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.25);
+      color: var(--c-accent);
+    }
+    [data-theme="light"] .replay-btn {
+      background: rgba(2, 132, 199, 0.08);
+      border-color: rgba(2, 132, 199, 0.25);
+      color: #0284c7;
+    }
+
+    /* 舞台视窗 */
+    .ink-theater {
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(20px);
+      position: relative;
+    }
+
+    .theater-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--c-divider);
+      background: rgba(0, 0, 0, 0.1);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+    [data-theme="light"] .theater-head {
+      background: rgba(0, 0, 0, 0.02);
+    }
+    .head-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--c-accent);
+    }
+    .beacon-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--c-accent);
+      box-shadow: 0 0 8px var(--c-accent);
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    .stage-wrapper {
+      position: relative;
+      width: 100%;
+      height: 540px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* 水墨流体 Canvas */
+    #flowing-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+    }
+
+    /* 真正有呼吸感、空灵疏朗的标题呈现区 */
+    .title-art-container {
+      position: relative;
+      z-index: 5;
+      text-align: center;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    /* 矢量笔画写意大标题 */
+    .ink-title-text {
+      font-size: clamp(38px, 5.2vw, 56px);
+      font-weight: 300; /* 极轻纤细骨架，拒绝黑团！ */
+      letter-spacing: 0.18em; /* 超大舒展字距，空灵留白！ */
+      line-height: 1.45;
+      margin-bottom: 20px;
+      text-indent: 0.18em;
+    }
+    .ink-title-text .title-line {
+      display: block;
+      overflow: hidden;
+    }
+
+    /* 每一笔字带入动态飘逸入场 */
+    .stroke-char {
+      display: inline-block;
+      opacity: 0;
+      transform: translateY(18px) scale(0.96);
+      filter: blur(8px);
+      transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 1.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  filter 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .stroke-char.revealed {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+    }
+
+    /* 核心词：世界 / 日常，带有极淡的冰蓝与冷白交织 */
+    .char-keyword {
+      font-weight: 500;
+      color: var(--c-text-1);
+      text-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+    }
+    [data-theme="light"] .char-keyword {
+      color: #0f172a;
+      text-shadow: 0 2px 12px rgba(2, 132, 199, 0.15);
+    }
+
+    /* 叙述词：通透的青灰淡墨，极具呼吸 */
+    .char-normal {
+      color: var(--c-text-2);
+    }
+    [data-theme="light"] .char-normal {
+      color: #475569; /* 白天绝对不是死黑！而是清雅的青墨烟灰 */
+    }
+
+    .hero-desc {
+      font-size: 0.95rem;
+      color: var(--c-text-2);
+      max-width: 600px;
+      margin: 0 auto 24px;
+      line-height: 1.75;
+      letter-spacing: 0.02em;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 1.5s ease 0.6s, transform 1.5s ease 0.6s;
+    }
+    .hero-desc.revealed {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 1.5s ease 0.8s, transform 1.5s ease 0.8s;
+      pointer-events: auto;
+    }
+    .hero-actions.revealed {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .btn-quickstart {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-text-1);
+      color: var(--c-bg);
+      font-weight: 600;
+      font-size: 0.82rem;
+      padding: 9px 18px;
+      border-radius: 6px;
+      text-decoration: none;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    }
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      font-size: 0.82rem;
+      padding: 9px 18px;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+
+    .theater-foot {
+      padding: 12px 20px;
+      border-top: 1px solid var(--c-divider);
+      font-size: 0.78rem;
+      color: var(--c-text-3);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0, 0, 0, 0.04);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header class="lab-header">
+      <div class="lab-title-group">
+        <h1>NYAIRO · 真正写意水墨长卷 (Flowing Ribbon Engine)</h1>
+        <div class="lab-subtitle">空灵留白 · 墨龙游弋破空 · 白昼青墨不沉闷</div>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="replay-btn" onclick="triggerReplay()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+            <path d="M21 3v5h-5"></path>
+            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+            <path d="M3 21v-5h5"></path>
+          </svg>
+          <span>重新挥洒破空 (Replay)</span>
+        </button>
+        <button type="button" class="theme-toggle-btn" onclick="toggleTheme()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+          </svg>
+          <span id="theme-label">切换浅色模式 (Light)</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="ink-theater">
+      <div class="theater-head">
+        <div class="head-status">
+          <span class="beacon-dot"></span>
+          <span id="status-text">INK RIBBON FLUID · 水墨真气破空流淌中</span>
+        </div>
+        <div class="head-mode font-mono">
+          实时矢量流体 · 墨气舒展 · 绝无点阵密集感
+        </div>
+      </div>
+
+      <div class="stage-wrapper" id="stage-wrapper">
+        <canvas id="flowing-canvas"></canvas>
+
+        <div class="title-art-container">
+          <h2 class="ink-title-text" id="ink-title">
+            <span class="title-line" id="title-line-1"></span>
+            <span class="title-line" id="title-line-2"></span>
+          </h2>
+          <p class="hero-desc" id="hero-desc">虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次对话，都发生在一段有前因与后来的日常里。</p>
+          <div class="hero-actions" id="hero-actions">
+            <a href="#quickstart" class="btn-quickstart">快速上手指南 →</a>
+            <a href="https://github.com/L1AN929/nyairo" target="_blank" class="btn-ghost">GitHub 仓库</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="theater-foot">
+        <span>美学准则：大字距疏朗空灵 + 背景水墨游龙真气 + 白昼青烟冷霜灰（通透不板结）</span>
+        <span class="font-mono">EASTERN DIGITAL AESTHETICS</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 真正写意水墨长卷：墨龙游弋、破空出云 (Flowing Ribbon Engine)
+    // =========================================================================
+    const canvas = document.getElementById('flowing-canvas');
+    const ctx = canvas.getContext('2d');
+    const stage = document.getElementById('stage-wrapper');
+
+    let stageW, stageH, dpr;
+    function resize() {
+      const rect = stage.getBoundingClientRect();
+      dpr = window.devicePixelRatio || 1;
+      stageW = rect.width;
+      stageH = rect.height;
+      canvas.width = stageW * dpr;
+      canvas.height = stageH * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+
+    // 几条水墨气流游龙 (Ribbons)
+    class InkRibbon {
+      constructor(colorOffset, baseYOffset, speedFactor) {
+        this.colorOffset = colorOffset;
+        this.baseYOffset = baseYOffset;
+        this.speedFactor = speedFactor;
+        this.points = [];
+        this.reset();
+      }
+      reset() {
+        this.points = [];
+        const numPoints = 28;
+        for (let i = 0; i < numPoints; i++) {
+          this.points.push({
+            x: (i / (numPoints - 1)) * (stageW + 160) - 80,
+            y: stageH * 0.45 + this.baseYOffset,
+            baseY: stageH * 0.45 + this.baseYOffset,
+            phase: Math.random() * Math.PI * 2,
+            amp: Math.random() * 45 + 30
+          });
+        }
+      }
+      update(t, mouse) {
+        for (let i = 0; i < this.points.length; i++) {
+          const pt = this.points[i];
+          // 优雅正弦行波
+          pt.y = pt.baseY + Math.sin(t * this.speedFactor + pt.phase + i * 0.25) * pt.amp +
+                           Math.cos(t * 0.7 + i * 0.15) * 15;
+
+          // 鼠标如指尖划过水面
+          if (mouse.active) {
+            const dx = pt.x - mouse.x;
+            const dy = pt.y - mouse.y;
+            const dSq = dx * dx + dy * dy;
+            if (dSq < 20000) {
+              const force = (1 - dSq / 20000) * 35;
+              pt.y += (dy > 0 ? force : -force);
+            }
+          }
+        }
+      }
+      draw(ctx, isDark) {
+        if (this.points.length < 2) return;
+
+        // 墨线多层重叠渲染：外圈淡墨雾、内圈浓墨丝
+        const layers = [
+          { width: 34, alpha: isDark ? 0.04 : 0.035 },
+          { width: 14, alpha: isDark ? 0.08 : 0.07 },
+          { width: 4,  alpha: isDark ? 0.22 : 0.18 },
+          { width: 1.2, alpha: isDark ? 0.55 : 0.45 }
+        ];
+
+        layers.forEach(l => {
+          ctx.beginPath();
+          ctx.moveTo(this.points[0].x, this.points[0].y);
+
+          for (let i = 0; i < this.points.length - 1; i++) {
+            const p0 = this.points[i];
+            const p1 = this.points[i + 1];
+            const midX = (p0.x + p1.x) * 0.5;
+            const midY = (p0.y + p1.y) * 0.5;
+            ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
+          }
+
+          ctx.lineWidth = l.width;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          // 白天：青墨烟岚 (#334155 / #0284c7 极淡调和)，绝不板结死黑！
+          // 黑夜：冷月冰川 (#e2e8f0 / #38bdf8 极淡调和)
+          if (isDark) {
+            ctx.strokeStyle = `rgba(224, 242, 254, ${l.alpha})`;
+          } else {
+            ctx.strokeStyle = `rgba(30, 41, 59, ${l.alpha})`;
+          }
+          ctx.stroke();
+        });
+      }
+    }
+
+    // 自由游动的墨鱼/水墨灵动微粒子
+    class InkWispParticle {
+      constructor() {
+        this.reset(true);
+      }
+      reset(initial = false) {
+        this.x = Math.random() * stageW;
+        this.y = stageH * 0.45 + (Math.random() - 0.5) * 160;
+        this.vx = (Math.random() * 0.8 + 0.3);
+        this.vy = (Math.random() - 0.5) * 0.4;
+        this.r = Math.random() * 2.4 + 0.8;
+        this.life = Math.random() * 220 + 80;
+        this.maxLife = this.life;
+        this.alpha = Math.random() * 0.25 + 0.05;
+      }
+      update() {
+        this.x += this.vx;
+        this.y += this.vy + Math.sin(this.x * 0.01) * 0.2;
+        this.life--;
+        if (this.life <= 0 || this.x > stageW + 40) this.reset();
+      }
+      draw(ctx, isDark) {
+        const p = this.life / this.maxLife;
+        const a = this.alpha * (p < 0.2 ? p / 0.2 : (1 - p));
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = isDark
+          ? `rgba(56, 189, 248, ${a * 0.7})`
+          : `rgba(2, 132, 199, ${a * 0.6})`;
+        ctx.fill();
+      }
+    }
+
+    let ribbons = [];
+    let wisps = [];
+    const mouse = { x: -999, y: -999, active: false };
+
+    function initScene() {
+      ribbons = [
+        new InkRibbon(0, -35, 1.2),
+        new InkRibbon(1, 0, 0.9),
+        new InkRibbon(2, 35, 1.4)
+      ];
+      wisps = [];
+      for (let i = 0; i < 45; i++) wisps.push(new InkWispParticle());
+    }
+
+    stage.addEventListener('mousemove', e => {
+      const r = stage.getBoundingClientRect();
+      mouse.x = e.clientX - r.left;
+      mouse.y = e.clientY - r.top;
+      mouse.active = true;
+    });
+    stage.addEventListener('mouseleave', () => mouse.active = false);
+
+    let time = 0;
+    function animate() {
+      time += 0.012;
+      const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+
+      ctx.clearRect(0, 0, stageW, stageH);
+
+      // 渲染水墨长卷
+      ribbons.forEach(rb => {
+        rb.update(time, mouse);
+        rb.draw(ctx, isDark);
+      });
+
+      // 渲染灵动微光墨滴
+      wisps.forEach(w => {
+        w.update();
+        w.draw(ctx, isDark);
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    // =========================================================================
+    // 疏朗空灵的文字逐笔挥洒动势 (Poetic Progressive Reveal)
+    // =========================================================================
+    const line1Data = [
+      { char: "给", type: "normal" },
+      { char: "A", type: "normal" },
+      { char: "I", type: "normal" },
+      { char: "一", type: "normal" },
+      { char: "个", type: "normal" },
+      { char: "世", type: "keyword" },
+      { char: "界", type: "keyword" }
+    ];
+    const line2Data = [
+      { char: "让", type: "normal" },
+      { char: "它", type: "normal" },
+      { char: "拥", type: "normal" },
+      { char: "有", type: "normal" },
+      { char: "自", type: "normal" },
+      { char: "己", type: "normal" },
+      { char: "的", type: "normal" },
+      { char: "日", type: "keyword" },
+      { char: "常", type: "keyword" }
+    ];
+
+    function buildTitleDom() {
+      const el1 = document.getElementById('title-line-1');
+      const el2 = document.getElementById('title-line-2');
+      el1.innerHTML = '';
+      el2.innerHTML = '';
+
+      line1Data.forEach(item => {
+        const span = document.createElement('span');
+        span.textContent = item.char;
+        span.className = `stroke-char char-${item.type}`;
+        el1.appendChild(span);
+      });
+
+      line2Data.forEach(item => {
+        const span = document.createElement('span');
+        span.textContent = item.char;
+        span.className = `stroke-char char-${item.type}`;
+        el2.appendChild(span);
+      });
+    }
+
+    let revealTimers = [];
+    function startTitleReveal() {
+      // 清空旧定时器
+      revealTimers.forEach(t => clearTimeout(t));
+      revealTimers = [];
+
+      const chars = document.querySelectorAll('.stroke-char');
+      chars.forEach(c => c.classList.remove('revealed'));
+      document.getElementById('hero-desc').classList.remove('revealed');
+      document.getElementById('hero-actions').classList.remove('revealed');
+
+      // 逐字气韵生动逐笔浮现
+      chars.forEach((c, idx) => {
+        const t = setTimeout(() => {
+          c.classList.add('revealed');
+        }, idx * 85 + 200);
+        revealTimers.push(t);
+      });
+
+      // 副标与行动栏收尾浮现
+      const endTimer = setTimeout(() => {
+        document.getElementById('hero-desc').classList.add('revealed');
+        document.getElementById('hero-actions').classList.add('revealed');
+      }, chars.length * 85 + 400);
+      revealTimers.push(endTimer);
+    }
+
+    window.triggerReplay = function() {
+      initScene();
+      startTitleReveal();
+    };
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+
+      const label = document.getElementById('theme-label');
+      if (label) {
+        label.textContent = next === 'dark' ? '切换浅色模式 (Light)' : '切换深色模式 (Dark)';
+      }
+    }
+
+    window.addEventListener('resize', () => {
+      resize();
+      initScene();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      buildTitleDom();
+      initScene();
+      animate();
+      startTitleReveal();
+    });
+  </script>
+</body>
+</html>
