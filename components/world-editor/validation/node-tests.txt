@@ -1,0 +1,160 @@
+TAP version 13
+# Subtest: canonical dirty comparison ignores JSON object key order
+ok 1 - canonical dirty comparison ignores JSON object key order
+  ---
+  duration_ms: 0.9127
+  type: 'test'
+  ...
+# Subtest: typing group undoes once, redo works and a new branch discards redo
+ok 2 - typing group undoes once, redo works and a new branch discards redo
+  ---
+  duration_ms: 0.4777
+  type: 'test'
+  ...
+# Subtest: selection boundaries create separate field edits and snapshots do not alias
+ok 3 - selection boundaries create separate field edits and snapshots do not alias
+  ---
+  duration_ms: 0.7554
+  type: 'test'
+  ...
+# Subtest: deleting a region and its contents restores the entire graph in one undo
+ok 4 - deleting a region and its contents restores the entire graph in one undo
+  ---
+  duration_ms: 0.7667
+  type: 'test'
+  ...
+# Subtest: history is bounded by count and memory; runtime state is outside its snapshots
+ok 5 - history is bounded by count and memory; runtime state is outside its snapshots
+  ---
+  duration_ms: 0.4688
+  type: 'test'
+  ...
+# Subtest: recovery keeps unfinished fields and isolates workspace and tab writers
+ok 6 - recovery keeps unfinished fields and isolates workspace and tab writers
+  ---
+  duration_ms: 1.8025
+  type: 'test'
+  ...
+# Subtest: corrupt entries and dangling references cannot prevent opening other recovery copies
+ok 7 - corrupt entries and dangling references cannot prevent opening other recovery copies
+  ---
+  duration_ms: 0.5896
+  type: 'test'
+  ...
+# Subtest: preserving a current draft survives replacement of the tab backup; quota failure is surfaced
+ok 8 - preserving a current draft survives replacement of the tab backup; quota failure is surfaced
+  ---
+  duration_ms: 1.7939
+  type: 'test'
+  ...
+# Subtest: old revision and base fingerprints remain available for conflict detection
+ok 9 - old revision and base fingerprints remain available for conflict detection
+  ---
+  duration_ms: 0.506
+  type: 'test'
+  ...
+# Subtest: a clean reopened document cannot clear an earlier unreviewed recovery copy
+ok 10 - a clean reopened document cannot clear an earlier unreviewed recovery copy
+  ---
+  duration_ms: 0.5427
+  type: 'test'
+  ...
+# Subtest: room movement snaps, clamps the whole rectangle, and rejects invalid geometry
+ok 11 - room movement snaps, clamps the whole rectangle, and rejects invalid geometry
+  ---
+  duration_ms: 0.1939
+  type: 'test'
+  ...
+# Subtest: object drop changes rooms, clamps label-safe positions and does not mutate on an outside drop
+ok 12 - object drop changes rooms, clamps label-safe positions and does not mutate on an outside drop
+  ---
+  duration_ms: 0.174
+  type: 'test'
+  ...
+# Subtest: group room movement preserves relative spacing, clamps together, and moves contents once
+ok 13 - group room movement preserves relative spacing, clamps together, and moves contents once
+  ---
+  duration_ms: 1.4389
+  type: 'test'
+  ...
+# Subtest: group objects cross rooms atomically; outside drop cannot partially move the group
+ok 14 - group objects cross rooms atomically; outside drop cannot partially move the group
+  ---
+  duration_ms: 0.4141
+  type: 'test'
+  ...
+# Subtest: resize snaps dimensions and respects minimum and map bounds
+ok 15 - resize snaps dimensions and respects minimum and map bounds
+  ---
+  duration_ms: 0.1183
+  type: 'test'
+  ...
+# Subtest: box selection uses centers and separates object/room selection
+ok 16 - box selection uses centers and separates object/room selection
+  ---
+  duration_ms: 0.2397
+  type: 'test'
+  ...
+# Subtest: copy/paste a connected region group remaps contents and internal edges with fresh IDs
+ok 17 - copy/paste a connected region group remaps contents and internal edges with fresh IDs
+  ---
+  duration_ms: 2.9497
+  type: 'test'
+  ...
+# Subtest: object paste can target another existing region and preserves visual and behavior config
+ok 18 - object paste can target another existing region and preserves visual and behavior config
+  ---
+  duration_ms: 0.2582
+  type: 'test'
+  ...
+# Subtest: copying a region includes its contents but not its external connection
+ok 19 - copying a region includes its contents but not its external connection
+  ---
+  duration_ms: 0.1815
+  type: 'test'
+  ...
+# Subtest: align and distribute object centers in the same region; reject mixed or cross-region sets
+ok 20 - align and distribute object centers in the same region; reject mixed or cross-region sets
+  ---
+  duration_ms: 0.611
+  type: 'test'
+  ...
+# Subtest: room alignment preserves contents and package boundaries
+ok 21 - room alignment preserves contents and package boundaries
+  ---
+  duration_ms: 0.4006
+  type: 'test'
+  ...
+# Subtest: copy wall remaps attached door and window; one undo restores entire spatial edit
+ok 22 - copy wall remaps attached door and window; one undo restores entire spatial edit
+  ---
+  duration_ms: 2.0097
+  type: 'test'
+  ...
+# Subtest: room-local snapping and movement clamp geometry and attached span
+ok 23 - room-local snapping and movement clamp geometry and attached span
+  ---
+  duration_ms: 0.8486
+  type: 'test'
+  ...
+# Subtest: recovery shape accepts new space and pictures but rejects malformed references or behavior
+ok 24 - recovery shape accepts new space and pictures but rejects malformed references or behavior
+  ---
+  duration_ms: 1.5997
+  type: 'test'
+  ...
+# Subtest: render honors layers and actual door state, embeds reused custom picture
+ok 25 - render honors layers and actual door state, embeds reused custom picture
+  ---
+  duration_ms: 0.7818
+  type: 'test'
+  ...
+1..25
+# tests 25
+# suites 0
+# pass 25
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 136.579

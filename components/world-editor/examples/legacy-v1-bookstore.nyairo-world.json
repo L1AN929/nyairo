@@ -1,0 +1,146 @@
+{
+  "format": "nyairo.world-package.v1",
+  "requires": "nyairo.editor-runtime.v1",
+  "meta": {
+    "id": "rainy-bookstore",
+    "name": "雨天旧书店",
+    "author": "nyairo 示例",
+    "version": "0.1.0",
+    "description": "雨声落在窗沿。楼下是阅读区，楼上有一张可以休息的床。拿一本书，坐下来，试试这个小世界。",
+    "license": "CC0-1.0",
+    "cover": "generated-floorplan"
+  },
+  "rooms": [
+    {
+      "id": "bookstore",
+      "name": "旧书店 · 一楼",
+      "description": "木书架、阅读角与收纳柜。每天 08:00–22:00 开放。",
+      "kind": "shop",
+      "x": 65,
+      "y": 95,
+      "w": 435,
+      "h": 405,
+      "hours": {
+        "open": 8,
+        "close": 22
+      }
+    },
+    {
+      "id": "upstairs",
+      "name": "楼上的小屋",
+      "description": "一个安静的休息空间，全天开放。",
+      "kind": "room",
+      "x": 580,
+      "y": 135,
+      "w": 350,
+      "h": 325,
+      "hours": null
+    }
+  ],
+  "connections": [
+    {
+      "from": "bookstore",
+      "to": "upstairs"
+    }
+  ],
+  "objects": [
+    {
+      "id": "reading-chair",
+      "name": "窗边椅子",
+      "description": "",
+      "kind": "chair",
+      "room_id": "bookstore",
+      "x": 28,
+      "y": 43,
+      "actions": [
+        "sit"
+      ],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0
+    },
+    {
+      "id": "old-book",
+      "name": "一册旧书",
+      "description": "",
+      "kind": "book",
+      "room_id": "bookstore",
+      "x": 67,
+      "y": 40,
+      "actions": [
+        "pick_up",
+        "place",
+        "read"
+      ],
+      "portable": true,
+      "capacity": 0,
+      "servings": 0
+    },
+    {
+      "id": "tea-cup",
+      "name": "热茶",
+      "description": "",
+      "kind": "cup",
+      "room_id": "bookstore",
+      "x": 67,
+      "y": 69,
+      "actions": [
+        "pick_up",
+        "place",
+        "drink"
+      ],
+      "portable": true,
+      "capacity": 0,
+      "servings": 2
+    },
+    {
+      "id": "wood-cabinet",
+      "name": "木柜",
+      "description": "",
+      "kind": "cabinet",
+      "room_id": "bookstore",
+      "x": 25,
+      "y": 72,
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "portable": false,
+      "capacity": 4,
+      "servings": 0
+    },
+    {
+      "id": "soft-bed",
+      "name": "单人床",
+      "description": "",
+      "kind": "bed",
+      "room_id": "upstairs",
+      "x": 50,
+      "y": 49,
+      "actions": [
+        "rest"
+      ],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0
+    },
+    {
+      "id": "green-plant",
+      "name": "小盆栽",
+      "description": "",
+      "kind": "plant",
+      "room_id": "upstairs",
+      "x": 81,
+      "y": 75,
+      "actions": [],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0
+    }
+  ],
+  "initial": {
+    "room_id": "bookstore",
+    "time": "2026-10-11T09:00",
+    "resident_name": "测试居民"
+  }
+}

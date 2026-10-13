@@ -1,0 +1,788 @@
+{
+  "ambient_pool": [
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "slot": "school",
+      "start_hour": 0,
+      "summaries": [
+        "公告栏贴出了文化祭筹备通知",
+        "学校广播通知了体检日期"
+      ]
+    },
+    {
+      "end_hour": 18,
+      "event_type": "park_maintenance",
+      "slot": "park",
+      "start_hour": 8,
+      "summaries": [
+        "草坪一部分正在维护",
+        "公园的沙坑刚翻过新沙"
+      ]
+    },
+    {
+      "end_hour": 22,
+      "event_type": "store_evening_sale",
+      "slot": "convenience_store",
+      "start_hour": 18,
+      "summaries": [
+        "晚间饭团打折",
+        "便利店新出了关东煮季节菜单"
+      ]
+    },
+    {
+      "end_hour": 20,
+      "event_type": "street_construction",
+      "slot": "street",
+      "start_hour": 6,
+      "summaries": [
+        "路边正在修排水管",
+        "商店街在换新的灯箱"
+      ]
+    },
+    {
+      "end_hour": 17,
+      "event_type": "market_closing",
+      "slot": "market",
+      "start_hour": 14,
+      "summaries": [
+        "市场在收摊，摊主们互相打招呼",
+        "市场口贴出了下周的集市通知"
+      ]
+    },
+    {
+      "end_hour": 18,
+      "event_type": "library_new_shelf",
+      "slot": "library",
+      "start_hour": 10,
+      "summaries": [
+        "图书馆新到了一批小说",
+        "还书箱已经堆满了"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "slot": "home",
+      "start_hour": 0,
+      "summaries": [
+        "窗外雨声变大",
+        "隔壁在给院子浇水"
+      ]
+    },
+    {
+      "end_hour": 20,
+      "event_type": "station_rush",
+      "slot": "station",
+      "start_hour": 17,
+      "summaries": [
+        "站前挤满了下班的人",
+        "末班车的时间表换了"
+      ]
+    }
+  ],
+  "fixed_slots": [
+    {
+      "affordances": [
+        [
+          "REST",
+          "在这里休息"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "USE_PHONE",
+          "在这里使用手机"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "安静的住宅区里的住处，房间朝阳，午后有斜斜的光。"
+      ],
+      "id": "home",
+      "kind": "home",
+      "names": [
+        "向阳町的住居"
+      ],
+      "open_hour": null,
+      "slot": "home",
+      "weekdays_only": false,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "ATTEND_CLASS",
+          "在学校上课"
+        ],
+        [
+          "SELF_STUDY",
+          "在学校自习"
+        ],
+        [
+          "STAY_AT_SCHOOL",
+          "留在学校"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "镇上唯一的学校，上学时段路上全是同校的学生。"
+      ],
+      "id": "school",
+      "kind": "school",
+      "names": [
+        "向阳丘学校",
+        "若叶台学园",
+        "南泽学校"
+      ],
+      "open_hour": 8,
+      "slot": "school",
+      "weekdays_only": true,
+      "zone": "education"
+    }
+  ],
+  "flavor_pool": {
+    "festival_candidates": [
+      "商店街的夏日抽签会",
+      "秋天的公民祭",
+      "年末的 Countdown 集市"
+    ],
+    "street_flavor": [
+      "路口的邮筒漆成醒目的红色",
+      "商店街的拱廊上挂着各自的店旗",
+      "路边停着几辆买菜用的小自行车"
+    ],
+    "world_intro": [
+      "一座普通的通勤小镇，住宅区安静，商店街在傍晚最热闹。",
+      "依着缓坡修建的小镇，学校在坡顶，商店街在坡下。",
+      "以住宅为主的小镇，公园很多，傍晚有很多遛狗的人。"
+    ],
+    "zone_flavor": [
+      "巷口的自动贩卖机闪着暖黄的灯",
+      "谁家的猫占据了邮筒顶的阴凉",
+      "自行车筐里放着刚买的葱",
+      "小学的放学铃声在下午三点准时响起",
+      "拐角的公告板贴着旧新地的传单",
+      "路边的水泥花坛种着朝颜",
+      "公园长椅的一条腿垫着半块砖",
+      "补习班的灯箱在傍晚格外亮",
+      "便利店门口的伞架插着一把断伞",
+      "小学围墙上画着运动会的手绘海报",
+      "十字路口的镜子里映出整条巷子",
+      "傍晚各家厨房陆续传来油烟味"
+    ]
+  },
+  "npc_name_pool": {
+    "family": [
+      "佐藤",
+      "田中",
+      "铃木",
+      "渡边",
+      "伊藤",
+      "山口",
+      "松本",
+      "井上",
+      "木村",
+      "林"
+    ],
+    "given_adult": [
+      "明",
+      "香织",
+      "大辅",
+      "美咲",
+      "刚",
+      "由美",
+      "宏树",
+      "理惠",
+      "拓海",
+      "泉"
+    ],
+    "given_minor": [
+      "翔太",
+      "美羽",
+      "健",
+      "樱",
+      "大地",
+      "真由",
+      "梓",
+      "步"
+    ]
+  },
+  "npc_role_pool": [
+    {
+      "age": "adult",
+      "end_hour": 19,
+      "role": "书店店员",
+      "slot": "bookstore",
+      "start_hour": 10,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 20,
+      "role": "咖啡店店主",
+      "slot": "cafe",
+      "start_hour": 10,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 22,
+      "role": "便利店店员",
+      "slot": "convenience_store",
+      "start_hour": 9,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 16,
+      "role": "面包房师傅",
+      "slot": "bakery",
+      "start_hour": 7,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 18,
+      "role": "图书馆管理员",
+      "slot": "library",
+      "start_hour": 9,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 18,
+      "role": "公民馆的事务员",
+      "slot": "community_center",
+      "start_hour": 9,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 16,
+      "role": "市场菜摊的大婶",
+      "slot": "market",
+      "start_hour": 7,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 16,
+      "role": "同班同学",
+      "slot": "school",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 18,
+      "role": "学校里的学生",
+      "slot": "school",
+      "start_hour": 12,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  ],
+  "object_pool": [
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "床",
+      "note": "普通的单人床。",
+      "object_id": "bed_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "书桌",
+      "note": "靠窗的书桌。",
+      "object_id": "desk_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "书架",
+      "note": "放课本和小说的书架。",
+      "object_id": "shelf_home"
+    }
+  ],
+  "slot_pool": [
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在书店看看"
+        ]
+      ],
+      "close_hour": [
+        19,
+        21
+      ],
+      "descriptions": [
+        "社区书店，杂志架靠窗，店主记得每个常客的名字。"
+      ],
+      "id": "bookstore",
+      "kind": "store",
+      "names": [
+        "{world_name}书店",
+        "若叶书房",
+        "栞泽书店"
+      ],
+      "open_hour": 10,
+      "slot": "bookstore",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "SIT",
+          "在店里坐下"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ]
+      ],
+      "close_hour": [
+        19,
+        22
+      ],
+      "descriptions": [
+        "住宅区口的咖啡馆，靠窗的位子能看一整条街。"
+      ],
+      "id": "cafe",
+      "kind": "cafe",
+      "names": [
+        "{prefix}咖啡",
+        "向阳咖啡店",
+        "丘上咖啡"
+      ],
+      "open_hour": [
+        9,
+        10
+      ],
+      "slot": "cafe",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在便利店看看"
+        ]
+      ],
+      "close_hour": 23,
+      "descriptions": [
+        "二十四小时亮着灯的便利店，夜里也有下晚班的人来。"
+      ],
+      "id": "convenience_store",
+      "kind": "store",
+      "names": [
+        "{world_name}便利店",
+        "南台便利店"
+      ],
+      "open_hour": 7,
+      "slot": "convenience_store",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在面包房看看"
+        ]
+      ],
+      "close_hour": [
+        18,
+        19
+      ],
+      "descriptions": [
+        "早上六点开炉的面包房，招牌是红豆包。"
+      ],
+      "id": "bakery",
+      "kind": "store",
+      "names": [
+        "{world_name}面包房",
+        "麦丘面包店"
+      ],
+      "open_hour": [
+        7,
+        8
+      ],
+      "slot": "bakery",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在公园散步"
+        ],
+        [
+          "SIT",
+          "在长椅上坐一会儿"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": 22,
+      "descriptions": [
+        "有沙坑和长椅的街区公园，傍晚有孩子在这里玩。"
+      ],
+      "id": "park",
+      "kind": "park",
+      "names": [
+        "{world_name}公园",
+        "若叶中央公园",
+        "南泽绿地"
+      ],
+      "open_hour": 6,
+      "slot": "park",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "SELF_STUDY",
+          "在这里自习"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "两层的小图书馆，二楼有自习区，周末很抢手。"
+      ],
+      "id": "library",
+      "kind": "library",
+      "names": [
+        "{world_name}图书馆",
+        "向原文库"
+      ],
+      "open_hour": 9,
+      "slot": "library",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "civic"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "看看布告栏"
+        ],
+        [
+          "SIT",
+          "在门厅坐一会儿"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "贴满布告的公民馆，晚上有居民来上书法课。"
+      ],
+      "id": "community_center",
+      "kind": "public",
+      "names": [
+        "{world_name}公民馆",
+        "南台公民馆"
+      ],
+      "open_hour": 9,
+      "slot": "community_center",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "civic"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在店里看看日用杂货"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "卖日用品和简单家具的店，货架一直堆到天花板。"
+      ],
+      "id": "home_goods_store",
+      "kind": "store",
+      "names": [
+        "{world_name}家居店",
+        "向阳道具店"
+      ],
+      "open_hour": 10,
+      "slot": "home_goods_store",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在神社院子里走走"
+        ],
+        [
+          "PRAY",
+          "在正殿前合掌"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "住宅区深处的小神社，新年时附近的人都会来。"
+      ],
+      "id": "shrine",
+      "kind": "shrine",
+      "names": [
+        "{world_name}神社",
+        "若叶神社"
+      ],
+      "open_hour": 6,
+      "slot": "shrine",
+      "weekdays_only": false,
+      "weight": 1,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "在站前看看"
+        ],
+        [
+          "WALK",
+          "在站台走走"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "通勤小站，早晚各挤一阵，白天很空。"
+      ],
+      "id": "station",
+      "kind": "station",
+      "names": [
+        "{world_name}站",
+        "向阳台站"
+      ],
+      "open_hour": null,
+      "slot": "station",
+      "weekdays_only": false,
+      "weight": 1,
+      "zone": "civic"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在公园走走"
+        ],
+        [
+          "SIT",
+          "在这里坐一会儿"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "夹在住宅之间的小公园，有秋千和一个旧滑梯。"
+      ],
+      "id": "playground",
+      "kind": "park",
+      "names": [
+        "{world_name}儿童公园",
+        "丘下小公园"
+      ],
+      "open_hour": 6,
+      "slot": "playground",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在市场逛逛"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": [
+        15,
+        17
+      ],
+      "descriptions": [
+        "半条街的露天市场，卖菜和腌菜的大婶嗓门都很好。"
+      ],
+      "id": "market",
+      "kind": "market",
+      "names": [
+        "{world_name}市场",
+        "二丁目市场"
+      ],
+      "open_hour": [
+        7,
+        8
+      ],
+      "slot": "market",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "shopping"
+    }
+  ],
+  "street_names": [
+    "向阳通",
+    "若叶坂",
+    "南丘大道",
+    "栞泽小路",
+    "二丁目商店街"
+  ],
+  "street_slot": {
+    "affordances": [
+      [
+        "WALK",
+        "在街道上散步"
+      ],
+      [
+        "LOOK_AROUND",
+        "在这里看看周围"
+      ]
+    ],
+    "kind": "street",
+    "slot": "street"
+  },
+  "theme_id": "residential_town",
+  "theme_name": "普通生活小镇",
+  "weather": [
+    {
+      "condition": "clear",
+      "description": "晴朗"
+    },
+    {
+      "condition": "cloudy",
+      "description": "多云"
+    },
+    {
+      "condition": "rain",
+      "description": "有雨"
+    },
+    {
+      "condition": "overcast",
+      "description": "阴天"
+    }
+  ],
+  "world_name_fragments": {
+    "prefix": [
+      "若",
+      "向",
+      "久",
+      "栞",
+      "南",
+      "千"
+    ],
+    "suffix": [
+      "叶",
+      "原",
+      "丘",
+      "台",
+      "泽",
+      "里"
+    ]
+  },
+  "zones": [
+    {
+      "color": "#8fb98f",
+      "name": "住宅区",
+      "zone_id": "residential"
+    },
+    {
+      "color": "#c79f6f",
+      "name": "商业街",
+      "zone_id": "shopping"
+    },
+    {
+      "color": "#a98fc7",
+      "name": "学区",
+      "zone_id": "education"
+    },
+    {
+      "color": "#7f9fc7",
+      "name": "公共区",
+      "zone_id": "civic"
+    }
+  ]
+}

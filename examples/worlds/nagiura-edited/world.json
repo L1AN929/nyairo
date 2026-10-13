@@ -1,0 +1,10 @@
+{
+  "description": "凪浦——海滨小镇主题的生成世界。",
+  "generator_version": "worldgen.v0.1",
+  "name": "凪浦",
+  "schema_version": "worldgen.world.v1",
+  "seed": 929711,
+  "theme": "coastal_town",
+  "timezone": "Asia/Tokyo",
+  "world_id": "coastal_town_929711"
+}

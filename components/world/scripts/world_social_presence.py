@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import world_runtime_data as wrd
 
 FEATURE_ENV = "CHIYO_WORLD_SOCIAL_PRESENCE_ENABLED"
 WORLD_ID = "shiomi_city"
@@ -146,10 +147,38 @@ def _public_identity(npc: _Npc) -> dict[str, str]:
     }
 
 
+def _active_npcs(environment: Optional[Mapping[str, str]] = None) -> tuple[_Npc, ...]:
+    """活动世界的公共 NPC（未配置世界包时即汐见市 _NPCS）。"""
+    world = wrd.active_world(environment)
+    result: list[_Npc] = []
+    for npc in world.npcs:
+        windows = tuple(
+            _PresenceWindow(
+                weekdays=frozenset(window["weekdays"]),
+                start_minute=window["start_minute"],
+                end_minute=window["end_minute"],
+                location_id=window["location_id"],
+            )
+            for window in npc["windows"]
+        )
+        result.append(
+            _Npc(
+                npc_id=npc["npc_id"],
+                display_name=npc["display_name"],
+                age_classification=npc["age_classification"],
+                public_role=npc["public_role"],
+                home_base_area=npc["home_base_area"],
+                public_description=npc["public_description"],
+                windows=windows,
+            )
+        )
+    return tuple(result)
+
+
 def npc_catalog() -> list[dict[str, str]]:
     """Return canonical public identities for deterministic tests/admin views."""
 
-    return [_public_identity(npc) for npc in _NPCS]
+    return [_public_identity(npc) for npc in _active_npcs()]
 
 
 def _active_window(npc: _Npc, now: datetime, location_id: str) -> Optional[_PresenceWindow]:
@@ -163,13 +192,14 @@ def present_npcs(
     location_id: Any,
     *,
     now: Optional[datetime] = None,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, Any]]:
     """Return only public NPC presence at the supplied current location."""
 
     location = _location_id(location_id)
     instant = _resolved_time(now)
     result: list[dict[str, Any]] = []
-    for npc in _NPCS:
+    for npc in _active_npcs(environment):
         if _active_window(npc, instant, location) is None:
             continue
         result.append(
@@ -206,7 +236,7 @@ def observe_social_presence(
     try:
         location = _location_id(location_id)
         instant = _resolved_time(now)
-        present = present_npcs(location, now=instant)
+        present = present_npcs(location, now=instant, environment=environment)
     except SocialPresenceError:
         return {
             "kind": PROJECTION_KIND,
@@ -218,7 +248,7 @@ def observe_social_presence(
         "kind": PROJECTION_KIND,
         "schema_version": SCHEMA_VERSION,
         "status": "available",
-        "world_id": WORLD_ID,
+        "world_id": wrd.active_world(environment).world_id,
         "location_id": location,
         "presence_date": instant.date().isoformat(),
         "presence_time": instant.strftime("%H:%M"),

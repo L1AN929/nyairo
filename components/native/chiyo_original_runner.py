@@ -79,6 +79,9 @@ class OriginalNativeRuntime:
         if env.get('CHIYO_NATIVE_WORLD_BODY_ENABLED', 'false').lower() == 'true':
             from integration.world_body_client import WorldBodyClient
             self.world_body = WorldBodyClient(timeout=0.3, read_retries=0, environment=env)
+        # E11.1: the read-only life projection.  ``None`` means the chat turn is exactly
+        # what it was before this revision -- the block is additive and never required.
+        self.life_projection = None
         # The canonical M37 M0 store is written through the bridge module, so the
         # runtime and the delivery poller share one derivation of the store path,
         # the owner binding and the conversation id.
@@ -202,6 +205,20 @@ class OriginalNativeRuntime:
                 LOGGER.warning('world.read.failed error_class=%s', type(exc).__name__)
             if world_text:
                 sys_prompt += '\n\n【当前身体与环境观察】\n' + world_text
+
+        # 1b. The read-only life projection (E11.1).  It is a projection of facts the
+        #     owners already hold, appended the same way the world observation is: it
+        #     tells her what is true right now so she can speak from it, and it never
+        #     instructs her to bring anything up.  A projection failure is logged and
+        #     dropped -- a conversation must not break because a life read failed.
+        if getattr(self, 'life_projection', None) is not None:
+            try:
+                life_text = self.life_projection.render() or ''
+            except Exception as exc:
+                LOGGER.warning('life.projection.failed error_class=%s', type(exc).__name__)
+                life_text = ''
+            if life_text:
+                sys_prompt += '\n\n【她的自主生活】\n' + life_text
 
         projection = self.memory_controls.projection() if self.memory_controls is not None else (
             MemoryProjection(healthy=False) if getattr(self, 'memory_control_unavailable', False) else None)

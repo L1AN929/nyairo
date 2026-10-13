@@ -4817,7 +4817,14 @@ class LifeIntegrationCoordinator:
         # Resolve step spec if any
         resolved_step_dict: Optional[dict[str, Any]] = None
         if step_spec_override is not None:
-            resolved_step_dict = dict(step_spec_override)
+            # B6-5: the override may be a callable of the committed Decision, so a step
+            # whose *shape* depends on which candidate won (a MOVE to the place that was
+            # actually chosen) stays lazy and stays bound to that Decision.  A plain
+            # Mapping -- the existing contract, including the lazy Mapping proxy the
+            # autonomous cycle passes -- is untouched: a Mapping is not callable.
+            spec_source = (step_spec_override(decision_record)
+                           if callable(step_spec_override) else step_spec_override)
+            resolved_step_dict = dict(spec_source)
         elif decision_record.selected_candidate_ref:
             spec_obj = self.adoption_coordinator.get_adoption_spec(decision_record.selected_candidate_ref)
             if spec_obj and spec_obj.initial_executable_step_spec:

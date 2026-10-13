@@ -1,0 +1,223 @@
+{
+  "format": "nyairo.world-package.v2",
+  "requires": "nyairo.editor-runtime.v2",
+  "meta": {
+    "id": "rainy-bookstore",
+    "name": "雨天旧书店",
+    "author": "nyairo 示例",
+    "version": "0.3.0",
+    "description": "雨声落在窗沿。木纹书店与温暖卧室，读一段 21 分钟的书，再到楼上休息。",
+    "license": "CC0-1.0",
+    "cover": "generated-floorplan"
+  },
+  "rooms": [
+    {
+      "id": "bookstore",
+      "name": "旧书店 · 一楼",
+      "description": "木书架、阅读角与收纳柜。每天 08:00–22:00 开放。",
+      "kind": "shop",
+      "x": 65,
+      "y": 95,
+      "w": 435,
+      "h": 405,
+      "hours": {
+        "open": 8,
+        "close": 22
+      },
+      "visual": {
+        "theme": "bookstore",
+        "floor": "#e8e8dc",
+        "texture": "planks",
+        "border": "#a4ac97",
+        "border_style": "solid",
+        "background": "#f3f3e9"
+      }
+    },
+    {
+      "id": "upstairs",
+      "name": "楼上的小屋",
+      "description": "一个安静的休息空间，全天开放。",
+      "kind": "room",
+      "x": 580,
+      "y": 135,
+      "w": 350,
+      "h": 325,
+      "hours": null,
+      "visual": {
+        "theme": "bedroom",
+        "floor": "#f0e3d3",
+        "texture": "planks",
+        "border": "#b99d89",
+        "border_style": "solid",
+        "background": "#f8f0e7"
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": "bookstore",
+      "to": "upstairs"
+    }
+  ],
+  "objects": [
+    {
+      "id": "reading-chair",
+      "name": "窗边椅子",
+      "description": "",
+      "kind": "chair",
+      "room_id": "bookstore",
+      "x": 28,
+      "y": 43,
+      "actions": [
+        "sit"
+      ],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 100,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {}
+    },
+    {
+      "id": "old-book",
+      "name": "一册旧书",
+      "description": "",
+      "kind": "book",
+      "room_id": "bookstore",
+      "x": 67,
+      "y": 40,
+      "actions": [
+        "pick_up",
+        "place",
+        "read"
+      ],
+      "portable": true,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 100,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {
+        "read": {
+          "minutes": 21,
+          "energy_cost": 5
+        }
+      }
+    },
+    {
+      "id": "tea-cup",
+      "name": "热茶",
+      "description": "",
+      "kind": "cup",
+      "room_id": "bookstore",
+      "x": 67,
+      "y": 69,
+      "actions": [
+        "pick_up",
+        "place",
+        "drink"
+      ],
+      "portable": true,
+      "capacity": 0,
+      "servings": 2,
+      "visual": {
+        "scale": 100,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {
+        "drink": {
+          "hydration_gain": 25
+        }
+      }
+    },
+    {
+      "id": "wood-cabinet",
+      "name": "木柜",
+      "description": "",
+      "kind": "cabinet",
+      "room_id": "bookstore",
+      "x": 25,
+      "y": 72,
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "portable": false,
+      "capacity": 4,
+      "servings": 0,
+      "visual": {
+        "scale": 100,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {}
+    },
+    {
+      "id": "soft-bed",
+      "name": "单人床",
+      "description": "",
+      "kind": "bed",
+      "room_id": "upstairs",
+      "x": 50,
+      "y": 49,
+      "actions": [
+        "rest"
+      ],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 120,
+        "rotation": 0,
+        "layer": 0,
+        "show_name": true
+      },
+      "behavior": {
+        "rest": {
+          "minutes": 45,
+          "energy_gain": 20
+        }
+      }
+    },
+    {
+      "id": "green-plant",
+      "name": "小盆栽",
+      "description": "",
+      "kind": "plant",
+      "room_id": "upstairs",
+      "x": 81,
+      "y": 75,
+      "actions": [],
+      "portable": false,
+      "capacity": 0,
+      "servings": 0,
+      "visual": {
+        "scale": 100,
+        "rotation": 15,
+        "layer": 2,
+        "show_name": true
+      },
+      "behavior": {}
+    }
+  ],
+  "initial": {
+    "room_id": "bookstore",
+    "time": "2026-10-11T09:00",
+    "resident_name": "测试居民"
+  },
+  "scene": {
+    "background": "#f8f9fc",
+    "grid": true,
+    "decorations": true
+  }
+}

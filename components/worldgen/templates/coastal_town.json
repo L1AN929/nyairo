@@ -1,0 +1,846 @@
+{
+  "ambient_pool": [
+    {
+      "end_hour": 10,
+      "event_type": "harbor_fish_unload",
+      "slot": "fish_market",
+      "start_hour": 5,
+      "summaries": [
+        "早市正在卸今日的渔获",
+        "港口的收鱼车排到了路边"
+      ]
+    },
+    {
+      "end_hour": 11,
+      "event_type": "beach_tide_low",
+      "slot": "beach",
+      "start_hour": 6,
+      "summaries": [
+        "退潮后沙滩上留下大片水洼",
+        "有人在海边捡贝壳"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "slot": "school",
+      "start_hour": 0,
+      "summaries": [
+        "公告栏贴出了学期末的日程",
+        "校门口的告示板换了新通知"
+      ]
+    },
+    {
+      "end_hour": 18,
+      "event_type": "street_construction",
+      "slot": "street",
+      "start_hour": 8,
+      "summaries": [
+        "路边正在修排水管",
+        "街上有一段在铺新的路面"
+      ]
+    },
+    {
+      "end_hour": 12,
+      "event_type": "shrine_sweeping",
+      "slot": "shrine",
+      "start_hour": 8,
+      "summaries": [
+        "神社的石阶正在打扫",
+        "神社的巫女在换绘马架"
+      ]
+    },
+    {
+      "end_hour": 22,
+      "event_type": "store_evening_sale",
+      "slot": "convenience_store",
+      "start_hour": 18,
+      "summaries": [
+        "晚间饭团打折",
+        "便利店门口摆出了特价箱"
+      ]
+    },
+    {
+      "end_hour": 18,
+      "event_type": "park_wind_chime",
+      "slot": "park",
+      "start_hour": 10,
+      "summaries": [
+        "公园的风铃被海风吹得很响",
+        "长椅刚被重新刷过漆"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "slot": "home",
+      "start_hour": 0,
+      "summaries": [
+        "窗外雨声变大",
+        "窗外能听到轮船的汽笛声"
+      ]
+    }
+  ],
+  "fixed_slots": [
+    {
+      "affordances": [
+        [
+          "REST",
+          "在这里休息"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "USE_PHONE",
+          "在这里使用手机"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "能听到海声的住处，房间的窗户朝着港口的方向。"
+      ],
+      "id": "home",
+      "kind": "home",
+      "names": [
+        "临海的住居"
+      ],
+      "open_hour": null,
+      "slot": "home",
+      "weekdays_only": false,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "ATTEND_CLASS",
+          "在学校上课"
+        ],
+        [
+          "SELF_STUDY",
+          "在学校自习"
+        ],
+        [
+          "STAY_AT_SCHOOL",
+          "留在学校"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "能从教室窗户看到海面的学校，放学后操场上还很吵。"
+      ],
+      "id": "school",
+      "kind": "school",
+      "names": [
+        "汐见丘学校",
+        "海岬学园",
+        "青滨学校"
+      ],
+      "open_hour": 8,
+      "slot": "school",
+      "weekdays_only": true,
+      "zone": "education"
+    }
+  ],
+  "flavor_pool": {
+    "festival_candidates": [
+      "夏天的港口花火大会",
+      "秋日的渔获感谢祭",
+      "冬季的灯塔点灯式"
+    ],
+    "street_flavor": [
+      "路边的电线杆上贴着祭典的旧海报",
+      "排水沟盖子上画着小镇的吉祥物",
+      "十字路口有一家很有年头的照相馆"
+    ],
+    "world_intro": [
+      "一座安静的海滨小镇，主要街道只有两条，傍晚能听到港口收工的铃声。",
+      "面朝海湾的小镇，坡道很多，从高处能一直看到防波堤。",
+      "以渔业和夏天来的游客闻名的小镇，冬天几乎听不到游客的声音。"
+    ],
+    "zone_flavor": [
+      "防波堤上晾着一排补好的渔网",
+      "邮筒顶上蹲着一只不太理人的海鸥",
+      "杂货店门口的冰柜嗡嗡作响",
+      "坡道尽头的台阶被海风磨得圆润",
+      "屋檐下挂着风干的小鱼干",
+      "路面上的油漆被海风褪成了淡蓝",
+      "码头边的缆绳圈成一圈一圈",
+      "防波堤内侧的水洼里留着小鱼",
+      "坡道中段的杂货店把货物摆到了檐下",
+      "渡船靠岸时汽笛会响两声",
+      "海风把晾衣绳上的毛巾吹得鼓起来",
+      "傍晚路灯下能看见细小的飞鱼虫"
+    ]
+  },
+  "npc_name_pool": {
+    "family": [
+      "白石",
+      "山本",
+      "高桥",
+      "田边",
+      "藤原",
+      "岡本",
+      "小林",
+      "森下",
+      "长谷部",
+      "村上"
+    ],
+    "given_adult": [
+      "美绪",
+      "由纪",
+      "绫乃",
+      "健太",
+      "直树",
+      "千惠",
+      "达也",
+      "里子",
+      "修二",
+      "加奈"
+    ],
+    "given_minor": [
+      "凛",
+      "悠斗",
+      "结衣",
+      "葵",
+      "凑",
+      "阳菜",
+      "陆",
+      "澪"
+    ]
+  },
+  "npc_role_pool": [
+    {
+      "age": "adult",
+      "end_hour": 22,
+      "role": "便利店店员",
+      "slot": "convenience_store",
+      "start_hour": 9,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 13,
+      "role": "鱼店老板",
+      "slot": "fish_market",
+      "start_hour": 5,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 19,
+      "role": "咖啡店店主",
+      "slot": "cafe",
+      "start_hour": 10,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 19,
+      "role": "书店店员",
+      "slot": "bookstore",
+      "start_hour": 10,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 16,
+      "role": "面包房学徒",
+      "slot": "bakery",
+      "start_hour": 7,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 18,
+      "role": "图书馆管理员",
+      "slot": "library",
+      "start_hour": 9,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 16,
+      "role": "学校的学生",
+      "slot": "school",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 16,
+      "role": "同班同学",
+      "slot": "school",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "minor",
+      "end_hour": 18,
+      "role": "学校的另一名学生",
+      "slot": "school",
+      "start_hour": 12,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 18,
+      "role": "神社的看护人",
+      "slot": "shrine",
+      "start_hour": 7,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    }
+  ],
+  "object_pool": [
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "床",
+      "note": "普通的单人床。",
+      "object_id": "bed_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "书桌",
+      "note": "靠窗的书桌。",
+      "object_id": "desk_home"
+    },
+    {
+      "kind": "item",
+      "location": "home",
+      "name": "台灯",
+      "note": "暖色的旧台灯。",
+      "object_id": "lamp_home"
+    }
+  ],
+  "slot_pool": [
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在便利店看看"
+        ]
+      ],
+      "close_hour": [
+        22,
+        23
+      ],
+      "descriptions": [
+        "亮着白光的便利店，关东煮的香味一直飘到门口。"
+      ],
+      "id": "convenience_store",
+      "kind": "store",
+      "names": [
+        "{world_name}便利店",
+        "浜屋便利店",
+        "青叶便利店"
+      ],
+      "open_hour": [
+        7,
+        8
+      ],
+      "slot": "convenience_store",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在鱼市看看"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": [
+        12,
+        14
+      ],
+      "descriptions": [
+        "清晨最热闹的地方，冰块上摆着刚卸船的鱼。"
+      ],
+      "id": "fish_market",
+      "kind": "market",
+      "names": [
+        "朝市鱼店",
+        "港の鱼摊",
+        "{world_name}早市"
+      ],
+      "open_hour": [
+        5,
+        6
+      ],
+      "slot": "fish_market",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "harbor"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在沙滩上散步"
+        ],
+        [
+          "SIT",
+          "在这里坐一会儿"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "退潮时沙滩会变宽一倍，傍晚有附近的人来散步。"
+      ],
+      "id": "beach",
+      "kind": "beach",
+      "names": [
+        "{world_name}海滩",
+        "白浜沙滩",
+        "琴引滨"
+      ],
+      "open_hour": 5,
+      "slot": "beach",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "harbor"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在堤坝上走走"
+        ],
+        [
+          "LOOK_AROUND",
+          "看看海面"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "老水泥堤坝，尽头有一盏不太亮的灯，钓鱼的人常来。"
+      ],
+      "id": "pier",
+      "kind": "public",
+      "names": [
+        "旧防波堤",
+        "{world_name}栈桥",
+        "第一埠头"
+      ],
+      "open_hour": null,
+      "slot": "pier",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "harbor"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ],
+        [
+          "SIT",
+          "在塔下坐一会儿"
+        ]
+      ],
+      "close_hour": 17,
+      "descriptions": [
+        "还在使用的老灯塔，塔下的平房里住着守灯人一家。"
+      ],
+      "id": "lighthouse",
+      "kind": "public",
+      "names": [
+        "{world_name}灯塔",
+        "白崎灯塔"
+      ],
+      "open_hour": 9,
+      "slot": "lighthouse",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "harbor"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在神社院子里走走"
+        ],
+        [
+          "PRAY",
+          "在正殿前合掌"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "小小的神社，石阶上长着青苔，祭典的时候才会挂起灯。"
+      ],
+      "id": "shrine",
+      "kind": "shrine",
+      "names": [
+        "{world_name}神社",
+        "住吉神社",
+        "浜宫"
+      ],
+      "open_hour": 6,
+      "slot": "shrine",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "SIT",
+          "在店里坐下"
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ]
+      ],
+      "close_hour": [
+        19,
+        21
+      ],
+      "descriptions": [
+        "老式喫茶店，热可可会给两块方糖，窗外就是街道。"
+      ],
+      "id": "cafe",
+      "kind": "cafe",
+      "names": [
+        "{prefix}喫茶",
+        "海鸥咖啡",
+        "渚咖啡店"
+      ],
+      "open_hour": [
+        9,
+        10
+      ],
+      "slot": "cafe",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在书店翻翻书"
+        ]
+      ],
+      "close_hour": [
+        19,
+        20
+      ],
+      "descriptions": [
+        "两层的旧书店，楼梯会响，店里养着一只不太理人的猫。"
+      ],
+      "id": "bookstore",
+      "kind": "store",
+      "names": [
+        "{world_name}书房",
+        "文浜堂书店",
+        "青卷书店"
+      ],
+      "open_hour": 10,
+      "slot": "bookstore",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在店里看看日用杂货"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "卖锅碗瓢盆和灯泡的店，东西摆得满满当当。"
+      ],
+      "id": "home_goods_store",
+      "kind": "store",
+      "names": [
+        "{world_name}家居店",
+        "浜道具店"
+      ],
+      "open_hour": 10,
+      "slot": "home_goods_store",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在公园散步"
+        ],
+        [
+          "SIT",
+          "在长椅上坐一会儿"
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": 22,
+      "descriptions": [
+        "种着防风松的小公园，长椅正对港口，傍晚很安静。"
+      ],
+      "id": "park",
+      "kind": "park",
+      "names": [
+        "{world_name}公园",
+        "松原公园",
+        "浜见绿地"
+      ],
+      "open_hour": 6,
+      "slot": "park",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "READ",
+          "在这里阅读"
+        ],
+        [
+          "SELF_STUDY",
+          "在这里自习"
+        ]
+      ],
+      "close_hour": 18,
+      "descriptions": [
+        "小镇图书馆，海潮主题的书架放在最里面的窗边。"
+      ],
+      "id": "library",
+      "kind": "library",
+      "names": [
+        "{world_name}图书馆",
+        "青叶图书角"
+      ],
+      "open_hour": 9,
+      "slot": "library",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "education"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "在站前看看"
+        ],
+        [
+          "WALK",
+          "在站台走走"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "单线小站，一小时只有一班车，站前的钟慢五分钟。"
+      ],
+      "id": "station",
+      "kind": "station",
+      "names": [
+        "{world_name}站",
+        "滨见站"
+      ],
+      "open_hour": null,
+      "slot": "station",
+      "weekdays_only": false,
+      "weight": 1,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在面包房看看"
+        ]
+      ],
+      "close_hour": [
+        18,
+        19
+      ],
+      "descriptions": [
+        "上午烤面包的味道会飘满半条街，午后有特价饭团。"
+      ],
+      "id": "bakery",
+      "kind": "store",
+      "names": [
+        "{world_name}面包房",
+        "麦浜面包店"
+      ],
+      "open_hour": [
+        7,
+        8
+      ],
+      "slot": "bakery",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
+    }
+  ],
+  "street_names": [
+    "海风通",
+    "滨见坂",
+    "浪打道",
+    "汐驹小路",
+    "青叶堤通"
+  ],
+  "street_slot": {
+    "affordances": [
+      [
+        "WALK",
+        "在街道上散步"
+      ],
+      [
+        "LOOK_AROUND",
+        "在这里看看周围"
+      ]
+    ],
+    "kind": "street",
+    "slot": "street"
+  },
+  "theme_id": "coastal_town",
+  "theme_name": "海滨小镇",
+  "weather": [
+    {
+      "condition": "clear",
+      "description": "晴朗"
+    },
+    {
+      "condition": "cloudy",
+      "description": "多云"
+    },
+    {
+      "condition": "sea_fog",
+      "description": "海雾"
+    },
+    {
+      "condition": "drizzle",
+      "description": "小雨"
+    }
+  ],
+  "world_name_fragments": {
+    "prefix": [
+      "汐",
+      "凪",
+      "澄",
+      "海",
+      "渚",
+      "青"
+    ],
+    "suffix": [
+      "见",
+      "风",
+      "岬",
+      "浦",
+      "滨",
+      "叶"
+    ]
+  },
+  "zones": [
+    {
+      "color": "#7fae7a",
+      "name": "住宅区",
+      "zone_id": "residential"
+    },
+    {
+      "color": "#6fa3c7",
+      "name": "港区",
+      "zone_id": "harbor"
+    },
+    {
+      "color": "#c7a76f",
+      "name": "镇中心",
+      "zone_id": "town"
+    },
+    {
+      "color": "#a98fc7",
+      "name": "学区",
+      "zone_id": "education"
+    }
+  ]
+}

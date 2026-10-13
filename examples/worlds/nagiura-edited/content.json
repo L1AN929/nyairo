@@ -1,0 +1,80 @@
+{
+  "entries": {
+    "beach": {
+      "intro": "退潮时沙滩会变宽一倍，傍晚有附近的人来散步。"
+    },
+    "bookstore": {
+      "intro": "换了新招牌的旧书店，楼梯会响，店里养着一只不太理人的猫。"
+    },
+    "cafe": {
+      "intro": "老式喫茶店，热可可会给两块方糖，窗外就是街道。"
+    },
+    "coastal_npc_bookstore_01": {
+      "public_note": "藤原美绪是这里的书店店员。"
+    },
+    "coastal_npc_library_03": {
+      "public_note": "高桥千惠是这里的图书馆管理员。"
+    },
+    "coastal_npc_school_02": {
+      "public_note": "森下悠斗是这里的学校的另一名学生。"
+    },
+    "coffee_stand": {
+      "intro": "街角新开的移动咖啡摊，只有两个座位。"
+    },
+    "convenience_store": {
+      "intro": "亮着白光的便利店，关东煮的香味一直飘到门口。"
+    },
+    "fish_market": {
+      "intro": "清晨最热闹的地方，冰块上摆着刚卸船的鱼。"
+    },
+    "home": {
+      "intro": "能听到海声的住处，房间的窗户朝着港口的方向。"
+    },
+    "home_goods_store": {
+      "intro": "卖锅碗瓢盆和灯泡的店，东西摆得满满当当。"
+    },
+    "library": {
+      "intro": "小镇图书馆，海潮主题的书架放在最里面的窗边。"
+    },
+    "lighthouse": {
+      "intro": "还在使用的老灯塔，塔下的平房里住着守灯人一家。"
+    },
+    "park": {
+      "intro": "种着防风松的小公园，长椅正对港口，傍晚很安静。"
+    },
+    "pier": {
+      "intro": "老水泥堤坝，尽头有一盏不太亮的灯，钓鱼的人常来。"
+    },
+    "school": {
+      "intro": "能从教室窗户看到海面的学校，放学后操场上还很吵。"
+    },
+    "shrine": {
+      "intro": "小小的神社，石阶上长着青苔，祭典的时候才会挂起灯。"
+    },
+    "station": {
+      "intro": "单线小站，一小时只有一班车，站前的钟慢五分钟。"
+    },
+    "street_1": {
+      "flavor": "十字路口有一家很有年头的照相馆",
+      "intro": "浪打道，镇上的主要街道之一。"
+    },
+    "street_2": {
+      "flavor": "排水沟盖子上画着小镇的吉祥物",
+      "intro": "滨见坂，镇上的主要街道之一。"
+    },
+    "street_3": {
+      "flavor": "十字路口有一家很有年头的照相馆",
+      "intro": "海风通，镇上的主要街道之一。"
+    },
+    "world": {
+      "festivals": [
+        "夏天的港口花火大会",
+        "冬季的灯塔点灯式"
+      ],
+      "tagline": "面朝海湾的小镇，坡道很多，从高处能一直看到防波堤。"
+    }
+  },
+  "model": null,
+  "schema_version": "worldgen.content.v1",
+  "source": "local"
+}

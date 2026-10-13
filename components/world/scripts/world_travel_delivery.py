@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 import world_foundation as wf
+import world_runtime_data as wrd
 import world_timeline as wt
 
 try:
@@ -177,19 +178,29 @@ def _instant(value: Any = None, field: str = "now") -> datetime:
     return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
 
 
-def route_duration_seconds(origin_location_id: Any, destination_location_id: Any) -> Optional[int]:
+def route_duration_seconds(
+    origin_location_id: Any,
+    destination_location_id: Any,
+    environment: Optional[Mapping[str, str]] = None,
+) -> Optional[int]:
     try:
         origin = _id(origin_location_id, "origin_location_id")
         destination = _id(destination_location_id, "destination_location_id")
     except TravelDeliveryError:
         return None
-    return WALKING_DURATIONS.get((origin, destination))
+    world = wrd.active_world(environment)
+    return world.route_duration_seconds(origin, destination)
 
 
-def route_id_for(origin_location_id: Any, destination_location_id: Any) -> str:
+def route_id_for(
+    origin_location_id: Any,
+    destination_location_id: Any,
+    environment: Optional[Mapping[str, str]] = None,
+) -> str:
     origin = _id(origin_location_id, "origin_location_id")
     destination = _id(destination_location_id, "destination_location_id")
-    if (origin, destination) not in WALKING_DURATIONS:
+    world = wrd.active_world(environment)
+    if world.route_duration_seconds(origin, destination) is None:
         raise TravelDeliveryError("route is not a V1 walking edge")
     return f"{origin}->{destination}"
 
@@ -209,14 +220,23 @@ def direct_execution_id(
     return "world-direct-" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def _stable_id(execution_id: str, origin: str, destination: str) -> str:
-    material = "|".join((execution_id, origin, destination, ROUTE_REVISION))
+def _stable_id(
+    execution_id: str,
+    origin: str,
+    destination: str,
+    route_revision: str,
+) -> str:
+    material = "|".join((execution_id, origin, destination, route_revision))
     return "travel-" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def _validate_travel(value: Any) -> dict[str, Any]:
+def _validate_travel(
+    value: Any, environment: Optional[Mapping[str, str]] = None
+) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != _TRAVEL_KEYS:
         raise TravelDeliveryError("travel record has an invalid strict shape")
+    world = wrd.active_world(environment)
+    route_revision = world.route_revision
     travel_id = _id(value.get("travel_id"), "travel_id")
     execution_id = _id(value.get("execution_id"), "execution_id")
     origin = _id(value.get("origin_location_id"), "origin_location_id")
@@ -226,7 +246,7 @@ def _validate_travel(value: Any) -> dict[str, Any]:
     duration = value.get("route_duration_seconds")
     if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
         raise TravelDeliveryError("route_duration_seconds is invalid")
-    if route_duration_seconds(origin, destination) != duration:
+    if route_duration_seconds(origin, destination, environment) != duration:
         raise TravelDeliveryError("route duration does not match route authority")
     if value.get("actor") != "chiyo":
         raise TravelDeliveryError("travel actor is invalid")
@@ -235,7 +255,7 @@ def _validate_travel(value: Any) -> dict[str, Any]:
     route_id = _text(value.get("route_id"), "route_id", MAX_TEXT_LENGTH)
     if route_id != f"{origin}->{destination}":
         raise TravelDeliveryError("route_id is invalid")
-    if value.get("route_revision") != ROUTE_REVISION:
+    if value.get("route_revision") != route_revision:
         raise TravelDeliveryError("route_revision is invalid")
     if value.get("provenance") != "verified_main_self_move_to":
         raise TravelDeliveryError("travel provenance is invalid")
@@ -256,7 +276,7 @@ def _validate_travel(value: Any) -> dict[str, Any]:
         arrived_at = _timestamp(arrived_at, "arrived_at")
         if _instant(arrived_at) < _instant(expected):
             raise TravelDeliveryError("arrived_at precedes expected arrival")
-    if travel_id != _stable_id(execution_id, origin, destination):
+    if travel_id != _stable_id(execution_id, origin, destination, route_revision):
         raise TravelDeliveryError("travel_id is not stable")
     return {
         "travel_id": travel_id,
@@ -269,19 +289,22 @@ def _validate_travel(value: Any) -> dict[str, Any]:
         "arrived_at": arrived_at,
         "travel_mode": TRAVEL_MODE_WALK,
         "route_id": route_id,
-        "route_revision": ROUTE_REVISION,
+        "route_revision": route_revision,
         "route_duration_seconds": duration,
         "status": status,
         "provenance": "verified_main_self_move_to",
     }
 
 
-def validate_state(value: Any) -> dict[str, Any]:
+def validate_state(
+    value: Any, environment: Optional[Mapping[str, str]] = None
+) -> dict[str, Any]:
+    world = wrd.active_world(environment)
     if not isinstance(value, Mapping) or set(value) != _STATE_KEYS:
         raise TravelDeliveryError("travel state has an invalid strict shape")
     if value.get("schema_version") != SCHEMA_VERSION:
         raise TravelDeliveryError("travel state schema is unsupported")
-    if value.get("world_id") != WORLD_ID:
+    if value.get("world_id") != world.world_id:
         raise TravelDeliveryError("travel state world_id is invalid")
     revision = value.get("revision")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
@@ -293,34 +316,45 @@ def validate_state(value: Any) -> dict[str, Any]:
         or len(raw) > MAX_TRAVELS
     ):
         raise TravelDeliveryError("travel state travels are invalid")
-    travels = [_validate_travel(item) for item in raw]
+    travels = [_validate_travel(item, environment) for item in raw]
     ids = [item["travel_id"] for item in travels]
     executions = [item["execution_id"] for item in travels]
     if len(ids) != len(set(ids)) or len(executions) != len(set(executions)):
         raise TravelDeliveryError("travel identities must be unique")
     return {
         "schema_version": SCHEMA_VERSION,
-        "world_id": WORLD_ID,
+        "world_id": world.world_id,
         "revision": revision,
         "travels": travels,
     }
 
 
-def _load(path: Path) -> Optional[dict[str, Any]]:
+def _load(
+    path: Path, environment: Optional[Mapping[str, str]] = None
+) -> Optional[dict[str, Any]]:
     if not path.exists():
         return None
     try:
-        return validate_state(json.loads(path.read_text(encoding="utf-8")))
+        return validate_state(
+            json.loads(path.read_text(encoding="utf-8")), environment
+        )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise TravelDeliveryError("travel state cannot be read") from exc
 
 
-def load_state(hermes_home: Optional[Path | str] = None) -> Optional[dict[str, Any]]:
-    return _load(state_path(hermes_home))
+def load_state(
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> Optional[dict[str, Any]]:
+    return _load(state_path(hermes_home), environment)
 
 
-def _save(path: Path, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = validate_state(state)
+def _save(
+    path: Path,
+    state: Mapping[str, Any],
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    normalized = validate_state(state, environment)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = (
         json.dumps(
@@ -381,10 +415,10 @@ def _world_lock(path: Path) -> Iterator[None]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _empty_state() -> dict[str, Any]:
+def _empty_state(environment: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
-        "world_id": WORLD_ID,
+        "world_id": wrd.active_world(environment).world_id,
         "revision": 1,
         "travels": [],
     }
@@ -424,8 +458,9 @@ def _travel_projection(
     *,
     hermes_home: Path,
     now: Any = None,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
-    normalized = _validate_travel(travel)
+    normalized = _validate_travel(travel, environment)
     result: dict[str, Any] = {
         "kind": TRAVEL_PROJECTION_KIND,
         "status": (
@@ -487,7 +522,7 @@ def plan_travel(
             "status": "rejected",
             "reason_code": "INVALID_ROUTE",
         }
-    duration = route_duration_seconds(origin, destination)
+    duration = route_duration_seconds(origin, destination, environment)
     if duration is None:
         return {
             "kind": TRAVEL_PROJECTION_KIND,
@@ -509,14 +544,16 @@ def plan_travel(
             "status": "rejected",
             "reason_code": "ACTIVE_ACTIVITY_CONFLICT",
         }
-    state = load_state(hermes_home)
+    state = load_state(hermes_home, environment)
     active = _active_travel(state)
     if active is not None:
         return {
             "kind": TRAVEL_PROJECTION_KIND,
             "status": "rejected",
             "reason_code": "TRAVEL_ALREADY_IN_PROGRESS",
-            "travel": _travel_projection(active, hermes_home=_home(hermes_home), now=now),
+            "travel": _travel_projection(
+                active, hermes_home=_home(hermes_home), now=now, environment=environment
+            ),
         }
     started = _instant(now)
     expected = started + timedelta(seconds=duration)
@@ -540,8 +577,9 @@ def ensure_travel_timeline_process(
     *,
     hermes_home: Optional[Path | str] = None,
     destination_area_id: Optional[str] = None,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
-    normalized = _validate_travel(travel)
+    normalized = _validate_travel(travel, environment)
     home = _home(hermes_home)
     path = timeline_path(home)
     if not path.exists() or fcntl is None:
@@ -616,7 +654,8 @@ def start_travel(
         execution = _id(execution_id, "execution_id")
         origin = _id(origin_location_id, "origin_location_id")
         destination = _id(destination_location_id, "destination_location_id")
-        duration = route_duration_seconds(origin, destination)
+        route_revision = wrd.active_world(environment).route_revision
+        duration = route_duration_seconds(origin, destination, environment)
         if duration is None:
             raise TravelDeliveryError("route is not reachable")
         started = _instant(now)
@@ -629,7 +668,7 @@ def start_travel(
         }
     expected = started + timedelta(seconds=duration)
     record = {
-        "travel_id": _stable_id(execution, origin, destination),
+        "travel_id": _stable_id(execution, origin, destination, route_revision),
         "execution_id": execution,
         "actor": "chiyo",
         "origin_location_id": origin,
@@ -639,7 +678,7 @@ def start_travel(
         "arrived_at": None,
         "travel_mode": TRAVEL_MODE_WALK,
         "route_id": f"{origin}->{destination}",
-        "route_revision": ROUTE_REVISION,
+        "route_revision": route_revision,
         "route_duration_seconds": duration,
         "status": TRAVEL_STATUS_IN_PROGRESS,
         "provenance": "verified_main_self_move_to",
@@ -647,7 +686,7 @@ def start_travel(
     path = state_path(hermes_home)
     try:
         with _lock(path):
-            state = _load(path) or _empty_state()
+            state = _load(path, environment) or _empty_state(environment)
             existing = next(
                 (item for item in state["travels"] if item["execution_id"] == execution),
                 None,
@@ -666,6 +705,7 @@ def start_travel(
                     existing,
                     hermes_home=_home(hermes_home),
                     now=now,
+                    environment=environment,
                 )
                 return {
                     **projection,
@@ -680,20 +720,22 @@ def start_travel(
                     "status": "rejected",
                     "reason_code": "TRAVEL_ALREADY_IN_PROGRESS",
                 }
-            normalized = _validate_travel(record)
+            normalized = _validate_travel(record, environment)
             updated = dict(state)
             updated["revision"] = state["revision"] + 1
             updated["travels"] = [*state["travels"], normalized]
-            _save(path, updated)
+            _save(path, updated, environment)
         timeline_result = ensure_travel_timeline_process(
             normalized,
             hermes_home=hermes_home,
             destination_area_id=destination_area_id,
+            environment=environment,
         )
         projection = _travel_projection(
             normalized,
             hermes_home=_home(hermes_home),
             now=now,
+            environment=environment,
         )
         return {
             **projection,
@@ -722,11 +764,13 @@ def observe_travel(
             "status": "disabled",
             "reason_code": "FEATURE_DISABLED",
         }
-    state = load_state(hermes_home)
+    state = load_state(hermes_home, environment)
     active = _active_travel(state)
     if active is None:
         return {"kind": TRAVEL_PROJECTION_KIND, "status": "none"}
-    return _travel_projection(active, hermes_home=_home(hermes_home), now=now)
+    return _travel_projection(
+        active, hermes_home=_home(hermes_home), now=now, environment=environment
+    )
 
 
 def realize_due_travel(
@@ -754,13 +798,15 @@ def realize_due_travel(
         # while holding the same world lock, so lock acquisition is ordered.
         with _world_lock(world_path):
             with _lock(travel_path):
-                state = _load(travel_path)
+                state = _load(travel_path, environment)
                 active = _active_travel(state)
                 if active is None:
                     return {"kind": TRAVEL_PROJECTION_KIND, "status": "none"}
                 if instant < _instant(active["expected_arrival_at"]):
                     return {
-                        **_travel_projection(active, hermes_home=home, now=instant),
+                        **_travel_projection(
+                            active, hermes_home=home, now=instant, environment=environment
+                        ),
                         "status": "in_progress",
                         "reason_code": "ARRIVAL_NOT_DUE",
                     }
@@ -772,20 +818,36 @@ def realize_due_travel(
                         "status": "unavailable",
                         "reason_code": "WORLD_NOT_INITIALIZED",
                     }
-                current = world_state["location"]["place_id"]
+                world = wrd.active_world(environment)
+                location_state = world_state["location"]
+                current = world.state_node(
+                    location_state["place_id"], location_state.get("area_id")
+                )
+                if current is None:
+                    return {
+                        "kind": TRAVEL_PROJECTION_KIND,
+                        "status": "uncertain",
+                        "reason_code": "WORLD_LOCATION_INVALID",
+                    }
                 destination = active["destination_location_id"]
                 origin = active["origin_location_id"]
+                # v0.4：入口区与 place 同义，比较使用归一化节点。
+                normalized_destination = world.state_node(*world.split_node(destination))
+                normalized_origin = world.state_node(*world.split_node(origin))
                 world_changed = False
-                if current == origin:
-                    destination_area = "bedroom" if destination == "home" else destination
+                if current == normalized_origin:
+                    # v0.4：destination 可以是室内复合节点（place/area），
+                    # world_state 写拆分后的 place_id + area_id。
+                    destination_area = world.area_id_of(destination)
+                    destination_place = world.node_place(destination)
                     updated_world = _copy_json(world_state)
                     updated_world["revision"] = world_state["revision"] + 1
                     updated_world["location"] = {
-                        "place_id": destination,
+                        "place_id": destination_place,
                         "area_id": destination_area,
                     }
                     updated_world["scene"] = {
-                        "scene_id": f"{destination}.{destination_area}",
+                        "scene_id": f"{destination_place}.{destination_area}",
                         "revision": world_state["scene"]["revision"] + 1,
                     }
                     world_store.save(
@@ -793,17 +855,22 @@ def realize_due_travel(
                         expected_revision=updated_world["revision"],
                     )
                     verified_world = world_store.load()
-                    if (
-                        verified_world is None
-                        or verified_world["location"]["place_id"] != destination
-                    ):
+                    verified_location = (
+                        world.state_node(
+                            verified_world["location"]["place_id"],
+                            verified_world["location"].get("area_id"),
+                        )
+                        if verified_world is not None
+                        else None
+                    )
+                    if verified_location != normalized_destination:
                         return {
                             "kind": TRAVEL_PROJECTION_KIND,
                             "status": "uncertain",
                             "reason_code": "WORLD_POSTCONDITION_FAILED",
                         }
                     world_changed = True
-                elif current != destination:
+                elif current != normalized_destination:
                     return {
                         "kind": TRAVEL_PROJECTION_KIND,
                         "status": "rejected",
@@ -821,11 +888,12 @@ def realize_due_travel(
                     else item
                     for item in state["travels"]
                 ]
-                _save(travel_path, updated_state)
+                _save(travel_path, updated_state, environment)
                 projection = _travel_projection(
                     completed,
                     hermes_home=home,
                     now=instant,
+                    environment=environment,
                 )
                 return {
                     **projection,

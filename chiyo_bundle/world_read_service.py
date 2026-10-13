@@ -44,9 +44,13 @@ def initialize(home):
         raise ValueError('World home already exists; initialization never overwrites it')
     world.mkdir(parents=True, mode=0o700)
     os.chmod(home, 0o700)
+    # B6-1: the initialization value must be the timezone the World Living
+    # Skeleton declares (world_living_skeleton.WORLD_TIMEZONE == "Asia/Tokyo").
+    # A new isolated instance written with any other zone fails _load_state and
+    # every MOVE is then refused as WORLD_NOT_INITIALIZED.
     (world / 'world_state.json').write_text(json.dumps({
         'schema_version': 'world.foundation.v0', 'world_id': 'shiomi_city',
-        'timezone': 'Asia/Shanghai', 'revision': 1, 'facts': [],
+        'timezone': 'Asia/Tokyo', 'revision': 1, 'facts': [],
         'location': {'place_id': 'home', 'area_id': 'bedroom'},
         'scene': {'revision': 1, 'scene_id': 'home.bedroom'}}), encoding='utf8')
     (world / 'world_timeline.json').write_text(json.dumps({

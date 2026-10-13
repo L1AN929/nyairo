@@ -1,0 +1,3193 @@
+{
+  "assets": {},
+  "connections": [
+    {
+      "from": "street_1",
+      "to": "street_2"
+    },
+    {
+      "from": "street_1",
+      "to": "street_3"
+    },
+    {
+      "from": "home",
+      "to": "street_3"
+    },
+    {
+      "from": "school",
+      "to": "street_1"
+    },
+    {
+      "from": "library",
+      "to": "street_1"
+    },
+    {
+      "from": "bakery",
+      "to": "street_1"
+    },
+    {
+      "from": "shrine",
+      "to": "street_3"
+    },
+    {
+      "from": "hot_spring",
+      "to": "street_2"
+    },
+    {
+      "from": "hiking_trail",
+      "to": "street_2"
+    },
+    {
+      "from": "inn",
+      "to": "street_2"
+    },
+    {
+      "from": "park",
+      "to": "street_3"
+    },
+    {
+      "from": "viewpoint",
+      "to": "street_2"
+    },
+    {
+      "from": "cafe",
+      "to": "street_1"
+    },
+    {
+      "from": "craft_shop",
+      "to": "street_1"
+    },
+    {
+      "from": "cafe",
+      "to": "bakery"
+    },
+    {
+      "from": "shrine",
+      "to": "park"
+    }
+  ],
+  "format": "nyairo.world-package.v3",
+  "initial": {
+    "resident_name": "试住居民",
+    "room_id": "home",
+    "time": "2026-10-14T08:00"
+  },
+  "meta": {
+    "author": "NyAiro WorldGen",
+    "cover": "generated-floorplan",
+    "description": "汤川——依山傍溪的静谧木构聚落，常年水汽蒸腾，空气中带着淡淡的硫磺与松木气息。依托地热温泉与林下山货维生，保留着街坊轮流打理公共浴场与山道的自治传统。 （由 worldgen 城镇包转换：seed 700001，主题 mountain_town。室内空间与物件交互需在编辑器中手动绘制与配置。）",
+    "id": "mountain_town_700001",
+    "license": "CC0-1.0",
+    "name": "汤川",
+    "version": "0.1.0"
+  },
+  "objects": [
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "bakery_cabinet01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "陈列柜1",
+      "portable": false,
+      "room_id": "bakery",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "bakery_cabinet02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "陈列柜2",
+      "portable": false,
+      "room_id": "bakery",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "bakery_cabinet03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "陈列柜3",
+      "portable": false,
+      "room_id": "bakery",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 22
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "bakery_counter04",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "柜台",
+      "portable": false,
+      "room_id": "bakery",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "bakery_dispenser05",
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "name": "饮水机",
+      "portable": false,
+      "room_id": "bakery",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "bakery_plant06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "门口盆栽",
+      "portable": false,
+      "room_id": "bakery",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_chair06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "椅子",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 67,
+      "y": 72
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_chair08",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "椅子",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 57
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_chair10",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "椅子",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 52
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "手写菜单板下的吧台。",
+      "id": "cafe_counter01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "吧台",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 17
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "手写菜单板下的吧台。",
+      "id": "cafe_counter02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "吧台",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 17
+    },
+    {
+      "actions": [
+        "pick_up",
+        "place",
+        "drink"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "drink": {
+          "hydration_gain": 20
+        }
+      },
+      "capacity": 0,
+      "description": "倒扣在吧台上的杯子。",
+      "id": "cafe_cup04",
+      "initial_status": "empty",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cup",
+      "name": "干净杯子",
+      "portable": true,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 17
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_lamp12",
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "暖色壁灯",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 27
+    },
+    {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "嗞嗞作响的意式咖啡机。",
+      "id": "cafe_machine03",
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "name": "咖啡机",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 17
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_plant11",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "绿植",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 87
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_table05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "座位桌1",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 67
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_table07",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "座位桌2",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 57
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "cafe_table09",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "座位桌3",
+      "portable": false,
+      "room_id": "cafe",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 22,
+      "y": 52
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "craft_shop_cabinet01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "陈列柜1",
+      "portable": false,
+      "room_id": "craft_shop",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "craft_shop_cabinet02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "陈列柜2",
+      "portable": false,
+      "room_id": "craft_shop",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "craft_shop_counter03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "柜台",
+      "portable": false,
+      "room_id": "craft_shop",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "craft_shop_dispenser04",
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "name": "饮水机",
+      "portable": false,
+      "room_id": "craft_shop",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "craft_shop_plant05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "门口盆栽",
+      "portable": false,
+      "room_id": "craft_shop",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    {
+      "actions": [
+        "rest"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "rest": {
+          "energy_gain": 15,
+          "minutes": 30
+        }
+      },
+      "capacity": 0,
+      "description": "临窗的单人床。",
+      "id": "home_bed01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "bed",
+      "name": "床",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 17
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "料理台边的橱柜。",
+      "id": "home_cabinet07",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "橱柜",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 77
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "home_chair06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "椅子",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 57
+    },
+    {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "home_dispenser08",
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "name": "饮水机",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 72,
+      "y": 67
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "home_lamp03",
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "床头灯",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 32
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "home_lamp04",
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "落地灯",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 47
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "home_table05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "餐桌",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 62
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "靠墙的衣柜。",
+      "id": "home_wardrobe02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "衣柜",
+      "portable": false,
+      "room_id": "home",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 82,
+      "y": 17
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "hot_spring_cabinet05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "储物柜",
+      "portable": false,
+      "room_id": "hot_spring",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "hot_spring_chair01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅1",
+      "portable": false,
+      "room_id": "hot_spring",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "hot_spring_chair02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅2",
+      "portable": false,
+      "room_id": "hot_spring",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "hot_spring_chair03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅3",
+      "portable": false,
+      "room_id": "hot_spring",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "hot_spring_lamp07",
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "角灯",
+      "portable": false,
+      "room_id": "hot_spring",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "hot_spring_plant06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "盆栽",
+      "portable": false,
+      "room_id": "hot_spring",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "社区公告与杂物桌。",
+      "id": "hot_spring_table04",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "长桌",
+      "portable": false,
+      "room_id": "hot_spring",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 52,
+      "y": 57
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "inn_cabinet01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "陈列柜1",
+      "portable": false,
+      "room_id": "inn",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "inn_cabinet02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "陈列柜2",
+      "portable": false,
+      "room_id": "inn",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 37,
+      "y": 22
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "inn_counter03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "柜台",
+      "portable": false,
+      "room_id": "inn",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 90,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 62
+    },
+    {
+      "actions": [
+        "fill",
+        "toggle_device"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "fill": {
+          "minutes": 2,
+          "servings": 1
+        },
+        "toggle_device": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "inn_dispenser04",
+      "initial_status": "available",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "dispenser",
+      "name": "饮水机",
+      "portable": false,
+      "room_id": "inn",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 92,
+      "y": 27
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "inn_plant05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "门口盆栽",
+      "portable": false,
+      "room_id": "inn",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 77
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "library_chair05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "自习椅",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 57
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "library_chair07",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "自习椅",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 57,
+      "y": 52
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "library_lamp08",
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "阅览灯",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 27
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "按索号排列的书库书架。",
+      "id": "library_shelf01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "书库架1",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 22
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "按索号排列的书库书架。",
+      "id": "library_shelf02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "书库架2",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 27,
+      "y": 22
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "按索号排列的书库书架。",
+      "id": "library_shelf03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "书库架3",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 22
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "library_table04",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "自习桌1",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 52
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "library_table06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "自习桌2",
+      "portable": false,
+      "room_id": "library",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 47
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅1",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 42
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅2",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 42
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair07",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅3",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 42
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair09",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅4",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 57
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair11",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅5",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 57
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair13",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅6",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 57
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair15",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅7",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 72
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair17",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅8",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 72
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_chair19",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "座椅9",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 180,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 72
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌1",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 37
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk04",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌2",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 37
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌3",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 37
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk08",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌4",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 52
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk10",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌5",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 52
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk12",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌6",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 52
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk14",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌7",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 32,
+      "y": 67
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk16",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌8",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 67
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_desk18",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "课桌9",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 62,
+      "y": 67
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "school_plant20",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "窗台绿植",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 7,
+      "y": 17
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "放着粉笔盒的讲台。",
+      "id": "school_podium01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "讲台",
+      "portable": false,
+      "room_id": "school",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 17
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "shrine_cabinet05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "储物柜",
+      "portable": false,
+      "room_id": "shrine",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "shrine_chair01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅1",
+      "portable": false,
+      "room_id": "shrine",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "shrine_chair02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅2",
+      "portable": false,
+      "room_id": "shrine",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "shrine_chair03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅3",
+      "portable": false,
+      "room_id": "shrine",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "shrine_lamp07",
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "角灯",
+      "portable": false,
+      "room_id": "shrine",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "shrine_plant06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "盆栽",
+      "portable": false,
+      "room_id": "shrine",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "社区公告与杂物桌。",
+      "id": "shrine_table04",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "长桌",
+      "portable": false,
+      "room_id": "shrine",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 42,
+      "y": 47
+    },
+    {
+      "actions": [
+        "store",
+        "retrieve"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 4,
+      "description": "",
+      "id": "viewpoint_cabinet05",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "cabinet",
+      "name": "储物柜",
+      "portable": false,
+      "room_id": "viewpoint",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 270,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 67
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "viewpoint_chair01",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅1",
+      "portable": false,
+      "room_id": "viewpoint",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 17,
+      "y": 22
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "viewpoint_chair02",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅2",
+      "portable": false,
+      "room_id": "viewpoint",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 22
+    },
+    {
+      "actions": [
+        "sit"
+      ],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "viewpoint_chair03",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "chair",
+      "name": "靠墙椅3",
+      "portable": false,
+      "room_id": "viewpoint",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 77,
+      "y": 22
+    },
+    {
+      "actions": [
+        "toggle"
+      ],
+      "asset_id": null,
+      "behavior": {
+        "toggle": {
+          "minutes": 1
+        }
+      },
+      "capacity": 0,
+      "description": "",
+      "id": "viewpoint_lamp07",
+      "initial_status": "off",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "lamp",
+      "name": "角灯",
+      "portable": false,
+      "room_id": "viewpoint",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 87,
+      "y": 17
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "",
+      "id": "viewpoint_plant06",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "plant",
+      "name": "盆栽",
+      "portable": false,
+      "room_id": "viewpoint",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 12,
+      "y": 62
+    },
+    {
+      "actions": [],
+      "asset_id": null,
+      "behavior": {},
+      "capacity": 0,
+      "description": "社区公告与杂物桌。",
+      "id": "viewpoint_table04",
+      "initial_status": "neutral",
+      "interaction": {
+        "near": false,
+        "radius": 2
+      },
+      "kind": "table",
+      "name": "长桌",
+      "portable": false,
+      "room_id": "viewpoint",
+      "servings": 0,
+      "visual": {
+        "layer": 0,
+        "rotation": 0,
+        "scale": 100,
+        "show_name": true
+      },
+      "x": 47,
+      "y": 42
+    }
+  ],
+  "requires": "nyairo.editor-runtime.v3",
+  "rooms": [
+    {
+      "description": "登山客的补给站，红豆面包配牛奶是最受欢迎的组合。",
+      "h": 110,
+      "hours": {
+        "close": 18,
+        "open": 7
+      },
+      "id": "bakery",
+      "kind": "shop",
+      "name": "岳麦面包店",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 10,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#ece7dc",
+            "h": 100,
+            "id": "f1",
+            "texture": "tiles",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#faf6ef",
+        "border": "#b7a79a",
+        "border_style": "solid",
+        "floor": "#eee7df",
+        "texture": "tiles",
+        "theme": "cafe"
+      },
+      "w": 170,
+      "x": 45,
+      "y": 426
+    },
+    {
+      "description": "坡道转角的咖啡屋，冬天玻璃窗上全是雾气，常客用粉笔在板上看雪况。旅馆屋檐下挂着登山杖和防滑链。",
+      "h": 110,
+      "hours": {
+        "close": 19,
+        "open": 9
+      },
+      "id": "cafe",
+      "kind": "shop",
+      "name": "汤烟咖啡",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 11,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#e8ddd0",
+            "h": 50,
+            "id": "f1",
+            "texture": "tiles",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "asset_id": null,
+            "color": "#efe6da",
+            "h": 55,
+            "id": "f2",
+            "texture": "planks",
+            "w": 100,
+            "x": 0,
+            "y": 45
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#faf6ef",
+        "border": "#b7a79a",
+        "border_style": "solid",
+        "floor": "#eee7df",
+        "texture": "tiles",
+        "theme": "cafe"
+      },
+      "w": 170,
+      "x": 122,
+      "y": 386
+    },
+    {
+      "description": "卖木雕与手工陶器的店，店主偶尔现场削木头。",
+      "h": 110,
+      "hours": {
+        "close": 19,
+        "open": 10
+      },
+      "id": "craft_shop",
+      "kind": "shop",
+      "name": "汤川工艺店",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 10,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#ece7dc",
+            "h": 100,
+            "id": "f1",
+            "texture": "tiles",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#faf6ef",
+        "border": "#b7a79a",
+        "border_style": "solid",
+        "floor": "#eee7df",
+        "texture": "tiles",
+        "theme": "cafe"
+      },
+      "w": 170,
+      "x": 139,
+      "y": 389
+    },
+    {
+      "description": "老练登山客喜欢的步道，入口的告示板记录着最近的熊出没情报。",
+      "h": 110,
+      "hours": {
+        "close": 18,
+        "open": 5
+      },
+      "id": "hiking_trail",
+      "kind": "outdoor",
+      "name": "汤川登山道",
+      "space": {
+        "doors": [],
+        "enabled": false,
+        "entry": {
+          "x": 5,
+          "y": 10
+        },
+        "floors": [],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 729,
+      "y": 59
+    },
+    {
+      "description": "坡道高处的研究小屋，窗台上晾着浴衣，夜里能听见川流声。石阶缝隙里长着苔藓。",
+      "h": 110,
+      "hours": null,
+      "id": "home",
+      "kind": "room",
+      "name": "汤泽的住居",
+      "space": {
+        "doors": [
+          {
+            "actions": [
+              "open_door",
+              "close_door"
+            ],
+            "color": "#bd976e",
+            "id": "w1-door",
+            "length": 15,
+            "offset": 35,
+            "state": "closed",
+            "wall_id": "w1"
+          },
+          {
+            "actions": [
+              "open_door",
+              "close_door"
+            ],
+            "color": "#bd976e",
+            "id": "w2-door",
+            "length": 15,
+            "offset": 20,
+            "state": "closed",
+            "wall_id": "w2"
+          }
+        ],
+        "enabled": true,
+        "entry": {
+          "x": 8,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#f0e3d3",
+            "h": 45,
+            "id": "f1",
+            "texture": "planks",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "asset_id": null,
+            "color": "#e9e2d3",
+            "h": 55,
+            "id": "f2",
+            "texture": "planks",
+            "w": 55,
+            "x": 0,
+            "y": 45
+          },
+          {
+            "asset_id": null,
+            "color": "#dbe5e2",
+            "h": 55,
+            "id": "f3",
+            "texture": "tiles",
+            "w": 45,
+            "x": 55,
+            "y": 45
+          }
+        ],
+        "walls": [
+          {
+            "color": "#8c8a7d",
+            "id": "w1",
+            "width": 7,
+            "x1": 0,
+            "x2": 100,
+            "y1": 45,
+            "y2": 45
+          },
+          {
+            "color": "#8c8a7d",
+            "id": "w2",
+            "width": 7,
+            "x1": 55,
+            "x2": 55,
+            "y1": 45,
+            "y2": 100
+          }
+        ],
+        "windows": []
+      },
+      "visual": {
+        "background": "#f8f0e7",
+        "border": "#b99d89",
+        "border_style": "solid",
+        "floor": "#f0e3d3",
+        "texture": "planks",
+        "theme": "bedroom"
+      },
+      "w": 170,
+      "x": 727,
+      "y": 44
+    },
+    {
+      "description": "老字号汤屋，露天池正对山谷，入夜汤烟沿坡道飘上半条街。木牌上用粉笔写着今日的雪况。",
+      "h": 110,
+      "hours": {
+        "close": 22,
+        "open": 11
+      },
+      "id": "hot_spring",
+      "kind": "outdoor",
+      "name": "翠泽汤屋",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 10,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#e7e3d8",
+            "h": 100,
+            "id": "f1",
+            "texture": "planks",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 764,
+      "y": 50
+    },
+    {
+      "description": "家传三代的旅馆，玄关摆着主人手写的登山路线图。路边的石阶被磨得发亮。",
+      "h": 110,
+      "hours": {
+        "close": 21,
+        "open": 8
+      },
+      "id": "inn",
+      "kind": "shop",
+      "name": "汤宿峰屋",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 10,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#ece7dc",
+            "h": 100,
+            "id": "f1",
+            "texture": "tiles",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#faf6ef",
+        "border": "#b7a79a",
+        "border_style": "solid",
+        "floor": "#eee7df",
+        "texture": "tiles",
+        "theme": "cafe"
+      },
+      "w": 170,
+      "x": 777,
+      "y": 86
+    },
+    {
+      "description": "小镇图书馆，山岳与温泉疗养的书架占了整整一面墙。",
+      "h": 110,
+      "hours": {
+        "close": 18,
+        "open": 9
+      },
+      "id": "library",
+      "kind": "room",
+      "name": "翠泽文库",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 10,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#e6e6da",
+            "h": 100,
+            "id": "f1",
+            "texture": "planks",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#f3f3e9",
+        "border": "#a4ac97",
+        "border_style": "solid",
+        "floor": "#e8e8dc",
+        "texture": "planks",
+        "theme": "bookstore"
+      },
+      "w": 170,
+      "x": 708,
+      "y": 441
+    },
+    {
+      "description": "川边的小公园，有村妇们洗菜用的旧石阶。",
+      "h": 110,
+      "hours": {
+        "close": 22,
+        "open": 6
+      },
+      "id": "park",
+      "kind": "outdoor",
+      "name": "汤川公园",
+      "space": {
+        "doors": [],
+        "enabled": false,
+        "entry": {
+          "x": 5,
+          "y": 10
+        },
+        "floors": [],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 119,
+      "y": 44
+    },
+    {
+      "description": "山间小镇的学校，冬天教室里有暖炉，操场上能望见对面的雪脊。",
+      "h": 110,
+      "hours": {
+        "close": 18,
+        "open": 8
+      },
+      "id": "school",
+      "kind": "room",
+      "name": "翠泽学校",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 3,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#ece6da",
+            "h": 100,
+            "id": "f1",
+            "texture": "planks",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "asset_id": null,
+            "color": "#dfe4e8",
+            "h": 15,
+            "id": "f2",
+            "texture": "tiles",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [
+          {
+            "color": "#3d4a5c",
+            "id": "w1",
+            "width": 5,
+            "x1": 30,
+            "x2": 60,
+            "y1": 10,
+            "y2": 10
+          }
+        ],
+        "windows": []
+      },
+      "visual": {
+        "background": "#f3f3e9",
+        "border": "#a4ac97",
+        "border_style": "solid",
+        "floor": "#e8e8dc",
+        "texture": "planks",
+        "theme": "bookstore"
+      },
+      "w": 170,
+      "x": 266,
+      "y": 282
+    },
+    {
+      "description": "守护登山的神社，绘马上写着求好天气的愿望。",
+      "h": 110,
+      "hours": {
+        "close": 20,
+        "open": 6
+      },
+      "id": "shrine",
+      "kind": "outdoor",
+      "name": "峰宫",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 10,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#e7e3d8",
+            "h": 100,
+            "id": "f1",
+            "texture": "planks",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 125,
+      "y": 80
+    },
+    {
+      "description": "峠坂，镇上的主要街道之一。排水沟里流着微微发热的泉水。",
+      "h": 110,
+      "hours": null,
+      "id": "street_1",
+      "kind": "outdoor",
+      "name": "峠坂",
+      "space": {
+        "doors": [],
+        "enabled": false,
+        "entry": {
+          "x": 5,
+          "y": 10
+        },
+        "floors": [],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 415,
+      "y": 255
+    },
+    {
+      "description": "汤泽小路，镇上的主要街道之一。墙根摆着一排接泉水的旧水桶。",
+      "h": 110,
+      "hours": null,
+      "id": "street_2",
+      "kind": "outdoor",
+      "name": "汤泽小路",
+      "space": {
+        "doors": [],
+        "enabled": false,
+        "entry": {
+          "x": 5,
+          "y": 10
+        },
+        "floors": [],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 165,
+      "y": 379
+    },
+    {
+      "description": "温泉通，镇上的主要街道之一。坡道旁的木凳上刻着常客的名字。",
+      "h": 110,
+      "hours": null,
+      "id": "street_3",
+      "kind": "outdoor",
+      "name": "温泉通",
+      "space": {
+        "doors": [],
+        "enabled": false,
+        "entry": {
+          "x": 5,
+          "y": 10
+        },
+        "floors": [],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 665,
+      "y": 119
+    },
+    {
+      "description": "能看到整条汤街的地方，长椅被晒得温热。屋檐挂着防雪的竹帘。",
+      "h": 110,
+      "hours": null,
+      "id": "viewpoint",
+      "kind": "outdoor",
+      "name": "汤川观景台",
+      "space": {
+        "doors": [],
+        "enabled": true,
+        "entry": {
+          "x": 10,
+          "y": 17
+        },
+        "floors": [
+          {
+            "asset_id": null,
+            "color": "#e7e3d8",
+            "h": 100,
+            "id": "f1",
+            "texture": "planks",
+            "w": 100,
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "walls": [],
+        "windows": []
+      },
+      "visual": {
+        "background": "#e4eaf4",
+        "border": "#8a9cb7",
+        "border_style": "dashed",
+        "floor": "#d0d9e8",
+        "texture": "tiles",
+        "theme": "street"
+      },
+      "w": 170,
+      "x": 728,
+      "y": 113
+    }
+  ],
+  "scene": {
+    "background": "#f4f6f4",
+    "decorations": true,
+    "grid": true
+  }
+}

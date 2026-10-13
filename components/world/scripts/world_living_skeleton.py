@@ -27,6 +27,7 @@ import world_ambient_events as wae
 import world_daily_rhythm as wdr
 import world_foundation as wf
 import world_home_space as whs
+import world_runtime_data as wrd
 import world_school_day as wsd
 import world_school_continuity as wsc
 import world_school_assignments as wsa
@@ -152,7 +153,71 @@ def world_timeline_path(hermes_home: Optional[Path | str] = None) -> Path:
 
 
 def location_catalog() -> list[dict[str, Any]]:
-    return [_copy_json(_LOCATIONS[key]) for key in _LOCATIONS]
+    """活动世界的地点目录（未配置世界包时即汐见市默认六地点）。"""
+    return [_copy_json(item) for item in wrd.active_world().location_catalog()]
+
+
+def _activity_world(environment: Optional[Mapping[str, str]] = None) -> wrd.WorldData:
+    return wrd.active_world(environment)
+
+
+def normalize_location_id(
+    location_id: str,
+    *,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> str:
+    """把目标位置规范化为导航节点（v0.4）。
+
+    入口区与 place 节点同义：``place/entrance`` 一律归一化为 ``place``；
+    其他室内区域保持 ``place/area``；无世界包（汐见市）原样返回。
+    之后所有状态写入与后置条件比较都使用规范化结果。
+    """
+    world = wrd.active_world(environment)
+    try:
+        place_id, area_id = world.split_node(location_id)
+    except Exception:
+        return location_id
+    node = world.state_node(place_id, area_id)
+    return node or location_id
+
+
+def _active_scene_snapshot(environment: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
+    """活动世界包的场景快照（家具摆位 + 名称/描述映射），供局部感知使用。
+
+    带进程内缓存；汐见市（无世界包）返回 None。
+    """
+    global _SCENE_SNAPSHOT_CACHE
+    world = wrd.active_world(environment)
+    key = world.package_dir or ""
+    if not key:
+        return None
+    cached = _SCENE_SNAPSHOT_CACHE.get("entry")
+    if cached and cached[0] == key:
+        return cached[1]
+    try:
+        import importlib
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        components_dir = str(_Path(__file__).resolve().parents[2])
+        if components_dir not in _sys.path:
+            _sys.path.insert(0, components_dir)
+        loader = importlib.import_module("worldgen.loader")
+        package = loader.load(key)
+        placements = (package.scene or {}).get("placements", {})
+        snapshot = {
+            "placements": placements,
+            "object_names": {obj["object_id"]: obj["name"] for obj in package.objects},
+            "object_notes": {obj["object_id"]: obj.get("note", "") for obj in package.objects},
+        }
+    except Exception:
+        snapshot = None
+    _SCENE_SNAPSHOT_CACHE = {"entry": (key, snapshot)}
+    return snapshot
+
+
+_SCENE_SNAPSHOT_CACHE: dict[str, Any] = {}
 
 
 def _bounded_text(value: Any, field: str, maximum: int = MAX_TEXT_LENGTH) -> str:
@@ -164,14 +229,18 @@ def _bounded_text(value: Any, field: str, maximum: int = MAX_TEXT_LENGTH) -> str
     return result
 
 
-def _location(location_id: Any) -> Optional[dict[str, Any]]:
+def _location(location_id: Any, world: Optional[wrd.WorldData] = None) -> Optional[dict[str, Any]]:
     if not isinstance(location_id, str):
         return None
-    return _LOCATIONS.get(location_id.strip())
+    active = world if world is not None else wrd.active_world()
+    return active.location(location_id.strip())
 
 
-def _location_projection(location_id: str) -> dict[str, Any]:
-    item = _LOCATIONS[location_id]
+def _location_projection(location_id: str, world: Optional[wrd.WorldData] = None) -> dict[str, Any]:
+    active = world if world is not None else wrd.active_world()
+    item = active.location(location_id)
+    if item is None:
+        raise WorldLivingSkeletonError(f"unknown location: {location_id}")
     return {
         "location_id": item["location_id"],
         "name": item["name"],
@@ -180,14 +249,25 @@ def _location_projection(location_id: str) -> dict[str, Any]:
     }
 
 
-def _load_state(hermes_home: Optional[Path | str]) -> Optional[dict[str, Any]]:
+def _load_state(
+    hermes_home: Optional[Path | str],
+    environment: Optional[Mapping[str, str]] = None,
+) -> Optional[dict[str, Any]]:
+    world = wrd.active_world(environment)
     state = wf.WorldStateStore(world_state_path(hermes_home)).load()
     if state is None:
         return None
-    if state.get("world_id") != WORLD_ID or state.get("timezone") != WORLD_TIMEZONE:
+    if (
+        state.get("world_id") != world.world_id
+        or state.get("timezone") != world.timezone_name
+    ):
         return None
-    current = state.get("location", {}).get("place_id")
-    if _location(current) is None:
+    location = state.get("location", {})
+    current = location.get("place_id")
+    if world.location(current) is None:
+        return None
+    # v0.4：area 必须是地点默认区域或已声明的室内导航区域。
+    if world.state_node(current, location.get("area_id")) is None:
         return None
     return state
 
@@ -244,7 +324,7 @@ def observe_world(
             )
         except Exception:
             pass
-    state = _load_state(hermes_home)
+    state = _load_state(hermes_home, environment)
     if state is None:
         return {
             "kind": OBSERVATION_KIND,
@@ -252,13 +332,28 @@ def observe_world(
             "status": "unavailable",
             "reason_code": "WORLD_NOT_INITIALIZED",
         }
+    world = wrd.active_world(environment)
+    package_scene = _active_scene_snapshot(environment)
+    package_scene_placements = (package_scene or {}).get("placements")
+    package_objects = (package_scene or {}).get("object_names")
+    package_notes = (package_scene or {}).get("object_notes")
     local = wf.world_local_time(state, instant)
-    current_id = state["location"]["place_id"]
-    current = _location_projection(current_id)
-    home = _location_projection(_HOME_LOCATION_ID)
+    location_state = state["location"]
+    current_id = world.state_node(
+        location_state["place_id"], location_state.get("area_id")
+    )
+    if current_id is None:
+        return {
+            "kind": OBSERVATION_KIND,
+            "schema_version": SCHEMA_VERSION,
+            "status": "unavailable",
+            "reason_code": "WORLD_LOCATION_INVALID",
+        }
+    current = _location_projection(current_id, world)
+    home = _location_projection(world.home_location_id, world)
     reachable = [
-        _location_projection(item)
-        for item in _LOCATIONS[current_id]["reachable"]
+        _location_projection(item, world)
+        for item in world.reachable_of(current_id)
     ]
     perceived_facts: list[dict[str, Any]] = []
     try:
@@ -280,16 +375,18 @@ def observe_world(
     ambient_projection: Optional[list[dict[str, Any]]] = None
     if wae.feature_enabled(environment):
         try:
+            # 环境事件是地点级事实：室内区域节点规范化回所属地点。
             relevant_locations = {
-                current_id,
-                *_LOCATIONS[current_id]["reachable"],
+                world.node_place(item)
+                for item in {current_id, *world.reachable_of(current_id)}
             }
             ambient_projection = wae.active_ambient_events(
                 local.date(),
                 local,
-                timezone_name=WORLD_TIMEZONE,
-                allowed_location_ids=_LOCATIONS,
+                timezone_name=world.timezone_name,
+                allowed_location_ids=world.locations,
                 relevant_location_ids=relevant_locations,
+                environment=environment,
             )
         except Exception:
             ambient_projection = []
@@ -297,16 +394,20 @@ def observe_world(
     if wdr.feature_enabled(environment):
         try:
             daily_projection = {
-                "daily_rhythm": wdr.daily_rhythm(local, timezone_name=WORLD_TIMEZONE),
+                "daily_rhythm": wdr.daily_rhythm(
+                    local, timezone_name=world.timezone_name, environment=environment
+                ),
                 "location_availability": wdr.location_availability(
                     current_id,
                     local,
-                    timezone_name=WORLD_TIMEZONE,
+                    timezone_name=world.timezone_name,
+                    environment=environment,
                 ),
                 "affordances": wdr.affordances_for_location(
                     current_id,
                     local,
-                    timezone_name=WORLD_TIMEZONE,
+                    timezone_name=world.timezone_name,
+                    environment=environment,
                 ),
             }
         except Exception:
@@ -429,7 +530,7 @@ def observe_world(
     if wsp.feature_enabled(environment):
         try:
             social_projection = wsp.observe_social_presence(
-                current_id,
+                world.node_place(current_id),
                 now=local,
                 environment=environment,
             )
@@ -440,6 +541,59 @@ def observe_world(
                 "status": "unavailable",
                 "reason_code": "SOCIAL_PROJECTION_FAILED",
             }
+    # v0.4 局部环境感知：建筑、功能区域、可见家具与可达区域。
+    # 数据来自世界包导航声明与摆位，全部是真实世界事实（不含想象内容）。
+    local_environment: Optional[dict[str, Any]] = None
+    nav = world.navigation_of(world.node_place(current_id))
+    if nav is not None:
+        place_id = world.node_place(current_id)
+        _, area_id = world.split_node(current_id)
+        area_info = next(
+            (a for a in nav["areas"] if a["area_id"] == area_id), None
+        )
+        furniture_ids = world.furniture_in_area(place_id, area_id)
+        furniture_view: list[dict[str, Any]] = []
+        for object_id in furniture_ids[:8]:
+            placement = (package_scene_placements or {}).get(object_id)
+            if placement is None:
+                continue
+            furniture_view.append(
+                {
+                    "object_id": object_id,
+                    "name": (package_objects or {}).get(object_id, object_id),
+                    "kind": placement.get("kind"),
+                    "note": (package_notes or {}).get(object_id, ""),
+                }
+            )
+        adjacent = []
+        for node in world.reachable_of(current_id):
+            if "/" not in node and node != place_id:
+                target = world.location(node) or {}
+                adjacent.append({"node": node, "name": target.get("name", node)})
+            elif node == place_id:
+                place_name = (world.location(place_id) or {}).get("name", place_id)
+                adjacent.append({"node": node, "name": f"{place_name}·入口区（可离开建筑）"})
+            elif "/" in node:
+                area_name = next(
+                    (a["name"] for a in nav["areas"] if node.endswith("/" + a["area_id"])),
+                    node.split("/", 1)[1],
+                )
+                adjacent.append({"node": node, "name": area_name})
+        local_environment = {
+            "building": {
+                "location_id": place_id,
+                "name": (world.location(place_id) or {}).get("name", place_id),
+            },
+            "area": {
+                "area_id": area_id,
+                "name": (area_info or {}).get("name", area_id),
+                "kind": (area_info or {}).get("kind", ""),
+            },
+            "furniture": furniture_view,
+            "furniture_total": len(furniture_ids),
+            "adjacent_areas": adjacent,
+            "note": "家具为世界包声明的场景物件；交互用途属于编辑器本地试运行能力，rc9 不执行家具动作。",
+        }
     travel_projection: Optional[dict[str, Any]] = None
     if wtd.travel_enabled(environment):
         try:
@@ -456,8 +610,8 @@ def observe_world(
         "kind": OBSERVATION_KIND,
         "schema_version": SCHEMA_VERSION,
         "status": "available",
-        "world_id": WORLD_ID,
-        "timezone": WORLD_TIMEZONE,
+        "world_id": world.world_id,
+        "timezone": world.timezone_name,
         "world_revision": state["revision"],
         "local_time": local.isoformat(timespec="seconds"),
         "local_date": local.date().isoformat(),
@@ -467,7 +621,7 @@ def observe_world(
         "current_location": current,
         "home_location": home,
         "reachable_locations": reachable,
-        "locations": location_catalog(),
+        "locations": [_copy_json(item) for item in world.location_catalog()],
         "scene": _copy_json(state["scene"]),
         "perceived_facts": perceived_facts,
     }
@@ -489,6 +643,8 @@ def observe_world(
         result["social_presence"] = social_projection
     if travel_projection is not None:
         result["travel"] = travel_projection
+    if local_environment is not None:
+        result["local_environment"] = local_environment
     if main_self_projection and wsek.feature_enabled(environment):
         try:
             wsek.record_first_hand_perception(
@@ -551,21 +707,34 @@ def read_move_state(
             )
         except Exception:
             pass
-    state = _load_state(hermes_home)
+    state = _load_state(hermes_home, environment)
     if state is None:
         return None
+    world = wrd.active_world(environment)
+    location_state = state["location"]
+    node = world.state_node(
+        location_state["place_id"], location_state.get("area_id")
+    )
     return {
-        "world_id": WORLD_ID,
-        "world_location_id": state["location"]["place_id"],
+        "world_id": world.world_id,
+        "world_location_id": node or location_state["place_id"],
         "world_scene_id": state["scene"]["scene_id"],
         "world_revision": str(state["revision"]),
     }
 
 
-def _before_summary(state: Mapping[str, Any]) -> dict[str, str]:
+def _before_summary(
+    state: Mapping[str, Any],
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, str]:
+    world = wrd.active_world(environment)
+    location_state = state["location"]
+    node = world.state_node(
+        location_state["place_id"], location_state.get("area_id")
+    )
     return {
-        "world_id": WORLD_ID,
-        "world_location_id": str(state["location"]["place_id"]),
+        "world_id": world.world_id,
+        "world_location_id": node or location_state["place_id"],
         "world_scene_id": str(state["scene"]["scene_id"]),
         "world_revision": str(state["revision"]),
     }
@@ -583,11 +752,16 @@ def plan_move_to(
     env = environment or os.environ
     if not feature_enabled(env):
         return {"kind": MOVE_KIND, "status": "disabled", "reason_code": "FEATURE_DISABLED"}
+    world = wrd.active_world(env)
     try:
         target = _bounded_text(location_id, "location_id", maximum=96)
     except WorldLivingSkeletonError:
         return {"kind": MOVE_KIND, "status": "rejected", "reason_code": "INVALID_LOCATION_ID"}
-    destination = _location(target)
+    try:
+        target = normalize_location_id(target, hermes_home=hermes_home, environment=env)
+    except Exception:
+        pass
+    destination = world.location(target)
     if destination is None:
         return {"kind": MOVE_KIND, "status": "rejected", "reason_code": "UNKNOWN_LOCATION"}
     if wtd.travel_enabled(env):
@@ -599,11 +773,16 @@ def plan_move_to(
             )
         except Exception:
             pass
-    state = _load_state(hermes_home)
+    state = _load_state(hermes_home, env)
     if state is None:
         return {"kind": MOVE_KIND, "status": "unavailable", "reason_code": "WORLD_NOT_INITIALIZED"}
-    before = _before_summary(state)
-    current_id = state["location"]["place_id"]
+    before = _before_summary(state, env)
+    location_state = state["location"]
+    current_id = world.state_node(
+        location_state["place_id"], location_state.get("area_id")
+    )
+    if current_id is None:
+        return {"kind": MOVE_KIND, "status": "unavailable", "reason_code": "WORLD_LOCATION_INVALID"}
     if target == current_id:
         return {
             "kind": MOVE_KIND,
@@ -620,7 +799,8 @@ def plan_move_to(
                     state,
                     datetime.now(timezone.utc) if now is None else now,
                 ),
-                timezone_name=WORLD_TIMEZONE,
+                timezone_name=world.timezone_name,
+                environment=env,
             )
         except Exception:
             return {
@@ -639,7 +819,7 @@ def plan_move_to(
                 "before": before,
                 "availability": availability,
             }
-    if target not in _LOCATIONS[current_id]["reachable"]:
+    if target not in world.reachable_of(current_id):
         return {
             "kind": MOVE_KIND,
             "status": "rejected",
@@ -674,7 +854,7 @@ def plan_move_to(
             "reason_code": "TRAVEL_ROUTE_READY",
             "target_location_id": target,
             "before": before,
-            "destination": _location_projection(target),
+            "destination": _location_projection(target, world),
             "travel": travel_plan,
         }
     return {
@@ -683,7 +863,7 @@ def plan_move_to(
         "reason_code": "REACHABLE",
         "target_location_id": target,
         "before": before,
-        "destination": _location_projection(target),
+        "destination": _location_projection(target, world),
     }
 
 
@@ -714,11 +894,16 @@ def apply_move_to(
     env = environment or os.environ
     if not feature_enabled(env):
         return {"kind": MOVE_KIND, "status": "disabled", "reason_code": "FEATURE_DISABLED"}
+    world = wrd.active_world(env)
     try:
         target = _bounded_text(location_id, "location_id", maximum=96)
     except WorldLivingSkeletonError:
         return {"kind": MOVE_KIND, "status": "rejected", "reason_code": "INVALID_LOCATION_ID"}
-    if _location(target) is None:
+    try:
+        target = normalize_location_id(target, hermes_home=hermes_home, environment=env)
+    except Exception:
+        pass
+    if world.location(target) is None:
         return {
             "kind": MOVE_KIND,
             "status": "rejected",
@@ -737,7 +922,7 @@ def apply_move_to(
             pass
     try:
         with _world_lock(state_path):
-            state = _load_state(hermes_home)
+            state = _load_state(hermes_home, env)
             if state is None:
                 return {
                     "kind": MOVE_KIND,
@@ -745,8 +930,19 @@ def apply_move_to(
                     "reason_code": "WORLD_NOT_INITIALIZED",
                     "target_location_id": target,
                 }
-            before = _before_summary(state)
-            current_id = state["location"]["place_id"]
+            before = _before_summary(state, env)
+            location_state = state["location"]
+            current_id = world.state_node(
+                location_state["place_id"], location_state.get("area_id")
+            )
+            if current_id is None:
+                return {
+                    "kind": MOVE_KIND,
+                    "status": "uncertain",
+                    "reason_code": "WORLD_LOCATION_INVALID",
+                    "target_location_id": target,
+                    "before": before,
+                }
             if target == current_id:
                 return {
                     "kind": MOVE_KIND,
@@ -764,7 +960,8 @@ def apply_move_to(
                             state,
                             datetime.now(timezone.utc) if now is None else now,
                         ),
-                        timezone_name=WORLD_TIMEZONE,
+                        timezone_name=world.timezone_name,
+                        environment=env,
                     )
                 except Exception:
                     return {
@@ -783,7 +980,7 @@ def apply_move_to(
                         "before": before,
                         "availability": availability,
                     }
-            if target not in _LOCATIONS[current_id]["reachable"]:
+            if target not in world.reachable_of(current_id):
                 return {
                     "kind": MOVE_KIND,
                     "status": "rejected",
@@ -822,7 +1019,7 @@ def apply_move_to(
                     execution_id=stable_execution_id,
                     origin_location_id=current_id,
                     destination_location_id=target,
-                    destination_area_id=_LOCATIONS[target]["area_id"],
+                    destination_area_id=world.area_id_of(target),
                     hermes_home=hermes_home,
                     environment=env,
                     now=now,
@@ -857,15 +1054,15 @@ def apply_move_to(
                         "expected_travel_id": travel.get("travel_id"),
                     },
                 }
-            destination = _LOCATIONS[target]
+            destination = world.location(target)
             updated = _copy_json(state)
             updated["revision"] = state["revision"] + 1
             updated["location"] = {
-                "place_id": target,
-                "area_id": destination["area_id"],
+                "place_id": world.node_place(target),
+                "area_id": world.area_id_of(target),
             }
             updated["scene"] = {
-                "scene_id": f"{target}.{destination['area_id']}",
+                "scene_id": f"{world.node_place(target)}.{world.area_id_of(target)}",
                 "revision": state["scene"]["revision"] + 1,
             }
             wf.WorldStateStore(state_path).save(
@@ -873,7 +1070,14 @@ def apply_move_to(
                 expected_revision=updated["revision"],
             )
             loaded = wf.WorldStateStore(state_path).load()
-            if loaded is None or loaded["location"]["place_id"] != target:
+            loaded_node = (
+                world.state_node(
+                    loaded["location"]["place_id"], loaded["location"].get("area_id")
+                )
+                if loaded is not None
+                else None
+            )
+            if loaded_node != target:
                 return {
                     "kind": MOVE_KIND,
                     "status": "uncertain",

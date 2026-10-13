@@ -47,6 +47,23 @@ def supply_view(svc):
         return {'state': 'UNAVAILABLE'}
 
 
+def _projection_facts(svc):
+    """The B7/E11 read-only life projection, when the instance has one.
+
+    Every field comes from a port that already owns the fact; an instance without one
+    simply has fewer facts, never a guess.  Returns ``None`` when there is nothing to
+    project at all, so the chat turn is untouched.
+    """
+
+    projection = getattr(svc, 'life_projection', None)
+    if projection is None:
+        return None
+    try:
+        return projection
+    except Exception:
+        return None
+
+
 def life_view(svc):
     wrapper = getattr(svc, 'life_wrapper', None)
     adapter = getattr(wrapper, '_adapter', None)
@@ -58,6 +75,14 @@ def life_view(svc):
         result = {'state': 'READY', 'life_state': view.get('life_state'),
                   'foreground_activity_kind': view.get('foreground_activity_kind'),
                   'attention_occupancy': view.get('attention_occupancy')}
+        projection = _projection_facts(svc)
+        if projection is not None:
+            facts = projection.diagnostics()
+            result['autonomous_enabled'] = facts.get('autonomous_enabled')
+            result['activity_status'] = facts.get('activity_status')
+            result['work_confirmed_version'] = facts.get('work_confirmed_version')
+            result['unresolved_action_refs'] = facts.get('unresolved_action_refs')
+            result['projection_degraded'] = facts.get('degraded')
         wiring = getattr(adapter, '_COGNITION', None)
         harness = getattr(wiring, 'harness', None)
         if harness is None or wiring.is_off():
@@ -97,6 +122,17 @@ def presence_context(svc):
     supply = supply_view(svc)
     if supply['state'] == 'READY':
         parts.append('个人资源候选（待考虑事项，不代表已经执行）：' + json.dumps(supply, ensure_ascii=False))
+    # B7/E11.1: the read-only life projection.  A projection of facts the owners already
+    # hold, so she can speak from a real life if the conversation goes there.  It never
+    # instructs her to bring anything up, and there is no "today's report" opener.
+    projection = _projection_facts(svc)
+    if projection is not None:
+        try:
+            text = projection.render()
+        except Exception:
+            text = ''
+        if text:
+            parts.append('自主生活只读事实：' + text)
     return '\n'.join(parts)
 
 

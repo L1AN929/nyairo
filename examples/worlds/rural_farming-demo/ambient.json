@@ -1,0 +1,47 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 9,
+      "event_type": "field_irrigation",
+      "location_id": "farm",
+      "start_hour": 5,
+      "summary": "田里正在放水灌溉"
+    },
+    {
+      "end_hour": 21,
+      "event_type": "store_evening_sale",
+      "location_id": "convenience_store",
+      "start_hour": 18,
+      "summary": "冰箱补上了新的冷饮"
+    },
+    {
+      "end_hour": 16,
+      "event_type": "street_drying",
+      "location_id": "street_1",
+      "start_hour": 9,
+      "summary": "村道上扬起小小的尘土"
+    },
+    {
+      "end_hour": 12,
+      "event_type": "shrine_prep",
+      "location_id": "shrine",
+      "start_hour": 8,
+      "summary": "石阶上的落叶被扫成一堆"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "location_id": "home",
+      "start_hour": 0,
+      "summary": "谁家的狗在村道上追自行车"
+    },
+    {
+      "end_hour": 24,
+      "event_type": "school_farm_break",
+      "location_id": "school",
+      "start_hour": 0,
+      "summary": "广播通知农忙假的安排"
+    }
+  ]
+}

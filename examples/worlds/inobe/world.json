@@ -1,0 +1,10 @@
+{
+  "description": "穗村——广袤田野与低矮木屋错落相映，水道纵横，泥土与稻草香弥漫，氛围静谧朴拙。以水稻与果蔬种植为生，重视邻里互助和节气耕作，崇敬土地自然。",
+  "generator_version": "worldgen.v0.1",
+  "name": "穗村",
+  "schema_version": "worldgen.world.v1",
+  "seed": 700002,
+  "theme": "rural_farming",
+  "timezone": "Asia/Tokyo",
+  "world_id": "rural_farming_700002"
+}

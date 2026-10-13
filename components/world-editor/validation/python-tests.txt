@@ -1,0 +1,79 @@
+HTTP GET 200
+HTTP GET 200
+HTTP GET 200
+test_editor_module_and_workspace_identity_bootstrap (test_editor.HttpTests.test_editor_module_and_workspace_identity_bootstrap) ... ok
+HTTP GET 200
+HTTP POST 201
+HTTP GET 200
+test_export_download_has_attachment_and_exact_content (test_editor.HttpTests.test_export_download_has_attachment_and_exact_content) ... ok
+HTTP GET 200
+HTTP POST 201
+HTTP POST 200
+HTTP GET 200
+HTTP POST 201
+test_http_end_to_end_and_clean_import (test_editor.HttpTests.test_http_end_to_end_and_clean_import) ... ok
+HTTP GET 200
+HTTP POST 422
+HTTP GET 200
+test_invalid_import_does_not_replace_draft (test_editor.HttpTests.test_invalid_import_does_not_replace_draft) ... ok
+HTTP GET 403
+HTTP POST 403
+HTTP POST 403
+HTTP GET 404
+HTTP GET 404
+HTTP GET 404
+HTTP GET 200
+test_local_only_csrf_and_static_allowlist (test_editor.HttpTests.test_local_only_csrf_and_static_allowlist) ... ok
+HTTP GET 200
+HTTP POST 422
+HTTP POST 422
+HTTP POST 422
+HTTP POST 422
+HTTP POST 422
+test_malformed_fields_return_explained_errors (test_editor.HttpTests.test_malformed_fields_return_explained_errors) ... ok
+HTTP GET 200
+HTTP GET 200
+HTTP POST 200
+HTTP POST 200
+HTTP POST 200
+HTTP POST 200
+HTTP POST 200
+HTTP GET 200
+test_rules_preview_and_durable_recovery_api (test_editor.HttpTests.test_rules_preview_and_durable_recovery_api) ... ok
+test_capacity_and_held_exclusivity (test_editor.RuntimeTests.test_capacity_and_held_exclusivity) ... ok
+test_complete_read_move_rest_and_reload (test_editor.RuntimeTests.test_complete_read_move_rest_and_reload) ... ok
+test_container_storage_and_retrieval (test_editor.RuntimeTests.test_container_storage_and_retrieval) ... ok
+test_corrupt_save_hash_and_dangling_state (test_editor.RuntimeTests.test_corrupt_save_hash_and_dangling_state) ... ok
+test_cross_midnight_hours (test_editor.RuntimeTests.test_cross_midnight_hours) ... ok
+test_draft_optimistic_conflict (test_editor.RuntimeTests.test_draft_optimistic_conflict) ... ok
+test_drink_consumes_actual_supply (test_editor.RuntimeTests.test_drink_consumes_actual_supply) ... ok
+test_duplicate_json_and_nonfinite_rejected (test_editor.RuntimeTests.test_duplicate_json_and_nonfinite_rejected) ... ok
+test_idempotent_replay_never_rewinds (test_editor.RuntimeTests.test_idempotent_replay_never_rewinds) ... ok
+test_incompatible_package_and_no_script_fields (test_editor.RuntimeTests.test_incompatible_package_and_no_script_fields) ... ok
+test_isolation_edit_export_and_import_in_clean_instance (test_editor.RuntimeTests.test_isolation_edit_export_and_import_in_clean_instance) ... ok
+test_open_hours_close_then_wait (test_editor.RuntimeTests.test_open_hours_close_then_wait) ... ok
+test_two_writers_one_state_revision (test_editor.RuntimeTests.test_two_writers_one_state_revision) ... ok
+test_unreachable_and_foreign_room (test_editor.RuntimeTests.test_unreachable_and_foreign_room) ... ok
+test_workspace_identity_upgrade_preserves_legacy_draft_and_trial (test_editor.RuntimeTests.test_workspace_identity_upgrade_preserves_legacy_draft_and_trial) ... ok
+test_durable_recovery_keeps_unfinished_fields_and_survives_restart (test_v03.VisualRuntimeTests.test_durable_recovery_keeps_unfinished_fields_and_survives_restart) ... ok
+test_invalid_parameters_and_visual_fields_are_rejected (test_v03.VisualRuntimeTests.test_invalid_parameters_and_visual_fields_are_rejected) ... ok
+test_legacy_database_upgrade_keeps_state_receipts_and_rejects_old_writer (test_v03.VisualRuntimeTests.test_legacy_database_upgrade_keeps_state_receipts_and_rejects_old_writer) ... ok
+test_old_save_hash_is_checked_before_upgrade_and_state_is_preserved (test_v03.VisualRuntimeTests.test_old_save_hash_is_checked_before_upgrade_and_state_is_preserved) ... ok
+test_old_world_upgrade_is_exact_for_rules_and_layout (test_v03.VisualRuntimeTests.test_old_world_upgrade_is_exact_for_rules_and_layout) ... ok
+test_read_rest_drink_use_configured_parameters_and_save_restore_them (test_v03.VisualRuntimeTests.test_read_rest_drink_use_configured_parameters_and_save_restore_them) ... ok
+test_recovery_sequence_blocks_late_write_after_clear_and_tabs_do_not_clobber (test_v03.VisualRuntimeTests.test_recovery_sequence_blocks_late_write_after_clear_and_tabs_do_not_clobber) ... ok
+test_visual_roundtrip_and_cover_embed_theme_and_sprite_without_external_paths (test_v03.VisualRuntimeTests.test_visual_roundtrip_and_cover_embed_theme_and_sprite_without_external_paths) ... ok
+test_active_svg_and_external_or_damaged_images_rejected (test_v04.PortableResourceTests.test_active_svg_and_external_or_damaged_images_rejected) ... ok
+test_real_png_webp_and_static_svg_import_without_filesystem_dependency (test_v04.PortableResourceTests.test_real_png_webp_and_static_svg_import_without_filesystem_dependency) ... ok
+test_real_v2_save_database_upgrade_preserves_experience_and_receipt (test_v04.PortableResourceTests.test_real_v2_save_database_upgrade_preserves_experience_and_receipt) ... ok
+test_closed_locked_and_window_block_open_door_provides_actual_path (test_v04.SpatialInteractionTests.test_closed_locked_and_window_block_open_door_provides_actual_path) ... ok
+test_empty_fill_drink_chain_params_idempotency_and_restart (test_v04.SpatialInteractionTests.test_empty_fill_drink_chain_params_idempotency_and_restart) ... ok
+test_invalid_spatial_geometry_opening_overlap_and_asset_reference_are_rejected (test_v04.SpatialInteractionTests.test_invalid_spatial_geometry_opening_overlap_and_asset_reference_are_rejected) ... ok
+test_missing_cup_device_state_disabled_rule_and_light_are_atomic (test_v04.SpatialInteractionTests.test_missing_cup_device_state_disabled_rule_and_light_are_atomic) ... ok
+test_near_condition_uses_path_not_straight_line_and_graph_cannot_bypass_wall (test_v04.SpatialInteractionTests.test_near_condition_uses_path_not_straight_line_and_graph_cannot_bypass_wall) ... ok
+test_save_rejects_contradictory_cup_bad_path_and_held_location (test_v04.SpatialInteractionTests.test_save_rejects_contradictory_cup_bad_path_and_held_location) ... ok
+
+----------------------------------------------------------------------
+Ran 39 tests in 5.515s
+
+OK

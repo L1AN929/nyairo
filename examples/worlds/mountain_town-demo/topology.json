@@ -1,0 +1,336 @@
+{
+  "edges": [
+    {
+      "from": "street_1",
+      "to": "street_2",
+      "walk_seconds": 175
+    },
+    {
+      "from": "home",
+      "to": "street_1",
+      "walk_seconds": 120
+    },
+    {
+      "from": "school",
+      "to": "street_2",
+      "walk_seconds": 125
+    },
+    {
+      "from": "shrine",
+      "to": "street_1",
+      "walk_seconds": 213
+    },
+    {
+      "from": "convenience_store",
+      "to": "street_1",
+      "walk_seconds": 199
+    },
+    {
+      "from": "craft_shop",
+      "to": "street_1",
+      "walk_seconds": 209
+    },
+    {
+      "from": "hot_spring",
+      "to": "street_2",
+      "walk_seconds": 283
+    },
+    {
+      "from": "park",
+      "to": "street_1",
+      "walk_seconds": 190
+    },
+    {
+      "from": "hiking_trail",
+      "to": "street_2",
+      "walk_seconds": 294
+    },
+    {
+      "from": "cafe",
+      "to": "street_1",
+      "walk_seconds": 209
+    },
+    {
+      "from": "bakery",
+      "to": "street_1",
+      "walk_seconds": 183
+    },
+    {
+      "from": "viewpoint",
+      "to": "street_2",
+      "walk_seconds": 291
+    },
+    {
+      "from": "inn",
+      "to": "street_2",
+      "walk_seconds": 281
+    },
+    {
+      "from": "library",
+      "to": "street_2",
+      "walk_seconds": 260
+    }
+  ],
+  "locations": [
+    {
+      "area_id": "bedroom",
+      "description": "坡道高处的研究小屋，窗台上晾着浴衣，夜里能听见川流声。",
+      "kind": "home",
+      "location_id": "home",
+      "map": {
+        "x": 557.9,
+        "y": 267.4
+      },
+      "name": "汤泽的住居",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [
+        {
+          "description": "自己的房间，有一张床和一张书桌。",
+          "name": "自己的房间",
+          "room_id": "bedroom"
+        }
+      ],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "school",
+      "description": "山间小镇的学校，冬天教室里有暖炉，操场上能望见对面的雪脊。",
+      "kind": "school",
+      "location_id": "school",
+      "map": {
+        "x": 170.1,
+        "y": 579.3
+      },
+      "name": "翠泽学校",
+      "reachable": [
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "education"
+    },
+    {
+      "area_id": "shrine",
+      "description": "守护登山的神社，绘马上写着求好天气的愿望。",
+      "kind": "shrine",
+      "location_id": "shrine",
+      "map": {
+        "x": 152.3,
+        "y": 129.3
+      },
+      "name": "峰宫",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "convenience_store",
+      "description": "山上唯一的便利店，货架上有登山用品和暖宝宝。",
+      "kind": "store",
+      "location_id": "convenience_store",
+      "map": {
+        "x": 165.8,
+        "y": 500.3
+      },
+      "name": "汤泽便利店",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "town"
+    },
+    {
+      "area_id": "craft_shop",
+      "description": "卖木雕与手工陶器的店，店主偶尔现场削木头。",
+      "kind": "store",
+      "location_id": "craft_shop",
+      "map": {
+        "x": 163.0,
+        "y": 561.0
+      },
+      "name": "岭谷工艺店",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "town"
+    },
+    {
+      "area_id": "hot_spring",
+      "description": "老字号汤屋，露天池正对山谷，入夜汤烟沿坡道飘上半条街。",
+      "kind": "public",
+      "location_id": "hot_spring",
+      "map": {
+        "x": 758.1,
+        "y": 90.5
+      },
+      "name": "岭谷温泉",
+      "reachable": [
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "onsen"
+    },
+    {
+      "area_id": "park",
+      "description": "川边的小公园，有村妇们洗菜用的旧石阶。",
+      "kind": "park",
+      "location_id": "park",
+      "map": {
+        "x": 233.7,
+        "y": 149.5
+      },
+      "name": "川端绿地",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "hiking_trail",
+      "description": "老练登山客喜欢的步道，入口的告示板记录着最近的熊出没情报。",
+      "kind": "park",
+      "location_id": "hiking_trail",
+      "map": {
+        "x": 869.1,
+        "y": 204.3
+      },
+      "name": "翠岳步道",
+      "reachable": [
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "onsen"
+    },
+    {
+      "area_id": "cafe",
+      "description": "坡道转角的咖啡屋，冬天玻璃窗上全是雾气，常客用粉笔在板上看雪况。",
+      "kind": "cafe",
+      "location_id": "cafe",
+      "map": {
+        "x": 205.1,
+        "y": 619.9
+      },
+      "name": "岭上咖啡屋",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "town"
+    },
+    {
+      "area_id": "bakery",
+      "description": "登山客的补给站，红豆面包配牛奶是最受欢迎的组合。",
+      "kind": "store",
+      "location_id": "bakery",
+      "map": {
+        "x": 249.4,
+        "y": 535.1
+      },
+      "name": "岭谷面包房",
+      "reachable": [
+        "street_1"
+      ],
+      "rooms": [],
+      "zone_id": "town"
+    },
+    {
+      "area_id": "viewpoint",
+      "description": "能看到整条汤街的地方，长椅被晒得温热。",
+      "kind": "public",
+      "location_id": "viewpoint",
+      "map": {
+        "x": 846.7,
+        "y": 183.5
+      },
+      "name": "翠岭展望台",
+      "reachable": [
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "onsen"
+    },
+    {
+      "area_id": "inn",
+      "description": "家传三代的旅馆，玄关摆着主人手写的登山路线图。",
+      "kind": "store",
+      "location_id": "inn",
+      "map": {
+        "x": 772.9,
+        "y": 121.3
+      },
+      "name": "岭谷旅馆",
+      "reachable": [
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "onsen"
+    },
+    {
+      "area_id": "library",
+      "description": "小镇图书馆，山岳与温泉疗养的书架占了整整一面墙。",
+      "kind": "library",
+      "location_id": "library",
+      "map": {
+        "x": 805.3,
+        "y": 614.2
+      },
+      "name": "翠泽文库",
+      "reachable": [
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "education"
+    },
+    {
+      "area_id": "street_1",
+      "description": "川端町，镇上的主要街道之一。",
+      "kind": "street",
+      "location_id": "street_1",
+      "map": {
+        "x": 500.0,
+        "y": 350.0
+      },
+      "name": "川端町",
+      "reachable": [
+        "bakery",
+        "cafe",
+        "convenience_store",
+        "craft_shop",
+        "home",
+        "park",
+        "shrine",
+        "street_2"
+      ],
+      "rooms": [],
+      "zone_id": "streets"
+    },
+    {
+      "area_id": "street_2",
+      "description": "翠岭道，镇上的主要街道之一。",
+      "kind": "street",
+      "location_id": "street_2",
+      "map": {
+        "x": 250.0,
+        "y": 490.0
+      },
+      "name": "翠岭道",
+      "reachable": [
+        "hiking_trail",
+        "hot_spring",
+        "inn",
+        "library",
+        "school",
+        "street_1",
+        "viewpoint"
+      ],
+      "rooms": [],
+      "zone_id": "streets"
+    }
+  ],
+  "schema_version": "worldgen.topology.v1"
+}

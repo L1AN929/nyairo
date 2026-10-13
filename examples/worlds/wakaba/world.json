@@ -1,0 +1,10 @@
+{
+  "description": "栞泽——普通生活小镇主题的生成世界。",
+  "generator_version": "worldgen.v0.1",
+  "name": "栞泽",
+  "schema_version": "worldgen.world.v1",
+  "seed": 20261014,
+  "theme": "residential_town",
+  "timezone": "Asia/Tokyo",
+  "world_id": "residential_town_20261014"
+}

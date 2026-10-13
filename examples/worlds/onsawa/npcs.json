@@ -1,0 +1,181 @@
+{
+  "npcs": [
+    {
+      "age_classification": "minor",
+      "display_name": "峠田湊",
+      "home_base_area": "school",
+      "npc_id": "mountain_npc_school_01",
+      "public_description": "汤川的学校的学生。",
+      "public_role": "学校的学生",
+      "windows": [
+        {
+          "end_minute": 960,
+          "location_id": "school",
+          "start_minute": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "minor",
+      "display_name": "汤川小百合",
+      "home_base_area": "school",
+      "npc_id": "mountain_npc_school_02",
+      "public_description": "汤川的同班同学。",
+      "public_role": "同班同学",
+      "windows": [
+        {
+          "end_minute": 960,
+          "location_id": "school",
+          "start_minute": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "泽口修",
+      "home_base_area": "bakery",
+      "npc_id": "mountain_npc_bakery_03",
+      "public_description": "汤川的面包房师傅。",
+      "public_role": "面包房师傅",
+      "windows": [
+        {
+          "end_minute": 960,
+          "location_id": "bakery",
+          "start_minute": 420,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        },
+        {
+          "end_minute": 1080,
+          "location_id": "street_1",
+          "start_minute": 1020,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "泽口健二",
+      "home_base_area": "library",
+      "npc_id": "mountain_npc_library_04",
+      "public_description": "汤川的图书馆管理员。",
+      "public_role": "图书馆管理员",
+      "windows": [
+        {
+          "end_minute": 1080,
+          "location_id": "library",
+          "start_minute": 540,
+          "weekdays": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        },
+        {
+          "end_minute": 960,
+          "location_id": "street_1",
+          "start_minute": 840,
+          "weekdays": [
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "岳本茂",
+      "home_base_area": "inn",
+      "npc_id": "mountain_npc_inn_05",
+      "public_description": "汤川的旅馆主人。",
+      "public_role": "旅馆主人",
+      "windows": [
+        {
+          "end_minute": 1200,
+          "location_id": "inn",
+          "start_minute": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "end_minute": 1020,
+          "location_id": "park",
+          "start_minute": 600,
+          "weekdays": [
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "age_classification": "adult",
+      "display_name": "峰岸茂",
+      "home_base_area": "hot_spring",
+      "npc_id": "mountain_npc_hot_spring_06",
+      "public_description": "汤川的汤屋的看板娘。",
+      "public_role": "汤屋的看板娘",
+      "windows": [
+        {
+          "end_minute": 1260,
+          "location_id": "hot_spring",
+          "start_minute": 660,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "end_minute": 960,
+          "location_id": "street_3",
+          "start_minute": 660,
+          "weekdays": [
+            6,
+            7
+          ]
+        }
+      ]
+    }
+  ],
+  "schema_version": "worldgen.npcs.v1"
+}
