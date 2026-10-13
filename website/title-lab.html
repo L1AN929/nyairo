@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyAiro 原版大标题 · 纯字面特效探索实验室</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --c-bg: #090b0e;
+      --c-bg-card: rgba(14, 18, 25, 0.78);
+      --c-border: rgba(255, 255, 255, 0.08);
+      --c-divider: rgba(255, 255, 255, 0.06);
+      --c-accent: #38bdf8;
+      --c-text-1: #f8fafc;
+      --c-text-2: #94a3b8;
+      --c-text-3: #64748b;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, monospace;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --c-bg: #f8fafc;
+      --c-bg-card: rgba(255, 255, 255, 0.92);
+      --c-border: rgba(0, 0, 0, 0.08);
+      --c-divider: rgba(0, 0, 0, 0.06);
+      --c-accent: #0284c7;
+      --c-text-1: #0f172a;
+      --c-text-2: #334155;
+      --c-text-3: #64748b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--c-bg);
+      color: var(--c-text-1);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      padding: 30px 20px 100px;
+      min-height: 100vh;
+      background-image: 
+        linear-gradient(to right, var(--c-divider) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--c-divider) 1px, transparent 1px);
+      background-size: 32px 32px;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+
+    .lab-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      margin-bottom: 40px;
+      border-bottom: 1px solid var(--c-border);
+    }
+    .lab-title-group h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+    }
+    .lab-subtitle {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: var(--c-text-3);
+    }
+    .theme-toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s ease;
+    }
+    .theme-toggle-btn:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+
+    .showcase-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 48px;
+    }
+    .showcase-card {
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      border-radius: 14px;
+      padding: 44px 40px 36px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.45);
+      position: relative;
+    }
+
+    .card-meta-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 30px;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      border-bottom: 1px solid var(--c-divider);
+      padding-bottom: 12px;
+    }
+    .card-badge {
+      color: var(--c-accent);
+      font-weight: 500;
+    }
+    .card-desc-tag {
+      color: var(--c-text-3);
+    }
+
+    .hero-stage {
+      text-align: center;
+      padding: 10px 0;
+      position: relative;
+    }
+
+    /* 100% 还原最初原版大字骨架 */
+    .hero-title {
+      font-size: clamp(40px, 5.8vw, 62px);
+      font-weight: 800;
+      letter-spacing: -0.035em;
+      line-height: 1.18;
+      margin-bottom: 20px;
+      user-select: none;
+    }
+    .hero-title-line {
+      display: block;
+    }
+    .hero-title-line + .hero-title-line {
+      margin-top: 0.12em;
+    }
+    .title-text {
+      color: var(--c-text-1);
+    }
+    .title-keyword {
+      position: relative;
+      display: inline-block;
+      margin: 0 0.06em;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .hero-desc {
+      font-size: 1.05rem;
+      color: var(--c-text-2);
+      line-height: 1.75;
+      margin: 0 auto 28px;
+      max-width: 620px;
+    }
+
+    .card-notes {
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px dashed var(--c-divider);
+      font-size: 0.78rem;
+      color: var(--c-text-3);
+      line-height: 1.55;
+    }
+
+    /* =========================================================================
+       特效 A: 【字内极光漫流 · 天青冰蓝流体】 (Aurora Liquid Flow)
+       纯粹在文字本体内部！冷月白、天青蓝、深湖蓝在字形内部缓缓流动，质感通透温润
+       ========================================================================= */
+    .effect-a .title-keyword {
+      background: linear-gradient(
+        120deg,
+        #38bdf8 0%,
+        #bae6fd 25%,
+        #ffffff 50%,
+        #38bdf8 75%,
+        #0284c7 100%
+      );
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: auroraFlow 7s ease-in-out infinite;
+      filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.35));
+    }
+    [data-theme="light"] .effect-a .title-keyword {
+      background: linear-gradient(
+        120deg,
+        #0284c7 0%,
+        #38bdf8 30%,
+        #0369a1 60%,
+        #0284c7 100%
+      );
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 2px 8px rgba(2, 132, 199, 0.2));
+    }
+    @keyframes auroraFlow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    /* =========================================================================
+       特效 B: 【字面水波滟潋 · 平缓潮汐波纹】 (Liquid Wave Ripple in Text)
+       文字内部仿佛盛着一泓清水，表面有极其平缓的潮汐波浪在微漾，波光粼粼
+       ========================================================================= */
+    .effect-b .title-keyword {
+      position: relative;
+      display: inline-block;
+      color: var(--c-text-1);
+    }
+    .effect-b .title-keyword-wave {
+      display: inline-block;
+      background-image: repeating-radial-gradient(
+        circle at 50% 100%,
+        var(--c-accent) 0,
+        var(--c-text-1) 15px,
+        var(--c-accent) 30px
+      );
+      background-size: 200% 200%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: waveDrift 6s ease-in-out infinite alternate;
+    }
+    [data-theme="light"] .effect-b .title-keyword-wave {
+      background-image: repeating-radial-gradient(
+        circle at 50% 100%,
+        #0284c7 0,
+        #0369a1 15px,
+        #38bdf8 30px
+      );
+      background-size: 200% 200%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    @keyframes waveDrift {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 100% 100%; }
+    }
+
+    /* =========================================================================
+       特效 C: 【字符微动琴键波浪 · 逐字呼吸起伏】 (Kinetic Character Sine Wave)
+       字形完全不动，但整句话中的每个字如同琴键拂过微风，在垂直方向上以 2.5px 极慢微波律动
+       ========================================================================= */
+    .effect-c .wave-char {
+      display: inline-block;
+      animation: charSineWave 4.2s ease-in-out infinite;
+    }
+    /* 逐字微位移错峰 */
+    .effect-c .wc-1 { animation-delay: 0.0s; }
+    .effect-c .wc-2 { animation-delay: 0.15s; }
+    .effect-c .wc-3 { animation-delay: 0.3s; }
+    .effect-c .wc-4 { animation-delay: 0.45s; }
+    .effect-c .wc-5 { animation-delay: 0.6s; }
+    .effect-c .wc-6 { animation-delay: 0.75s; }
+    .effect-c .wc-7 { animation-delay: 0.9s; }
+    .effect-c .wc-8 { animation-delay: 1.05s; }
+    .effect-c .wc-9 { animation-delay: 1.2s; }
+    .effect-c .wc-10 { animation-delay: 1.35s; }
+    .effect-c .wc-11 { animation-delay: 1.5s; }
+    .effect-c .wc-12 { animation-delay: 1.65s; }
+    .effect-c .wc-13 { animation-delay: 1.8s; }
+    .effect-c .wc-14 { animation-delay: 1.95s; }
+    .effect-c .wc-15 { animation-delay: 2.1s; }
+
+    .effect-c .title-keyword {
+      color: var(--c-accent);
+      text-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+    }
+    [data-theme="light"] .effect-c .title-keyword {
+      color: #0284c7;
+      text-shadow: 0 1px 6px rgba(2, 132, 199, 0.25);
+    }
+
+    @keyframes charSineWave {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-3.5px); }
+    }
+
+    /* =========================================================================
+       特效 D: 【字符发丝光织 · 边缘轮廓脉冲】 (Luminescent Edge Pulse)
+       在字面上带有发丝般纯净的透光边缘呼吸，像冷光氖管又像通透白玉
+       ========================================================================= */
+    .effect-d .title-keyword {
+      color: #ffffff;
+      animation: edgeLuminescence 4.5s ease-in-out infinite alternate;
+    }
+    [data-theme="light"] .effect-d .title-keyword {
+      color: #0284c7;
+      animation: edgeLuminescenceLight 4.5s ease-in-out infinite alternate;
+    }
+
+    @keyframes edgeLuminescence {
+      0% {
+        text-shadow: 0 0 4px rgba(255, 255, 255, 0.3),
+                     0 0 12px rgba(56, 189, 248, 0.2);
+      }
+      100% {
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.8),
+                     0 0 24px rgba(56, 189, 248, 0.6),
+                     0 0 40px rgba(56, 189, 248, 0.3);
+      }
+    }
+    @keyframes edgeLuminescenceLight {
+      0% {
+        text-shadow: 0 1px 2px rgba(2, 132, 199, 0.15);
+      }
+      100% {
+        text-shadow: 0 2px 10px rgba(2, 132, 199, 0.35),
+                     0 0 20px rgba(56, 189, 248, 0.25);
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header class="lab-header">
+      <div class="lab-title-group">
+        <h1>NYAIRO · 原版大标题【纯字面特效】探索</h1>
+        <div class="lab-subtitle">原版骨架字形 100% 不动 · 特效纯粹聚焦在“字本体”上面</div>
+      </div>
+      <button type="button" class="theme-toggle-btn" onclick="toggleTheme()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+        </svg>
+        <span id="theme-label">切换浅色模式 (Light)</span>
+      </button>
+    </header>
+
+    <div class="showcase-stack">
+      <!-- 特效 A: 字内极光漫流 -->
+      <section class="showcase-card">
+        <div class="card-meta-bar">
+          <span class="card-badge">EFFECT A · 字内极光漫流 (Aurora Liquid In-Text)</span>
+          <span class="card-desc-tag">纯在“世界”与“日常”字形内部流淌 · 冷月白与天青蓝慢速交融</span>
+        </div>
+        <div class="hero-stage effect-a">
+          <h2 class="hero-title">
+            <span class="hero-title-line"><span class="title-text">给 AI 一个</span><span class="title-keyword">世界</span></span>
+            <span class="hero-title-line"><span class="title-text">让它拥有自己的</span><span class="title-keyword">日常</span></span>
+          </h2>
+          <p class="hero-desc">虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次对话，都发生在一段有前因与后来的日常里。</p>
+        </div>
+        <div class="card-notes">
+          <strong>特效特点：</strong>完全作用在文字笔画内部！冷月纯白、冰蓝与天青蓝在字内无缝漫展流动（7秒慢节律），绝非俗气的左右硬扫，而是像液体在文字容器中翻涌，通透温润。
+        </div>
+      </section>
+
+      <!-- 特效 B: 字面水波滟潋 -->
+      <section class="showcase-card">
+        <div class="card-meta-bar">
+          <span class="card-badge">EFFECT B · 字面水波滟潋 (Liquid Wave Drift)</span>
+          <span class="card-desc-tag">文字内部宛如盛着一泓清水 · 潮汐波光在字面微漾</span>
+        </div>
+        <div class="hero-stage effect-b">
+          <h2 class="hero-title">
+            <span class="hero-title-line"><span class="title-text">给 AI 一个</span><span class="title-keyword"><span class="title-keyword-wave">世界</span></span></span>
+            <span class="hero-title-line"><span class="title-text">让它拥有自己的</span><span class="title-keyword"><span class="title-keyword-wave">日常</span></span></span>
+          </h2>
+          <p class="hero-desc">虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次对话，都发生在一段有前因与后来的日常里。</p>
+        </div>
+        <div class="card-notes">
+          <strong>特效特点：</strong>将柔和的同心潮汐波纹映射在“世界”与“日常”文字上，随着时间推移，波光在笔画内部轻微漂移起伏，极富生命感与水韵。
+        </div>
+      </section>
+
+      <!-- 特效 C: 字符微动琴键波浪 -->
+      <section class="showcase-card">
+        <div class="card-meta-bar">
+          <span class="card-badge">EFFECT C · 字符微动琴键波浪 (Kinetic Sine Wave)</span>
+          <span class="card-desc-tag">整句 16 个汉字像风吹麦浪 / 琴键拂过般 · 极微小错峰上下微浮</span>
+        </div>
+        <div class="hero-stage effect-c">
+          <h2 class="hero-title">
+            <span class="hero-title-line">
+              <span class="title-text">
+                <span class="wave-char wc-1">给</span>
+                <span class="wave-char wc-2">A</span>
+                <span class="wave-char wc-3">I</span>
+                <span class="wave-char wc-4">一</span>
+                <span class="wave-char wc-5">个</span>
+              </span>
+              <span class="title-keyword">
+                <span class="wave-char wc-6">世</span>
+                <span class="wave-char wc-7">界</span>
+              </span>
+            </span>
+            <span class="hero-title-line">
+              <span class="title-text">
+                <span class="wave-char wc-8">让</span>
+                <span class="wave-char wc-9">它</span>
+                <span class="wave-char wc-10">拥</span>
+                <span class="wave-char wc-11">有</span>
+                <span class="wave-char wc-12">自</span>
+                <span class="wave-char wc-13">己</span>
+                <span class="wave-char wc-14">的</span>
+              </span>
+              <span class="title-keyword">
+                <span class="wave-char wc-15">日</span>
+                <span class="wave-char wc-1">常</span>
+              </span>
+            </span>
+          </h2>
+          <p class="hero-desc">虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次对话，都发生在一段有前因与后来的日常里。</p>
+        </div>
+        <div class="card-notes">
+          <strong>特效特点：</strong>字形和字体完全不动！但字与字之间以极其细腻的正弦行波错开微动（上下仅 3.5px），整句话像活了一样在海面上平缓起伏，富有诗意。
+        </div>
+      </section>
+
+      <!-- 特效 D: 字符发丝光织 -->
+      <section class="showcase-card">
+        <div class="card-meta-bar">
+          <span class="card-badge">EFFECT D · 字符透光辉光呼吸 (Luminescent Pulse)</span>
+          <span class="card-desc-tag">关键词字身带有深浅交替的发丝微光脉冲 · 如温润冷玉</span>
+        </div>
+        <div class="hero-stage effect-d">
+          <h2 class="hero-title">
+            <span class="hero-title-line"><span class="title-text">给 AI 一个</span><span class="title-keyword">世界</span></span>
+            <span class="hero-title-line"><span class="title-text">让它拥有自己的</span><span class="title-keyword">日常</span></span>
+          </h2>
+          <p class="hero-desc">虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次对话，都发生在一段有前因与后来的日常里。</p>
+        </div>
+        <div class="card-notes">
+          <strong>特效特点：</strong>文字本体带有极其干净利落的辉光呼吸脉冲。从内敛微光到清澈饱满缓缓放大再收拢，白天模式是天青水润微光，夜间是纯银冷光，深沉耐看。
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+
+      const label = document.getElementById('theme-label');
+      if (label) {
+        label.textContent = next === 'dark' ? '切换浅色模式 (Light)' : '切换深色模式 (Dark)';
+      }
+    }
+  </script>
+</body>
+</html>

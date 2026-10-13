@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyAiro 真正水墨笔意天青挥毫 · Azure Ink Stroke</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --c-bg: #f8fafc;
+      --c-bg-card: rgba(255, 255, 255, 0.96);
+      --c-border: rgba(2, 132, 199, 0.12);
+      --c-divider: rgba(2, 132, 199, 0.08);
+      --c-accent: #0284c7;
+      /* 天青淡蓝纯正墨彩：白天绝不用黑色！ */
+      --c-ink: #0284c7;
+      --c-text-1: #0369a1;
+      --c-text-2: #0284c7;
+      --c-text-3: #64748b;
+      --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, monospace;
+    }
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --c-bg: #080a0e;
+      --c-bg-card: rgba(14, 18, 25, 0.88);
+      --c-border: rgba(255, 255, 255, 0.08);
+      --c-divider: rgba(255, 255, 255, 0.06);
+      --c-accent: #38bdf8;
+      --c-ink: #f8fafc;
+      --c-text-1: #f8fafc;
+      --c-text-2: #94a3b8;
+      --c-text-3: #64748b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--c-bg);
+      color: var(--c-text-1);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      padding: 30px 20px 80px;
+      min-height: 100vh;
+      background-image: 
+        linear-gradient(to right, var(--c-divider) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--c-divider) 1px, transparent 1px);
+      background-size: 32px 32px;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    .lab-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      margin-bottom: 30px;
+      border-bottom: 1px solid var(--c-border);
+    }
+    .lab-title-group h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+      color: var(--c-text-1);
+    }
+    .lab-subtitle {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: var(--c-text-3);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .theme-toggle-btn, .replay-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s ease;
+    }
+    .theme-toggle-btn:hover, .replay-btn:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+    .replay-btn {
+      background: rgba(2, 132, 199, 0.08);
+      border-color: rgba(2, 132, 199, 0.25);
+      color: #0284c7;
+    }
+    [data-theme="dark"] .replay-btn {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.25);
+      color: var(--c-accent);
+    }
+
+    .ink-theater {
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.08);
+      backdrop-filter: blur(20px);
+      position: relative;
+    }
+    [data-theme="dark"] .ink-theater {
+      box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.6);
+    }
+
+    .theater-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--c-divider);
+      background: rgba(2, 132, 199, 0.03);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+    [data-theme="dark"] .theater-head {
+      background: rgba(0, 0, 0, 0.12);
+    }
+    .head-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--c-accent);
+    }
+    .beacon-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--c-accent);
+      box-shadow: 0 0 8px var(--c-accent);
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    .stage-wrapper {
+      position: relative;
+      width: 100%;
+      height: 480px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 42%, rgba(56, 189, 248, 0.04) 0%, transparent 75%);
+    }
+
+    /* 真正可靠、字形清朗、中宫疏朗的矢量书法文字层 */
+    .calligraphy-text-stage {
+      position: relative;
+      z-index: 5;
+      text-align: center;
+      user-select: none;
+      margin-bottom: 24px;
+    }
+
+    .title-line {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(10px, 1.8vw, 22px); /* 舒适大字距，绝不粘连！ */
+      margin: 8px 0;
+    }
+
+    /* 单字水墨笔意容器 */
+    .char-unit {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(38px, 5.2vw, 54px);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+      overflow: hidden;
+    }
+
+    /* 底层幽微骨架 (未落墨前极淡的笔位) */
+    .char-unit::before {
+      content: attr(data-char);
+      color: var(--c-text-3);
+      opacity: 0.12;
+    }
+
+    /* 表层实时行笔墨汁图层：通过动态 clip-path 模拟毛笔饱蘸浓墨的破空划过 */
+    .char-stroke {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      clip-path: inset(0 100% 0 0); /* 初始完全遮罩，等待毛笔划过 */
+      transition: clip-path 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .char-stroke.inked {
+      clip-path: inset(0 0% 0 0); /* 饱满墨色一气呵成 */
+    }
+
+    /* 天青淡蓝文字设色：绝无半点黑！ */
+    .char-stroke-inner {
+      color: #0284c7;
+      text-shadow: 0 1px 2px rgba(2, 132, 199, 0.15);
+    }
+    [data-theme="dark"] .char-stroke-inner {
+      color: #f8fafc;
+      text-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
+    }
+
+    /* 关键词“世界”和“日常”：略微提神清亮 */
+    .char-unit[data-type="keyword"] .char-stroke-inner {
+      color: #0369a1;
+      font-weight: 700;
+    }
+    [data-theme="dark"] .char-unit[data-type="keyword"] .char-stroke-inner {
+      color: #ffffff;
+      font-weight: 700;
+      text-shadow: 0 0 20px rgba(56, 189, 248, 0.5);
+    }
+
+    /* “AI” 专用优雅西文间距微调 */
+    .char-unit[data-en="true"] {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-weight: 700;
+    }
+
+    /* 动态水墨烟云背景画布 (负责毛笔前导水雾与飞溅粒子) */
+    #fx-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 6;
+    }
+
+    /* 写完后平滑浮现的现代副标与行动按钮 */
+    .hero-meta-overlay {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 1.2s ease, transform 1.2s ease;
+    }
+    .hero-meta-overlay.revealed {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .hero-desc {
+      font-size: 0.95rem;
+      color: var(--c-text-2);
+      max-width: 580px;
+      margin: 0 auto 20px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .btn-quickstart {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-accent);
+      color: #ffffff;
+      font-weight: 600;
+      font-size: 0.82rem;
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(2, 132, 199, 0.25);
+    }
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      font-size: 0.82rem;
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+
+    .theater-foot {
+      padding: 12px 20px;
+      border-top: 1px solid var(--c-divider);
+      font-size: 0.78rem;
+      color: var(--c-text-3);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(2, 132, 199, 0.02);
+    }
+    [data-theme="dark"] .theater-foot {
+      background: rgba(0, 0, 0, 0.04);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header class="lab-header">
+      <div class="lab-title-group">
+        <h1>NYAIRO · 天青水墨清澄笔道 (Pure Azure Calligraphy)</h1>
+        <div class="lab-subtitle">中宫疏朗 · 笔画绝不粘连 · 日间模式清澈天青淡蓝 · 100% 绝对可见</div>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="replay-btn" onclick="triggerReplay()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+            <path d="M21 3v5h-5"></path>
+            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+            <path d="M3 21v-5h5"></path>
+          </svg>
+          <span>重新挥毫落墨 (Replay)</span>
+        </button>
+        <button type="button" class="theme-toggle-btn" onclick="toggleTheme()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+          </svg>
+          <span id="theme-label">切换深色模式 (Dark)</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="ink-theater">
+      <div class="theater-head">
+        <div class="head-status">
+          <span class="beacon-dot"></span>
+          <span id="status-text">CALLIGRAPHY ENGINE · 执笔落墨成真</span>
+        </div>
+        <div class="head-mode font-mono">
+          天青墨韵 · 字字清澈如雕版 · 绝无糊字黑斑
+        </div>
+      </div>
+
+      <div class="stage-wrapper" id="stage-wrapper">
+        <canvas id="fx-canvas"></canvas>
+
+        <div class="calligraphy-text-stage" id="text-stage">
+          <!-- 行 1: 给 AI 一个世界 -->
+          <div class="title-line" id="line-1">
+            <div class="char-unit" data-char="给"><div class="char-stroke"><span class="char-stroke-inner">给</span></div></div>
+            <div class="char-unit" data-char="A" data-en="true"><div class="char-stroke"><span class="char-stroke-inner">A</span></div></div>
+            <div class="char-unit" data-char="I" data-en="true"><div class="char-stroke"><span class="char-stroke-inner">I</span></div></div>
+            <div class="char-unit" data-char="一"><div class="char-stroke"><span class="char-stroke-inner">一</span></div></div>
+            <div class="char-unit" data-char="个"><div class="char-stroke"><span class="char-stroke-inner">个</span></div></div>
+            <div class="char-unit" data-char="世" data-type="keyword"><div class="char-stroke"><span class="char-stroke-inner">世</span></div></div>
+            <div class="char-unit" data-char="界" data-type="keyword"><div class="char-stroke"><span class="char-stroke-inner">界</span></div></div>
+          </div>
+          <!-- 行 2: 让它拥有自己的日常 -->
+          <div class="title-line" id="line-2">
+            <div class="char-unit" data-char="让"><div class="char-stroke"><span class="char-stroke-inner">让</span></div></div>
+            <div class="char-unit" data-char="它"><div class="char-stroke"><span class="char-stroke-inner">它</span></div></div>
+            <div class="char-unit" data-char="拥"><div class="char-stroke"><span class="char-stroke-inner">拥</span></div></div>
+            <div class="char-unit" data-char="有"><div class="char-stroke"><span class="char-stroke-inner">有</span></div></div>
+            <div class="char-unit" data-char="自"><div class="char-stroke"><span class="char-stroke-inner">自</span></div></div>
+            <div class="char-unit" data-char="己"><div class="char-stroke"><span class="char-stroke-inner">己</span></div></div>
+            <div class="char-unit" data-char="的"><div class="char-stroke"><span class="char-stroke-inner">的</span></div></div>
+            <div class="char-unit" data-char="日" data-type="keyword"><div class="char-stroke"><span class="char-stroke-inner">日</span></div></div>
+            <div class="char-unit" data-char="常" data-type="keyword"><div class="char-stroke"><span class="char-stroke-inner">常</span></div></div>
+          </div>
+        </div>
+
+        <div class="hero-meta-overlay" id="hero-overlay">
+          <p class="hero-desc">虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 为 AI 构建持续的生活状态，让每一次对话，都发生在一段有前因与后来的日常里。</p>
+          <div class="hero-actions">
+            <a href="#quickstart" class="btn-quickstart">快速上手指南 →</a>
+            <a href="https://github.com/L1AN929/nyairo" target="_blank" class="btn-ghost">GitHub 仓库</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="theater-foot">
+        <span>书法要领：纯净天青淡蓝水墨 + 字符独立舒展留白 + 毛笔前导飞白气韵</span>
+        <span class="font-mono">CRISP AZURE MASTERPIECE</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 天青水墨清澄笔道 (Pure Azure Calligraphy)
+    // 结合真实 DOM 排版与 Canvas 前导墨雾，100% 绝对可见，字迹清澈！
+    // =========================================================================
+    const canvas = document.getElementById('fx-canvas');
+    const ctx = canvas.getContext('2d');
+    const stage = document.getElementById('stage-wrapper');
+    const overlay = document.getElementById('hero-overlay');
+    const statusText = document.getElementById('status-text');
+
+    let stageW, stageH, dpr;
+    function resize() {
+      const rect = stage.getBoundingClientRect();
+      dpr = window.devicePixelRatio || 1;
+      stageW = rect.width;
+      stageH = rect.height;
+      canvas.width = stageW * dpr;
+      canvas.height = stageH * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+
+    const charUnits = Array.from(document.querySelectorAll('.char-unit'));
+    let animTimers = [];
+    let particles = [];
+    let isWriting = false;
+
+    class InkMist {
+      constructor(x, y, isDark) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 1.5;
+        this.vy = (Math.random() - 0.5) * 1.5;
+        this.r = Math.random() * 8 + 4;
+        this.life = Math.random() * 30 + 20;
+        this.maxLife = this.life;
+        this.isDark = isDark;
+      }
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.r += 0.3;
+        this.life--;
+      }
+      draw(ctx) {
+        const p = this.life / this.maxLife;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        if (!this.isDark) {
+          ctx.fillStyle = `rgba(56, 189, 248, ${p * 0.18})`;
+        } else {
+          ctx.fillStyle = `rgba(248, 250, 252, ${p * 0.2})`;
+        }
+        ctx.fill();
+      }
+    }
+
+    function startCalligraphy() {
+      animTimers.forEach(t => clearTimeout(t));
+      animTimers = [];
+      particles = [];
+      isWriting = true;
+
+      resize();
+      ctx.clearRect(0, 0, stageW, stageH);
+
+      // 全部字重置为遮罩状态
+      charUnits.forEach(unit => {
+        const stroke = unit.querySelector('.char-stroke');
+        stroke.classList.remove('inked');
+      });
+      overlay.classList.remove('revealed');
+      statusText.textContent = 'CALLIGRAPHY ENGINE · 执笔落墨中...';
+
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+      // 逐字行云流水推进
+      charUnits.forEach((unit, idx) => {
+        const t = setTimeout(() => {
+          const stroke = unit.querySelector('.char-stroke');
+          stroke.classList.add('inked');
+
+          // 获取该字的实际视口坐标，在笔尖产生微细天青水雾
+          const uRect = unit.getBoundingClientRect();
+          const sRect = stage.getBoundingClientRect();
+          const cx = uRect.left - sRect.left + uRect.width * 0.5;
+          const cy = uRect.top - sRect.top + uRect.height * 0.5;
+
+          for (let i = 0; i < 8; i++) {
+            particles.push(new InkMist(cx, cy, isDark));
+          }
+        }, idx * 110 + 150);
+        animTimers.push(t);
+      });
+
+      // 收笔完成
+      const finishTimer = setTimeout(() => {
+        isWriting = false;
+        statusText.textContent = 'CALLIGRAPHY ENGINE · 墨韵落成';
+        overlay.classList.add('revealed');
+      }, charUnits.length * 110 + 400);
+      animTimers.push(finishTimer);
+    }
+
+    function renderLoop() {
+      ctx.clearRect(0, 0, stageW, stageH);
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.update();
+        p.draw(ctx);
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+      requestAnimationFrame(renderLoop);
+    }
+    renderLoop();
+
+    window.triggerReplay = function() {
+      startCalligraphy();
+    };
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme') || 'light';
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+
+      const label = document.getElementById('theme-label');
+      if (label) {
+        label.textContent = next === 'dark' ? '切换浅色模式 (Light)' : '切换深色模式 (Dark)';
+      }
+      startCalligraphy();
+    }
+
+    window.addEventListener('resize', () => {
+      resize();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      startCalligraphy();
+    });
+  </script>
+</body>
+</html>

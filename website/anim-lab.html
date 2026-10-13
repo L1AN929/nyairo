@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyAiro 核心视觉动画实验室 · Visual Animation Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --c-bg: #07090c;
+      --c-bg-subtle: #0d1016;
+      --c-bg-card: rgba(14, 18, 25, 0.85);
+      --c-border: rgba(255, 255, 255, 0.08);
+      --c-divider: rgba(255, 255, 255, 0.06);
+      --c-accent: #38bdf8;
+      --c-text-1: #f8fafc;
+      --c-text-2: #94a3b8;
+      --c-text-3: #64748b;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, monospace;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --c-bg: #f5f7fa;
+      --c-bg-subtle: #ebedf2;
+      --c-bg-card: rgba(255, 255, 255, 0.95);
+      --c-border: rgba(0, 0, 0, 0.08);
+      --c-divider: rgba(0, 0, 0, 0.06);
+      --c-accent: #0284c7;
+      --c-text-1: #0f172a;
+      --c-text-2: #334155;
+      --c-text-3: #64748b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--c-bg);
+      color: var(--c-text-1);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      padding: 30px 20px 100px;
+      min-height: 100vh;
+      /* 32px 几何工程网格 */
+      background-image: 
+        linear-gradient(to right, var(--c-divider) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--c-divider) 1px, transparent 1px);
+      background-size: 32px 32px;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    /* 顶部控制栏 */
+    .lab-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      margin-bottom: 40px;
+      border-bottom: 1px solid var(--c-border);
+    }
+    .lab-title-group h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+    }
+    .lab-subtitle {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: var(--c-text-3);
+    }
+    .theme-toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      color: var(--c-text-1);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+    }
+    .theme-toggle-btn:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+
+    /* 动画展示卡片 */
+    .animations-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 56px;
+    }
+    .anim-card {
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(20px);
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--c-divider);
+      background: rgba(0, 0, 0, 0.12);
+    }
+    [data-theme="light"] .card-head {
+      background: rgba(0, 0, 0, 0.02);
+    }
+    .card-title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .card-badge {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--c-accent);
+      background: rgba(56, 189, 248, 0.09);
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid rgba(56, 189, 248, 0.2);
+    }
+    .card-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--c-text-1);
+    }
+    .card-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .ctrl-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid var(--c-border);
+      color: var(--c-text-2);
+      padding: 4px 10px;
+      border-radius: 5px;
+      font-size: 0.74rem;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .ctrl-btn:hover {
+      color: var(--c-text-1);
+      border-color: var(--c-accent);
+    }
+
+    /* 画布舞台 */
+    .canvas-stage {
+      position: relative;
+      width: 100%;
+      height: 480px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.015) 0%, transparent 80%);
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* 浮动在动画之上的极简标题覆盖层 */
+    .hero-overlay-text {
+      position: relative;
+      z-index: 5;
+      text-align: center;
+      pointer-events: none;
+      user-select: none;
+    }
+    .hero-overlay-text h2 {
+      font-size: clamp(32px, 4.4vw, 48px);
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.22;
+      color: var(--c-text-1);
+      text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8);
+    }
+    [data-theme="light"] .hero-overlay-text h2 {
+      text-shadow: 0 4px 16px rgba(255, 255, 255, 0.9);
+    }
+    .hero-overlay-text p {
+      font-size: 0.88rem;
+      color: var(--c-text-2);
+      max-width: 520px;
+      margin: 12px auto 0;
+      opacity: 0.85;
+    }
+
+    .card-footer {
+      padding: 12px 22px;
+      border-top: 1px solid var(--c-divider);
+      font-size: 0.78rem;
+      color: var(--c-text-3);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0, 0, 0, 0.06);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header class="lab-header">
+      <div class="lab-title-group">
+        <h1>NYAIRO · 核心视觉动画探索实验室</h1>
+        <div class="lab-subtitle">三套纯实时物理演算动画 · 告别死板文字特效 · 赋予生命感</div>
+      </div>
+      <button type="button" class="theme-toggle-btn" onclick="toggleTheme()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+        </svg>
+        <span id="theme-label">切换浅色模式 (Light)</span>
+      </button>
+    </header>
+
+    <div class="animations-stack">
+      <!-- 动画 1: 深空墨韵 · 活体流体星核 -->
+      <section class="anim-card">
+        <div class="card-head">
+          <div class="card-title-group">
+            <span class="card-badge">ANIM 01</span>
+            <span class="card-name">深空墨韵 · 活体流体星核 (Live Ink Nebula)</span>
+          </div>
+          <div class="card-controls">
+            <button type="button" class="ctrl-btn" onclick="disturbNebula()">轻触激发墨澜</button>
+          </div>
+        </div>
+        <div class="canvas-stage" id="stage-nebula">
+          <canvas id="canvas-nebula"></canvas>
+          <div class="hero-overlay-text">
+            <h2>给 AI 一个世界<br>让它拥有自己的日常</h2>
+            <p>虚拟世界承载经历，身体连接感知，记忆延续过往。</p>
+          </div>
+        </div>
+        <div class="card-footer">
+          <span>算法：Curl Noise 双向卷曲流场 + 3,000 粒子墨缕无声旋转（鼠标划过带起流体水波）</span>
+          <span class="font-mono">60 FPS · REALTIME PHYSICS</span>
+        </div>
+      </section>
+
+      <!-- 动画 2: 水墨笔势 · 墨迹破空生长动画 -->
+      <section class="anim-card">
+        <div class="card-head">
+          <div class="card-title-group">
+            <span class="card-badge">ANIM 02</span>
+            <span class="card-name">水墨笔势 · 破空墨迹生长 (Generative Ink Stroke)</span>
+          </div>
+          <div class="card-controls">
+            <button type="button" class="ctrl-btn" onclick="replayInkStroke()">重新挥毫落墨 (Replay)</button>
+          </div>
+        </div>
+        <div class="canvas-stage" id="stage-stroke">
+          <canvas id="canvas-stroke"></canvas>
+          <!-- 随墨笔写完后淡入呈现的说明 -->
+          <div class="hero-overlay-text" style="top: 130px;">
+            <p id="stroke-subtitle" style="opacity: 0; transition: opacity 1.2s ease;">每一个字符皆有笔势游走，墨水落入宣纸纤维，缓缓晕开成形。</p>
+          </div>
+        </div>
+        <div class="card-footer">
+          <span>算法：动态贝塞尔轨迹微分 + 飞白喷溅粒子 + 湿水墨边缘扩散晕染</span>
+          <span class="font-mono">CALLIGRAPHY ENGINE</span>
+        </div>
+      </section>
+
+      <!-- 动画 3: 昼夜天体仪 · 无声时轨日常流转 -->
+      <section class="anim-card">
+        <div class="card-head">
+          <div class="card-title-group">
+            <span class="card-badge">ANIM 03</span>
+            <span class="card-name">昼夜天体仪 · 无声时轨流转 (Celestial Routine Instrument)</span>
+          </div>
+          <div class="card-controls">
+            <button type="button" class="ctrl-btn" onclick="toggleClockSpeed()">加速时针流转 (x4)</button>
+          </div>
+        </div>
+        <div class="canvas-stage" id="stage-celestial">
+          <canvas id="canvas-celestial"></canvas>
+          <div class="hero-overlay-text">
+            <h2>给 AI 一个世界<br>让它拥有自己的日常</h2>
+            <p>同心时轨无声咬合旋转，光锥扫过晨曦与深夜，记录生命不可逆的起居。</p>
+          </div>
+        </div>
+        <div class="card-footer">
+          <span>算法：多重轨道引力天体仪 + 晨昏光锥漫射 + 萤火时针跳跃脉冲</span>
+          <span class="font-mono">ORBITAL TIME INSTRUMENT</span>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 动画 1: 深空墨韵 · 活体流体星核 (Live Ink Nebula)
+    // =========================================================================
+    (function initNebula() {
+      const canvas = document.getElementById('canvas-nebula');
+      const ctx = canvas.getContext('2d');
+      const stage = document.getElementById('stage-nebula');
+
+      let width, height;
+      function resize() {
+        const rect = stage.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        width = canvas.width = rect.width * dpr;
+        height = canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+      }
+      resize();
+
+      function pseudoNoise(x, y, t) {
+        return Math.sin(x * 0.003 + t) * Math.cos(y * 0.003 + t * 0.7) +
+               Math.sin(x * 0.006 - t * 0.5) * 0.5;
+      }
+      function curlNoise(x, y, t) {
+        const eps = 1.0;
+        const n1 = pseudoNoise(x, y + eps, t);
+        const n2 = pseudoNoise(x, y - eps, t);
+        const n3 = pseudoNoise(x + eps, y, t);
+        const n4 = pseudoNoise(x - eps, y, t);
+        const dx = (n1 - n2) / (2 * eps);
+        const dy = (n3 - n4) / (2 * eps);
+        return { vx: dy * 1.6, vy: -dx * 1.6 };
+      }
+
+      const particles = [];
+      const NUM_P = 1800;
+      const mouse = { x: -999, y: -999, active: false };
+
+      class NebulaParticle {
+        constructor() {
+          this.reset(true);
+        }
+        reset(initial = false) {
+          const w = stage.offsetWidth;
+          const h = stage.offsetHeight;
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * (initial ? 260 : 70);
+          this.x = w * 0.5 + Math.cos(angle) * dist;
+          this.y = h * 0.5 + Math.sin(angle) * dist;
+          this.prevX = this.x;
+          this.prevY = this.y;
+          this.vx = 0;
+          this.vy = 0;
+          this.life = Math.random() * 260 + 120;
+          this.maxLife = this.life;
+          this.alpha = (Math.random() * 0.22 + 0.04);
+          this.size = Math.random() * 2.2 + 0.8;
+        }
+        update(t) {
+          const w = stage.offsetWidth;
+          const h = stage.offsetHeight;
+          this.prevX = this.x;
+          this.prevY = this.y;
+
+          // 核心引力微旋
+          const dxC = w * 0.5 - this.x;
+          const dyC = h * 0.5 - this.y;
+          const distC = Math.hypot(dxC, dyC);
+          const orbitAngle = Math.atan2(dyC, dxC) + Math.PI * 0.5;
+          this.vx += Math.cos(orbitAngle) * 0.25;
+          this.vy += Math.sin(orbitAngle) * 0.25;
+
+          // 卷曲噪波
+          const curl = curlNoise(this.x, this.y, t);
+          this.vx += curl.vx * 0.14;
+          this.vy += curl.vy * 0.14;
+
+          // 鼠标交互
+          if (mouse.active) {
+            const mdx = this.x - mouse.x;
+            const mdy = this.y - mouse.y;
+            const dSq = mdx * mdx + mdy * mdy;
+            if (dSq < 24000) {
+              const f = (1 - dSq / 24000) * 1.6;
+              this.vx += (mdx / Math.sqrt(dSq)) * f;
+              this.vy += (mdy / Math.sqrt(dSq)) * f;
+            }
+          }
+
+          this.vx *= 0.94;
+          this.vy *= 0.94;
+          this.x += this.vx;
+          this.y += this.vy;
+
+          this.life--;
+          if (this.life <= 0 || this.x < -30 || this.x > w + 30 || this.y < -30 || this.y > h + 30) {
+            this.reset(false);
+          }
+        }
+        draw() {
+          const progress = 1 - (this.life / this.maxLife);
+          let fade = 1;
+          if (progress < 0.2) fade = progress / 0.2;
+          else if (progress > 0.7) fade = (1 - progress) / 0.3;
+
+          const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+          const a = this.alpha * fade;
+          ctx.beginPath();
+          ctx.moveTo(this.prevX, this.prevY);
+          ctx.lineTo(this.x, this.y);
+          ctx.strokeStyle = isDark ? `rgba(224, 242, 254, ${a})` : `rgba(15, 23, 42, ${a * 0.8})`;
+          ctx.lineWidth = this.size;
+          ctx.stroke();
+        }
+      }
+
+      for (let i = 0; i < NUM_P; i++) particles.push(new NebulaParticle());
+
+      stage.addEventListener('mousemove', e => {
+        const r = stage.getBoundingClientRect();
+        mouse.x = e.clientX - r.left;
+        mouse.y = e.clientY - r.top;
+        mouse.active = true;
+      });
+      stage.addEventListener('mouseleave', () => mouse.active = false);
+
+      window.disturbNebula = function() {
+        particles.forEach(p => {
+          p.vx += (Math.random() - 0.5) * 8;
+          p.vy += (Math.random() - 0.5) * 8;
+        });
+      };
+
+      let t = 0;
+      function loop() {
+        t += 0.005;
+        const w = stage.offsetWidth;
+        const h = stage.offsetHeight;
+        const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+        ctx.fillStyle = isDark ? 'rgba(7, 9, 12, 0.06)' : 'rgba(245, 247, 250, 0.07)';
+        ctx.fillRect(0, 0, w, h);
+
+        for (let i = 0; i < particles.length; i++) {
+          particles[i].update(t);
+          particles[i].draw();
+        }
+        requestAnimationFrame(loop);
+      }
+      loop();
+    })();
+
+    // =========================================================================
+    // 动画 2: 水墨笔势 · 墨迹破空生长 (Generative Ink Stroke)
+    // =========================================================================
+    (function initStrokeEngine() {
+      const canvas = document.getElementById('canvas-stroke');
+      const ctx = canvas.getContext('2d');
+      const stage = document.getElementById('stage-stroke');
+      const subtitle = document.getElementById('stroke-subtitle');
+
+      let w, h;
+      function resize() {
+        const rect = stage.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        w = canvas.width = rect.width * dpr;
+        h = canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+      }
+      resize();
+
+      let animProgress = 0;
+      let strokePoints = [];
+      let isWriting = false;
+
+      // 24 根狼毫毛刷簇偏移
+      const BRISTLES = 24;
+      const brushOffsets = [];
+      for (let i = 0; i < BRISTLES; i++) {
+        brushOffsets.push({
+          dx: (Math.random() - 0.5) * 6,
+          dy: (Math.random() - 0.5) * 6,
+          width: Math.random() * 1.5 + 0.6,
+          alphaMod: Math.random() * 0.5 + 0.5
+        });
+      }
+
+      function generateStrokePlan() {
+        const sw = stage.offsetWidth;
+        const sh = stage.offsetHeight;
+        strokePoints = [];
+
+        const fontSize = Math.min(sw * 0.056, 50);
+        const fontStr = "bold " + fontSize + "px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif";
+
+        const off = document.createElement('canvas');
+        off.width = sw;
+        off.height = sh;
+        const octx = off.getContext('2d');
+        octx.font = fontStr;
+        octx.textAlign = 'center';
+        octx.textBaseline = 'middle';
+        octx.fillStyle = '#fff';
+
+        const y1 = sh * 0.38;
+        const y2 = sh * 0.56;
+        octx.fillText("给 AI 一个世界", sw * 0.5, y1);
+        octx.fillText("让它拥有自己的日常", sw * 0.5, y2);
+
+        const img = octx.getImageData(0, 0, sw, sh).data;
+        const pts = [];
+        for (let y = 0; y < sh; y += 2) {
+          for (let x = 0; x < sw; x += 2) {
+            const idx = (y * sw + x) * 4;
+            if (img[idx + 3] > 110) {
+              const line = y < sh * 0.47 ? 1 : 2;
+              const order = line * 20000 + x * 20 + y * 2 + (Math.random() - 0.5) * 12;
+              pts.push({ x, y, order });
+            }
+          }
+        }
+        pts.sort((a, b) => a.order - b.order);
+        strokePoints = pts;
+      }
+
+      window.replayInkStroke = function() {
+        resize();
+        generateStrokePlan();
+        animProgress = 0;
+        isWriting = true;
+        if (subtitle) subtitle.style.opacity = '0';
+        ctx.clearRect(0, 0, stage.offsetWidth, stage.offsetHeight);
+        requestAnimationFrame(drawStrokeFrame);
+      };
+
+      function drawStrokeFrame() {
+        if (!isWriting) return;
+        const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+        const speed = Math.max(16, Math.floor(strokePoints.length / 95));
+        let tip = null;
+
+        for (let i = 0; i < speed; i++) {
+          if (animProgress >= strokePoints.length) {
+            isWriting = false;
+            if (subtitle) subtitle.style.opacity = '1';
+            break;
+          }
+          const pt = strokePoints[animProgress];
+          tip = pt;
+
+          // 24 根毛刷簇发丝划过
+          for (let b = 0; b < brushOffsets.length; b++) {
+            if (Math.random() < 0.12) continue; // 飞白断笔
+            const br = brushOffsets[b];
+            const px = pt.x + br.dx;
+            const py = pt.y + br.dy;
+            const a = (isDark ? 0.85 : 0.92) * br.alphaMod;
+
+            ctx.beginPath();
+            ctx.arc(px, py, br.width * 1.3, 0, Math.PI * 2);
+            // 浅色模式采用纯正松烟墨色 (#0f172a)，绝不丢字！
+            ctx.fillStyle = isDark ? ("rgba(248, 250, 252, " + a + ")") : ("rgba(15, 23, 42, " + a + ")");
+            ctx.fill();
+          }
+          animProgress++;
+        }
+
+        // 笔锋指示微光
+        if (tip && isWriting) {
+          ctx.beginPath();
+          ctx.arc(tip.x, tip.y, 4, 0, Math.PI * 2);
+          ctx.fillStyle = isDark ? '#38bdf8' : '#0284c7';
+          ctx.fill();
+        }
+
+        if (isWriting) {
+          requestAnimationFrame(drawStrokeFrame);
+        }
+      }
+
+      generateStrokePlan();
+      isWriting = true;
+      requestAnimationFrame(drawStrokeFrame);
+    })();
+
+    // =========================================================================
+    // 动画 3: 昼夜天体仪 · 无声时轨日常流转 (Celestial Routine Instrument)
+    // =========================================================================
+    (function initCelestialInstrument() {
+      const canvas = document.getElementById('canvas-celestial');
+      const ctx = canvas.getContext('2d');
+      const stage = document.getElementById('stage-celestial');
+
+      let w, h;
+      function resize() {
+        const rect = stage.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        w = canvas.width = rect.width * dpr;
+        h = canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+      }
+      resize();
+
+      let speedMultiplier = 1;
+      window.toggleClockSpeed = function() {
+        speedMultiplier = speedMultiplier === 1 ? 4 : 1;
+      };
+
+      // 轨道配置
+      const rings = [
+        { r: 90, speed: 0.006, angle: 0, label: 'MEMO · 记忆脉冲', nodeR: 4, nodeAngle: 0.4 },
+        { r: 160, speed: -0.0035, angle: 0, label: 'CHRONOS · 昼夜刻度', nodeR: 5, nodeAngle: 2.1 },
+        { r: 230, speed: 0.002, angle: 0, label: 'WORLD · 空间引力', nodeR: 4.5, nodeAngle: 4.6 }
+      ];
+
+      // 轨道穿梭的萤火粒子
+      const fireflies = [];
+      for (let i = 0; i < 48; i++) {
+        fireflies.push({
+          ringIdx: Math.floor(Math.random() * rings.length),
+          t: Math.random() * Math.PI * 2,
+          speed: (Math.random() * 0.004 + 0.002) * (Math.random() < 0.5 ? 1 : -1),
+          r: Math.random() * 1.8 + 0.8,
+          alpha: Math.random() * 0.6 + 0.2
+        });
+      }
+
+      let time = 0;
+      function loop() {
+        time += 0.01 * speedMultiplier;
+        const sw = stage.offsetWidth;
+        const sh = stage.offsetHeight;
+        const cx = sw * 0.5;
+        const cy = sh * 0.5;
+        const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+
+        ctx.clearRect(0, 0, sw, sh);
+
+        // 1. 扫描光锥 (晨昏交割线漫射)
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(time * 0.2);
+        const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, 260);
+        grad.addColorStop(0, isDark ? 'rgba(56, 189, 248, 0.12)' : 'rgba(2, 132, 199, 0.1)');
+        grad.addColorStop(0.5, isDark ? 'rgba(56, 189, 248, 0.03)' : 'rgba(2, 132, 199, 0.02)');
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, 260, -Math.PI * 0.15, Math.PI * 0.15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // 2. 绘制多层同心轨道与刻度
+        rings.forEach((ring, idx) => {
+          ring.angle += ring.speed * speedMultiplier;
+
+          // 轨道主线
+          ctx.beginPath();
+          ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
+          ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.09)' : 'rgba(15, 23, 42, 0.09)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // 轨道发丝刻度 (像日晷刻度齿轮)
+          const ticks = idx === 1 ? 48 : 24;
+          for (let i = 0; i < ticks; i++) {
+            const a = (i / ticks) * Math.PI * 2 + ring.angle;
+            const innerR = ring.r - (i % 4 === 0 ? 6 : 3);
+            const outerR = ring.r + (i % 4 === 0 ? 6 : 3);
+            ctx.beginPath();
+            ctx.moveTo(cx + Math.cos(a) * innerR, cy + Math.sin(a) * innerR);
+            ctx.lineTo(cx + Math.cos(a) * outerR, cy + Math.sin(a) * outerR);
+            ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(15, 23, 42, 0.15)';
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+          }
+
+          // 轨道公转节点 (星宿/时针微星)
+          const nodeA = ring.nodeAngle + ring.angle;
+          const nx = cx + Math.cos(nodeA) * ring.r;
+          const ny = cy + Math.sin(nodeA) * ring.r;
+
+          // 节点辉光
+          ctx.beginPath();
+          ctx.arc(nx, ny, ring.nodeR * 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = isDark ? 'rgba(56, 189, 248, 0.18)' : 'rgba(2, 132, 199, 0.18)';
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(nx, ny, ring.nodeR, 0, Math.PI * 2);
+          ctx.fillStyle = isDark ? '#38bdf8' : '#0284c7';
+          ctx.fill();
+        });
+
+        // 3. 萤火微光穿梭粒子
+        fireflies.forEach(f => {
+          f.t += f.speed * speedMultiplier;
+          const ring = rings[f.ringIdx];
+          const fx = cx + Math.cos(f.t) * ring.r;
+          const fy = cy + Math.sin(f.t) * ring.r;
+
+          ctx.beginPath();
+          ctx.arc(fx, fy, f.r, 0, Math.PI * 2);
+          ctx.fillStyle = isDark ? `rgba(224, 242, 254, ${f.alpha})` : `rgba(2, 132, 199, ${f.alpha})`;
+          ctx.fill();
+        });
+
+        // 4. 中心恒星枢纽 (微光核心呼吸)
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fillStyle = isDark ? '#ffffff' : '#0f172a';
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, 14 + Math.sin(time * 0.8) * 3, 0, Math.PI * 2);
+        ctx.strokeStyle = isDark ? 'rgba(56, 189, 248, 0.35)' : 'rgba(2, 132, 199, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        requestAnimationFrame(loop);
+      }
+      loop();
+    })();
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      const label = document.getElementById('theme-label');
+      if (label) {
+        label.textContent = next === 'dark' ? '切换浅色模式 (Light)' : '切换深色模式 (Dark)';
+      }
+    }
+  </script>
+</body>
+</html>
