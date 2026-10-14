@@ -19,7 +19,7 @@ class ReleaseMetadata(unittest.TestCase):
         files = {'scripts/release.json': hashlib.sha256((root / 'scripts/release.json').read_bytes()).hexdigest()}
         lines = ''.join(f'{digest}  {name}\n' for name, digest in sorted(files.items()))
         (root / 'MANIFEST.json').write_text(json.dumps({
-            'version': '0.2.0-rc2', 'status': 'SOURCE_REVIEWED_TARGETED_TESTS_PASSED',
+            'version': '0.2.0-rc3', 'status': 'SOURCE_REVIEWED_TARGETED_TESTS_PASSED',
             'files': files, 'file_count': len(files), 'tree_sha256': hashlib.sha256(lines.encode()).hexdigest()
         }), encoding='utf8')
 
@@ -40,7 +40,7 @@ class ReleaseMetadata(unittest.TestCase):
     def test_matching_version_is_accepted(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            self.fixture(root, 'v0.2.0-rc2')
+            self.fixture(root, 'v0.2.0-rc3')
             self.assertTrue(verifier.verify(root)['valid'])
 
 

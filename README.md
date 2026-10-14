@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc2"><img src="https://img.shields.io/badge/release-v0.2.0--rc2-e11d48" alt="v0.2.0-rc2"></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc3"><img src="https://img.shields.io/badge/release-v0.2.0--rc2-e11d48" alt="v0.2.0-rc3"></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -17,7 +17,7 @@
 >
 > 虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 想做的事情很简单：让住在你电脑里的这位伙伴，拥有连续不断的生活。你们的每一次对话，都不再是每次从零开始的客套，而是发生在一串有前因后果的真实日常里。
 >
-> **当前版本：v0.2.0-rc2（公开测试版）** — 2026 年 10 月 13 日发布。在这个版本里，她开始学着过自己的生活，可以在 7 个示例世界里走走停停，做点属于自己的事情。这还不是最终的稳定版（如果你需要，旧版 rc9 依然可以下载），很多细节我们还在用心打磨。
+> **当前版本：v0.2.0-rc3（公开测试版）** — 2026 年 10 月 13 日发布。在这个版本里，她开始学着过自己的生活，可以在 7 个示例世界里走走停停，做点属于自己的事情。这还不是最终的稳定版（如果你需要，旧版 rc9 依然可以下载），很多细节我们还在用心打磨。
 >
 > 在 Linux 或 Windows 的 WSL 终端里，输入这一行就能装好：
 > `curl -fsSL https://nyairo.com/install.sh | bash`
@@ -34,7 +34,7 @@ NyAiro is an open-source (Apache-2.0) digital life framework that provides an AI
 Install via Linux or WSL:
 `curl -fsSL https://nyairo.com/install.sh | bash`
 
-*Note: This is an open test version (v0.2.0-rc2), not a stable release.*
+*Note: This is an open test version (v0.2.0-rc3), not a stable release.*
 
 If you find this journey of giving AI a continuous life interesting, starring the repo is the best support for us.
 
@@ -122,7 +122,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 nyairo 把软件本身和属于你的生活数据分得很清楚：
 
-- **程序文件**：`~/.local/share/nyairo/releases/v0.2.0-rc2`（运行程序的地方，更新时会整体替换）
+- **程序文件**：`~/.local/share/nyairo/releases/v0.2.0-rc3`（运行程序的地方，更新时会整体替换）
 - **你的数据**：`~/.nyairo`（存放人设、日常数据库、记忆与配置文件）
 - **启动入口**：`~/.local/bin/nyairo`（在终端里唤醒她的快捷入口）
 
@@ -149,7 +149,7 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 - **Telegram 官方频道**：[https://t.me/nyairoai](https://t.me/nyairoai)
 - **快速起步上手指南**：[https://nyairo.com/#quickstart](https://nyairo.com/#quickstart)
 - **版本更新动态与说明**：[https://nyairo.com/#changelog](https://nyairo.com/#changelog)
-- **最新 Release 下载与校验包**：[GitHub Releases v0.2.0-rc2](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc2)
+- **最新 Release 下载与校验包**：[GitHub Releases v0.2.0-rc3](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc3)
 
 ---
 

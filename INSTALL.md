@@ -1,6 +1,6 @@
 # 安装与开始使用
 
-当前发行是 `v0.2.0-rc2` 公开测试版：[GitHub 仓库](https://github.com/L1AN929/nyairo)、[预发布下载](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc2)。不是稳定版；旧 rc9 资产保留。
+当前发行是 `v0.2.0-rc3` 公开测试版：[GitHub 仓库](https://github.com/L1AN929/nyairo)、[预发布下载](https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc3)。不是稳定版；旧 rc9 资产保留。
 
 ## 一条命令引导安装
 
@@ -10,9 +10,9 @@ Windows 用户先打开 WSL 2 / Ubuntu；Linux 用户打开自己的终端。使
 curl -fsSL https://nyairo.com/install.sh | bash
 ```
 
-自动准备 uv 和 Python 3.13，下载并校验固定 v0.2.0-rc2、安装依赖、创建独立个人配置，再打开 Hermes 模型设置向导并启动聊天。需要自己选择模型、填写密钥或服务地址。Ubuntu / Debian 如果没有 curl，先运行 `sudo apt update && sudo apt install -y curl`。
+自动准备 uv 和 Python 3.13，下载并校验固定 v0.2.0-rc3、安装依赖、创建独立个人配置，再打开 Hermes 模型设置向导并启动聊天。需要自己选择模型、填写密钥或服务地址。Ubuntu / Debian 如果没有 curl，先运行 `sudo apt update && sudo apt install -y curl`。
 
-安装目录：`~/.local/share/nyairo/releases/v0.2.0-rc2`；个人数据：`~/.nyairo`；命令入口：`~/.local/bin/nyairo`。以后打开新终端运行 `nyairo`；模型设置用 `nyairo setup model`，平台设置用 `nyairo gateway setup`，网关用 `nyairo gateway run`。修改人设编辑 `~/.nyairo/SOUL.md`。
+安装目录：`~/.local/share/nyairo/releases/v0.2.0-rc3`；个人数据：`~/.nyairo`；命令入口：`~/.local/bin/nyairo`。以后打开新终端运行 `nyairo`；模型设置用 `nyairo setup model`，平台设置用 `nyairo gateway setup`，网关用 `nyairo gateway run`。修改人设编辑 `~/.nyairo/SOUL.md`。
 
 重复运行会核对程序、保留个人数据并再次打开模型向导，不自动升级到其他发行版本。旧手动安装不会自动搬家；要使用已有个人目录，可明确传入 `--profile`，继续使用前仍按隐私升级说明检查旧授权。
 
@@ -39,7 +39,7 @@ curl -fsSL https://nyairo.com/install.sh | bash -s -- --prefix "$HOME/apps/nyair
 
 ## 首次安装与旧配置升级
 
-首次安装使用 v0.2.0-rc2；旧 ZIP 和标签不改写。创建 profile 时，只有加上 `--allow-local-owner` 才授权当前 Linux 账号的本地入口；Telegram 等入口仍需自己的明确 DM 绑定。记忆模式默认拦截模型工具，用户命令与聊天仍可用；主动放开工具会削弱遗忘后的读取限制。
+首次安装使用 v0.2.0-rc3；旧 ZIP 和标签不改写。创建 profile 时，只有加上 `--allow-local-owner` 才授权当前 Linux 账号的本地入口；Telegram 等入口仍需自己的明确 DM 绑定。记忆模式默认拦截模型工具，用户命令与聊天仍可用；主动放开工具会削弱遗忘后的读取限制。
 
 已有 profile 不要重跑创建脚本，也不要删数据。先备份 `HERMES_HOME`，更新程序和个人插件副本，再按 [隐私修复与升级](PRIVACY_REVIEW.md) 检查自己的授权设置。你写好的 SOUL.md 和个人记录会保留。
 
@@ -47,9 +47,9 @@ curl -fsSL https://nyairo.com/install.sh | bash -s -- --prefix "$HOME/apps/nyair
 
 RC1 引导安装会在 Linux / WSL 建立 `~/.local/bin/nyairo` 并记住个人目录。手动 Git / ZIP 路线在创建个人目录后，按教程运行一次 `bash scripts/update.sh --adopt` 登记入口。以后通过固定入口聊天、运行网关和整包更新。已有 rc5 安装请使用 [一次性迁移步骤](UPDATE.md)，保留原来的个人目录。
 
-## v0.2.0-rc2 预发布安装
+## v0.2.0-rc3 预发布安装
 
-`v0.2.0-rc2` 是公开测试版，不是稳定版；发行提交以标签为准，来自 `v0.2-world-integration`，未合入 `main`。
+`v0.2.0-rc3` 是公开测试版，不是稳定版；发行提交以标签为准，来自 `v0.2-world-integration`，未合入 `main`。
 安装器随本包指向 RC1，官网入口只在 Release 资产可下载后更新。也可按下面的手动路线安装。
 
 需要的东西：Linux 或 Windows WSL / Ubuntu、Python 3.13、`curl`、`sha256sum`、`unzip` 或 Python 的
@@ -57,21 +57,21 @@ RC1 引导安装会在 Linux / WSL 建立 `~/.local/bin/nyairo` 并记住个人�
 
 ```bash
 # 1) 下载预发布源码包和它的校验值
-curl -fL -o nyairo-v0.2.0-rc2.zip \
-  https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc2/nyairo-v0.2.0-rc2.zip
-curl -fL -o nyairo-v0.2.0-rc2.zip.sha256 \
-  https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc2/nyairo-v0.2.0-rc2.zip.sha256
+curl -fL -o nyairo-v0.2.0-rc3.zip \
+  https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip
+curl -fL -o nyairo-v0.2.0-rc3.zip.sha256 \
+  https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip.sha256
 
 # 2) 校验（不通过就停在这里）
-sha256sum -c nyairo-v0.2.0-rc2.zip.sha256
+sha256sum -c nyairo-v0.2.0-rc3.zip.sha256
 
 # 3) 解压到一个独立目录
-mkdir -p "$HOME/.local/share/nyairo/releases/v0.2.0-rc2"
-python3 -m zipfile -e nyairo-v0.2.0-rc2.zip "$HOME/.local/share/nyairo/releases/v0.2.0-rc2"
+mkdir -p "$HOME/.local/share/nyairo/releases/v0.2.0-rc3"
+python3 -m zipfile -e nyairo-v0.2.0-rc3.zip "$HOME/.local/share/nyairo/releases/v0.2.0-rc3"
 
 # 4) 先核完整性，再装依赖（源码包不含 Git 元数据）
-python3 "$HOME/.local/share/nyairo/releases/v0.2.0-rc2/scripts/verify_manifest.py"
-cd "$HOME/.local/share/nyairo/releases/v0.2.0-rc2"
+python3 "$HOME/.local/share/nyairo/releases/v0.2.0-rc3/scripts/verify_manifest.py"
+cd "$HOME/.local/share/nyairo/releases/v0.2.0-rc3"
 uv sync --project vendor/hermes --frozen --extra messaging --extra web
 
 # 5) 个人目录：新装
@@ -95,7 +95,7 @@ SHA256），**不证明发布者身份**，也不证明凭据状态。解压出�
 ## v0.2 自主生活（预发布候选）
 
 自主生活基线为 `35df37f`，生成世界与常驻进程的同实例融合已通过隔离 owner 链验收。
-发行标签为 `v0.2.0-rc2`；未合入 `main`，未切生产。下面保留基线隔离安装的真实历史操作。
+发行标签为 `v0.2.0-rc3`；未合入 `main`，未切生产。下面保留基线隔离安装的真实历史操作。
 自主生活依然需要独立服务、真实授权和显式 enable，不是基础安装后自动产生动作。
 
 下面的命令与输出，是在隔离测试环境里**实际执行过**的一次完整安装走通（全新个人目录 → 初始化 → 配置供应商 → 资源服务工作区与授权 → 打开自主生活 → 一次合法作品活动 → 回读真实结果）。隔离环境不等于生产交付，逐能力判定见 [验收与复测](TESTING.md) 的 E13 门禁。
@@ -247,4 +247,4 @@ content : "# 长测的手记\n\n第一段：先写一句，看看她会不会自
 
 这一轮**没有任何用户消息**：考虑由到期窗口触发，决策来自真实模型，写入由资源服务确认，新正文是模型写的散文而不是模板。这一次共 **2 次**真实模型调用（1 次决策 + 1 次内容生成）。
 
-日常使用、能力边界与不得声称的部分，见 [详细中文教程](docs/USER_GUIDE.zh-CN.md) 的「v0.2 自主生活（v0.2.0-rc2 公开测试版）」一节。
+日常使用、能力边界与不得声称的部分，见 [详细中文教程](docs/USER_GUIDE.zh-CN.md) 的「v0.2 自主生活（v0.2.0-rc3 公开测试版）」一节。
