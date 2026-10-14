@@ -373,6 +373,14 @@ def render_grounded_context(client: WorldBodyClient, *, max_objects: int = 8) ->
     area = location.get("area_id")
     where = "/".join(str(x) for x in (place, area) if x) or "unknown"
     parts = ["[world] location=%s | pose=%s" % (where, snap.get("pose"))]
+    try:
+        from chiyo_bundle.world_move_tool import travel_context
+        travel = travel_context(client.environment, socket_path=client.socket_path)
+        if travel:
+            parts.append(travel)
+    except Exception:
+        # Optional travel perception must not suppress a valid World/Body view.
+        pass
     objects = (snap.get("visible_objects") or [])[:max_objects]
     if objects:
         parts.append("visible: " + ", ".join(

@@ -70,6 +70,9 @@ def memory_tool_gate(tool_name,args,**kwargs):
         home,cfg=configuration()
     except Exception:
         return {'action':'block','message':'Personal memory configuration is unavailable; historical memory tools are blocked.'}
+    # This bounded World tool cannot read transcripts or personal memory.
+    if tool_name == 'world_move':
+        return None
     if cfg.get('memory') and (cfg.get('memory_tool_policy') != 'unrestricted' or tool_name in ('memory','session_search')):
         return {'action':'block','message':'Personal memory mode blocks model tools that could read forgotten history. Use /chiyo_memory; unrestricted tools require an explicit profile setting and remove this protection.'}
     return None
