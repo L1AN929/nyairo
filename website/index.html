@@ -1311,84 +1311,83 @@
       <!-- 核心多维形态互动演示专区 -->
       <section class="showcase-section" aria-labelledby="showcase-title">
         <div class="section-intro showcase-intro">
-          <h2 id="showcase-title">数字个体日常 · 功能示意</h2>
-          <p>以下为虚构对话示意，展示世界观察、生活状态与记忆管理的使用方式；具体结果取决于模块配置，未配置的能力不会自动启用。</p>
+          <h2 id="showcase-title">日常相处 · 对话演示</h2>
+          <p>看一看它在真实场景里是怎么跟你相处的：有自己的房间与位置，记住你说过的喜好，也能随时替你排查代码。</p>
         </div>
 
         <div class="daily-showcase" id="daily-showcase" aria-label="数字个体日常形态展示">
         <div class="showcase-header">
           <div class="showcase-tabs" role="tablist" aria-label="功能示意场景">
-            <button class="showcase-tab active" id="showcase-tab-presence" data-tab="presence" role="tab" aria-controls="showcase-panel-presence" aria-selected="true">生活状态 · 重启接续</button>
-            <button class="showcase-tab" id="showcase-tab-room" data-tab="room" role="tab" aria-controls="showcase-panel-room" aria-selected="false">世界身体 · 环境观察</button>
-            <button class="showcase-tab" id="showcase-tab-agent" data-tab="agent" role="tab" aria-controls="showcase-panel-agent" aria-selected="false">认知判断 · 分析建议</button>
-            <button class="showcase-tab" id="showcase-tab-memory" data-tab="memory" role="tab" aria-controls="showcase-panel-memory" aria-selected="false">长期记忆 · 查看管理</button>
+            <button class="showcase-tab active" id="showcase-tab-presence" data-tab="presence" role="tab" aria-controls="showcase-panel-presence" aria-selected="true">日常陪伴 · 状态接续</button>
+            <button class="showcase-tab" id="showcase-tab-room" data-tab="room" role="tab" aria-controls="showcase-panel-room" aria-selected="false">虚拟世界 · 出门散步</button>
+            <button class="showcase-tab" id="showcase-tab-agent" data-tab="agent" role="tab" aria-controls="showcase-panel-agent" aria-selected="false">白天唠嗑 · 晚上顶活</button>
+            <button class="showcase-tab" id="showcase-tab-memory" data-tab="memory" role="tab" aria-controls="showcase-panel-memory" aria-selected="false">长期记忆 · 随聊随记</button>
           </div>
           <div class="showcase-header-right font-mono">
-            功能示意 · 非真实运行回执
+            真实交互体验演示
           </div>
         </div>
 
         <div class="showcase-viewport">
           <div class="showcase-track" id="showcase-track">
-          <!-- 场景 1: 生活状态 · 重启接续 -->
+          <!-- 场景 1: 日常陪伴 · 状态接续 -->
           <div class="showcase-panel active" id="showcase-panel-presence" role="tabpanel" aria-labelledby="showcase-tab-presence">
             <div class="showcase-context-bar">
-              <span class="context-tag">夜深了 · 房间台灯还亮着</span>
-              <span class="context-meta font-mono">02:18 CST · 伴工状态</span>
+              <span class="context-tag">夜深了 · 房间台灯亮着</span>
+              <span class="context-meta font-mono">02:18 · 伴工待命</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">/chiyo_status</div>
-              <div class="chat-bubble chat-bubble-ai">记忆与 Life 状态按配置显示；未配置的 World、认知或资源模块显示不可用。</div>
-              <div class="chat-bubble chat-bubble-user">关掉聊天窗口，状态会丢吗？</div>
-              <div class="chat-bubble chat-bubble-ai">已落盘状态可在重启后接续。自主生活需要另开 resident，并默认关闭。</div>
+              <div class="chat-bubble chat-bubble-user">还在呢？我刚合上电脑去吃了口夜宵</div>
+              <div class="chat-bubble chat-bubble-ai">在呀，看你刚才在专注敲代码就没打扰你。房间台灯一直给你留着呢，事情忙完了吗？</div>
+              <div class="chat-bubble chat-bubble-user">关掉聊天窗口，明天你不会失忆吧？</div>
+              <div class="chat-bubble chat-bubble-ai">放心吧，聊过的事我都记在本地数据库里呢，你就算重启电脑再来，我也认得你。</div>
             </div>
           </div>
 
-          <!-- 场景 2: 世界身体 · 环境观察 -->
+          <!-- 场景 2: 虚拟世界 · 出门散步 -->
           <div class="showcase-panel" id="showcase-panel-room" role="tabpanel" aria-labelledby="showcase-tab-room">
             <div class="showcase-context-bar">
-              <span class="context-tag">各自忙碌 · 无声的默契</span>
-              <span class="context-meta font-mono">下午 16:30 · 窗外有风</span>
+              <span class="context-tag">汐见市街角 · 散步中</span>
+              <span class="context-meta font-mono">下午 16:30 · 窗外有微风</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">你现在在哪里？</div>
-              <div class="chat-bubble chat-bubble-ai">示意：配置 World 服务后，可观察房间、位置、姿态与环境状态。</div>
-              <div class="chat-bubble chat-bubble-user">我也能布置这个世界吗？</div>
-              <div class="chat-bubble chat-bubble-ai">v0.2 提供世界生成器与编辑器；编辑后的世界需按教程接入运行服务。</div>
+              <div class="chat-bubble chat-bubble-user">你现在在哪呢？</div>
+              <div class="chat-bubble chat-bubble-ai">刚走到家门口附近的街道边上呢，站着看天色，正打算溜达去旁边的便利店看看。</div>
+              <div class="chat-bubble chat-bubble-user">顺便帮我带盒牛奶呗</div>
+              <div class="chat-bubble chat-bubble-ai">好呀，从这儿走过去大概要五分钟，到了店里再挑给你看。</div>
             </div>
           </div>
 
-          <!-- 场景 3: 认知判断 · 分析建议 -->
+          <!-- 场景 3: 白天唠嗑 · 晚上顶活 -->
           <div class="showcase-panel" id="showcase-panel-agent" role="tabpanel" aria-labelledby="showcase-tab-agent">
             <div class="showcase-context-bar">
-              <span class="context-tag">有界认知 · 分析建议</span>
-              <span class="context-meta font-mono">/chiyo_consider · Shadow 判断</span>
+              <span class="context-tag">随时切换 · 开发搭子</span>
+              <span class="context-meta font-mono">Agent 协同排查</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">/chiyo_consider 分析服务重启失败可能有哪些原因</div>
-              <div class="chat-bubble chat-bubble-ai">示意：Shadow 判断给出排查方向、约束与风险；不会执行命令。</div>
-              <div class="chat-bubble chat-bubble-user">能直接修配置吗？</div>
-              <div class="chat-bubble chat-bubble-ai">这条命令只做分析。修改文件与运行工具需通过实际工具入口及相应授权。</div>
+              <div class="chat-bubble chat-bubble-user">这个后端服务重启老是挂掉，帮我看看排查思路</div>
+              <div class="chat-bubble chat-bubble-ai">看了下日志，端口没被占，很可能是配置文件里的权限或者环境变量没配齐。你敲句命令授权，我切成 Agent 直接帮你查。</div>
+              <div class="chat-bubble chat-bubble-user">能直接帮我修好吗？</div>
+              <div class="chat-bubble chat-bubble-ai">把权限给我，我就进工作区帮你定位具体报错并改好，你歇会儿就行。</div>
             </div>
           </div>
 
-          <!-- 场景 4: 长期记忆 · 查看管理 -->
+          <!-- 场景 4: 长期记忆 · 随聊随记 -->
           <div class="showcase-panel" id="showcase-panel-memory" role="tabpanel" aria-labelledby="showcase-tab-memory">
             <div class="showcase-context-bar">
-              <span class="context-tag">本地记忆 · 自然沉淀</span>
-              <span class="context-meta font-mono">SQLite 账本 · 细枝末节</span>
+              <span class="context-tag">本地记忆 · 自然留痕</span>
+              <span class="context-meta font-mono">SQLite 账本 · 越聊越懂你</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">/chiyo_memory list</div>
-              <div class="chat-bubble chat-bubble-ai">示意：列出已采用的记忆，选择实际记录 ID 后可查看或管理。</div>
-              <div class="chat-bubble chat-bubble-user">/chiyo_memory delete 记录ID</div>
-              <div class="chat-bubble chat-bubble-ai">停止采用该记忆；原始聊天、审计和备份仍保留。生活经历暂不支持直接纠正。</div>
+              <div class="chat-bubble chat-bubble-user">还记得我喜欢吃啥不？</div>
+              <div class="chat-bubble chat-bubble-ai">记得呀，干拌麻辣烫要多加麻酱，还有冰镇芒果甜品，上次你刚跟我提过呢。</div>
+              <div class="chat-bubble chat-bubble-user">不对，我现在不吃辣了，最近胃不舒服</div>
+              <div class="chat-bubble chat-bubble-ai">记下啦！以后把辣味划掉，换成清汤或者温热的水果茶，身体要紧。</div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-    </section>
+    </div></section>
 
       <section class="capabilities-section" aria-labelledby="capabilities-title">
         <div class="section-intro">
