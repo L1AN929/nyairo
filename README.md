@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc3"><img src="https://img.shields.io/badge/release-v0.2.0--rc2-e11d48" alt="v0.2.0-rc3"></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.2.0-rc3"><img src="https://img.shields.io/badge/release-v0.2.0--rc3-e11d48" alt="v0.2.0-rc3"></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -13,15 +13,14 @@
   <img src="https://img.shields.io/badge/license-Apache--2.0-1f2937.svg" alt="License" />
 </p>
 
-> **给 AI 一个世界，让她拥有属于自己的日常。**
+> **离开聊天窗口后，它的时间不会静止。**
 >
-> 虚拟世界承载经历，身体连接感知，记忆延续过往。nyairo 想做的事情很简单：让住在你电脑里的这位伙伴，拥有连续不断的生活。你们的每一次对话，都不再是每次从零开始的客套，而是发生在一串有前因后果的真实日常里。
+> nyairo 是一个开源的数字个体框架，让 AI 拥有本地长期记忆、可编辑的虚拟小房间，以及按真实时间流动的日常。你们的每一次对话，不再是一次性客套的问答，而是发生在一个看得见房间、走得出门的日常场景里。
 >
-> **当前版本：v0.2.0-rc3（公开测试版）** — 2026 年 10 月 13 日发布。在这个版本里，她开始学着过自己的生活，可以在 7 个示例世界里走走停停，做点属于自己的事情。这还不是最终的稳定版（如果你需要，旧版 rc9 依然可以下载），很多细节我们还在用心打磨。
+> **当前版本：v0.2.0-rc3（公开测试版）** — 2026 年 10 月 14 日发布。在这个版本里，我们增加了单机网页地图编辑器，实现了按真实物理距离计时的走路出行（拒绝瞬间瞬移），并打通了微信私聊接入。这还不是最终的稳定版，很多细节我们还在用心打磨。
 >
 > 在 Linux 或 Windows 的 WSL 终端里，输入这一行就能装好：
 > `curl -fsSL https://nyairo.com/install.sh | bash`
-
 ---
 
 ## About (English)
@@ -42,21 +41,18 @@ If you find this journey of giving AI a continuous life interesting, starring th
 
 ## 核心特性
 
-- **她开始有自己的生活**：哪怕你没有发消息找她，她也会按自己的节奏醒来看一眼，决定要不要做点什么，或者把之前没写完的东西接着写下去。这项功能默认是关闭的，如果你想让她自己忙起来，可以手动打开。
-- **她做完的事是真的**：她不会随口敷衍你。光说一句“写好了”不算数，只有系统确认事情真正办妥了，才会记进账本；遇到说不清的情况，她会老老实实标成“不确定”，绝不假装成功。
-- **世界可以自己画**：这一版带来了世界生成器和世界编辑器，还附带了 7 个现成的示例世界。你可以自己画一面墙、装一扇门、摆几件家具。她在里面能清楚感知自己的位置，能在屋子里走动，也能动身去别的地方。
-- **长久的记忆**：今天聊过的事、以前一起经历过的心情，关掉窗口也不会丢。重要经历可跨会话召回，召回效果取决于配置与记录质量；你可以随时查看她记住了什么，能帮她修正记错的事，也能停止采用不想继续召回的记录；原始聊天、审计和备份仍保留。
-- **生活不会中断**：即使你合上电脑或者重启系统，她的状态依然是连续的，不会退化成那种点一下才动一下的一次性对话框。
-- **认真的工作帮手**：需要处理复杂事情时，她也可以从日常状态切换出来，接管本地工作区，帮你写代码、推演方案或者运行脚本。
-- **本地保存数据**：她的人设、你们的聊天记录、日常记录默认保存在本地个人目录；World / Supply 服务使用各自的数据根。连接外部模型时，参与回复的上下文会发送到你配置的服务。
-
+- **出门真的在走路（拒绝瞬间瞬移）**：告别聊天指令下像末影人一样的瞬间瞬移。出门去便利店走 5 分钟、去公园走 9 分钟；在路上问它走到哪了，它会如实说还在路上，只有时间真正走完了才进店；中转路线会自动接力走完。
+- **关掉窗口也有自己的生活**：哪怕你没有发消息找它，它在后台也会按节律自己醒来看看风景、散步或者写日记。我们在真实服务器上连续测了 58 小时，它在后台自发写出了一篇千字随笔。这项功能默认关闭，可以按需开启。
+- **世界可以自己画**：包里自带单机轻量地图编辑器，双击就能在本地浏览器打开。可以在房间里画墙、装门、摆桌椅，也能直接套用做好的小城镇模板。
+- **本地长期记忆**：聊天记录和记忆保存在本地 SQLite 数据库，跨越会话也能自然聊起；说错了随时用命令修改，不上传云端，数据在你自己手里。
+- **白天陪伴，晚上写代码**：平时是陪你唠嗑的生活搭子，遇到复杂的编程或系统问题时，敲句命令就能切成 Agent 帮你查代码、推演方案。
 ---
 ## 架构概览
 
 ```text
 +-------------------------------------------------------------+
 |                  交互层 (User & Platforms)                  |
-|            终端交互 (CLI)  |  消息网关 (Telegram)           |
+|            终端交互 (CLI)  |  消息网关 (微信 / Telegram)           |
 +-------------------------------------------------------------+
                                |
 +-------------------------------------------------------------+
