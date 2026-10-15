@@ -167,7 +167,19 @@ def move_handler(args, **kwargs) -> str:
                 minutes = math.ceil(started["route_duration_seconds"] / 60)
                 message = f"已出发，正在步行前往{_label(step)}，预计{minutes}分钟到达。"
                 if step != target:
-                    message += f"这是前往{_label(target)}的中转；到达街道后再次调用 world_move 前往{_label(target)}。"
+                    message += f"这是前往{_label(target)}的中转；到达街道后会继续前往{_label(target)}。"
+                    try:
+                        (home / "data/world/intended_target.json").write_text(
+                            json.dumps({"target": target, "set_at": now.isoformat()}, ensure_ascii=False),
+                            encoding="utf-8"
+                        )
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        (home / "data/world/intended_target.json").unlink(missing_ok=True)
+                    except Exception:
+                        pass
                 return _result(True, "started", message, destination_location_id=step,
                                requested_location_id=target, estimated_minutes=minutes, route=route)
         return _result(True, "arrived", f"已到达{_label(target)}。", location_id=target, route=route)
