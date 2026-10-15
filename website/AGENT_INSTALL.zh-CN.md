@@ -53,7 +53,7 @@
    curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip
    curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip.sha256
    sha256sum -c nyairo-v0.2.0-rc3.zip.sha256
-   ZIP 的 SHA256 必须是：6136af4c03a6ce2d5db01607424ba06232e839333d71765abb4763e61052b0e7
+   ZIP 的 SHA256 必须是：31149fb8bef960743c83cd98d2cfa28c9d11ea2ed9560d55271eba8d4c11753a
    不一致就立刻停止，把实际值告诉我，不要继续。
 2) 解压并使用包内的官方安装器安装（不要自己另写一套安装脚本）：
    python3 -m zipfile -e nyairo-v0.2.0-rc3.zip "$HOME/apps/nyairo-v0.2.0-rc3"

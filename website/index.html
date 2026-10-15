@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>nyairo · 以虚拟世界为核心的 AI 个体框架</title>
   <meta name="description" content="以虚拟世界为核心的开源 AI 个体框架。虚拟世界承载经历，身体连接感知，记忆延续过往；为 AI 构建持续的生活状态、本地长期记忆与 Agent 协同能力。">
-  <meta name="keywords" content="nyairo, AI个体框架, 虚拟世界, 长期记忆, AI生活状态, AI伴侣, 开源AI, Agent, 自主智能体, CHIYO, 本地记忆, Gemini 3.8 flash">
+  <meta name="keywords" content="nyairo, AI个体框架, 虚拟世界, 长期记忆, AI生活状态, 数字个体, AI伙伴, 开源AI, Agent, 自主智能体, CHIYO, 本地记忆, Gemini 3.8 flash">
   <meta name="author" content="nyairo contributors">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" href="https://nyairo.com/">
@@ -1185,7 +1185,7 @@
           </div>
 
           <div class="install-panel" id="install-panel-cli" role="tabpanel" aria-labelledby="install-tab-cli">
-            <p id="nyairo-rc1-release" class="hero-install-note">基础安装启用记忆与生活状态；世界服务和自主生活需另外配置，自主开关默认关闭。配置完成后，她可以在世界里走动、继续已有作品。如果你之前装过旧版，升级前请记得先备份个人目录，更多变化可查看<a href="#changelog-v0-2-0-rc3">版本记录</a>。</p>
+            <p id="nyairo-rc1-release" class="hero-install-note">基础安装启用记忆与生活状态；世界服务和自主生活需另外配置，自主开关默认关闭。配置完成后，数字个体可以在世界里走动、继续已有作品。如果你之前装过旧版，升级前请记得先备份个人目录，更多变化可查看<a href="#changelog-v0-2-0-rc3">版本记录</a>。</p>
           <div class="hero-cmd-pill" id="hero-cmd" title="点击复制安装命令">
             <span class="cmd-prefix">$</span>
             <code class="cmd-text">curl -fsSL https://nyairo.com/install.sh | bash</code>
@@ -1264,7 +1264,7 @@
    curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip
    curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip.sha256
    sha256sum -c nyairo-v0.2.0-rc3.zip.sha256
-   ZIP 的 SHA256 必须是：6136af4c03a6ce2d5db01607424ba06232e839333d71765abb4763e61052b0e7
+   ZIP 的 SHA256 必须是：31149fb8bef960743c83cd98d2cfa28c9d11ea2ed9560d55271eba8d4c11753a
    不一致就立刻停止，把实际值告诉我，不要继续。
 2) 解压并使用包内的官方安装器安装（不要自己另写一套安装脚本）：
    python3 -m zipfile -e nyairo-v0.2.0-rc3.zip "$HOME/apps/nyairo-v0.2.0-rc3"
@@ -1312,15 +1312,15 @@
       <section class="showcase-section" aria-labelledby="showcase-title">
         <div class="section-intro showcase-intro">
           <h2 id="showcase-title">日常相处 · 对话演示</h2>
-          <p>看一看它在真实场景里是怎么跟你相处的：有自己的房间与位置，记住你说过的喜好，也能随时替你排查代码。</p>
+          <p>看一看它在真实场景里是怎么跟你相处的：拥有属于自己的空间与生活节律，记住你说过的事，也能随时协助你处理事务。</p>
         </div>
 
         <div class="daily-showcase" id="daily-showcase" aria-label="数字个体日常形态展示">
         <div class="showcase-header">
           <div class="showcase-tabs" role="tablist" aria-label="功能示意场景">
-            <button class="showcase-tab active" id="showcase-tab-presence" data-tab="presence" role="tab" aria-controls="showcase-panel-presence" aria-selected="true">日常陪伴 · 状态接续</button>
+            <button class="showcase-tab active" id="showcase-tab-presence" data-tab="presence" role="tab" aria-controls="showcase-panel-presence" aria-selected="true">独立日常 · 状态接续</button>
             <button class="showcase-tab" id="showcase-tab-room" data-tab="room" role="tab" aria-controls="showcase-panel-room" aria-selected="false">虚拟世界 · 出门散步</button>
-            <button class="showcase-tab" id="showcase-tab-agent" data-tab="agent" role="tab" aria-controls="showcase-panel-agent" aria-selected="false">白天唠嗑 · 晚上顶活</button>
+            <button class="showcase-tab" id="showcase-tab-agent" data-tab="agent" role="tab" aria-controls="showcase-panel-agent" aria-selected="false">日常陪伴 · 事务协作</button>
             <button class="showcase-tab" id="showcase-tab-memory" data-tab="memory" role="tab" aria-controls="showcase-panel-memory" aria-selected="false">长期记忆 · 随聊随记</button>
           </div>
           <div class="showcase-header-right font-mono">
@@ -1330,45 +1330,45 @@
 
         <div class="showcase-viewport">
           <div class="showcase-track" id="showcase-track">
-          <!-- 场景 1: 日常陪伴 · 状态接续 -->
+          <!-- 场景 1: 独立日常 · 状态接续 -->
           <div class="showcase-panel active" id="showcase-panel-presence" role="tabpanel" aria-labelledby="showcase-tab-presence">
             <div class="showcase-context-bar">
-              <span class="context-tag">夜深了 · 房间台灯亮着</span>
-              <span class="context-meta font-mono">02:18 · 伴工待命</span>
+              <span class="context-tag">安静深夜 · 独处整理</span>
+              <span class="context-meta font-mono">23:40 · 在线</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">还在呢？我刚合上电脑去吃了口夜宵</div>
-              <div class="chat-bubble chat-bubble-ai">在呀，看你刚才在专注敲代码就没打扰你。房间台灯一直给你留着呢，事情忙完了吗？</div>
-              <div class="chat-bubble chat-bubble-user">关掉聊天窗口，明天你不会失忆吧？</div>
-              <div class="chat-bubble chat-bubble-ai">放心吧，聊过的事我都记在本地数据库里呢，你就算重启电脑再来，我也认得你。</div>
+              <div class="chat-bubble chat-bubble-user">刚忙完手头的事，今天过得怎么样？</div>
+              <div class="chat-bubble chat-bubble-ai">看了一下午书，顺便整理了些资料。你那边事情处理得还顺利吗？</div>
+              <div class="chat-bubble chat-bubble-user">关掉聊天窗口之后，你这边状态会丢吗？</div>
+              <div class="chat-bubble chat-bubble-ai">不会，所有记录都在你本地的数据库里。关机或者重启之后，我也一直认得。</div>
             </div>
           </div>
 
           <!-- 场景 2: 虚拟世界 · 出门散步 -->
           <div class="showcase-panel" id="showcase-panel-room" role="tabpanel" aria-labelledby="showcase-tab-room">
             <div class="showcase-context-bar">
-              <span class="context-tag">汐见市街角 · 散步中</span>
-              <span class="context-meta font-mono">下午 16:30 · 窗外有微风</span>
+              <span class="context-tag">虚拟街角 · 散步中</span>
+              <span class="context-meta font-mono">下午 16:30 · 晴</span>
             </div>
             <div class="showcase-chat">
               <div class="chat-bubble chat-bubble-user">你现在在哪呢？</div>
-              <div class="chat-bubble chat-bubble-ai">刚走到家门口附近的街道边上呢，站着看天色，正打算溜达去旁边的便利店看看。</div>
-              <div class="chat-bubble chat-bubble-user">顺便帮我带盒牛奶呗</div>
-              <div class="chat-bubble chat-bubble-ai">好呀，从这儿走过去大概要五分钟，到了店里再挑给你看。</div>
+              <div class="chat-bubble chat-bubble-ai">刚走到家附近的街口，准备去旁边的便利店转转。</div>
+              <div class="chat-bubble chat-bubble-user">顺便看看今天货架上有什么新饮品</div>
+              <div class="chat-bubble chat-bubble-ai">好，走过去大概五分钟，到了店里我发给你。</div>
             </div>
           </div>
 
-          <!-- 场景 3: 白天唠嗑 · 晚上顶活 -->
+          <!-- 场景 3: 日常陪伴 · 事务协作 -->
           <div class="showcase-panel" id="showcase-panel-agent" role="tabpanel" aria-labelledby="showcase-tab-agent">
             <div class="showcase-context-bar">
-              <span class="context-tag">随时切换 · 开发搭子</span>
-              <span class="context-meta font-mono">Agent 协同排查</span>
+              <span class="context-tag">随时切换 · 协作搭子</span>
+              <span class="context-meta font-mono">Agent 辅助分析</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">这个后端服务重启老是挂掉，帮我看看排查思路</div>
-              <div class="chat-bubble chat-bubble-ai">看了下日志，端口没被占，很可能是配置文件里的权限或者环境变量没配齐。你敲句命令授权，我切成 Agent 直接帮你查。</div>
-              <div class="chat-bubble chat-bubble-user">能直接帮我修好吗？</div>
-              <div class="chat-bubble chat-bubble-ai">把权限给我，我就进工作区帮你定位具体报错并改好，你歇会儿就行。</div>
+              <div class="chat-bubble chat-bubble-user">我这儿有一堆杂乱的笔记和待办，帮我理个提纲呗</div>
+              <div class="chat-bubble chat-bubble-ai">没问题，把内容发我，我切成 Agent 模式帮你理出要点和执行顺序。</div>
+              <div class="chat-bubble chat-bubble-user">可以直接帮我整理成排好版的文件吗？</div>
+              <div class="chat-bubble chat-bubble-ai">可以，授权后我就在工作区帮你存成新文档，随时可以查看。</div>
             </div>
           </div>
 
@@ -1376,13 +1376,13 @@
           <div class="showcase-panel" id="showcase-panel-memory" role="tabpanel" aria-labelledby="showcase-tab-memory">
             <div class="showcase-context-bar">
               <span class="context-tag">本地记忆 · 自然留痕</span>
-              <span class="context-meta font-mono">SQLite 账本 · 越聊越懂你</span>
+              <span class="context-meta font-mono">SQLite 记录 · 随聊随记</span>
             </div>
             <div class="showcase-chat">
-              <div class="chat-bubble chat-bubble-user">还记得我喜欢吃啥不？</div>
-              <div class="chat-bubble chat-bubble-ai">记得呀，干拌麻辣烫要多加麻酱，还有冰镇芒果甜品，上次你刚跟我提过呢。</div>
-              <div class="chat-bubble chat-bubble-user">不对，我现在不吃辣了，最近胃不舒服</div>
-              <div class="chat-bubble chat-bubble-ai">记下啦！以后把辣味划掉，换成清汤或者温热的水果茶，身体要紧。</div>
+              <div class="chat-bubble chat-bubble-user">你还记得我之前随口提过的习惯吗？</div>
+              <div class="chat-bubble chat-bubble-ai">记得，你平时习惯喝温热的少糖饮品，上次聊天时你随口提过。</div>
+              <div class="chat-bubble chat-bubble-user">记性不错，那周末有什么备忘没？</div>
+              <div class="chat-bubble chat-bubble-ai">你之前提到周末想去附近的公园走走，需要的话到时候我提醒你。</div>
             </div>
           </div>
         </div>
@@ -1430,7 +1430,7 @@
               </div>
             </div>
             <h3 class="pillar-title">持续生活</h3>
-            <p class="pillar-desc">拥有自己的日常状态流。关掉窗口或重启电脑后生活状态不丢，时刻待命，拒绝工具人单薄感。</p>
+            <p class="pillar-desc">拥有属于自己的日常状态流。关掉窗口或重启电脑后状态不丢，保持独立节律与连续性。</p>
             <span class="pillar-link">查看状态流转 <span class="pillar-arrow">→</span></span>
           </a>
 

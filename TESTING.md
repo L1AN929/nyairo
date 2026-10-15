@@ -213,7 +213,7 @@ python3 -m venv .venv-dev
 | 对同一件作品的持续编辑 | `E2E_VERIFIED` | B8-6 / B8-6A 长测：同一件作品由真实模型连续推进（v1→v5、v1→v3），每次都有 owner 回执；E13 走通也在同一件作品上把 v1 推进到 v2。受控替身版本见 T03（同一 Activity、`parent_version_id` = 上一版、checkpoint 前移） | 没有做跨天、跨重启的编辑统计 |
 | 有界的 World MOVE | `E2E_VERIFIED` | T16（`run_world_move_e2e.sh`）：真实 World 服务 + 真 gateway，`home`→`nearby_street`、revision 1→2、重启后保持；不可达的 MOVE 被拒且世界不变；UNKNOWN 用原 execution_id 对账、不二次移动（`WORLD_MOVE_ACCEPTANCE PASS`） | 本批**没有**复跑 T16；E13 的隔离 profile 没有配 World（观测记 `UNAVAILABLE`），"自主循环里由真实模型选择一次 MOVE"没有证据 |
 | 真实结果形成受控的生活经历 | `TESTED_ISOLATED` | E13 走通：真实提交在 M0 留下一条 `LIFE_VERIFIED_OUTCOME` 记录（正文由结构化字段拼成，不是手写）；三个不同性质的真实结果（成功提交 / 冲突拒绝 / 放弃）的准入见 B8-5 实验 B1（`accepted=1 / duplicate=0 / defer=0`） | **经历改变决策**没有证据：B8-5 实验 B2 的真实模型半边当时 `NOT_RUN`，本批没有复跑；`NO_CHANGE` 无法成为经历（AG-2 词表缺口） |
-| 预算、静默、重启恢复 | `TESTED_ISOLATED` | T14（空窗口 `IDLE_NO_CANDIDATE`、`llm_calls=0`、无编造经历）、T15（预算耗尽 → `BLOCKED`，不是"她选择休息"）、T18（重启后开关/预算/事件游标保持）、T19（关闭后新决策 `DISABLED`，数据与投影仍可用）；E13 走通实测默认关（`DISABLED`、`model_calls 0`）与真实预算消耗（认知 1/2、动作 1/1） | 真实一整天的预算行为没有证据（长测未达 24 小时） |
+| 预算、静默、重启恢复 | `TESTED_ISOLATED` | T14（空窗口 `IDLE_NO_CANDIDATE`、`llm_calls=0`、无编造经历）、T15（预算耗尽 → `BLOCKED`，不是\"自主选择休息\"）、T18（重启后开关/预算/事件游标保持）、T19（关闭后新决策 `DISABLED`，数据与投影仍可用）；E13 走通实测默认关（`DISABLED`、`model_calls 0`）与真实预算消耗（认知 1/2、动作 1/1） | 真实一整天的预算行为没有证据（长测未达 24 小时） |
 | 只读生活投影与 Hermes 聊天并存 | `TESTED_ISOLATED` | E13 走通：只读投影真实渲染出"当前作品 + 最新已确认版本"（0 次模型调用）；T19 证明关闭自主开关后聊天投影与 status 仍工作；`tests/test_presence_integration.py` 另有投影不暴露 owner 权限与原始状态的检查 | 隔离环境里**没有**做真实 Telegram / 网关收发；投影与聊天同进程共存的端到端路径未验证。`tests/test_presence_integration.py` 属于当前失败的 `host-boundaries` 套件（原因见下） |
 
 ### 与本次判定一起读的限定

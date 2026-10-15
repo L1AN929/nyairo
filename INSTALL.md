@@ -242,7 +242,7 @@ cat /srv/nya02/inst/resident/state/autonomous_wakes.jsonl | tail -1
 # 直接问资源服务（窄端口 read_head）
 head    : {"version_id": "artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd", "version_number": 2,
            "parent_version_id": "artifact-version:d5904244225447b3b5e8190bd01ef6b9", ...}
-content : "# 长测的手记\n\n第一段：先写一句，看看她会不会自己接着写。\n\n\n其实没有谁在真正注视，屏幕另一端只有光标在规律地闪动。隔壁工位的咖啡机响了第三回，今天的天气比预想中更早凉下来。\n"
+content : "# 长测的手记\n\n第一段：先写一句，看看它会不会自己接着写。\n\n\n其实没有谁在真正注视，屏幕另一端只有光标在规律地闪动。隔壁工位的咖啡机响了第三回，今天的天气比预想中更早凉下来。\n"
 ```
 
 这一轮**没有任何用户消息**：考虑由到期窗口触发，决策来自真实模型，写入由资源服务确认，新正文是模型写的散文而不是模板。这一次共 **2 次**真实模型调用（1 次决策 + 1 次内容生成）。

@@ -92,24 +92,24 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 | 命令 | 用途 | 什么时候用 |
 | --- | --- | --- |
-| `nyairo` | 启动终端聊天 | 想和她聊聊天、说说话 |
+| `nyairo` | 启动终端聊天 | 随时开启对话、交流互动 |
 | `nyairo setup model` | 更换模型或更新密钥 | 想换一家模型供应商，或者填入新的 API Key |
-| `nyairo gateway setup` | 配置消息平台 | 想要连上 Telegram 机器人在手机上找她 |
+| `nyairo gateway setup` | 配置消息平台 | 连接 Telegram 机器人，在手机上随时互动 |
 | `nyairo update` | 升级软件 | 想要更新到最新发布的版本 |
 | `nyairo update --rollback` | 回退到上一个版本 | 遇到不习惯或有问题时，直接退回旧版本 |
-| `nano "$HOME/.nyairo/SOUL.md"` | 编辑人设与性格 | 调整她的性格、说话习惯和对你的称呼 |
+| `nano "$HOME/.nyairo/SOUL.md"` | 自定义人设与性格 | 自定义名字、性格特征、说话风格与称呼 |
 
 ### 对话里的指令
 
-在聊天的时候，你可以直接发这些指令来查看或调整她的状态：
+在聊天的时候，你可以直接发这些指令来查看或管理状态：
 
 | 指令 | 示例 | 作用 |
 | --- | --- | --- |
-| `/chiyo_status` | `/chiyo_status` | 看看她的记忆、生活节奏与周围环境状态 |
-| `/chiyo_memory list` | `/chiyo_memory list` | 看看她都记住了哪些关于你们的事情 |
-| `/chiyo_memory correct` | `/chiyo_memory correct mem-102 事实内容` | 帮她修正某条记偏的事情，避免以后记混 |
-| `/chiyo_memory delete` | `/chiyo_memory delete mem-102` | 删掉某条记忆，让她以后不再提起 |
-| `/chiyo_consider` | `/chiyo_consider 推演切流风险` | 让她深入推演某个问题，给出一份分析建议 |
+| `/chiyo_status` | `/chiyo_status` | 查看长期记忆、生活节律与周围环境状态 |
+| `/chiyo_memory list` | `/chiyo_memory list` | 查看已沉淀的长期记忆与经历事实 |
+| `/chiyo_memory correct` | `/chiyo_memory correct mem-102 事实内容` | 修正某条记偏的事实，避免后续记混 |
+| `/chiyo_memory delete` | `/chiyo_memory delete mem-102` | 删除某条记忆，让其不再被召回提起 |
+| `/chiyo_consider` | `/chiyo_consider 推演切流风险` | 深入推演复杂问题，给出一份分析与建议 |
 | `/chiyo_note` | `/chiyo_note 部署备忘 \| 步骤说明` | 在本地工作区保存或翻看备忘文档 |
 
 ---
@@ -120,7 +120,7 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 
 - **程序文件**：`~/.local/share/nyairo/releases/v0.2.0-rc3`（运行程序的地方，更新时会整体替换）
 - **你的数据**：`~/.nyairo`（存放人设、日常数据库、记忆与配置文件）
-- **启动入口**：`~/.local/bin/nyairo`（在终端里唤醒她的快捷入口）
+- **启动入口**：`~/.local/bin/nyairo`（在终端里随时唤起对话的快捷入口）
 
 这种划分能保证：以后不管是升级新版还是回退旧版，存放在 `~/.nyairo` 里的所有对话、人设与共同回忆，都原封不动留在那里，不会被覆盖或丢失。
 
@@ -131,8 +131,8 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 因为这还是公开测试版，有几件事我们想先坦诚告诉你：
 
 - 用户聊天记忆可纠正；自主生活经历暂不支持直接纠正，可停止召回错误记录；
-- 虽然她有了自己的日常节律，但目前还做不到在没有你呼唤的时候，主动在聊天软件里弹消息找你；
-- 刚搭好的新世界里，她第一次想要出门时，偶尔可能会因为不熟悉路线而没走成。
+- 虽然具备了自主生活节律，但目前还做不到在没有交互的时候，主动在消息软件里弹窗找你；
+- 刚搭好的新世界里，第一次尝试出门时，偶尔可能会因为路线判定而没走成。
 
 这些地方我们正在继续调整，会在后面的更新里一步步做好。
 

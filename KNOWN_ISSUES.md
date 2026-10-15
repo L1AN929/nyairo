@@ -32,12 +32,12 @@ rc1 包的 `MANIFEST.version` 为 `0.2.0-rc1`，`scripts/release.json.version` �
 5. **旧供应商密钥仍需账户持有人轮换。** 代码侧已经改好（0600 的 `model_env` 交接，命令行里不再出现
    密钥），但**旧密钥的撤销只能在供应商后台做**，代码修复不能代替。这条是账户持有人的动作，本版未做。
 6. **自主 Telegram 联系不会投递。** `components/life/scripts/autonomous_life_resident.py:269` 硬编码
-   `proactive_enabled=False`。本版没有任何"她自己给你发消息"的能力；只有你主动发起时才有对话。
+   `proactive_enabled=False`。本版没有任何"自主主动向用户发送消息"的能力；只有你主动发起时才有对话。
 7. **自主生活第一次自主选择 World 动作不是每次都成（本次新发现，未定性）。** 同样的隔离实例连跑 5 次，
    3 次在第 1 个检查窗就选中世界候选并完成 MOVE，2 次同一个窗口给出**空候选集**
    （`RULE_RESOLVED` + `NO_LEGAL_CANDIDATE` + `candidate_refs=[]`），随后 120 分钟的间隔让那一轮不再
    重来。进程内诊断显示 World provider 连续 40 次都正常返回同一条机会、记录环节也没有报错，**根因本次
-   没有定位**。所以：集成是通的，但"她第一次自己走出去"存在失败概率，不要当成稳定行为。
+   没有定位**。所以：集成是通的，但"首次自主尝试出门"存在失败概率，不要当成稳定行为。
 8. **模型观测有口径限制。** 从 `model_env` 文件载入凭据时，启动 probe 在载入前执行，可能显示
    `NOT_CONFIGURED`；环境中已有凭据则不一定如此。`model_calls` / 日预算主要计认知调用，
    内容 writer 的 `call_count` 仅成功返回时增加，失败请求会漏计，不能拿 summary 总数当完整费用。

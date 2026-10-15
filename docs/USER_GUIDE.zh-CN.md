@@ -998,7 +998,7 @@ World/Body 的同账号 socket、Life Supply 的 operator/service 权限与有�
 
 | 词 | 一句话 | 你需要知道的 |
 | --- | --- | --- |
-| **state root** | 这套生活的状态根目录，默认 `<安装根>/state` | 开关、每日预算、唤醒与步骤日志、Activity 快照都在里面。**一个 state root 只允许一个写入进程**：第二个进程会被拒绝，这是防止"出现两个她"的机制，不要为了让第二个进程起来去取消租约。 |
+| **state root** | 这套生活的状态根目录，默认 `<安装根>/state` | 开关、每日预算、唤醒与步骤日志、Activity 快照都在里面。**一个 state root 只允许一个写入进程**：第二个进程会被拒绝，这是防止\"出现两个同时运行的实例\"的机制，不要为了让第二个进程起来去取消租约。 |
 | **subject** | 主体身份 | 授权、工作区、作品都挂在它上面。换一个 subject 就是另一份生活，看不到别人的作品。 |
 | **Supply socket** | 本机连接资源服务（Life Supply）的 Unix socket 文件 | 它不是网络端口、不对外；默认权限 `0600`，只允许它的所有者账号连接。 |
 | **grant** | 由管理身份签发的一张权限凭据 | 写明"谁、能做什么、作用在哪个目标、能用几次"。写自己的作品需要一份 `COMMIT_MANAGED_ARTIFACT`（限定到自己的工作区）。没有它，写请求会被资源服务拒绝；授权编号必须由服务真实签发，随手写一串不会生效。 |
@@ -1146,7 +1146,7 @@ tail -1 /srv/nya02/inst/resident/state/autonomous_wakes.jsonl
 # 直接问资源服务（窄端口 read_head / read_artifact）
 head    : {"version_id": "artifact-version:7da6005463dd4e3d87e5ea20bdf8c3dd", "version_number": 2,
            "parent_version_id": "artifact-version:d5904244225447b3b5e8190bd01ef6b9", ...}
-content : "# 长测的手记\n\n第一段：先写一句，看看她会不会自己接着写。\n\n\n其实没有谁在真正注视，屏幕另一端只有光标在规律地闪动。隔壁工位的咖啡机响了第三回，今天的天气比预想中更早凉下来。\n"
+content : "# 长测的手记\n\n第一段：先写一句，看看它会不会自己接着写。\n\n\n其实没有谁在真正注视，屏幕另一端只有光标在规律地闪动。隔壁工位的咖啡机响了第三回，今天的天气比预想中更早凉下来。\n"
 ```
 
 这一轮**没有任何用户消息**：考虑由到期窗口触发，决策来自真实模型，写入由资源服务确认，新正文是模型写的散文而不是模板。整套走通共 **2 次**真实模型调用（1 次决策 + 1 次内容生成）。
@@ -1223,7 +1223,7 @@ runuser -u nyasvc -- env PYTHONPATH="$PWD" python3 -m chiyo_bundle life \
 - `pending_unknown_actions`（控制面）与 `unresolved_actions`（只读投影）里的东西是**"提交了但没拿到确认结果"**：既不是成功，也不是失败。
 - 处理方式：常驻进程**每次启动、每个 tick** 都会按**原来的操作编号**去对账（`reconcile_pending()`），不会重试、不会另开一笔；关闭开关也仍然对账。
 - 本次真实结果：`pending_unknown_last 0`、`pending_unknown_max 0`。如果它不为 0，先确认是不是同一笔操作反复出现，**不要手工删记录**。
-- 已提交但结果未知的写入**不会**变成"她做完了"。只有在资源服务真的确认了新版本时，`owner_confirmed_versions` 才会 +1。
+- 已提交但结果未知的写入**不会**变成\"已完成\"。只有在资源服务真的确认了新版本时，`owner_confirmed_versions` 才会 +1。
 
 #### 5) 给某个作品授予 / 撤回写权限
 
@@ -1333,7 +1333,7 @@ STOPPED
 | 对同一件作品的持续编辑 | `E2E_VERIFIED` | 长测里同一件作品由真实模型连续推进（v1→v5 / v1→v3），每次都有 owner 回执；受控替身版本见 E12.3 的 T03 |
 | 有界的 World MOVE | `E2E_VERIFIED` | 真实 World 服务 + 真 gateway：`home`→`nearby_street`、revision 1→2、重启后保持；不可达的 MOVE 被拒、UNKNOWN 用原 operation 对账（E12.3 的 T16） |
 | 真实结果形成受控的生活经历 | `TESTED_ISOLATED` | 本次写入产生了 `LIFE_VERIFIED_OUTCOME` 记录（正文由结构化字段拼成）；三个不同性质的真实结果（成功/冲突/放弃）的准入见 B8-5 实验 B1。经历**改变决策**这件事没有证据 |
-| 预算、静默、重启恢复 | `TESTED_ISOLATED` | 预算耗尽→`BLOCKED`（不是"她选择休息"）；空窗口零模型调用零动作；重启不补跑、开关与预算不重置（T14/T15/T18/T19 + 本次走通） |
+| 预算、静默、重启恢复 | `TESTED_ISOLATED` | 预算耗尽→`BLOCKED`（不是\"自主选择休息\"）；空窗口零模型调用零动作；重启不补跑、开关与预算不重置（T14/T15/T18/T19 + 本次走通） |
 | 只读生活投影与 Hermes 聊天并存 | `TESTED_ISOLATED` | 投影真实渲染出当前作品与版本；T19 证明关闭开关后聊天投影与 status 仍工作。真实 Telegram 收发未测 |
 
 **不得声称**
