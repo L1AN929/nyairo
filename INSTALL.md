@@ -32,7 +32,7 @@ curl -fsSL https://nyairo.com/install.sh | bash -s -- --prefix "$HOME/apps/nyair
 
 ## 手动 Git / ZIP 路线
 
-按 [官网新手路线](https://nyairo.com/#quickstart) 或 [详细中文教程](docs/USER_GUIDE.zh-CN.md) 中的手动章节操作。原来的 `bash scripts/install.sh` 仅安装源码目录内的依赖，需要已有 uv，随后手动建立个人配置并设置模型。不要将它和官网引导安装命令混用。
+按 [官网快速上手路线](https://nyairo.com/#quickstart) 或 [详细中文教程](docs/USER_GUIDE.zh-CN.md) 中的手动章节操作。原来的 `bash scripts/install.sh` 仅安装源码目录内的依赖，需要已有 uv，随后手动建立个人配置并设置模型。不要将它和官网引导安装命令混用。
 教程依次说明下载、建立个人数据目录、选择模型、开始聊天、Telegram、各附加模块、更新、备份与排错。基础配置先开启记忆与生活状态；认知、World/Body 和资源文档按需要单独设置。资源服务的当前装配限制见 [功能与已知问题](https://nyairo.com/#status-matrix)。
 
 已记录的普通账号安装复核覆盖 Linux / Windows WSL。原生 Windows、macOS、官方完整 Docker 方案和全模块一键配置仍没有完成相同范围的交付验收。
