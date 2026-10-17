@@ -2,6 +2,8 @@
 
 Status: implemented
 
+
+Superseded-by: [v0.3.0 发行版本指针更新](2026-10-19-v03-release-install-pointer.md)（只取代“无 v0.3 安装包、安装入口保持 rc3”这一条；发布白名单与单写者隔离继续适用）
 ## Problem
 
 用户在本地v0.3限定验收后授权推送GitHub并更新nyairo.com。原工作树保存大量已验收但未提交的产品、测试和文档，origin指向本地审阅副本；GitHub main还有五条文案更新。直接整仓add、强推或把官网安装链接改成未制作的v0.3 ZIP，会混淆提交对象或损坏有效安装入口。

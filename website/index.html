@@ -1112,12 +1112,12 @@
       <div class="home-hero">
         <!-- 顶部版本与架构通告栏 (现代开发者高光胶囊) -->
         <div class="hero-banner-wrap">
-          <a href="#changelog-v0-3-0" class="hero-status-banner" title="v0.3 后端连续生活版：源码已更新到 GitHub main，安装发行包仍为 v0.2.0-rc3">
+          <a href="#changelog-v0-3-0" class="hero-status-banner" title="v0.3.0 后端连续生活版：已作为 GitHub prerelease 发行，安装命令装的就是这一版">
             <span class="banner-beacon">
               <span class="beacon-core"></span>
             </span>
-            <span class="banner-beta-badge font-mono"><span class="badge-pulse"></span>BETA</span><span class="banner-chip font-mono">v0.3 · 源码</span>
-            <span class="banner-title">后端连续生活版 · 机制限定验收，发行包仍 v0.2.0-rc3</span>
+            <span class="banner-beta-badge font-mono"><span class="badge-pulse"></span>BETA</span><span class="banner-chip font-mono">v0.3.0 · 发行</span>
+            <span class="banner-title">后端连续生活版 · 机制限定验收的 prerelease</span>
             <span class="banner-arrow">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -1185,7 +1185,7 @@
           </div>
 
           <div class="install-panel" id="install-panel-cli" role="tabpanel" aria-labelledby="install-tab-cli">
-            <p id="nyairo-rc1-release" class="hero-install-note">基础安装启用记忆与生活状态；世界服务和自主生活需另外配置，自主开关默认关闭。配置完成后，数字个体可以在世界里走动、继续已有作品。v0.3「后端连续生活版」源码已更新到 GitHub main（机制限定验收，尚未打包发行），安装命令与安装包行为不变，装的仍是 v0.2.0-rc3 发行包；如果你之前装过旧版，升级前请记得先备份个人目录，更多变化可查看<a href="#changelog-v0-3-0">v0.3 更新说明</a>与<a href="#changelog-v0-2-0-rc3">版本记录</a>。</p>
+            <p id="nyairo-rc1-release" class="hero-install-note">基础安装启用记忆与生活状态；世界服务和自主生活需另外配置，自主开关默认关闭。配置完成后，数字个体可以在世界里走动、继续已有作品。现在这条命令装的是 v0.3.0「后端连续生活版」（GitHub prerelease，不是稳定版）；此前默认的 v0.2.0-rc3 标签与 ZIP 保留原处。隔离新装与 rc3 升级/回滚链已有验证，未对现有实例/生产升级或真实模型一天/24h 验收，升级前请先备份个人目录。更多变化见<a href="#changelog-v0-3-0">v0.3.0 更新说明</a>与<a href="#changelog-v0-2-0-rc3">版本记录</a>。</p>
           <div class="hero-cmd-pill" id="hero-cmd" title="点击复制安装命令">
             <span class="cmd-prefix">$</span>
             <code class="cmd-text">curl -fsSL https://nyairo.com/install.sh | bash</code>
@@ -1230,7 +1230,7 @@
 【背景资料】
 - 官方仓库：https://github.com/L1AN929/nyairo
 - 官方 Agent 安装规范：仓库里的 docs/AGENT_INSTALL.zh-CN.md（如果你能读仓库或网络，先读它；读不到就按下面步骤做，本指令已经包含全部要求）
-- 当前公开测试版本：v0.2.0-rc3（Prerelease，不是稳定版；只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
+- 当前公开测试版本：v0.3.0（GitHub prerelease，不是稳定版；只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
 
 【第一步：先检查环境，先不要安装】
 请检查并用中文汇报：
@@ -1252,7 +1252,7 @@
 
 【第二步：说明将要改动什么，并等我确认】
 这次安装会：
-- 在 ~/.local/share/nyairo/releases/v0.2.0-rc3 放程序（约 460 MB，含配套 Hermes 的运行环境）；
+- 在 ~/.local/share/nyairo/releases/v0.3.0 放程序（约 460 MB，含配套 Hermes 的运行环境）；
 - 在 ~/.nyairo 建个人数据目录（人设、模型配置、记忆与生活状态数据）；
 - 在 ~/.local/bin/nyairo 放启动入口；
 - 用 uv 下载一份 Python 3.13 到 ~/.local/share/uv。
@@ -1261,22 +1261,22 @@
 
 【第三步：安装（只用官方发行包，并且校验）】
 1) 下载官方发行包与校验值：
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.2.0-rc3/nyairo-v0.2.0-rc3.zip.sha256
-   sha256sum -c nyairo-v0.2.0-rc3.zip.sha256
-   ZIP 的 SHA256 必须是：31149fb8bef960743c83cd98d2cfa28c9d11ea2ed9560d55271eba8d4c11753a
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.3.0/nyairo-v0.3.0.zip
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.3.0/nyairo-v0.3.0.zip.sha256
+   sha256sum -c nyairo-v0.3.0.zip.sha256
+   ZIP 的 SHA256 必须与同一发行页下载到的 nyairo-v0.3.0.zip.sha256 记录一致；这一页不再抄写固定哈希，以你实际下载到的校验文件为准。
    不一致就立刻停止，把实际值告诉我，不要继续。
 2) 解压并使用包内的官方安装器安装（不要自己另写一套安装脚本）：
-   python3 -m zipfile -e nyairo-v0.2.0-rc3.zip "$HOME/apps/nyairo-v0.2.0-rc3"
-   cd "$HOME/apps/nyairo-v0.2.0-rc3" &amp;&amp; bash scripts/bootstrap.sh
+   python3 -m zipfile -e nyairo-v0.3.0.zip "$HOME/apps/nyairo-v0.3.0"
+   cd "$HOME/apps/nyairo-v0.3.0" &amp;&amp; bash scripts/bootstrap.sh
    如果你的终端无法交互（没有 TTY），改用：bash scripts/bootstrap.sh --no-setup --no-launch
    装完再单独引导我配置模型：~/.local/bin/nyairo setup model
 
 【第四步：装完必须实际验证，不要只看命令有没有报错】
-- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.2.0-rc3；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.2.0-rc3。
+- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.3.0；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.3.0。
   （注意：nyairo --version 显示的是配套 Hermes 的版本，不是 nyairo 的版本。）
 - 完整性：用包内解释器校验清单：
-  ~/.local/share/nyairo/releases/v0.2.0-rc3/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.2.0-rc3/scripts/verify_manifest.py
+  ~/.local/share/nyairo/releases/v0.3.0/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.3.0/scripts/verify_manifest.py
   输出里应该有 "valid": true。
 - 个人数据目录：~/.nyairo 下应该有 SOUL.md、config.yaml、chiyo/config.json。
 - 启动：~/.local/bin/nyairo --help 能正常输出帮助。
@@ -1284,7 +1284,7 @@
 - 模型与 Telegram：在我没有提供自己的密钥之前，这两项属于「尚未验证」，请如实说明，不要报告为成功。
 
 【第五步：最后给我一份中文说明】
-用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.2.0-rc3 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
+用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.3.0 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
 
 【安全要求】
 - 不要擅自创建系统用户，也不要擅自使用 sudo；需要时先说明你要执行的命令并征得我同意。
@@ -1502,7 +1502,7 @@
             <button class="stage-step-btn" data-phase="1" role="tab" aria-selected="false" aria-controls="phase-panel-1">
               <span class="step-num font-mono">02</span>
               <div class="step-text-wrap">
-                <span class="step-version font-mono">v0.2 · 当前发行包</span>
+                <span class="step-version font-mono">v0.2 · 上一发行包</span>
                 <span class="step-title">小世界与自主生活</span>
               </div>
             </button>
@@ -1510,7 +1510,7 @@
             <button class="stage-step-btn" data-phase="2" role="tab" aria-selected="false" aria-controls="phase-panel-2">
               <span class="step-num font-mono">03</span>
               <div class="step-text-wrap">
-                <span class="step-version font-mono">v0.3 · 源码已更新</span>
+                <span class="step-version font-mono">v0.3.0 · 当前发行包</span>
                 <span class="step-title">后端连续生活版</span>
               </div>
             </button>
@@ -1570,8 +1570,8 @@
             <div class="phase-panel" id="phase-panel-1" role="tabpanel">
               <div class="phase-header-row">
                 <div class="phase-meta-left">
-                  <span class="phase-status-pill font-mono">当前发行包</span>
-                  <span class="phase-sub-meta font-mono">v0.2.0-rc3</span>
+                  <span class="phase-status-pill font-mono">上一发行包</span>
+                  <span class="phase-sub-meta font-mono">v0.2.0-rc3 · 旧版，仍可下载</span>
                 </div>
                 <div class="phase-counter font-mono">02 / 04</div>
               </div>
@@ -1607,14 +1607,14 @@
             <div class="phase-panel" id="phase-panel-2" role="tabpanel">
               <div class="phase-header-row">
                 <div class="phase-meta-left">
-                  <span class="phase-status-pill font-mono">源码已更新</span>
-                  <span class="phase-sub-meta font-mono">v0.3.0 · 未打标签 · 未打包</span>
+                  <span class="phase-status-pill font-mono">当前发行包</span>
+                  <span class="phase-sub-meta font-mono">v0.3.0 · GitHub prerelease</span>
                 </div>
                 <div class="phase-counter font-mono">03 / 04</div>
               </div>
               <h3 class="phase-heading">后端连续生活版：出门、等待、消费、留下经历、回家</h3>
               <p class="phase-summary">
-                0.2 已经能自主做一些事；0.3 把出门、等待、改主意、消费、留下经历、回家续自己的事，接成可以暂停、可以恢复的连续过程。本版源码已推送到 GitHub main，按机制限定的验收 51 项通过、0 跳过。
+                0.2 已经能自主做一些事；0.3 把出门、等待、改主意、消费、留下经历、回家续自己的事，接成可以暂停、可以恢复的连续过程。这一版已作为 GitHub prerelease 发行，按机制限定的验收 51 项通过、0 跳过。
               </p>
               
               <div class="phase-columns-grid">
@@ -1642,7 +1642,7 @@
               </div>
 
               <p class="phase-summary">
-                这一版只到源码：没有创建 release 标签，也没有发行 ZIP 与安装迁移，安装命令装的仍然是 v0.2.0-rc3。验收用本地真实 owner 加确定性/loopback 替身与显式时钟，没有真实模型跑一整天、没有 24 小时长测、不是生产部署验收。明确还没做：统一 Web 生活与模型配置台、主动发信与拨打电话、天气联动、到点自动想起（Agenda 接线）、营养/饥饿与完整情绪、193 项全部能力——这些都留在后续版本，不要当成已经实现。
+                这一版作为 GitHub prerelease 发行：官网安装命令和可校验 ZIP 都指向 v0.3.0，旧的 v0.2.0-rc3 标签与 ZIP 保留原处。验收仍是机制限定的——本地真实 owner 加确定性/loopback 替身与显式时钟，没有真实模型跑一整天、没有 24 小时长测、不是生产部署验收，隔离新装与 rc3 升级/回滚链已有独立验证，未对现有实例/生产升级或真实模型一天/24h 验收。明确还没做：统一 Web 生活与模型配置台、主动发信与拨打电话、天气联动、到点自动想起（Agenda 接线）、营养/饥饿与完整情绪、193 项全部能力——这些都留在后续版本，不要当成已经实现。
                 <a href="https://github.com/L1AN929/nyairo/blob/main/docs/engineering/v03-vs-v02.md" target="_blank" rel="noopener noreferrer">v0.3 对比 v0.2</a> ·
                 <a href="https://github.com/L1AN929/nyairo/blob/main/docs/engineering/v03-final-acceptance.md" target="_blank" rel="noopener noreferrer">限定验收报告</a>
               </p>
