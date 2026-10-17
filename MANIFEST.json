@@ -9,7 +9,7 @@
     "version": "0.21.0",
     "license": "MIT"
   },
-  "file_count": 12575,
+  "file_count": 12576,
   "files": {
     ".agents/notes/implemented/architecture/2026-10-16-action-reality-ledger-settlement.md": "cfe3d828e1b1b6faf63fd1afcddd9f8c64a6ea89e09d67250150324c7414ee8e",
     ".agents/notes/implemented/architecture/2026-10-16-non-coercive-life-actions.md": "1e9b752bcbd6c12b56b7436f55a157e5cf69ad8c1d3edf5885c3ba188cbf38b0",
@@ -655,12 +655,13 @@
     "patches/patch_manager.py": "a0167db589700d68e9342d08d7b4e166aa31d58ec99281f978b78033473ff1c3",
     "patches/rollback.sh": "b959ed6778ec551bfd242c64723a8f6fa427cb66d450f176640bc1ef43fd3afb",
     "patches/secure_target.py": "e205ec9e4ef87770b3de864cefcf4597c2206beead2ab40c90d31164bf21e573",
-    "plugins/chiyo/__init__.py": "0fbc0852edf9a10ddfc973a8bab0aba3dfb2f35b64393b5bb7eec61063c0ab3c",
+    "plugins/chiyo/__init__.py": "624f8fd4fea02199bbc9caadf26b66c8c84bac689bb09041ac7d7ae3c38ce1ad",
     "plugins/chiyo/plugin.yaml": "fd7d9838e5d77ea7a4ae38d54c2e2b83688e321f441c1f3d2836abfe4aa7c503",
     "requirements-dev.txt": "111157ff19ab94b16c079709f9bcb89f92ae0558a4cc9f348be4b4fc2345a6b0",
     "scripts/bootstrap.sh": "7bf1b8374701d184adf3918161d29c400eb4f4516642f79d7a1792494834b668",
     "scripts/check_update_runtime.py": "1a702ce19956fdd0980075680d937beab5576aa47c9fd9fcc8eee17b399933bb",
     "scripts/chiyo.sh": "214a14c6402fab9a04e1397205286639da41dd582cfb77ea284f1cde819f9d3c",
+    "scripts/fix_weixin_world_move.py": "ba51ba3883b3d4a91bbb045000229b6c375c63514e244857435b7c225b94af68",
     "scripts/hermes.sh": "158d00e731ff1bd9feddf8764199e5687facba2e5f9fe98a58b7ec3510947f2c",
     "scripts/install.sh": "41cb752bee03b58689f95ceee807af23d3722d935c86152f60aed29fa5e8692b",
     "scripts/life_heartbeat.py": "1ac722c0e712392173c5902a6c8b2650b1d5913090ec7fdbd91f24b58b79ee6d",
@@ -12587,7 +12588,7 @@
     "website/style.css": "0640d528b75694a128753bafeb0d3730f6083b9fcc28c467aa9a0e40504a0469",
     "website/title-lab.html": "2daba0a736677c469a631cdea8e1f73d9e92da9b8701cca474c19462c2cd287f"
   },
-  "tree_sha256": "92948186db503fbd6290370c483ebafb884c730d707cd35055d02a33a8cb7e08",
+  "tree_sha256": "776a8e74f4fc083fb2533dc5cc04adfb94d16f607a2d5d5ba16198408ef4267e",
   "tree_recipe": "SHA256(sorted UTF-8 lines: sha256 + two spaces + POSIX relative path + LF); MANIFEST.json excluded",
   "release_gate": "Bounded backend milestone; 51 selected mechanism checks accepted. Installation/upgrade qualification recorded separately; no real-model day, 24h soak or production cutover claim.",
   "project_name": "nyairo",
