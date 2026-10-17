@@ -25,11 +25,18 @@ Two boundaries keep this honest:
 * Reconciliation only ever *fills a gap*.  A restart with nothing to heal writes
   nothing at all: no record per restart, no re-application, no grading of an
   unknown.
+
+A third boundary applies to ``CONSUME`` only: attribution comes from the World
+owner's consumption receipt, never from the consumed object being gone.  The
+receipt must match the execution, the payload (object id, as recorded in the
+ledger's own committed refs) and the subject (body).  A ``CONSUME`` success
+without such a receipt is reported as unresolved and applies nothing -- the
+object is absent *by design*, so absence can never be the proof.
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 SCHEMA_RECONCILE = "world.body.service.reconciliation.v1"
 KIND_RECONCILE = "world_body_startup_reconciliation"
@@ -67,6 +74,61 @@ def body_era_frames(ledger) -> list[dict[str, Any]]:
     return [ledger.frame(execution_id) for execution_id in body_era_execution_ids(ledger)]
 
 
+def consume_evidence(
+    *,
+    execution_id: str,
+    frame: Mapping[str, Any],
+    substrate: Optional[Mapping[str, Any]],
+    body_id: str,
+) -> dict[str, Any]:
+    """Does the World owner hold a receipt that attributes this consumption?
+
+    Four things must line up before a CONSUME execution may reach the body:
+
+    1. the execution id,
+    2. the payload (the ledger's own committed mutation refs must name the same
+       object id the receipt names),
+    3. the subject (``body_id``),
+    4. the physical outcome (the placement really is gone).
+
+    A missing object satisfies none of them on its own, so it is never used as
+    success evidence.  Every failure is reported, never repaired.
+    """
+
+    import world_body_substrate as substrate_module
+    import world_consumable_contract as contract
+
+    if substrate is None:
+        return {"ok": False, "reasons": ["substrate_unavailable"], "object_id": None}
+    try:
+        receipt = substrate_module.consumption_receipt(substrate, execution_id)
+    except Exception:
+        return {"ok": False, "reasons": ["substrate_unreadable"], "object_id": None}
+    if receipt is None:
+        return {"ok": False, "reasons": ["receipt_missing"], "object_id": None}
+
+    match = contract.verify_receipt(receipt, execution_id=execution_id, body_id=body_id)
+    if not match["ok"]:
+        return {"ok": False, "reasons": match["reasons"], "object_id": None}
+
+    object_id = receipt["object_id"]
+    refs: list[str] = []
+    for record in frame.get("records") or []:
+        raw = record.get("raw") or {}
+        refs.extend(str(ref) for ref in (raw.get("world_mutation_refs") or []))
+    if ("placement.%s=consumed" % object_id) not in refs:
+        return {"ok": False, "reasons": ["payload_mismatch"], "object_id": None}
+
+    try:
+        still_placed = substrate_module.placement_of(substrate, object_id) is not None
+    except Exception:
+        return {"ok": False, "reasons": ["substrate_unreadable"], "object_id": None}
+    if still_placed:
+        return {"ok": False, "reasons": ["placement_still_live"], "object_id": None}
+
+    return {"ok": True, "reasons": [], "object_id": object_id}
+
+
 def reconcile_startup(
     *,
     ledger,
@@ -78,6 +140,7 @@ def reconcile_startup(
     at: Any,
     world_facts: Optional[Mapping[str, Any]] = None,
     pose: Optional[str] = None,
+    substrate: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Heal only the gaps.  Returns a report plus the caller's new body state.
 
@@ -139,6 +202,33 @@ def reconcile_startup(
             failures.append(execution_id)
             continue
 
+        consume_object_id: Optional[str] = None
+        if action_type == "CONSUME":
+            # A consumption is only ever attributed by its owner receipt.  The
+            # consumed object is *absent* by design, so absence is never used as
+            # evidence: without a receipt matching this execution, this payload
+            # (object) and this body, the body consequence stays unapplied.
+            evidence = consume_evidence(
+                execution_id=execution_id,
+                frame=frame,
+                substrate=substrate,
+                body_id=body_id,
+            )
+            if not evidence["ok"]:
+                unresolved.append(
+                    {
+                        "execution_id": execution_id,
+                        "action": action_type,
+                        "frame_state": frame_state,
+                        "ledger_result": result,
+                        "reasons": evidence["reasons"],
+                        "reconciliation_required": True,
+                        "action_taken": "none (no matching consumption receipt)",
+                    }
+                )
+                continue
+            consume_object_id = evidence["object_id"]
+
         if already_applied:
             # Crash B, or an ordinary clean restart.  Nothing to do.
             already.append(execution_id)
@@ -159,6 +249,7 @@ def reconcile_startup(
             at=at,
             world_facts=world_facts,
             pose=pose,
+            object_id=consume_object_id,
         )
         if outcome["applied"]:
             state = outcome["state"]

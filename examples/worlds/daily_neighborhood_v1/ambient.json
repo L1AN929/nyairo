@@ -1,0 +1,19 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 21,
+      "event_type": "street_traffic",
+      "location_id": "street_front",
+      "start_hour": 7,
+      "summary": "门前街道上偶尔有车经过"
+    },
+    {
+      "end_hour": 18,
+      "event_type": "park_birds",
+      "location_id": "park",
+      "start_hour": 6,
+      "summary": "公园的树上有鸟叫"
+    }
+  ]
+}

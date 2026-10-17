@@ -138,6 +138,18 @@ class ProductionAgencyCognitionAdapter:
         self.requests_seen: list[dict[str, Any]] = []
         self._request_key: Optional[str] = None
 
+
+    @property
+    def send_split_capable(self) -> bool:
+        """W05R-R1c: whether the provider path underneath can separate send from response.
+
+        This adapter does not do the writing itself -- the transport inside the client does --
+        so it only reports the capability its caller needs in order to coordinate the pause
+        with the actual send, or to refuse the send when that is impossible.
+        """
+
+        return bool(getattr(self._client, "send_split_capable", False))
+
     @staticmethod
     def _new_transport_attempt_id() -> str:
         """One id per transport attempt (LPC0B-R2): recorded in the send-state journal."""
@@ -315,6 +327,12 @@ class ProductionAgencyCognitionAdapter:
                 timeout_s=self.timeout_s, max_output_tokens=self.max_output_tokens,
             )
         except Exception as exc:  # AgencyModelClientError
+            import life_pause as _lp
+            if isinstance(exc, (_lp.PauseConfirmedError, _lp.RequestNotSentError)):
+                # W05R-R1c: a pause that stopped the *send* (or a transport that cannot
+                # coordinate the send at all) is neither a provider failure nor a decision.
+                # It is re-raised so the caller reports it as exactly what it is.
+                raise
             failure_class = getattr(exc, "failure_class", type(exc).__name__)
             response_status = getattr(exc, "status", None)
             definitive_response = bool(response_status) or failure_class in {

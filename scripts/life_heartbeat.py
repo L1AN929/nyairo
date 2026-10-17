@@ -1,114 +1,52 @@
-"""NyAiro Life Heartbeat Daemon
-Periodically runs in the background to:
-1. Realize due travel arrivals (automatically transitioning in-progress walks to arrived).
-2. Continue multi-leg transit (e.g. convenience_store -> nearby_street -> home).
-3. Provide autonomous life wandering rhythm when idle (e.g. heading home in the evening, taking a walk during the day).
+"""NyAiro 生命推进入口（W03：薄包装，委托前台常驻 runner）。
+
+本文件只做参数转发与兼容别名，实现都在 ``chiyo_bundle/world_runner.py``：
+
+* ``run``    —— 前台常驻推进（单实例 run lease、monotonic 调度、UTC 真实时间）；
+* ``once``   —— 一次显式推进（保留 W02 旧调用；不带子命令时默认走这里）；
+* ``status`` —— 只读结构化状态（零创建、零写入、不结算到达）；
+* ``pause`` / ``resume`` —— 在 journey 锁内切换持久暂停位。
+
+不生成目标、不调用 LLM、不做宵禁/漫游/推送；不安装 systemd/计划任务/daemon，
+不注册自启动（未来由 supervisor 托管的命令见 ``docs/engineering/v03-runner-usage.md``）。
 """
-import os, sys, time, datetime, json, logging
+
+from __future__ import annotations
+
+import sys
 from pathlib import Path
+from typing import Any, Mapping, Optional
 
-REL = Path("/srv/nyairo-v0.2.0-rc2/app/releases/v0.2.0-rc2")
-WORLD_HOME = Path("/srv/nyairo-v0.2.0-rc2/world")
-PROFILE = Path("/srv/nyairo-v0.2.0-rc2/profile")
-LOG_FILE = PROFILE / "logs" / "life_heartbeat.log"
+REL = Path(__file__).resolve().parents[1]
+for _path in (str(REL), str(REL / "components/world/scripts")):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
-for p in (str(REL), str(REL / "components/world/scripts"), str(REL / "components/native")):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+from chiyo_bundle import world_journey, world_runner  # noqa: E402
 
-import world_travel_delivery as wtd
-import world_living_skeleton as wls
-from chiyo_bundle.world_move_tool import move_handler
+#: 环境装配（显式 world_home/profile 字段，不继承进程世界配置）
+build_environment = world_runner.build_environment
+#: 一次性推进结果分类
+classify_journey_result = world_runner.classify_journey_result
+#: 常驻循环
+run_forever = world_runner.run_forever
+#: 只读状态
+runner_status = world_runner.runner_status
+#: pause / resume
+set_pause = world_runner.set_pause
+#: CLI
+main = world_runner.main
+parse_args = world_runner.parse_args
 
-logging.basicConfig(
-    filename=str(LOG_FILE),
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
 
-ENV = {
-    "CHIYO_WORLD_LIVING_SKELETON_ENABLED": "1",
-    "CHIYO_WORLD_TRAVEL_TIME_ENABLED": "1",
-    "CHIYO_WORLD_HOME": str(WORLD_HOME)
-}
+def advance_once(
+    world_home, environment: Mapping[str, str], now: Optional[Any] = None
+) -> dict:
+    """W02 兼容别名：对已存在的旅程做一次显式推进（不创建任何东西）。"""
+    return world_journey.advance_journey(
+        hermes_home=world_home, environment=environment, now=now
+    )
 
-LAST_AUTO_WANDER = time.time()
-INTENT_TARGET_FILE = WORLD_HOME / "data/world/intended_target.json"
 
-def get_intended_target() -> str:
-    if INTENT_TARGET_FILE.exists():
-        try:
-            return json.loads(INTENT_TARGET_FILE.read_text(encoding="utf-8")).get("target", "")
-        except Exception:
-            return ""
-    return ""
-
-def set_intended_target(target: str):
-    try:
-        INTENT_TARGET_FILE.write_text(json.dumps({"target": target, "set_at": time.time()}), encoding="utf-8")
-    except Exception:
-        pass
-
-def clear_intended_target():
-    if INTENT_TARGET_FILE.exists():
-        try:
-            INTENT_TARGET_FILE.unlink()
-        except Exception:
-            pass
-
-def heartbeat_step():
-    global LAST_AUTO_WANDER
-    # 1. Realize due travel
-    wtd.realize_due_travel(hermes_home=str(WORLD_HOME), environment=ENV)
-    tr = wtd.observe_travel(hermes_home=str(WORLD_HOME), environment=ENV)
-    state = wls.read_move_state(hermes_home=str(WORLD_HOME), environment=ENV)
-    curr = state.get("world_location_id") if state else "unknown"
-
-    if tr.get("status") == "in_progress":
-        dest = tr.get("destination_location_id")
-        exp = datetime.datetime.fromisoformat(tr["expected_arrival_at"].replace("Z", "+00:00"))
-        now = datetime.datetime.now(datetime.timezone.utc)
-        rem = max(0, int((exp - now).total_seconds()))
-        logging.debug(f"In-progress travel to {dest}, remaining {rem}s")
-        return
-
-    # If travel just finished or not travelling:
-    intended = get_intended_target()
-    if intended and curr != intended:
-        # We were transiting! E.g. landed at nearby_street, now continue to intended target
-        logging.info(f"Transit arrived at {curr}, now continuing to intended destination {intended}")
-        res = move_handler({"location": intended}, environment=ENV)
-        logging.info(f"Continued move to {intended}: {res}")
-        clear_intended_target()
-        return
-    elif intended and curr == intended:
-        clear_intended_target()
-
-    # 2. Autonomous wandering if idle for long
-    now_hour = datetime.datetime.now().hour  # Local server hour
-    now_ts = time.time()
-    
-    # Evening curfew: if it is late (> 21:00 or < 7:00) and not home, head home!
-    if (now_hour >= 21 or now_hour < 7) and curr != "home":
-        if now_ts - LAST_AUTO_WANDER > 300:  # Check every 5 min
-            LAST_AUTO_WANDER = now_ts
-            logging.info(f"Evening curfew (hour={now_hour}): currently at {curr}, heading home autonomously.")
-            set_intended_target("home")
-            res = move_handler({"location": "home"}, environment=ENV)
-            logging.info(f"Autonomous move home: {res}")
-
-def run_loop():
-    logging.info("NyAiro Life Heartbeat starting loop...")
-    while True:
-        try:
-            heartbeat_step()
-        except Exception as exc:
-            logging.error(f"Heartbeat step exception: {exc}")
-        time.sleep(15)
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "once":
-        heartbeat_step()
-        print("STEP_DONE")
-    else:
-        run_loop()
+if __name__ == "__main__":  # pragma: no cover - CLI 入口
+    raise SystemExit(main())

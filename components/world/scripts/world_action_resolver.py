@@ -70,6 +70,10 @@ CODE_NOT_REACHABLE = "NOT_REACHABLE"
 CODE_OCCUPIED = "OCCUPIED"
 CODE_STALE_STATE = "STALE_STATE"
 CODE_NOT_TAKEABLE = "NOT_TAKEABLE"
+#: F: CONSUME.  A consumable is a *World-owned declaration*, never a guess: an
+#: undeclared, uneatable, unfree, unreachable or economy-owned instance is
+#: refused with this code, and nothing is consumed.
+CODE_NOT_CONSUMABLE = "NOT_CONSUMABLE"
 CODE_NOT_ALLOWED = "NOT_ALLOWED"
 CODE_ALREADY_APPLIED = "ALREADY_APPLIED"
 CODE_POSTCONDITION_FAILED = "POSTCONDITION_FAILED"
@@ -138,6 +142,11 @@ ERROR_PROVENANCE: dict[str, tuple[str, list[str], str]] = {
         "the bare code NOT_TAKEABLE is NEW; no object-level takeability concept existed",
         "no prior object-level takeability concept",
     ),
+    CODE_NOT_CONSUMABLE: (
+        NEW_RESOLVER_REQUIRED,
+        "the bare code NOT_CONSUMABLE is NEW; no consumable-object concept existed",
+        "no prior consumable/eat capability existed",
+    ),
 }
 #: Unified mapping from the two legacy vocabularies onto canonical codes.
 LEGACY_CODE_MAP: dict[str, str] = {
@@ -163,7 +172,7 @@ LEGACY_CODE_MAP: dict[str, str] = {
     "invalid_execution_id": CODE_INVALID_PROPOSAL,
 }
 
-ACTIONS = ("MOVE", "PICK_UP", "PLACE", "POSE")
+ACTIONS = ("MOVE", "PICK_UP", "PLACE", "POSE", "CONSUME")
 
 TERMINAL_SUCCESS = frozenset({"applied", "noop"})
 TERMINAL_FAILURE = frozenset({"rejected", "failed", "disabled"})
@@ -439,7 +448,8 @@ def _m15_capability_block(hermes_home, object_id: str) -> dict[str, Any]:
 
 
 def _m15_destination_verdict(
-    target: Mapping[str, Any], *, world_place: Optional[str], hermes_home
+    target: Mapping[str, Any], *, world_place: Optional[str], hermes_home,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     """``(code, detail)`` -- ``(None, None)`` when the destination is legal."""
 
@@ -452,7 +462,13 @@ def _m15_destination_verdict(
         return "UNKNOWN_DESTINATION", "world topology is unavailable"
 
     catalog = {}
-    for entry in skeleton.location_catalog():
+    # W03：显式传调用方环境，避免回落到进程环境里的另一个世界；
+    # 目录不可读（世界包缺失/损坏）时没有任何合法目的地 —— 拒绝而不是抛出。
+    try:
+        entries = skeleton.location_catalog(environment)
+    except Exception:
+        return "UNKNOWN_DESTINATION", "world topology is unavailable"
+    for entry in entries:
         if isinstance(entry, Mapping) and entry.get("location_id"):
             catalog[str(entry["location_id"])] = dict(entry)
 
@@ -502,6 +518,25 @@ _M15_DESTINATION_CODES = {
     "DESTINATION_NOT_ALLOWED": CODE_NOT_ALLOWED,
 }
 
+#: F: consumption verdict -> Resolver reason code.  A refusal is always a code,
+#: never a silent no-op, so a caller can tell "you may not" from "nothing there".
+_CONSUME_VERDICT_CODES = {
+    "NO_PLACEMENT": CODE_UNKNOWN_TARGET,
+    "PLACEMENT_KIND_NOT_CONSUMABLE": CODE_NOT_REACHABLE,
+    "NOT_HELD_OR_HERE": CODE_NOT_REACHABLE,
+    "NOT_DECLARED": CODE_NOT_CONSUMABLE,
+    "DECLARATION_INVALID": CODE_NOT_CONSUMABLE,
+    "NOT_CONSUMABLE": CODE_NOT_CONSUMABLE,
+    "NOT_FREE": CODE_NOT_CONSUMABLE,
+    "ECONOMY_OBJECT": CODE_NOT_CONSUMABLE,
+    # An unreadable property economy cannot prove "not an economy object", so
+    # this is a refusal, not a pass.
+    "ECONOMY_FACTS_UNAVAILABLE": CODE_NOT_CONSUMABLE,
+    "POSE_CANNOT_CONSUME": CODE_NOT_REACHABLE,
+    "LOCATION_CLOSED": CODE_NOT_ALLOWED,
+    "RHYTHM_UNAVAILABLE": CODE_NOT_ALLOWED,
+}
+
 class WorldResolver:
     """Single commit authority for World actions."""
 
@@ -511,6 +546,7 @@ class WorldResolver:
         *,
         ledger_path: Optional[Path | str] = None,
         environment: Optional[Mapping[str, str]] = None,
+        now: Optional[Any] = None,
     ):
         home = Path(
             hermes_home
@@ -524,6 +560,11 @@ class WorldResolver:
         self.ledger = ledger.ExecutionLedger(
             ledger_path if ledger_path is not None else ledger.ledger_path(home)
         )
+        #: The clock for the one live-source rule (a place's opening hours, which
+        #: only gate food the place itself supplies).  Injectable so a caller's own
+        #: moment is used instead of an ambient wall clock; the default is
+        #: unchanged behaviour.
+        self._clock = now if callable(now) else (lambda: datetime.now(timezone.utc))
 
     # -- lazy module access (import has no runtime effect) ---------------
 
@@ -674,6 +715,7 @@ class WorldResolver:
             "PICK_UP": self._resolve_pick_up,
             "PLACE": self._resolve_place,
             "POSE": self._resolve_pose,
+            "CONSUME": self._resolve_consume,
         }[normalized["action"]]
 
         try:
@@ -786,6 +828,50 @@ class WorldResolver:
 
     # -- MOVE (delegates to the untouched World core) ---------------------
 
+    def _departure_evidence(
+        self, normalized: Mapping[str, Any], target_text: str, before: Any
+    ) -> Optional[dict[str, Any]]:
+        """This execution's own in-transit record, or ``None`` when there is none.
+
+        Read-only.  A timed departure *is* a committed World mutation -- the owner wrote
+        the travel record itself -- it is simply not an arrival, which is the only thing
+        the instant-move postcondition knows how to check.
+        """
+
+        try:
+            import world_travel_delivery as wtd
+        except ImportError:  # pragma: no cover - flat/packaged import spelling
+            return None
+        try:
+            if not wtd.travel_enabled(self.environment):
+                return None
+            state = wtd.load_state(self.hermes_home, self.environment)
+        except Exception:
+            return None
+        if not isinstance(state, Mapping):
+            return None
+        record = None
+        for item in state.get("travels") or []:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("execution_id")) == str(normalized.get("execution_id")):
+                record = item
+                break
+        if record is None:
+            return None
+        if str(record.get("status")) == wtd.TRAVEL_STATUS_ARRIVED:
+            # already arrived: the ordinary postcondition must decide, not this branch.
+            return None
+        if str(record.get("destination_location_id")) != str(target_text):
+            return None
+        origin = before.get("world_location_id") if isinstance(before, Mapping) else None
+        if origin is not None and str(record.get("origin_location_id")) != str(origin):
+            return None
+        return {"travel_id": record.get("travel_id"), "status": record.get("status"),
+                "origin_location_id": record.get("origin_location_id"),
+                "destination_location_id": record.get("destination_location_id"),
+                "expected_arrival_at": record.get("expected_arrival_at")}
+
     def _resolve_move(
         self, normalized: Mapping[str, Any], *, crash_after: Optional[str]
     ) -> dict[str, Any]:
@@ -881,6 +967,28 @@ class WorldResolver:
                 reason_code=legacy, before=before, after=after, dependencies=live,
                 ledger_status="uncertain" if uncertain else "failed",
                 reconciliation_required=uncertain,
+            )
+
+        # W04 计时旅程：travel time 打开时 ``apply_move_to`` 提交的是一次**出发**，
+        # 位置要到期才变。M13A 原来的后置条件（位置已等于目的地）对计时移动永远不成立，
+        # 会把一次真实、已授权的出发报成 uncertain/POSTCONDITION_FAILED —— W05R 定位到
+        # 的正是这里。计时出发有自己的、同样严格的后置条件：owner 自己的在途记录必须存在，
+        # 且 execution_id / 起点 / 终点都与本次提交一致。位置权威仍在 owner 手里，
+        # 这里只读它的证据，不写任何东西，也不提前认领到达。
+        departure = self._departure_evidence(normalized, target_text, before)
+        if departure is not None:
+            self.ledger.append_unlocked(
+                self._entry(
+                    normalized, status="committed", reason_code="move_departed",
+                    before=before, after=after, dependencies=live,
+                    world_mutation_refs=[
+                        "world.travel=%s" % departure.get("travel_id")
+                    ],
+                )
+            )
+            return _result(
+                normalized, status="applied", code=CODE_OK, reason_code="move_departed",
+                before=before, after=after, dependencies=live, ledger_status="committed",
             )
 
         verified = (
@@ -1147,7 +1255,8 @@ class WorldResolver:
         world_state = self._world_state() or {}
         world_place = (world_state.get("location") or {}).get("place_id")
         dest_code, dest_detail = _m15_destination_verdict(
-            target, world_place=world_place, hermes_home=self.hermes_home
+            target, world_place=world_place, hermes_home=self.hermes_home,
+            environment=self.environment,
         )
         if dest_code is not None:
             return _reject(
@@ -1293,6 +1402,257 @@ class WorldResolver:
             before=before, after=after, dependencies=live, ledger_status="committed",
         )
 
+    # -- CONSUME (F: one instance in, one receipt out, one body consequence) --
+
+    def _consume_contract(self):
+        import world_consumable_contract
+
+        return world_consumable_contract
+
+    def _consume_replay(
+        self, normalized: Mapping[str, Any], object_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Replay gate for CONSUME: the receipt, not just the frame, decides.
+
+        A committed execution replayed with the *same* object is ``already_applied``
+        (nothing is consumed twice).  The same execution id replayed with a
+        different object is a payload mismatch and is refused -- it must never be
+        reported as an already-applied consumption.
+        """
+
+        finished, _frame = self._replay_frame(normalized)
+        if finished is None:
+            return None
+        if finished.get("status") != "already_applied":
+            return finished
+
+        contract = self._consume_contract()
+        receipt = self._consumption_receipt_for(normalized["execution_id"])
+        match = contract.verify_receipt(
+            receipt,
+            execution_id=normalized["execution_id"],
+            object_id=object_id,
+            body_id=normalized["body_id"],
+        )
+        if match["ok"]:
+            return finished
+        return _reject(
+            normalized, "rejected", CODE_INVALID_PROPOSAL,
+            reason_code="EXECUTION_PAYLOAD_MISMATCH: %s is already recorded as a "
+            "different consumption (%s)"
+            % (normalized["execution_id"], ",".join(match["reasons"])),
+        )
+
+    def _resolve_consume(
+        self, normalized: Mapping[str, Any], *, crash_after: Optional[str]
+    ) -> dict[str, Any]:
+        """Consume exactly one object instance, through the ordinary pipeline.
+
+        Nothing here bypasses MOVE/PICK_UP/PLACE: the same substrate gate, the
+        same dependency freshness check, the same execution ledger, the same
+        crash windows.  What is specific is the *evidence* rule -- the live
+        placement and its consumption receipt are produced by one state change
+        and persisted by one atomic save, and the commit is only reached when
+        that receipt matches this execution, this object and this body.
+        """
+
+        module, state, blocked = self._substrate_gate(normalized)
+        if blocked is not None:
+            return blocked
+
+        _require_params(normalized["params"], {"object_id"})
+
+        try:
+            object_id = _text(normalized["params"].get("object_id"), "object_id")
+        except ResolverError as error:
+            return _reject(
+                normalized, "rejected", CODE_INVALID_PROPOSAL, reason_code=str(error)
+            )
+
+        # Replay is judged against the recorded receipt, not just the ledger
+        # frame: an execution id may not be re-used to consume a *different*
+        # instance and be told "already applied".
+        finished = self._consume_replay(normalized, object_id)
+        if finished is not None:
+            return finished
+
+        live = self._dependencies()
+        stale = self._stale_keys(normalized["observed_dependencies"], live)
+        if stale:
+            return _reject(
+                normalized, "rejected", CODE_STALE_STATE, reason_code="stale_dependency",
+                dependencies=live, stale_dependencies=stale,
+            )
+
+        before = module.read_model(state)
+
+        # Positive evidence first: a receipt that already names this object means
+        # the instance is gone because *something* consumed it.  Say so instead
+        # of pretending it never existed.
+        previous = module.receipts_for_object(state, object_id)
+        if previous:
+            return _reject(
+                normalized, "rejected", CODE_NOT_ALLOWED,
+                reason_code="ALREADY_CONSUMED: %s was consumed by %s at %s"
+                % (object_id, previous[-1]["execution_id"], previous[-1]["consumed_at"]),
+                before=before, dependencies=live,
+            )
+
+        placement = module.placement_of(state, object_id)
+        if placement is None:
+            return _reject(
+                normalized, "rejected", CODE_UNKNOWN_TARGET,
+                reason_code="UNKNOWN: %s has no live placement "
+                "(a missing object is not a consumption record)" % object_id,
+                before=before, dependencies=live,
+            )
+
+        # The body must be the one this substrate describes.  A proposal naming a
+        # different body cannot consume this world's food.
+        if str(normalized["body_id"]) != str(state["body_id"]):
+            return _reject(
+                normalized, "rejected", CODE_NOT_ALLOWED,
+                reason_code="BODY_MISMATCH: proposal body_id=%s, substrate body_id=%s"
+                % (normalized["body_id"], state["body_id"]),
+                before=before, dependencies=live,
+            )
+
+        contract = self._consume_contract()
+        world = self._world_state() or {}
+        here = (world.get("location") or {}).get("place_id") if world else None
+        # Economy facts are a *permission* input: the tri-state read (absent /
+        # present / unreadable) is owned by the contract module, and an
+        # unreadable document refuses this consumption instead of being
+        # flattened to "no economy objects".
+        facts = contract.economy_facts(self.hermes_home)
+
+        verdict = contract.consumption_verdict(
+            object_id=object_id,
+            placement=placement,
+            declaration=contract.declaration_of(object_id, self.hermes_home),
+            economy=facts,
+            current_place=here,
+            hands_usable=bool(module.reachability_inputs(state)["hands_usable"]),
+            now=self._clock(),
+            environment=self.environment,
+        )
+        if not verdict["allowed"]:
+            return _reject(
+                normalized, "rejected",
+                _CONSUME_VERDICT_CODES.get(verdict["reason_code"], CODE_NOT_ALLOWED),
+                reason_code="%s: %s" % (verdict["reason_code"], verdict["detail"]),
+                before=before, dependencies=live,
+            )
+
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="prepared", reason_code="consume_prepared",
+                before=before, dependencies=live,
+            )
+        )
+        if crash_after == CRASH_AFTER_PREPARED:
+            raise ResolverCrash("crash after prepared (test)")
+
+        # The receipt's own timestamp comes from the service clock (the same
+        # moment the opening-hours rule was evaluated at), not from an ambient
+        # wall clock, so the record is reproducible.
+        noted_at = self._clock()
+        receipt = contract.build_receipt(
+            execution_id=normalized["execution_id"],
+            object_id=object_id,
+            body_id=state["body_id"],
+            actor_id=normalized["actor_id"],
+            before_revision=state["revision"],
+            consumed_at=(
+                noted_at.isoformat()
+                if isinstance(noted_at, datetime) else str(noted_at)
+            ),
+            source=verdict["source"],
+            placement_before=placement,
+        )
+        try:
+            # One state change: the placement is removed and the receipt is filed
+            # together, then saved once.  Either both are on disk or neither is.
+            updated = module.consume_object(
+                state, object_id, receipt, expected_revision=state["revision"]
+            )
+            module.SubstrateStore(module.substrate_path(self.hermes_home)).save(
+                updated, expected_revision=state["revision"]
+            )
+        except module.BodySubstrateError as error:
+            self.ledger.append_unlocked(
+                self._entry(
+                    normalized, status="failed", reason_code="substrate_rejected",
+                    before=before, dependencies=live,
+                )
+            )
+            return _reject(
+                normalized, "failed", CODE_NOT_ALLOWED, reason_code=str(error),
+                before=before, dependencies=live, ledger_status="failed",
+            )
+        if crash_after == CRASH_AFTER_MUTATION:
+            raise ResolverCrash("crash after mutation (test)")
+
+        # Postcondition: re-read the owner file and require *this execution's*
+        # receipt plus the absence of the placement.  Absence alone proves
+        # nothing, so it is only ever accepted next to its receipt.
+        fresh = self._substrate()
+        stored = (
+            module.consumption_receipt(fresh, normalized["execution_id"])
+            if fresh is not None else None
+        )
+        match = contract.verify_receipt(
+            stored,
+            execution_id=normalized["execution_id"],
+            object_id=object_id,
+            body_id=state["body_id"],
+        )
+        placement_gone = fresh is not None and module.placement_of(fresh, object_id) is None
+        if not (match["ok"] and placement_gone):
+            self.ledger.append_unlocked(
+                self._entry(
+                    normalized, status="uncertain",
+                    reason_code="world_postcondition_failed",
+                    before=before, dependencies=live, reconciliation_required=True,
+                )
+            )
+            return _reject(
+                normalized, "uncertain", CODE_POSTCONDITION_FAILED,
+                reason_code="world_postcondition_failed: receipt=%s"
+                % (",".join(match["reasons"]) or "unverified"),
+                before=before, dependencies=live, ledger_status="uncertain",
+                reconciliation_required=True,
+            )
+
+        after = module.read_model(fresh)
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="committed", reason_code="consume_committed",
+                before=before, after=after, dependencies=live,
+                world_mutation_refs=[
+                    f"placement.{object_id}=consumed",
+                    f"world.consumption={stored['receipt_id']}",
+                ],
+                # Only a proven-present economy can produce an economy instance,
+                # so cross-authority bookkeeping is only meaningful then.
+                cross_authority_refs=(
+                    self._cross_authority_refs(object_id)
+                    if contract.is_economy_instance(facts["economy"], object_id)
+                    else []
+                ),
+            )
+        )
+        result = _result(
+            normalized, status="applied", code=CODE_OK,
+            reason_code="consume_committed", before=before, after=after,
+            dependencies=live, ledger_status="committed",
+        )
+        # The receipt travels with the result so a caller can reconcile this
+        # execution without re-deriving anything (read-only evidence).
+        result["object_id"] = object_id
+        result["consumption_receipt"] = stored
+        return result
+
     # -- reconciliation ---------------------------------------------------
 
     def reconcile(self, execution_id: str) -> dict[str, Any]:
@@ -1327,7 +1687,27 @@ class WorldResolver:
             "reconciliation_required": frame["reconciliation_required"],
             "action_type": frame["action_type"],
             "attempts": frame["attempts"],
+            "consumption_receipt": (
+                self._consumption_receipt_for(execution_id)
+                if frame.get("action_type") == "CONSUME" else None
+            ),
         }
+
+    def _consumption_receipt_for(self, execution_id: str) -> Optional[dict[str, Any]]:
+        """The owner receipt for a CONSUME execution (read-only, may be ``None``).
+
+        Reported next to the ledger verdict so a reconciler never has to decide
+        between "the object is not there" and "this execution ate it".
+        """
+
+        try:
+            module = self._substrate_module()
+            state = self._substrate()
+            if state is None:
+                return None
+            return module.consumption_receipt(state, execution_id)
+        except Exception:  # pragma: no cover - unreadable owner is reported as absent
+            return None
 
 
 def execute_move_compat(

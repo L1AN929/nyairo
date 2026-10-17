@@ -72,12 +72,18 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         *,
         subject_id: str,
         per_source_cap: int = DEFAULT_PER_SOURCE_CAP,
+        exclude_artifact_ids: Optional[Iterable[str]] = None,
     ) -> None:
         super().__init__(per_source_cap=per_source_cap)
         if not subject_id:
             raise CandidateSourceError("subject_id is required")
         self.port = port
         self.subject_id = str(subject_id)
+        #: D (life-v1): artifacts that are *not* work (the reading material and the private-items
+        #: document).  They are still offered through this admitted PERSONAL_OPPORTUNITY source
+        #: only when the caller explicitly wants them; by default the source keeps offering
+        #: exactly the continuable work it always did.
+        self.exclude_artifact_ids = {str(a) for a in (exclude_artifact_ids or ()) if str(a)}
         self._revision = 0
         self._last_snapshot_ref = "snap:PERSONAL_OPPORTUNITY:artifact:rev:0"
         #: Filled by the last discover(); the cycle reads it to plan a real step without a
@@ -119,13 +125,19 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
     # -- discovery ---------------------------------------------------------------------
 
     def _read_points(self) -> list[ArtifactResumePoint]:
-        """Every ACTIVE artifact of this subject whose head is committed."""
+        """Every ACTIVE artifact of this subject whose head is committed.
+
+        Artifacts the caller named as *not work* (D: the private-items document) are skipped:
+        a JSON private document must never be offered as a piece of writing to continue.
+        """
         points: list[ArtifactResumePoint] = []
         for row in self.port.list_artifacts():
             if str(row.get("lifecycle")) != "ACTIVE":
                 continue
             artifact_id = str(row.get("artifact_id") or "")
             if not artifact_id:
+                continue
+            if artifact_id in self.exclude_artifact_ids:
                 continue
             point = self.port.resume_point(artifact_id)
             if point.resumable:

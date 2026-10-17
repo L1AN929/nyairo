@@ -1,3 +1,5 @@
+> **v0.3 源码验收（本次）**：8 组、51 个选定检查通过，零失败/错误/跳过；覆盖新行为、关键负控/恢复及一次同实例街区连续链，不是全仓测试声明。真实本地 owners + 确定性/loopback 替身；未验证新增链真实模型一天、24h、安装迁移或生产部署。[最终验收与失败历史](docs/engineering/v03-final-acceptance.md) · [对比 v0.2](docs/engineering/v03-vs-v02.md)。以下历史数字不继承为 v0.3 新运行结果。
+
 > 本次维护验证见 [HEALTHCHECK.md](HEALTHCHECK.md)。下文的历史记录不作为本次新运行结果。
 
 # 验收与复测

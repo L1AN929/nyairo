@@ -1,0 +1,150 @@
+{
+  "edges": [
+    {
+      "from": "home",
+      "to": "street_front",
+      "walk_seconds": 90
+    },
+    {
+      "from": "street_front",
+      "to": "street_corner",
+      "walk_seconds": 120
+    },
+    {
+      "from": "street_front",
+      "to": "reading_point",
+      "walk_seconds": 150
+    },
+    {
+      "from": "street_corner",
+      "to": "park",
+      "walk_seconds": 180
+    },
+    {
+      "from": "street_corner",
+      "to": "cafe",
+      "walk_seconds": 120
+    }
+  ],
+  "locations": [
+    {
+      "area_id": "bedroom",
+      "description": "一间靠窗摆着书桌、床边靠着墙的卧室，门外就是街区。",
+      "kind": "home",
+      "location_id": "home",
+      "map": {
+        "x": 10,
+        "y": 10
+      },
+      "name": "千代的家",
+      "reachable": [
+        "street_front"
+      ],
+      "rooms": [
+        {
+          "description": "书桌上放着读到一半的纸，床靠着墙。",
+          "name": "卧室",
+          "room_id": "bedroom"
+        }
+      ],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "street_front",
+      "description": "出门必经的一段人行道，路灯立在路沿上。",
+      "kind": "street",
+      "location_id": "street_front",
+      "map": {
+        "x": 20,
+        "y": 10
+      },
+      "name": "家门前街道",
+      "reachable": [
+        "home",
+        "street_corner",
+        "reading_point"
+      ],
+      "rooms": [],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "street_corner",
+      "description": "两条小路交汇的路口，往南是小公园，往东是咖啡店。",
+      "kind": "street",
+      "location_id": "street_corner",
+      "map": {
+        "x": 30,
+        "y": 20
+      },
+      "name": "街口",
+      "reachable": [
+        "street_front",
+        "park",
+        "cafe"
+      ],
+      "rooms": [],
+      "zone_id": "residential"
+    },
+    {
+      "area_id": "park",
+      "description": "街区里的小公园，有一条环园步道、几棵树和一张长椅。",
+      "kind": "park",
+      "location_id": "park",
+      "map": {
+        "x": 30,
+        "y": 40
+      },
+      "name": "小公园",
+      "reachable": [
+        "street_corner"
+      ],
+      "rooms": [],
+      "zone_id": "green"
+    },
+    {
+      "area_id": "cafe",
+      "description": "工作日白天营业的咖啡店，店里有柜台和靠窗的桌子。",
+      "kind": "cafe",
+      "location_id": "cafe",
+      "map": {
+        "x": 40,
+        "y": 25
+      },
+      "name": "街角咖啡店",
+      "reachable": [
+        "street_corner"
+      ],
+      "rooms": [
+        {
+          "description": "靠窗的桌子与店深处的柜台。",
+          "name": "店内",
+          "room_id": "main"
+        }
+      ],
+      "zone_id": "shops"
+    },
+    {
+      "area_id": "reading_room",
+      "description": "书店里可以坐下来读一会儿的角落，有一张阅读桌和一排书架。",
+      "kind": "library",
+      "location_id": "reading_point",
+      "map": {
+        "x": 20,
+        "y": 0
+      },
+      "name": "书店阅读角",
+      "reachable": [
+        "street_front"
+      ],
+      "rooms": [
+        {
+          "description": "一张阅读桌和一排书架，坐着读不用产出任何东西。",
+          "name": "阅读区",
+          "room_id": "reading_room"
+        }
+      ],
+      "zone_id": "shops"
+    }
+  ],
+  "schema_version": "worldgen.topology.v1"
+}

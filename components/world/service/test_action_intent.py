@@ -146,13 +146,14 @@ class IntentTests(unittest.TestCase):
         with self.assertRaisesRegex(ai.IntentRefused, "not exposed"):
             ai.build_intent(choice, space_with_drop)
 
-    def test_pick_up_and_place_are_on_the_allowlist(self):
-        """M15: PICK_UP / PLACE are explicitly allowed; nothing else sneaks in."""
+    def test_pick_up_place_and_consume_are_on_the_allowlist(self):
+        """M15/F: PICK_UP / PLACE / CONSUME are explicitly allowed; nothing else sneaks in."""
 
         self.assertIn("PICK_UP", ai.EXPOSED_VERBS)
         self.assertIn("PLACE", ai.EXPOSED_VERBS)
+        self.assertIn("CONSUME", ai.EXPOSED_VERBS)
         self.assertEqual(tuple(ai.ACTION_ALLOWLIST),
-                         ("MOVE", "POSE", "PICK_UP", "PLACE"))
+                         ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME"))
         for verb in ("DROP", "THROW", "GIVE", "PUT_IN_CONTAINER", "STACK",
                      "EQUIP", "USE"):
             self.assertNotIn(verb, ai.ACTION_ALLOWLIST)

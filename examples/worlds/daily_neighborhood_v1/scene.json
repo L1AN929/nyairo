@@ -1,0 +1,364 @@
+{
+  "assets": {},
+  "navigation": {
+    "cafe": {
+      "areas": [
+        {
+          "area_id": "main",
+          "kind": "room",
+          "name": "店内"
+        },
+        {
+          "area_id": "counter",
+          "kind": "room",
+          "name": "柜台"
+        }
+      ],
+      "connections": [
+        {
+          "from": "main",
+          "to": "counter"
+        }
+      ],
+      "entrance": "main",
+      "furniture_map": {
+        "counter": [
+          "counter_cafe"
+        ],
+        "main": [
+          "table_cafe",
+          "chair_cafe"
+        ]
+      }
+    },
+    "home": {
+      "areas": [
+        {
+          "area_id": "bedroom",
+          "kind": "room",
+          "name": "卧室"
+        },
+        {
+          "area_id": "living",
+          "kind": "room",
+          "name": "起居室"
+        }
+      ],
+      "connections": [
+        {
+          "from": "bedroom",
+          "to": "living"
+        }
+      ],
+      "entrance": "bedroom",
+      "furniture_map": {
+        "bedroom": [
+          "desk_home",
+          "bed_home"
+        ],
+        "living": [
+          "chair_home"
+        ]
+      }
+    },
+    "park": {
+      "areas": [
+        {
+          "area_id": "park_path",
+          "kind": "outdoor",
+          "name": "环园步道"
+        }
+      ],
+      "connections": [],
+      "entrance": "park_path",
+      "furniture_map": {
+        "park_path": [
+          "bench_park",
+          "tree_park"
+        ]
+      }
+    },
+    "reading_point": {
+      "areas": [
+        {
+          "area_id": "reading_room",
+          "kind": "room",
+          "name": "阅读区"
+        },
+        {
+          "area_id": "shelf",
+          "kind": "room",
+          "name": "书架区"
+        }
+      ],
+      "connections": [
+        {
+          "from": "reading_room",
+          "to": "shelf"
+        }
+      ],
+      "entrance": "reading_room",
+      "furniture_map": {
+        "reading_room": [
+          "reading_table"
+        ],
+        "shelf": [
+          "shelf_reading"
+        ]
+      }
+    },
+    "street_corner": {
+      "areas": [
+        {
+          "area_id": "crossing",
+          "kind": "outdoor",
+          "name": "路口"
+        }
+      ],
+      "connections": [],
+      "entrance": "crossing",
+      "furniture_map": {
+        "crossing": [
+          "street_sign_corner"
+        ]
+      }
+    },
+    "street_front": {
+      "areas": [
+        {
+          "area_id": "sidewalk",
+          "kind": "outdoor",
+          "name": "人行道"
+        }
+      ],
+      "connections": [],
+      "entrance": "sidewalk",
+      "furniture_map": {
+        "sidewalk": [
+          "street_lamp_front"
+        ]
+      }
+    }
+  },
+  "placements": {
+    "bed_home": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "bench_park": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "chair_cafe": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "chair_home": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "counter_cafe": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "desk_home": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "reading_table": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "shelf_reading": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "street_lamp_front": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "fixture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "street_sign_corner": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "fixture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "table_cafe": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "furniture",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "tree_park": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    }
+  },
+  "schema_version": "worldgen.scene.v1",
+  "spaces": {
+    "cafe": {
+      "doors": [],
+      "enabled": true,
+      "entry": "main",
+      "floors": [],
+      "walls": [],
+      "windows": []
+    },
+    "home": {
+      "doors": [],
+      "enabled": true,
+      "entry": "bedroom",
+      "floors": [],
+      "walls": [],
+      "windows": []
+    },
+    "reading_point": {
+      "doors": [],
+      "enabled": true,
+      "entry": "reading_room",
+      "floors": [],
+      "walls": [],
+      "windows": []
+    }
+  }
+}

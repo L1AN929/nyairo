@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit
+import life_pause
 
 HERE = Path(__file__).resolve().parent
 _COMPONENTS = HERE.parents[1]
@@ -116,6 +117,27 @@ def _iso(moment: datetime) -> str:
     return moment.isoformat(timespec="seconds")
 
 
+def _compact_round_view(view: Any, keys: tuple[str, ...]) -> Optional[dict[str, Any]]:
+    """A bounded, JSON-safe projection of one reader's last answer.
+
+    The resident's record must stay serializable and small: a reader's raw view is kept
+    only where it is named here, and anything else is dropped rather than guessed.
+    """
+
+    if not isinstance(view, Mapping):
+        return None
+    out: dict[str, Any] = {}
+    for key in keys:
+        if key in view:
+            out[key] = view[key]
+    try:
+        json.dumps(out, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return {"unserializable": True}
+    return out
+
+
+
 def _parse(text: Any) -> Optional[datetime]:
     try:
         return datetime.fromisoformat(str(text))
@@ -149,6 +171,42 @@ def probe_model_provider(environment: Mapping[str, str], *,
                 "detail": "%s: %s" % (type(exc).__name__, exc)}
     return {"status": "REACHABLE", "host": host, "port": port}
 
+def set_paused(state_root: Path | str, paused: bool, *, reason: str = "operator") -> dict[str, Any]:
+    """The life-side persistent pause (W05).  A pure file write: works on a stopped instance.
+
+    This is deliberately **not** the World's pause (``world_control.json``).  Stopping her
+    thinking and stopping the World's next travel segment are two different switches over two
+    different owners, so neither command may flip the other: ``pause`` here never writes the
+    World's control file, and the World runner's ``pause``/``resume`` never write this one.
+    """
+
+    return life_pause.set_paused(state_root, paused, reason=reason)
+
+
+def resolve_world_action_adapter(environment: Mapping[str, str], world: Mapping[str, Any]) -> Any:
+    """The AR-0 World adapter for this instance (W05).
+
+    With ``CHIYO_WORLD_TRAVEL_TIME_ENABLED`` on, the action goes through the W04 journey engine:
+    a MOVE commits a *timed departure* through the same single World owner, and the arrival is
+    settled later by real time.  With it off, the previous instant path is kept unchanged, so a
+    profile that never turned walking time on behaves exactly as before.
+
+    Either way this returns an adapter or ``None``: a World that is not configured, unreachable or
+    not ready yields no adapter, and the cycle then cannot move her at all.
+    """
+
+    if not isinstance(world, Mapping) or world.get("status") != "READY":
+        return None
+    if _flag(environment, "CHIYO_WORLD_TRAVEL_TIME_ENABLED", False):
+        from world_journey_action_adapter import (JourneyWorldResolver,
+                                                  RealJourneyWorldActionAdapter)
+
+        return RealJourneyWorldActionAdapter(JourneyWorldResolver(environment=environment))
+    from world_action_bridge_adapter import RealWorldActionAdapter, WorldBridgeResolver
+
+    return RealWorldActionAdapter(
+        WorldBridgeResolver(environment=environment, bridge_dir=world.get("bridge_dir")))
+
 
 class AutonomousLifeResident:
     """One state root, one runtime, one loop, one honest record."""
@@ -166,6 +224,8 @@ class AutonomousLifeResident:
         self.assembled: Any = None
         self.last_tick: Optional[dict[str, Any]] = None
         self.last_error: Optional[str] = None
+        #: W05: the last journey settlement record, kept for the tick record and the report.
+        self.last_settlement: Optional[dict[str, Any]] = None
         self.started_at: Optional[str] = None
         self.soak_started_at: Optional[str] = None
         self.stopped_at: Optional[str] = None
@@ -182,6 +242,8 @@ class AutonomousLifeResident:
             "blocked_reasons": {}, "actions": 0, "owner_confirmed_versions": 0,
             "unknown_settlements": 0, "reconciliations": 0,
             "pending_unknown_last": 0, "pending_unknown_max": 0,
+            "journey_settlements": 0, "journey_arrivals": 0,
+            "journey_arrival_refusals": 0, "paused_windows": 0,
         }
         self._stop = threading.Event()
         self._stop_reason: Optional[str] = None
@@ -217,27 +279,75 @@ class AutonomousLifeResident:
 
     # -- memory boundary (optional, and only when a database is configured) ---------------
 
-    def _memory_ports(self) -> tuple[Any, Any]:
-        """The M0 admission consumer and the bounded experience view, or ``(None, None)``."""
+    def _memory_ports(self) -> tuple[Any, Any, Any]:
+        """The M0 admission consumer, the bounded experience view and the read port.
+
+        ``(None, None, None)`` when no Memory database is configured.  The port is handed
+        back as well because C's continuity reader needs the *same* M0 owner boundary: it
+        must read the admitted past through the owner, not through a second handle.
+        """
 
         database = _first(self.env, MEMORY_DB_ENV)
         if not database:
-            return None, None
+            return None, None, None
         try:
             from life_experience_port import LifeExperiencePort
             from life_experience_memory_consumer import MemoryAdmissionExperienceConsumer
         except Exception as exc:
             self.last_error = "MEMORY_IMPORT_FAILED: %s: %s" % (type(exc).__name__, exc)
-            return None, None
+            return None, None, None
         subject = _first(self.env, MEMORY_SUBJECT_ENV) or "chiyo"
         try:
             port = LifeExperiencePort(database, controls_db=_first(self.env, MEMORY_CONTROLS_ENV),
                                       subject=subject)
         except Exception as exc:
             self.last_error = "MEMORY_PORT_FAILED: %s: %s" % (type(exc).__name__, exc)
-            return None, None
+            return None, None, None
         return (MemoryAdmissionExperienceConsumer(port=port, enabled=True),
-                lambda: port.prompt_view())
+                lambda: port.prompt_view(), port)
+
+    def _continuity_source(self, runtime: Any) -> Any:
+        """C's read-only continuity reader over the owners this process already holds.
+
+        The binding's subject is the *Memory* owner (``chiyo``), which is a different
+        concept from the canonical Activity subject (``chiyo.global``) and from the Supply
+        workspace subject: C requires the past binding to name the Memory owner it really
+        is, and the Activity side to be this runtime's own controlled home.
+        """
+
+        memory = _first(self.env, MEMORY_DB_ENV)
+        if not memory:
+            return None
+        try:
+            from life_continuity_inputs import ContinuityBinding, LifeContinuityInputs
+            from life_experience_port import LifeExperiencePort
+            from memory_control import MemoryControlLedger
+            from life_experience_port import life_conversation_id
+        except Exception as exc:
+            self.last_error = "CONTINUITY_IMPORT_FAILED: %s: %s" % (type(exc).__name__, exc)
+            return None
+        owner = _first(self.env, MEMORY_SUBJECT_ENV) or "chiyo"
+        controls = _first(self.env, MEMORY_CONTROLS_ENV) or memory
+        home = str(self.env.get("CHIYO_WORLD_HOME") or self.state_root)
+        try:
+            ledger = MemoryControlLedger(controls, memory, owner=owner,
+                                         conversation=life_conversation_id(owner))
+            return LifeContinuityInputs(
+                binding=ContinuityBinding(
+                    subject=owner, home=home, now=_iso(self._clock()),
+                    owner_refs={
+                        "memory": "memory:%s" % owner,
+                        "activity": "activity:canonical",
+                        "agenda": "agenda:lr4",
+                        "artifact": "artifact:supply",
+                    }),
+                past_source=LifeExperiencePort(memory, controls_db=controls, subject=owner),
+                activity_source=getattr(runtime, "activity_read", None),
+                agenda_source=getattr(runtime, "waiting_coordinator", None),
+                governance_probe=lambda: {"healthy": bool(ledger.projection().healthy)})
+        except Exception as exc:
+            self.last_error = "CONTINUITY_SOURCE_FAILED: %s: %s" % (type(exc).__name__, exc)
+            return None
 
     # -- start / stop --------------------------------------------------------------------
 
@@ -284,15 +394,22 @@ class AutonomousLifeResident:
         # provider and a named reason, and the feed is then recorded UNAVAILABLE.
         world = assembly.resolve_world_provider(self.env)
         world_adapter = None
-        if world["status"] == "READY":
-            from world_action_bridge_adapter import RealWorldActionAdapter, WorldBridgeResolver
+        world_adapter = resolve_world_action_adapter(self.env, world)
 
-            world_adapter = RealWorldActionAdapter(
-                WorldBridgeResolver(environment=self.env, bridge_dir=world["bridge_dir"]))
-
-        consumer, experience_provider = self._memory_ports()
-        cognition = assembly.model_cognition(self.env)
-
+        consumer, experience_provider, memory_port = self._memory_ports()
+        # W05R: the persisted request budget is built *before* either model surface, so the
+        # ceilings apply to the very first decision and the very first content generation.
+        # A window that this caller may not open is a refusal, not a silent new allowance.
+        try:
+            requests = assembly.request_budget(self.env, self.state_root)
+        except Exception as exc:
+            self.last_error = "REQUEST_BUDGET_REFUSED: %s: %s" % (type(exc).__name__, exc)
+            return {"ok": False, "reason": "REQUEST_BUDGET_REFUSED", "detail": self.last_error}
+        # W05R-R1b: the decision transport is admitted at each attempt's send boundary
+        # against this instance's own pause bit (the same state root the operator writes).
+        admission = assembly.pause_request_admission(self.state_root)
+        cognition = assembly.model_cognition(self.env, requests=requests,
+                                             admission=admission, pause_guard=admission)
         try:
             self.runtime = lrp.build_production_life_runtime(
                 self.state_root, kill_switches=switches, cognition_adapter=cognition,
@@ -302,9 +419,23 @@ class AutonomousLifeResident:
             self.last_error = "%s: %s" % (type(exc).__name__, exc)
             return {"ok": False, "reason": "RUNTIME_REFUSED", "detail": self.last_error}
 
+        # D (life-v1): C's read-only continuity reader, built from the same Memory owner
+        # boundary this process already holds.  It is handed over as a *factory* so every read
+        # carries a fresh binding instant and a fresh control-ledger probe instead of one
+        # frozen at startup.  With no Memory database configured there is no reader, and the
+        # cycle records PAST_SOURCE_NOT_WIRED rather than "no history".
+        continuity_source = (None if not _first(self.env, MEMORY_DB_ENV)
+                             else (lambda: self._continuity_source(self.runtime)))
+        # A (life-v1): there is no S07 affect owner in this tree, so the resident has no
+        # short-appraisal source of its own and passes none.  The seam (cycle -> assembly ->
+        # decision context) is wired and reports ``appraisal_wired: false`` instead of inventing
+        # a feeling, a mood or a stable fact; an explicit experimental input may supply one.
+        appraisal_source = None
         assembled = assembly.assemble_autonomous_life(
             self.runtime, environment=self.env, state_root=self.state_root,
-            experience_provider=experience_provider, world_provider=world["provider"])
+            experience_provider=experience_provider, world_provider=world["provider"],
+            requests=requests, continuity_source=continuity_source,
+            appraisal_source=appraisal_source)
         if assembled.get("state") != assembly.READY:
             self.assembled = assembled
             self.last_error = assembled.get("reason")
@@ -398,6 +529,12 @@ class AutonomousLifeResident:
         if self.assembled is None or self.assembled.get("state") != assembly.READY:
             return {"ok": False, "reason": "NOT_STARTED"}
 
+        # W05: real time first.  An already departed travel segment arrives on its own schedule,
+        # and a journey that completed is turned into an arrival here -- against the World's own
+        # observation, never against the requested target.  Nothing about a journey is settled by
+        # the decision window, and the decision window is not gated on the journey.
+        settled = self.settle_journey()
+
         result = assembly.runner_tick(self.assembled, act=self.act)
         try:
             reconciled = self.assembled["runner"].reconcile_pending()
@@ -409,7 +546,8 @@ class AutonomousLifeResident:
         record = {"at": _iso(self._clock()), "tick": self.ticks + 1,
                   "events": list(result.get("events") or []),
                   "feed_errors": list(result.get("feed_errors") or []),
-                  "due": result.get("due"), "reconciled": reconciled}
+                  "due": result.get("due"), "reconciled": reconciled,
+                  "journey": settled}
         self.ticks += 1
         self.last_tick = record
         self._journal(record)
@@ -446,6 +584,10 @@ class AutonomousLifeResident:
             self.counters["no_action"] += 1
         if outcome == OUTCOME_DEFERRED:
             self.counters["defer"] += 1
+        if status == "PAUSED_BY_OPERATOR":
+            # W05: the life-side pause held the window.  Nothing was considered, so this is
+            # neither a choice she made nor a technical refusal.
+            self.counters["paused_windows"] += 1
         if status_class == CLASS_BLOCKED:
             text = ("%s %s" % (outcome, wake.get("detail") or "")).strip()
             # A provider that cannot be reached is not a choice she made, so it is named
@@ -491,6 +633,54 @@ class AutonomousLifeResident:
                 "stop_reason": self._stop_reason,
                 "observed_seconds": int((self._clock() - began).total_seconds())}
 
+    # -- the journey half (W05) -----------------------------------------------------------
+
+    def settle_journey(self) -> dict[str, Any]:
+        """Let real time settle the W04 world journey.  Never starts a new target.
+
+        This runs on every tick, before the consideration window: an already departed segment
+        has to be able to arrive even in a tick that then decides nothing.
+        """
+        cycle = (self.assembled or {}).get("cycle")
+        if cycle is None or not hasattr(cycle, "settle_world_journey"):
+            return {"ok": False, "reason_code": "NO_CYCLE"}
+        try:
+            record = dict(cycle.settle_world_journey() or {})
+        except Exception as exc:  # a real failure is reported, never hidden
+            self.last_error = "JOURNEY_SETTLE_FAILED: %s: %s" % (type(exc).__name__, exc)
+            return {"ok": False, "reason_code": "JOURNEY_SETTLE_FAILED",
+                    "detail": self.last_error}
+        self.last_settlement = record
+        self.counters["journey_settlements"] += 1
+        if record.get("arrived"):
+            self.counters["journey_arrivals"] += 1
+        if record.get("arrival_refused"):
+            self.counters["journey_arrival_refusals"] += 1
+        return record
+
+    def journey_view(self) -> dict[str, Any]:
+        """A read-only view of the journey, for ``status`` and the 24h report."""
+
+        import autonomous_life_cycle as alc
+
+        cycle = (self.assembled or {}).get("cycle")
+        home = getattr(cycle, "world_home", None) if cycle is not None else None
+        view: dict[str, Any] = {
+            "configured": bool(home),
+            "last_settlement": self.last_settlement,
+            "arrivals": self.counters.get("journey_arrivals", 0),
+            "settlements": self.counters.get("journey_settlements", 0),
+        }
+        if not home:
+            return view
+        try:
+            journey = alc.journey_module()
+            view["projection"] = journey.observe_journey(hermes_home=home,
+                                                        environment=self.env)
+        except Exception as exc:
+            view["error"] = "%s: %s" % (type(exc).__name__, exc)
+        return view
+
     def _replay_journal(self) -> None:
         """Rebuild the counters from the durable journal, so a restart keeps the record.
 
@@ -529,19 +719,28 @@ class AutonomousLifeResident:
                 self.env[name] = value.strip()
 
     def _model_calls_detail(self) -> dict[str, Any]:
-        """The two kinds of provider request, named separately instead of added into one number.
+        """The provider requests, counted from the persisted ledger when there is one.
 
-        ``counters.model_calls`` counts what the cycle reports as ``llm_calls``: the *decision*
-        (cognition) call, which is also the number the daily ``max_cognition_calls_per_day``
-        budget bounds.  Producing the text for an adopted step is a *second* provider request
-        per acted round, made by the cycle's own writer, and it is not counted there.  The split
-        is stated here so that "6 cognition calls a day" cannot be read as "6 requests in total".
-        ``content_generation_calls`` is the live writer's own counter for *this* process; after a
-        restart it starts at zero again, while the cognition count is replayed from the journal.
+        W05R: ``max_cognition_calls_per_day`` never bounded the content generation, and the
+        writer's own ``call_count`` is per process, so a restart made the day look cheaper
+        than it was.  When the instance carries a ``LifeRequestBudget`` the numbers below
+        come from that ledger instead: it counts every attempt -- decision, content
+        generation and schema retry -- and it survives a restart.
         """
 
+        cycle = (self.assembled or {}).get("cycle")
+        requests = getattr(getattr(cycle, "budget", None), "requests", None)
+        if requests is not None:
+            view = requests.view()
+            return {"cognition_calls": int(self.counters.get("model_calls") or 0),
+                    "content_generation_calls": getattr(
+                        getattr(cycle, "writer", None), "call_count", None),
+                    "total_requests": view.get("utc_day_calls"),
+                    "content_generation_scope": "counted by the persisted request ledger",
+                    "daily_budget_counts": "decision + content + retry requests",
+                    "request_budget": view}
         cognition = int(self.counters.get("model_calls") or 0)
-        writer = getattr((self.assembled or {}).get("cycle"), "writer", None)
+        writer = getattr(cycle, "writer", None)
         content = getattr(writer, "call_count", None)
         total = cognition + content if isinstance(content, int) else None
         return {"cognition_calls": cognition,
@@ -592,6 +791,24 @@ class AutonomousLifeResident:
             "interval_minutes": getattr(assembled.get("runner"), "interval_minutes", None),
             "feeds": assembled.get("feeds"),
             "world": assembled.get("world"),
+            # W05: the two switches are reported separately on purpose -- the Life's own pause
+            # and the World's own pause are different owners' bits.
+            # D (life-v1): what was wired and what the last round actually read.  The two
+            # readers are reported as facts, not as "everything is fine".
+            "work_artifact_id": assembled.get("work_artifact_id"),
+            "situation_wiring": assembled.get("situation"),
+            "continuity_wired": assembled.get("continuity_wired"),
+            "last_situation": _compact_round_view(
+                getattr(cycle, "last_situation", None),
+                ("reason_code", "observed_at", "identity_bound", "body", "resource_budget",
+                 "dimensions", "limiting_dimensions", "unknown_dimensions", "knowledge")),
+            "last_continuity": _compact_round_view(
+                getattr(cycle, "last_continuity", None),
+                ("past_state", "next_step", "source_states", "refusals", "llm_calls",
+                 "read_error", "watermark_write_error")),
+            "work_selection": getattr(cycle, "last_resume_selection", None),
+            "pause": life_pause.read(self.state_root),
+            "journey": self.journey_view(),
             "model": {"probe": self.model_probe,
                       "cognition_attached": getattr(cycle, "runtime", None) is not None},
             "budget": budget,
@@ -638,6 +855,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--duration-seconds", type=int)
     parser.add_argument("--once", action="store_true", help="exactly one tick, then stop")
     parser.add_argument("--status", action="store_true", help="print the persisted record and exit")
+    parser.add_argument("--pause", action="store_true",
+                        help="persist the life-side pause (stops new decisions) and exit")
+    parser.add_argument("--resume", action="store_true",
+                        help="clear the life-side pause and exit")
+    parser.add_argument("--reason", default="operator", help="recorded with pause/resume")
     parser.add_argument("--no-act", action="store_true", help="consider but never execute")
     args = parser.parse_args(argv)
 
@@ -653,6 +875,12 @@ def main(argv: Optional[list[str]] = None) -> int:
                                       poll_seconds=args.poll_seconds, act=not args.no_act)
     if args.status:
         print(json.dumps(resident.read_status(), ensure_ascii=False, indent=1, sort_keys=True))
+        return 0
+    if args.pause or args.resume:
+        # A pure file write, so it works on a stopped instance and never needs the model.
+        view = set_paused(state_root, bool(args.pause), reason=args.reason)
+        print(json.dumps({"ok": True, "pause": view}, ensure_ascii=False, indent=1,
+                         sort_keys=True))
         return 0
 
     started = resident.start()

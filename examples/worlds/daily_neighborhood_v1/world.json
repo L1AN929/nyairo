@@ -1,0 +1,10 @@
+{
+  "description": "一处有限街区：家、门前街道、街口、小公园、街角咖啡店、书店阅读角。只声明静态地点、走道耗时与营业时间，不写剧情、不含虚构 NPC 经济。",
+  "generator_version": "worldgen.v0.1",
+  "name": "日常街区·一",
+  "schema_version": "worldgen.world.v1",
+  "seed": 20261017,
+  "theme": "residential_neighborhood",
+  "timezone": "Asia/Tokyo",
+  "world_id": "daily_neighborhood_v1"
+}

@@ -1,0 +1,117 @@
+{
+  "location_rules": {
+    "cafe": {
+      "affordances": [
+        {
+          "affordance_id": "SIT_AT_CAFE",
+          "description": "在店里坐一会儿"
+        },
+        {
+          "affordance_id": "BUY_DRINK",
+          "description": "在柜台点一杯饮品（消费由饮食 owner 负责）"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在店里看看周围"
+        }
+      ],
+      "close_hour": 18,
+      "open_hour": 8,
+      "weekdays_only": true
+    },
+    "home": {
+      "affordances": [
+        {
+          "affordance_id": "REST",
+          "description": "在房间里歇一会儿"
+        },
+        {
+          "affordance_id": "READ",
+          "description": "在自己房间读书"
+        },
+        {
+          "affordance_id": "USE_PHONE",
+          "description": "在房间里看手机"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    },
+    "park": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "沿环园步道走一圈"
+        },
+        {
+          "affordance_id": "SIT",
+          "description": "在长椅上坐一会儿（不需要产出）"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在公园里看看周围"
+        }
+      ],
+      "close_hour": 22,
+      "open_hour": 6,
+      "weekdays_only": false
+    },
+    "reading_point": {
+      "affordances": [
+        {
+          "affordance_id": "BROWSE_BOOKS",
+          "description": "在书架前翻一翻"
+        },
+        {
+          "affordance_id": "READ_HERE",
+          "description": "在阅读桌边读一会儿（不需要产出）"
+        }
+      ],
+      "close_hour": 20,
+      "open_hour": 10,
+      "weekdays_only": false
+    },
+    "street_corner": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "在街口走一段"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在街口看看周围"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    },
+    "street_front": {
+      "affordances": [
+        {
+          "affordance_id": "WALK",
+          "description": "在门前街道走一段"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在街道上看看周围"
+        }
+      ],
+      "close_hour": null,
+      "open_hour": null,
+      "weekdays_only": false
+    }
+  },
+  "schema_version": "worldgen.rules.v1",
+  "weather_candidates": [
+    {
+      "condition": "clear",
+      "description": "晴朗"
+    },
+    {
+      "condition": "cloudy",
+      "description": "多云"
+    }
+  ]
+}

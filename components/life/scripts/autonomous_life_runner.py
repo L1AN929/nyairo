@@ -83,6 +83,10 @@ WAKE_ACTED = "ACTED"
 WAKE_UNKNOWN = "UNKNOWN"
 WAKE_UNSETTLED = "UNSETTLED"
 WAKE_ERROR = "ERROR"
+#: W05: a real departure was committed by the owner; the arrival is settled later by real time.
+WAKE_IN_TRANSIT = "IN_TRANSIT"
+#: W05: the life-side persistent pause held the window before anything was considered.
+WAKE_HELD = "PAUSED_BY_OPERATOR"
 
 #: Cycle outcome -> (wake status, class).  The class is what E09.3 separates:
 #: ``silence`` is normal, ``choice`` is hers, ``blocked`` is a technical refusal.
@@ -101,6 +105,11 @@ OUTCOME_CLASS = {
     alc.OUTCOME_ALREADY_DONE: (WAKE_ACTED, "acted"),
     alc.OUTCOME_STEP_UNKNOWN: (WAKE_UNKNOWN, "unknown"),
     alc.OUTCOME_STEP_UNSETTLED: (WAKE_UNSETTLED, "unknown"),
+    #: W05: the owner committed a timed departure; she is on her way, not there yet.
+    alc.OUTCOME_IN_TRANSIT: (WAKE_IN_TRANSIT, "acted"),
+    #: W05: the life-side persistent pause held this window.  Nothing was considered, so this
+    #: is silence, not a choice she made and not a technical refusal.
+    alc.OUTCOME_PAUSED_BY_OPERATOR: (WAKE_HELD, "silence"),
 }
 
 #: A repeated identical event inside this window does not re-trigger the decision.

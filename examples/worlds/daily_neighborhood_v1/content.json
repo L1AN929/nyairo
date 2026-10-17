@@ -1,0 +1,31 @@
+{
+  "entries": {
+    "cafe": {
+      "description": "工作日白天营业的咖啡店。",
+      "title": "街角咖啡店"
+    },
+    "home": {
+      "description": "一间带书桌和床的卧室。",
+      "title": "千代的家"
+    },
+    "park": {
+      "description": "有长椅和树的街区公园。",
+      "title": "小公园"
+    },
+    "reading_point": {
+      "description": "可以坐下来读书的角落。",
+      "title": "书店阅读角"
+    },
+    "street_corner": {
+      "description": "通公园和咖啡店的路口。",
+      "title": "街口"
+    },
+    "street_front": {
+      "description": "出门就要走过的一段人行道。",
+      "title": "家门前街道"
+    }
+  },
+  "model": null,
+  "schema_version": "worldgen.content.v1",
+  "source": "local"
+}

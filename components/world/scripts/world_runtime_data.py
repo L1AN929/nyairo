@@ -249,6 +249,82 @@ class WorldData:
     def route_duration_seconds(self, origin: str, destination: str) -> Optional[int]:
         return self.walking_durations.get((origin, destination))
 
+    def canonical_node(self, node: str) -> Optional[str]:
+        """节点规范化：入口区与 place 同义（``state_node`` 语义）；非法返回 None。"""
+        if not isinstance(node, str) or not node:
+            return None
+        try:
+            place_id, area_id = self.split_node(node)
+        except Exception:
+            return None
+        return self.state_node(place_id, area_id)
+
+    def all_nodes(self) -> list[str]:
+        """全部合法导航节点（地点 + 已声明室内区域），稳定排序。"""
+        nodes = set(self.locations)
+        for place_id, nav in self._area_nav.items():
+            for area in nav["areas"]:
+                node = self.state_node(place_id, area["area_id"])
+                if node:
+                    nodes.add(node)
+        return sorted(nodes)
+
+    def _edge_seconds(self, origin: str, destination: str) -> Optional[int]:
+        """一条合法边的非负耗时；缺耗时或非法耗时返回 None（视为不可通行）。"""
+        seconds = self.route_duration_seconds(origin, destination)
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds < 0:
+            return None
+        return seconds
+
+    def route_to(self, origin: str, destination: str) -> Optional[list[str]]:
+        """世界导航图上的确定性最短路线（v0.3 通用导航）。
+
+        返回 ``origin`` 之后依次经过的节点（含终点）；同节点返回 ``[]``；
+        不可达或节点非法返回 ``None``。语义：
+
+        * 边长 = ``route_duration_seconds``（非负整数）；缺耗时或负耗时的边
+          视为不可通行，不会为了"能走"而发明耗时；
+        * 最优 = 总耗时最小；等成本时按节点序列字典序取最小，保证同一世界
+          同一对节点上的选路结果稳定可复现；
+        * 只考虑简单路径（不重复节点）：非负边下重复节点不会更优；
+        * 结果不区分室内/室外：室内区域节点与街道节点同在图上，连通关系
+          由 ``reachable_of`` 决定。
+        """
+        start = self.canonical_node(origin)
+        goal = self.canonical_node(destination)
+        if start is None or goal is None:
+            return None
+        if start == goal:
+            return []
+        nodes = self.all_nodes()
+        if start not in nodes or goal not in nodes:
+            return None
+        best_cost: dict[str, int] = {start: 0}
+        best_path: dict[str, tuple[str, ...]] = {start: (start,)}
+        for _ in range(len(nodes) + 1):
+            improved = False
+            for node in nodes:
+                current_path = best_path.get(node)
+                if current_path is None:
+                    continue
+                for neighbor in self.reachable_of(node):
+                    nxt = self.canonical_node(neighbor)
+                    if nxt is None or nxt not in nodes or nxt in current_path:
+                        continue
+                    seconds = self._edge_seconds(node, nxt)
+                    if seconds is None:
+                        continue
+                    candidate = current_path + (nxt,)
+                    total = best_cost[node] + seconds
+                    existing = best_path.get(nxt)
+                    if existing is None or (total, candidate) < (best_cost[nxt], existing):
+                        best_cost[nxt] = total
+                        best_path[nxt] = candidate
+                        improved = True
+            if not improved:
+                break
+        path = best_path.get(goal)
+        return list(path[1:]) if path is not None else None
     def location_rule(self, location_id: str) -> dict[str, Any]:
         """返回骨架 ``_LocationRule`` 形状的规则；区域节点委托所属地点。"""
         rule = self.rules.get(location_id)

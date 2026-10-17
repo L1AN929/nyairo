@@ -1,0 +1,89 @@
+{
+  "objects": [
+    {
+      "kind": "furniture",
+      "location_id": "home",
+      "name": "书桌",
+      "note": "靠窗的书桌，桌面不算大。",
+      "object_id": "desk_home"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "home",
+      "name": "床",
+      "note": "靠墙的一张单人床。",
+      "object_id": "bed_home"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "home",
+      "name": "椅子",
+      "note": "书桌前的椅子。",
+      "object_id": "chair_home"
+    },
+    {
+      "kind": "fixture",
+      "location_id": "street_front",
+      "name": "路灯",
+      "note": "立在路沿上的路灯。",
+      "object_id": "street_lamp_front"
+    },
+    {
+      "kind": "fixture",
+      "location_id": "street_corner",
+      "name": "路牌",
+      "note": "写着两条小路名字的路牌。",
+      "object_id": "street_sign_corner"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "park",
+      "name": "长椅",
+      "note": "步道边的一张木长椅。",
+      "object_id": "bench_park"
+    },
+    {
+      "kind": "plant",
+      "location_id": "park",
+      "name": "树",
+      "note": "公园里的其中一棵树。",
+      "object_id": "tree_park"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "cafe",
+      "name": "靠窗的桌子",
+      "note": "一张能看见街口的桌子。",
+      "object_id": "table_cafe"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "cafe",
+      "name": "椅子",
+      "note": "桌子旁的椅子。",
+      "object_id": "chair_cafe"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "cafe",
+      "name": "柜台",
+      "note": "点单的柜台。",
+      "object_id": "counter_cafe"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "reading_point",
+      "name": "阅读桌",
+      "note": "可以摊开书或纸的桌子。",
+      "object_id": "reading_table"
+    },
+    {
+      "kind": "furniture",
+      "location_id": "reading_point",
+      "name": "书架",
+      "note": "靠墙的一排书架。",
+      "object_id": "shelf_reading"
+    }
+  ],
+  "schema_version": "worldgen.objects.v1"
+}

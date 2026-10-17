@@ -30,6 +30,14 @@ Environment (all required; the check SKIPs cleanly without them)
 ``NYA02_WORKSPACE_ID``    an ACTIVE workspace of that subject
 ``NYA02_ARTIFACT_GRANT``  a REUSABLE ``COMMIT_MANAGED_ARTIFACT`` grant targeting that workspace
 ``NYA02_LIFE_STATE``      optional; the Life state root (defaults to a fresh temp dir)
+``NYA02_MEMORY_OWNER``    optional; the M0 memory owner (defaults to ``chiyo``)
+
+``NYA02_SUBJECT`` owns the Supply *workspace*; it is **not** an M0 memory owner.  The Life->
+Memory boundary writes under the persona's own memory owner: M0 requires the LIFE_ORIGIN
+provenance triple to name the speaker ``chiyo``, and AG-2's handoff carries the global subject
+``chiyo.global``, which ``life_experience_memory_consumer`` normalizes to ``chiyo``.  Section 12
+therefore reads M0 back under ``NYA02_MEMORY_OWNER``, and asserts explicitly that the workspace
+subject holds nothing there (an identity fact, not a relaxation).
 
 The owner's data root must be **fresh** (no artifacts yet): the first assertion is exactly that an
 empty owner yields no activity.  A non-empty owner is reported as ``ENVIRONMENT_NOT_FRESH`` rather
@@ -53,6 +61,9 @@ for _path in (str(LIFE_SCRIPTS), str(NATIVE), str(NATIVE / "src"),
 
 REQUIRED_ENV = ("NYA02_SUPPLY_SOCKET", "NYA02_SUBJECT", "NYA02_WORKSPACE_ID",
                 "NYA02_ARTIFACT_GRANT")
+
+#: The M0 memory owner (the persona), which is deliberately NOT the Supply workspace subject.
+DEFAULT_MEMORY_OWNER = "chiyo"
 
 #: Rounds this check is allowed to spend per cycle instance.
 MAX_ROUNDS = 4
@@ -530,27 +541,39 @@ def main() -> int:
     evidence_db = install_root / "evidence.sqlite"
     controls_db = install_root / "controls.sqlite"
     store = EvidenceStore(evidence_db)
-    MemoryControlLedger(controls_db, evidence_db, owner=subject,
-                        conversation=life_conversation_id(subject)).initialize()
-    live_port = LifeExperiencePort(evidence_db, controls_db=controls_db, subject=subject)
+    # M0 is read back under the memory owner the boundary actually writes, not under the Supply
+    # workspace subject: see the module docstring.  The workspace subject holds nothing here, and
+    # that is asserted below rather than assumed.
+    memory_owner = os.environ.get("NYA02_MEMORY_OWNER") or DEFAULT_MEMORY_OWNER
+    MemoryControlLedger(controls_db, evidence_db, owner=memory_owner,
+                        conversation=life_conversation_id(memory_owner)).initialize()
+    live_port = LifeExperiencePort(evidence_db, controls_db=controls_db, subject=memory_owner)
     runtime, port, cycle, adapter, cognition = build(
         enabled=True, max_rounds=MAX_ROUNDS,
         experience_consumer=MemoryAdmissionExperienceConsumer(live_port, enabled=True))
     try:
-        check(store.recent_verified_outcomes(memory_owner=subject, limit=10) == [],
+        check(store.recent_verified_outcomes(memory_owner=memory_owner, limit=10) == [],
               "nothing reached M0 before the restart",
-              len(store.recent_verified_outcomes(memory_owner=subject, limit=10)))
+              len(store.recent_verified_outcomes(memory_owner=memory_owner, limit=10)))
         delivered = runtime.coordinator.dispatch_experience_handoffs()
         check(delivered.get("dispatched_count", 0) >= 1,
               "the pending handoff was delivered after the restart",
               delivered.get("pending_handoff_ids"))
         check(delivered.get("pending_handoff_ids") == [],
               "nothing is left pending", delivered.get("pending_handoff_ids"))
-        rows = store.recent_verified_outcomes(memory_owner=subject, limit=10)
+        rows = store.recent_verified_outcomes(memory_owner=memory_owner, limit=10)
         check(len(rows) == 1, "M0 holds exactly one row for that source", len(rows))
         check(rows and rows[0]["speaker"] == "chiyo" and rows[0]["delivery_status"] == "VERIFIED",
               "the delivered row is the verified one",
               (rows[0]["speaker"], rows[0]["delivery_status"]) if rows else None)
+        # The identity that made this section fail before: the Supply workspace subject is not an
+        # M0 owner, so asking M0 about it returns nothing even though the delivery really worked.
+        # Asserted (not assumed) so a regression to the wrong owner fails loudly instead of
+        # silently reporting "no history".
+        check(store.recent_verified_outcomes(memory_owner=subject, limit=10) == []
+              and memory_owner != subject,
+              "the workspace subject is not an M0 memory owner; the row belongs to the persona",
+              (subject, memory_owner))
         # A restart must not settle the same confirmed action twice, nor repeat its side effect.
         settlement_before_restart = runtime.settlement_read.get_settlement(restart_action)
         check(settlement_before_restart is not None,
@@ -572,9 +595,9 @@ def main() -> int:
         check(head_after_restart.get("version_number") == head_after.get("version_number"),
               "no duplicate side effect: the work did not advance again",
               (head_after.get("version_number"), head_after_restart.get("version_number")))
-        check(len(store.recent_verified_outcomes(memory_owner=subject, limit=10)) == 1,
+        check(len(store.recent_verified_outcomes(memory_owner=memory_owner, limit=10)) == 1,
               "no duplicate memory experience",
-              len(store.recent_verified_outcomes(memory_owner=subject, limit=10)))
+              len(store.recent_verified_outcomes(memory_owner=memory_owner, limit=10)))
     finally:
         runtime.close()
 

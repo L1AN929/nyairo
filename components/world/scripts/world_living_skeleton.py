@@ -152,9 +152,14 @@ def world_timeline_path(hermes_home: Optional[Path | str] = None) -> Path:
     return _home(hermes_home) / "data" / "world" / "world_timeline.json"
 
 
-def location_catalog() -> list[dict[str, Any]]:
-    """活动世界的地点目录（未配置世界包时即汐见市默认六地点）。"""
-    return [_copy_json(item) for item in wrd.active_world().location_catalog()]
+def location_catalog(environment: Optional[Mapping[str, str]] = None) -> list[dict[str, Any]]:
+    """活动世界的地点目录（未配置世界包时即汐见市默认六地点）。
+
+    ``environment`` 是本次请求的环境；只有不传时才回落到进程环境。
+    目标目录与后续提交必须来自同一个环境，否则会出现"目录来自 A 世界、
+    提交落在 B 世界"的错位。
+    """
+    return [_copy_json(item) for item in wrd.active_world(environment).location_catalog()]
 
 
 def _activity_world(environment: Optional[Mapping[str, str]] = None) -> wrd.WorldData:
@@ -270,6 +275,19 @@ def _load_state(
     if world.state_node(current, location.get("area_id")) is None:
         return None
     return state
+
+
+def read_world_state(
+    *,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> Optional[dict[str, Any]]:
+    """活动世界的状态只读快照（不写、不迁移）；未初始化或世界不符返回 None。
+
+    只读投影（例如 ``world_daily_opportunities``）复用同一套"什么算当前世界
+    状态"的判定，不另写一份解析。
+    """
+    return _load_state(hermes_home, environment)
 
 
 def _season(month: int) -> str:
@@ -676,6 +694,37 @@ def observe_world(
         except Exception:
             result = _copy_json(result)
             result.pop("school_assignments", None)
+    # 有限街区的“此刻能去哪儿做什么”：只读机会投影（不是动作授权）。
+    # 有投影预算时附在观察里；超出预算则省略，调用方可直接调
+    # world_daily_opportunities.location_opportunity_catalog。
+    opportunities_projection: Optional[dict[str, Any]] = None
+    try:
+        import world_daily_opportunities as wdo
+
+        opportunities_projection = wdo.compact_projection(
+            wdo.location_opportunity_catalog(
+                environment,
+                instant,
+                hermes_home=hermes_home,
+            )
+        )
+    except Exception:
+        opportunities_projection = None
+    if opportunities_projection is not None:
+        candidate = dict(result)
+        candidate["reachable_opportunities"] = opportunities_projection
+        if (
+            len(
+                json.dumps(
+                    candidate,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            <= MAX_OBSERVATION_BYTES
+        ):
+            result = candidate
     encoded = json.dumps(
         result,
         ensure_ascii=False,
@@ -791,9 +840,12 @@ def plan_move_to(
             "target_location_id": target,
             "before": before,
         }
-    if not wtd.travel_enabled(env) and wdr.feature_enabled(env):
+    destination_availability: Optional[dict[str, Any]] = None
+    if wdr.feature_enabled(env):
+        # 营业只是到达后的事实：MOVE 到门口即使 CLOSED 也允许，
+        # 店内可做事项/消费由到场后的投影与 owner 约束。
         try:
-            availability = wdr.location_availability(
+            destination_availability = wdr.location_availability(
                 target,
                 wf.world_local_time(
                     state,
@@ -803,22 +855,7 @@ def plan_move_to(
                 environment=env,
             )
         except Exception:
-            return {
-                "kind": MOVE_KIND,
-                "status": "rejected",
-                "reason_code": "DAILY_RHYTHM_UNAVAILABLE",
-                "target_location_id": target,
-                "before": before,
-            }
-        if availability["status"] != "OPEN":
-            return {
-                "kind": MOVE_KIND,
-                "status": "rejected",
-                "reason_code": "LOCATION_CLOSED",
-                "target_location_id": target,
-                "before": before,
-                "availability": availability,
-            }
+            destination_availability = None
     if target not in world.reachable_of(current_id):
         return {
             "kind": MOVE_KIND,
@@ -856,6 +893,7 @@ def plan_move_to(
             "before": before,
             "destination": _location_projection(target, world),
             "travel": travel_plan,
+            "destination_availability": destination_availability,
         }
     return {
         "kind": MOVE_KIND,
@@ -864,6 +902,7 @@ def plan_move_to(
         "target_location_id": target,
         "before": before,
         "destination": _location_projection(target, world),
+        "destination_availability": destination_availability,
     }
 
 
@@ -952,9 +991,12 @@ def apply_move_to(
                     "before": before,
                     "after": before,
                 }
-            if not wtd.travel_enabled(env) and wdr.feature_enabled(env):
+            destination_availability: Optional[dict[str, Any]] = None
+            if wdr.feature_enabled(env):
+                # 营业只是到达后的事实：MOVE 到门口即使 CLOSED 也允许，
+                # 店内可做事项/消费由到场后的投影与 owner 约束。
                 try:
-                    availability = wdr.location_availability(
+                    destination_availability = wdr.location_availability(
                         target,
                         wf.world_local_time(
                             state,
@@ -964,22 +1006,7 @@ def apply_move_to(
                         environment=env,
                     )
                 except Exception:
-                    return {
-                        "kind": MOVE_KIND,
-                        "status": "rejected",
-                        "reason_code": "DAILY_RHYTHM_UNAVAILABLE",
-                        "target_location_id": target,
-                        "before": before,
-                    }
-                if availability["status"] != "OPEN":
-                    return {
-                        "kind": MOVE_KIND,
-                        "status": "rejected",
-                        "reason_code": "LOCATION_CLOSED",
-                        "target_location_id": target,
-                        "before": before,
-                        "availability": availability,
-                    }
+                    destination_availability = None
             if target not in world.reachable_of(current_id):
                 return {
                     "kind": MOVE_KIND,
@@ -1047,6 +1074,7 @@ def apply_move_to(
                     "before": before,
                     "after": before,
                     "travel": travel,
+                    "destination_availability": destination_availability,
                     "postcondition": {
                         "verified": True,
                         "expected_world_location_id": current_id,
@@ -1085,7 +1113,7 @@ def apply_move_to(
                     "target_location_id": target,
                     "before": before,
                 }
-            after = _before_summary(loaded)
+            after = _before_summary(loaded, env)
             return {
                 "kind": MOVE_KIND,
                 "status": "applied",
@@ -1093,6 +1121,7 @@ def apply_move_to(
                 "target_location_id": target,
                 "before": before,
                 "after": after,
+                "destination_availability": destination_availability,
                 "postcondition": {
                     "verified": True,
                     "expected_world_location_id": target,
@@ -1220,6 +1249,7 @@ __all__ = [
     "observe_world",
     "plan_move_to",
     "read_move_state",
+    "read_world_state",
     "world_state_path",
     "world_timeline_path",
 ]

@@ -27,6 +27,11 @@ Hard rules
   wall clock.
 * **No verb knowledge in the body.**  The adapter maps action facts to a load
   class; the runtime decides how that moves the variables.
+* **No intake class.**  ``CONSUME`` is a physical operation, not a meal: the
+  body has no hunger, nutrition, satiety or intake variable and this adapter
+  never invents one.  Eating therefore does not "restore" fatigue or award
+  comfort; the only input it may carry is the tiny ``PHYSICAL_RESULT``
+  manipulation load of the act itself (see ``CONSUME_LOAD_NOTE``).
 """
 
 from __future__ import annotations
@@ -45,7 +50,10 @@ KIND_CONSEQUENCE = "body_consequence"
 KIND_PENDING = "pending_body_consequence"
 
 #: Laws of the adapter: which action types may produce a body consequence.
-SUPPORTED_ACTIONS = ("MOVE", "POSE", "REST", "PICK_UP", "PLACE")
+#: F: ``CONSUME`` is here only for the small physical manipulation of the
+#: operation itself.  It is explicitly *not* an intake/nutrition class and grants
+#: no recovery, comfort or satiety: see ``CONSUME_LOAD_NOTE``.
+SUPPORTED_ACTIONS = ("MOVE", "POSE", "REST", "PICK_UP", "PLACE", "CONSUME")
 
 #: Movement duration is not carried by the resolver result today, so a
 #: deterministic per-action default is used and recorded as an assumption.
@@ -62,7 +70,22 @@ EFFORT_BY_ACTION = {
     "PICK_UP": "light",
     "PLACE": "light",
     "REST": "light",
+    "CONSUME": "light",
 }
+
+#: Versioned, minimal assumption for a consumption operation: the physical act of
+#: bringing one already-obtained portion to the mouth.  Two seconds is the same
+#: order as PICK_UP/PLACE (a hand movement), deliberately *not* a made-up
+#: "120 s spent eating" and deliberately not a meal duration, because no real
+#: duration is measured anywhere in this system yet.
+#: This is a manipulation-load model.  It says nothing about nutrition, satiety,
+#: hunger, health, energy intake or recovery, and nothing may map it onto one.
+CONSUME_OPERATION_SECONDS = 2.0
+CONSUME_LOAD_NOTE = (
+    "consume_operation_load_model:%.1fs manipulation only; "
+    "not nutrition, not satiety, not hunger, not health, not recovery"
+    % CONSUME_OPERATION_SECONDS
+)
 
 #: Actions that may open a recovery session when they SUCCEED.
 RECOVERY_ACTIONS = ("REST",)
@@ -200,19 +223,25 @@ def build_consequence(
         inputs.append(item)
         record["notes"].append(f"movement_load_assumed:{MOVEMENT_SECONDS_BY_ACTION[action]}s")
 
-    elif action in ("PICK_UP", "PLACE"):
+    elif action in ("PICK_UP", "PLACE", "CONSUME"):
         # a small manipulation: resource context, deliberately tiny load so the
-        # runtime can decide whether it is even enough to form a transition
+        # runtime can decide whether it is even enough to form a transition.
+        # For CONSUME this is the physical act of the operation -- the same order
+        # of magnitude as picking one portion up -- never a meal duration and
+        # never an intake/nutrition input.
+        seconds = CONSUME_OPERATION_SECONDS if action == "CONSUME" else 2.0
         inputs.append(
             {
                 "class": "PHYSICAL_RESULT",
-                "movement_duration_seconds": 2.0,
+                "movement_duration_seconds": seconds,
                 "effort": EFFORT_BY_ACTION[action],
                 "execution_id": execution_id,
             }
         )
-        record["resource_ref"] = object_id
-        record["notes"].append("manipulation_load_minimal")
+        record["resource_ref"] = object_id or result.get("object_id")
+        record["notes"].append(
+            CONSUME_LOAD_NOTE if action == "CONSUME" else "manipulation_load_minimal"
+        )
 
     if action in POSTURE_ACTIONS and pose:
         inputs.append(

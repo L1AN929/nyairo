@@ -424,8 +424,12 @@ def _empty_state(environment: Optional[Mapping[str, str]] = None) -> dict[str, A
     }
 
 
-def _current_activity_status(hermes_home: Path) -> Optional[str]:
-    raw_dir = os.environ.get("XINXI_DIR")
+def _current_activity_status(
+    hermes_home: Path, environment: Optional[Mapping[str, str]] = None
+) -> Optional[str]:
+    # 必须用本次请求环境：进程级 XINXI_DIR 会把另一个实例的活动状态串进来。
+    values = os.environ if environment is None else environment
+    raw_dir = values.get("XINXI_DIR")
     directory = Path(raw_dir).expanduser() if raw_dir else hermes_home / "xinxi"
     path = directory / "current_activity.json"
     if not path.exists():
@@ -531,7 +535,7 @@ def plan_travel(
             "origin_location_id": origin,
             "destination_location_id": destination,
         }
-    activity_status = _current_activity_status(_home(hermes_home))
+    activity_status = _current_activity_status(_home(hermes_home), environment)
     if activity_status == "unavailable":
         return {
             "kind": TRAVEL_PROJECTION_KIND,

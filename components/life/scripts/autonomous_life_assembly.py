@@ -27,6 +27,7 @@ What this module does, and the rules it obeys
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -102,6 +103,159 @@ def resolve_supply_configuration(environment: Mapping[str, str]) -> dict[str, An
 #: service, and the feed is then recorded UNAVAILABLE instead of being invented.
 WORLD_SOCKET_ENV = "WORLD_BODY_SOCKET"
 WORLD_BRIDGE_DIR_ENV = "NYAIRO_WORLD_BRIDGE_DIR"
+
+
+#: W05R: the hard *request* ceilings.  These count every HTTP attempt -- a decision, a
+#: content generation and a schema retry -- against both a UTC day and one run window.
+ENV_REQUEST_UTC_DAY_MAX = "CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_UTC_DAY"
+ENV_REQUEST_RUN_WINDOW_MAX = "CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_RUN_WINDOW"
+ENV_RUN_ID = "CHIYO_AUTONOMOUS_RUN_ID"
+ENV_NEW_RUN_WINDOW = "CHIYO_AUTONOMOUS_NEW_RUN_WINDOW"
+
+
+def _int_env(environment: Mapping[str, str], name: str) -> Optional[int]:
+    raw = str(environment.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def request_budget(environment: Mapping[str, str], state_root: Path | str) -> Any:
+    """The persisted request budget for this instance, or ``None`` when unconfigured.
+
+    ``None`` means "this profile sets no request ceiling at all", which is a *stated*
+    configuration rather than a silent fallback: the one-day entry always writes both
+    ceilings into the instance, so a real run cannot end up here by accident.
+
+    A window is opened the first time an identity is seen, and a plain restart carrying
+    the same identity continues it.  A *new* identity is refused unless the caller
+    explicitly asked for a new window, so restarting cannot mint a fresh allowance.
+    """
+
+    from life_request_budget import LifeRequestBudget
+
+    day_max = _int_env(environment, ENV_REQUEST_UTC_DAY_MAX)
+    window_max = _int_env(environment, ENV_REQUEST_RUN_WINDOW_MAX)
+    if day_max is None and window_max is None:
+        return None
+    run_id = str(environment.get(ENV_RUN_ID) or "").strip() or (
+        "run:" + hashlib.sha256(str(state_root).encode("utf-8")).hexdigest()[:16])
+    budget = LifeRequestBudget(Path(state_root), utc_day_max=day_max,
+                               run_window_max=window_max, run_id=run_id)
+    allow_new = str(environment.get(ENV_NEW_RUN_WINDOW) or "").strip().lower() in {
+        "1", "true", "yes", "on"}
+    budget.ensure_window(allow_new=allow_new)
+    return budget
+
+
+#: D (life-v1): the explicit work binding and the World/Body read seam.  The work artifact is
+#: *named*, never picked by recency: a private-items document (or any other newer artifact)
+#: must never be mistaken for the work being continued.
+WORK_ARTIFACT_ENV = "CHIYO_LIFE_WORK_ARTIFACT_ID"
+READING_ARTIFACT_ENV = "CHIYO_LIFE_READING_ARTIFACT_ID"
+PRIVATE_ITEMS_ARTIFACT_ENV = "CHIYO_LIFE_PRIVATE_ITEMS_ARTIFACT_ID"
+WORLD_HOME_ENV = ("CHIYO_WORLD_HOME", "HERMES_HOME")
+
+
+def resolve_artifact_bindings(environment: Mapping[str, str]) -> dict[str, Optional[str]]:
+    """The three explicitly bound artifacts of this instance (work / reading / private items)."""
+
+    def _get(name: str) -> Optional[str]:
+        value = str(environment.get(name) or "").strip()
+        return value or None
+
+    return {"work_artifact_id": _get(WORK_ARTIFACT_ENV),
+            "reading_artifact_id": _get(READING_ARTIFACT_ENV),
+            "private_items_artifact_id": _get(PRIVATE_ITEMS_ARTIFACT_ENV)}
+
+
+def resolve_work_artifact_id(environment: Mapping[str, str]) -> Optional[str]:
+    """The artifact this instance continues, or ``None`` (then the port picks the newest)."""
+
+    value = str(environment.get(WORK_ARTIFACT_ENV) or "").strip()
+    return value or None
+
+
+def _load_module_by_path(name: str, path: Path) -> Any:
+    """Load one module from an explicit file, for the copies that are not on ``sys.path``."""
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load %s from %s" % (name, path))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def resolve_body_port(environment: Mapping[str, str]) -> dict[str, Any]:
+    """The real World/Body read port, or a named reason there is none.
+
+    ``READY`` means a real ``WorldBodyReadPort`` was built over the instance's own gateway
+    socket.  Everything else returns no port plus a reason, and A's situation view then
+    reports the body column UNKNOWN -- it never invents a healthy body.
+    """
+
+    env = dict(environment or {})
+    socket_path = str(env.get(WORLD_SOCKET_ENV) or "").strip()
+    if not socket_path:
+        return {"port": None, "status": "UNAVAILABLE", "reason": "BODY_SEAM_NOT_CONFIGURED",
+                "detail": "no %s in this profile" % WORLD_SOCKET_ENV}
+    try:
+        here = str(Path(__file__).resolve().parent)
+        bridge = (str(env.get(WORLD_BRIDGE_DIR_ENV) or "").strip()
+                  or str(Path(__file__).resolve().parents[2] / "world" / "service" / "bridge"))
+        integration = str(Path(__file__).resolve().parents[2] / "native" / "integration")
+        for entry in (here, bridge, integration):
+            if entry and entry not in sys.path:
+                sys.path.insert(0, entry)
+        import world_body_client as wbc
+
+        try:
+            from world_body_read_port import WorldBodyReadPort
+        except ImportError:
+            WorldBodyReadPort = _load_module_by_path(
+                "assembly_world_body_read_port",
+                Path(integration) / "world_body_read_port.py").WorldBodyReadPort
+        client = wbc.WorldBodyClient(socket_path=socket_path, mode=wbc.MODE_CANONICAL,
+                                     read_retries=0)
+    except Exception as exc:
+        return {"port": None, "status": "UNAVAILABLE", "reason": "BODY_PORT_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    return {"port": WorldBodyReadPort(client), "status": "READY", "reason": "",
+            "socket": socket_path}
+
+
+def resolve_situation_source(environment: Mapping[str, str], *, home: Any = None) -> dict[str, Any]:
+    """A's situation reader (``life_situation_view.LifeSituationView``), or a named reason.
+
+    The subject is the *canonical* Life subject (the Body is the global subject's body); the
+    Supply workspace subject is a different concept and is deliberately not passed here.
+    """
+
+    try:
+        import life_situation_view as lsv
+    except Exception as exc:
+        return {"source": None, "status": "UNAVAILABLE", "reason": "SITUATION_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    env = dict(environment or {})
+    world_home = str(home or "").strip() or str(_first(env, WORLD_HOME_ENV) or "").strip()
+    if not world_home or not Path(world_home).is_dir():
+        return {"source": None, "status": "UNAVAILABLE", "reason": "WORLD_HOME_NOT_BOUND",
+                "detail": "no %s directory in this profile" % WORLD_HOME_ENV[0]}
+    body = resolve_body_port(env)
+    try:
+        source = lsv.LifeSituationView(home=world_home, body_port=body["port"])
+    except Exception as exc:
+        return {"source": None, "status": "UNAVAILABLE", "reason": "SITUATION_WIRING_REFUSED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    return {"source": source, "status": "READY", "reason": "", "home": world_home,
+            "body_seam": body["status"], "body_seam_reason": body["reason"]}
 
 
 def resolve_world_provider(environment: Mapping[str, str], *,
@@ -189,7 +343,23 @@ def _model_config(environment: Mapping[str, str]) -> Any:
     return config
 
 
-def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0) -> Any:
+def pause_request_admission(state_root: Path | str) -> Any:
+    """W05R-R1c: the pause send guard bound to one instance's pause bit.
+
+    It is handed to the real transport (which holds the shared confirmation lock across the
+    finite *send phase* of every decision, schema retry and content request, and releases it
+    before waiting for the response) and to the transport wrappers (which require that
+    capability, and refuse the send when a transport cannot provide it).
+    """
+
+    import life_pause
+
+    return life_pause.RequestSendGuard(state_root)
+
+
+def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0,
+                  requests: Any = None, admission: Any = None,
+                  pause_guard: Any = None) -> Any:
     """The real content writer, over the instance's own provider.
 
     The writer is the one place a model produces text for a work, so it is built from the
@@ -210,13 +380,21 @@ def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0) ->
     transport = OpenAICompatibleTransport(
         base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
         provider=config.get("provider") or "custom", timeout_s=timeout_s,
-        purpose="artifact_edit", request_json_object=True)
+        purpose="artifact_edit", request_json_object=True, pause_guard=pause_guard)
     client = AgencyModelClient(config=config, transport=transport, purpose="artifact_edit",
                                timeout_s=timeout_s, max_output_tokens=512)
+    if requests is not None:
+        # W05R: the reservation happens here, at the HTTP boundary, *before* the request
+        # leaves.  A refusal raises and the round is reported as a budget refusal.
+        from life_request_budget import BudgetedModelClient
+
+        client = BudgetedModelClient(client, requests, admission=admission)
     return ModelContinuationWriter(client, max_new_chars=300)
 
 
-def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0) -> Any:
+def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0,
+                    requests: Any = None, admission: Any = None,
+                    pause_guard: Any = None) -> Any:
     """The real decision adapter over the same provider, or ``None``.
 
     The decision is the one place a model may speak, so it is built from the same profile
@@ -237,12 +415,22 @@ def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0) 
     transport = OpenAICompatibleTransport(
         base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
         provider=config.get("provider") or "custom", timeout_s=timeout_s,
-        purpose="agency_cognition", request_json_object=True)
+        purpose="agency_cognition", request_json_object=True, pause_guard=pause_guard)
     client = AgencyModelClient(config=config, transport=transport,
                                purpose="agency_cognition", timeout_s=timeout_s,
                                max_output_tokens=512)
-    return ProductionAgencyCognitionAdapter(client=client, timeout_s=timeout_s,
-                                            max_output_tokens=512)
+    adapter = ProductionAgencyCognitionAdapter(client=client, timeout_s=timeout_s,
+                                               max_output_tokens=512)
+    if requests is not None or admission is not None:
+        # W05R: every cognition attempt -- the decision and each schema retry -- is
+        # reserved against the persisted ledger before the HTTP request is made; W05R-R1b
+        # adds the pause request-start handshake at that same boundary.
+        from life_request_budget import BudgetedCognitionAdapter
+
+        if requests is None:
+            return adapter
+        return BudgetedCognitionAdapter(adapter, requests, admission=admission)
+    return adapter
 
 
 def assemble_autonomous_life(
@@ -253,7 +441,13 @@ def assemble_autonomous_life(
     experience_provider: Any = None,
     world_provider: Any = None,
     writer: Any = None,
+    requests: Any = None,
+    pause_admission: Any = None,
     enabled: bool = False,
+    situation_source: Any = None,
+    continuity_source: Any = None,
+    appraisal_source: Any = None,
+    work_artifact_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build the cycle, the runner and the feed poller on top of ``runtime``.
 
@@ -287,6 +481,10 @@ def assemble_autonomous_life(
         root = Path(state_root)
     else:
         root = Path(env.get("CHIYO_LIFE_INSTALL_ROOT") or "./data/life") / "state"
+    #: W05R-R1b: every real request attempt is admitted at its send boundary against the
+    #: instance's own pause bit (the same root the operator's ``pause`` writes).
+    admission = (pause_admission if pause_admission is not None
+                 else pause_request_admission(root))
     try:
         import sys
 
@@ -303,7 +501,8 @@ def assemble_autonomous_life(
                 "detail": "%s: %s" % (type(exc).__name__, exc)}
 
     if writer is None:
-        writer = _model_writer(env)
+        writer = _model_writer(env, requests=requests, admission=admission,
+                               pause_guard=admission)
     if writer is None:
         return {"state": BLOCKED, "reason": "NO_CONTENT_WRITER",
                 "detail": "the profile has no usable provider for the content writer"}
@@ -312,6 +511,23 @@ def assemble_autonomous_life(
     artifact_adapter = SupplyManagedArtifactActionAdapter(
         port, grant_id=supply["artifact_grant_id"],
         workspace_id=env.get("CHIYO_LIFE_SUPPLY_WORKSPACE_ID"))
+
+    # D (life-v1): the two injected readers and the explicit work binding.
+    #   * ``situation`` is A's view: the Body column comes from the instance's own gateway
+    #     socket, and with no socket it is UNKNOWN rather than healthy.
+    #   * ``continuity`` is C's read-only view; the resident builds it because it is the
+    #     process that already holds the Memory boundary port.
+    #   * the work artifact is *named* (``CHIYO_LIFE_WORK_ARTIFACT_ID``), so a private-items
+    #     document cannot be selected as if it were the work.
+    work_artifact = ((str(work_artifact_id).strip() if work_artifact_id else "")
+                     or resolve_work_artifact_id(env) or None)
+    bindings = resolve_artifact_bindings(env)
+    situation = ({"source": situation_source, "status": "READY", "reason": "",
+                  "detail": "supplied by the caller"}
+                 if situation_source is not None
+                 else resolve_situation_source(env, home=env.get("CHIYO_WORLD_HOME")))
+    situation_source = situation["source"]
+    situation_record = {k: v for k, v in situation.items() if k != "source"}
 
     cycle = alc.AutonomousLifeCycle(
         runtime,
@@ -328,6 +544,13 @@ def assemble_autonomous_life(
         # anything on, which is a different bug wearing the same clothes.
         enabled=True,
         env=env,
+        requests=requests,
+        situation_source=situation_source,
+        continuity_source=continuity_source,
+        appraisal_source=appraisal_source,
+        work_artifact_id=work_artifact,
+        reading_artifact_id=bindings["reading_artifact_id"],
+        private_items_artifact_id=bindings["private_items_artifact_id"],
     )
     # The World feed is assembled only when a real observation seam exists.  Without one the
     # cycle must not consult the World at all -- that is the behaviour every pre-B6 profile
@@ -357,7 +580,6 @@ def assemble_autonomous_life(
         feeds.append(events.WorldOpportunityFeed(world_provider, root))
     poller = events.EventFeedPoller(feeds)
     poller.feeds = [feed for feed in poller.feeds if feed is not None]
-
     return {
         "state": READY,
         "cycle": cycle,
@@ -373,6 +595,13 @@ def assemble_autonomous_life(
         "world_provider": world_provider,
         "feeds": [getattr(feed, "name", type(feed).__name__) for feed in poller.feeds],
         "lease_instance": getattr(lease, "instance_id", None),
+        "request_budget": (requests.view() if requests is not None else None),
+        # D (life-v1): what was actually wired, so a reader can tell "no body seam" from
+        # "the body said nothing".  No reader object is handed back.
+        "work_artifact_id": work_artifact,
+        "situation": situation_record,
+        "continuity_wired": continuity_source is not None,
+        "appraisal_wired": appraisal_source is not None,
     }
 
 
@@ -424,4 +653,13 @@ __all__ = [
     "resolve_supply_configuration",
     "run_once",
     "runner_tick",
+    "ENV_REQUEST_RUN_WINDOW_MAX",
+    "ENV_REQUEST_UTC_DAY_MAX",
+    "ENV_RUN_ID",
+    "request_budget",
+    "resolve_situation_source",
+    "resolve_body_port",
+    "resolve_work_artifact_id",
+    "WORK_ARTIFACT_ENV",
+    "WORLD_HOME_ENV",
 ]

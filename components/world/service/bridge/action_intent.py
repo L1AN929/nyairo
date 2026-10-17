@@ -58,12 +58,15 @@ INTENT_STATUSES = (
 #: Verbs this ticket exposes.  M15 enabled PICK_UP / PLACE once the World could
 #: declare an object's capability (see world_object_capability + the economy
 #: catalog), so the gate is no longer "the verb is unknown" but "the object
-#: says takeable/placeable".
-EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE")
+#: says takeable/placeable".  F enabled CONSUME (one object instance, one owner
+#: receipt, no nutrition), and it is registered here for the same reason: the
+#: Life core reaches the owner *only* through this chain, so a verb the Resolver
+#: commits but this list omits is unreachable from a real decision.
+EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME")
 
 #: M15 §19: the production allowlist is explicit.  A future verb does NOT gain
 #: permission by being added to the resolver; it must be added here on purpose.
-ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE")
+ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME")
 
 #: kept for compatibility with older callers/tests; M15 emptied it.
 BLOCKED_VERBS: tuple[str, ...] = ()

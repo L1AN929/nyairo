@@ -5,6 +5,8 @@
 
 * 修改后的道路拓扑真实生效（被删除的道路不可通行，新增道路可走）；
 * 修改后的营业时间真实生效（11 点未营业 / 13 点营业 / 20 点关闭）；
+* 闭店只约束店内 affordance，不拦“走到门口”（本批已裁定：相邻闭店地点
+  plan/apply 仍 ready，结果带 CLOSED 提示）；
 * 编辑不影响角色既有经历（实例状态独立保存）。
 
 需要 POSIX（fcntl）；原生 Windows 自动跳过。
@@ -130,18 +132,100 @@ class EditedWorldRuntimeTest(WorldGenTestCase):
             wdr.location_availability("bookstore", self._at(20), environment=self.env)["status"],
             "CLOSED",
         )
-        # 即时移动模式下，未营业时进入书店被拒绝（动作级规则执行）。
+        # 闭店不再拦“走到门口”：书店与家不相邻，拒绝原因只能是可达性，
+        # 不能再用 LOCATION_CLOSED 把拓扑事实说成营业事实。门口语义见
+        # test_closed_bookstore_doorstep_is_reachable_but_store_affordances_are_empty。
         plan_closed = self.wls.plan_move_to(
             "bookstore", hermes_home=self.home, environment=self.env_instant,
             now=self._at(11),
         )
         self.assertEqual(plan_closed["status"], "rejected")
-        self.assertEqual(plan_closed["reason_code"], "LOCATION_CLOSED")
+        self.assertEqual(plan_closed["reason_code"], "LOCATION_NOT_REACHABLE")
+        self.assertNotEqual(plan_closed["reason_code"], "LOCATION_CLOSED")
         # 经过 park 到达书店的合法移动在 13 点照常执行。
         applied = self.wls.apply_move_to(
             "street_1", hermes_home=self.home, environment=self.env, now=self._at(10)
         )
         self.assertEqual(applied["status"], "applied")
+
+    def test_closed_bookstore_doorstep_is_reachable_but_store_affordances_are_empty(
+        self,
+    ) -> None:
+        """营业限制的是场内机会，不是走到门口（本批已裁定语义）。
+
+        park↔bookstore 相邻、书店 12–18 营业：11 点从公园规划/走到书店门口必须
+        成功，并如实带上 CLOSED 提示；店内 affordance 为空。13 点开门后同一个
+        门口才出现 BROWSE_STORE。全程用真实编辑后世界与真实实例状态。
+        """
+        import world_daily_rhythm as wdr
+
+        for leg in ("street_1", "park"):
+            applied = self.wls.apply_move_to(
+                leg, hermes_home=self.home, environment=self.env_instant,
+                now=self._at(10),
+            )
+            self.assertEqual(applied["status"], "applied", f"{leg}: {applied}")
+        self.assertEqual(
+            self.wls.read_move_state(
+                hermes_home=self.home, environment=self.env_instant
+            )["world_location_id"],
+            "park",
+        )
+
+        # 11:00 书店闭店：门口仍然可规划（ready），营业只是提示字段。
+        plan_closed = self.wls.plan_move_to(
+            "bookstore", hermes_home=self.home, environment=self.env_instant,
+            now=self._at(11),
+        )
+        self.assertEqual(plan_closed["status"], "ready", plan_closed)
+        self.assertEqual(plan_closed["reason_code"], "REACHABLE")
+        self.assertEqual(
+            plan_closed["destination_availability"]["status"], "CLOSED"
+        )
+        self.assertEqual(
+            plan_closed["destination_availability"]["reason_code"],
+            "OUTSIDE_OPEN_HOURS",
+        )
+        self.assertEqual(
+            wdr.affordances_for_location(
+                "bookstore", self._at(11), environment=self.env_instant
+            ),
+            [],
+        )
+
+        # 真的走到门口：到达事实成立，闭店提示跟着结果走。
+        into_closed = self.wls.apply_move_to(
+            "bookstore", hermes_home=self.home, environment=self.env_instant,
+            now=self._at(11),
+        )
+        self.assertEqual(into_closed["status"], "applied", into_closed)
+        self.assertEqual(into_closed["reason_code"], "MOVE_COMMITTED")
+        self.assertEqual(
+            into_closed["destination_availability"]["status"], "CLOSED"
+        )
+        self.assertEqual(
+            self.wls.read_move_state(
+                hermes_home=self.home, environment=self.env_instant
+            )["world_location_id"],
+            "bookstore",
+        )
+        self.assertEqual(
+            wdr.affordances_for_location(
+                "bookstore", self._at(11), environment=self.env_instant
+            ),
+            [],
+        )
+
+        # 13:00 开门：同一个门口，店内可做事项才出现。
+        self.assertEqual(
+            [
+                item["affordance_id"]
+                for item in wdr.affordances_for_location(
+                    "bookstore", self._at(13), environment=self.env_instant
+                )
+            ],
+            ["BROWSE_STORE"],
+        )
 
     def test_edited_world_survives_reload_with_state(self) -> None:
         """编辑后世界加载 + 移动 + 重载：位置与移动记录保留（隔离实例）。"""

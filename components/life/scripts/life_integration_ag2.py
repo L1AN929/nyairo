@@ -3074,10 +3074,16 @@ class DecisionAdoptionCoordinator:
             # Section 49 & 68-70: START_NEW_ACTIVITY
             assert cand_dict is not None and sel_cid is not None
             if adoption_spec is not None:
+                # W05R: the override may be a callable of the committed Decision, exactly
+                # like ``step_spec_override`` below.  A round in which a continuable work
+                # *and* an observed place are both legal must register the Activity shape
+                # for the candidate that actually won, not for a path fixed in advance.
+                spec_source = (adoption_spec(decision) if callable(adoption_spec)
+                               else adoption_spec)
                 spec_obj = (
-                    adoption_spec
-                    if isinstance(adoption_spec, ActivityAdoptionSpec)
-                    else ActivityAdoptionSpec.from_dict(adoption_spec)
+                    spec_source
+                    if isinstance(spec_source, ActivityAdoptionSpec)
+                    else ActivityAdoptionSpec.from_dict(spec_source)
                 )
                 self.register_adoption_spec(sel_cid, spec_obj)
             else:

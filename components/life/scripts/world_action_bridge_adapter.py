@@ -57,14 +57,19 @@ import action_reality_ledger as ar0
 #: Where the World bridge modules live, when the tree layout is not discoverable.
 WORLD_BRIDGE_DIR_ENV = "NYAIRO_WORLD_BRIDGE_DIR"
 
-#: The one verb this adapter maps faithfully.  AR-0 carries a single ``target``
-#: string; the Resolver's POSE requires ``pose`` *and* ``orientation``, which a
-#: single target cannot express without inventing one.  POSE is therefore
-#: refused as a pre-submission failure rather than guessed at.
-SUPPORTED_VERBS = ("MOVE",)
+#: The verbs this adapter maps faithfully, i.e. the ones a single AR-0 ``target``
+#: string can express completely.  ``MOVE``'s target is the destination place and
+#: ``CONSUME``'s target is the World object instance id -- the Resolver's own
+#: single-parameter shapes (``destination_location_id`` / ``object_id``).  POSE is
+#: still refused as a pre-submission failure rather than guessed at: the Resolver
+#: requires ``pose`` *and* ``orientation``, and one target cannot supply both
+#: without inventing one of them.
+SUPPORTED_VERBS = ("MOVE", "CONSUME")
 
 #: Verb -> the Resolver's own parameter name (world_action_resolver._require_params).
-VERB_PARAMETER = {"MOVE": "destination_location_id"}
+#: Both entries are total: nothing here invents a second parameter, and the AR-0
+#: single target *is* the parameter value.
+VERB_PARAMETER = {"MOVE": "destination_location_id", "CONSUME": "object_id"}
 
 
 class WorldBridgeUnavailable(RuntimeError):
@@ -338,7 +343,7 @@ class WorldBridgeResolver:
             if place is not None and revision is not None
             else "world:execution:%s" % execution_id
         )
-        return {
+        entry: dict[str, Any] = {
             "execution_id": execution_id,
             "status": "committed",
             "code": "OK",
@@ -346,6 +351,32 @@ class WorldBridgeResolver:
             "world_mutation_ref": mutation_ref,
             "transport_result": ar0.TRANSPORT_OK_SUCCEEDED,
             "detail": detail,
+        }
+        if verb == "CONSUME":
+            # The one owner fact that names *which* instance was consumed and that the
+            # deletion and its receipt were saved together.  It is read back under the
+            # original execution id; a missing receipt is reported as missing rather
+            # than inferred from "the object is gone" (the F contract).
+            entry["details"] = self._consumption_details(execution_id)
+        return entry
+
+    def _consumption_details(self, execution_id: str) -> dict[str, Any]:
+        """The World owner's own consumption receipt, or an honest absence."""
+
+        try:
+            _, _, wbc = self._bridge()
+            probe = self.client.get_action_result(execution_id)
+        except Exception as error:  # noqa: BLE001 - unreachable World is not a receipt
+            return {"receipt_present": False,
+                    "receipt_query_error": "%s: %s" % (type(error).__name__, error)}
+        if probe.outcome != wbc.OK or not isinstance(probe.data, dict):
+            return {"receipt_present": False,
+                    "receipt_query_error": "outcome=%s" % probe.outcome}
+        data = probe.data
+        return {
+            "receipt_present": bool(data.get("receipt_present")),
+            "consumption_receipt": data.get("consumption_receipt"),
+            "world_verdict": data.get("verdict"),
         }
 
     def _record(self, idempotency_key: str, entry: dict[str, Any]) -> dict[str, Any]:

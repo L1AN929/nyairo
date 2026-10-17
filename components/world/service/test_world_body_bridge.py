@@ -198,11 +198,17 @@ class TransportTests(unittest.TestCase):
                                               params={}).outcome, wbc.UNKNOWN)
 
     def test_transport_fault_on_submit_is_unknown(self):
+        """回执丢失 = 疑问，不是结论；查询也失败时绝不编造成功。"""
+
         client = wbc.WorldBodyClient(socket_path="/nonexistent/gateway.sock",
                                      mode=wbc.MODE_CANONICAL)
         result = client.submit_action(action="MOVE", execution_id="e1", params={})
         self.assertEqual(result.outcome, wbc.UNKNOWN)
         self.assertIn("transport_fault", result.reason or "")
+        self.assertEqual(result.failure_class, "transport_fault:UNAVAILABLE")
+        self.assertEqual(result.detail, "socket_missing")
+        self.assertEqual(result.attempts, 1, "一次提交，不重发")
+        self.assertEqual(client.metrics.submitted, 1)
 
     def test_missing_execution_id_is_invalid(self):
         client = wbc.WorldBodyClient(mode=wbc.MODE_CANONICAL)
@@ -531,6 +537,175 @@ class AdminSurfaceSeparationTests(unittest.TestCase):
         self.assertTrue(gapi.is_test_object("M13A1_something"))
         self.assertFalse(gapi.is_test_object(
             "item-8ad09561bcc7d3d5b8e10aec36365df138c5d217e66db8e14f65cf4aafe54006"))
+
+
+class _BlockingServer:
+    """unix-socket 替身：每条连接一个线程，脚本化的响应可以被挂住。
+
+    用它复现"回执丢了"的真实窗口：``submit_action`` 的响应被无限期挂起（客户端
+    只会等到自己的 deadline），而同一 execution id 的 ``get_action_result`` 仍然
+    可以立刻被服务 —— 这正是 fixture 里 owner 已提交、客户端却超时的样子。
+    不靠 sleep 竞速：谁先谁后由事件和 deadline 决定。
+    """
+
+    def __init__(self, responder):
+        self.responder = responder
+        self.release = threading.Event()
+        self.calls: list[tuple[str, object]] = []
+        self._lock = threading.Lock()
+        self.dir = pathlib.Path(tempfile.mkdtemp(prefix="m13b-amb-"))
+        self.path = self.dir / "gateway.sock"
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.server.bind(str(self.path))
+        self.server.listen(8)
+        self.server.settimeout(0.2)
+        self._stop = False
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while not self._stop:
+            try:
+                connection, _ = self.server.accept()
+            except (socket.timeout, OSError):
+                continue
+            threading.Thread(target=self._handle, args=(connection,),
+                             daemon=True).start()
+
+    def _handle(self, connection):
+        try:
+            data = connection.recv(65536)
+            request = json.loads(data.decode().strip().splitlines()[0])
+            command = request.get("command")
+            with self._lock:
+                self.calls.append((command, request.get("argument")))
+            payload = self.responder(command, request.get("argument"), self.release)
+        except Exception as error:  # pragma: no cover - defensive
+            payload = {"ok": False, "error": type(error).__name__}
+        try:
+            connection.sendall((json.dumps(payload) + "\n").encode())
+        except OSError:
+            pass
+        finally:
+            connection.close()
+
+    def count(self, command) -> int:
+        with self._lock:
+            return sum(1 for item, _ in self.calls if item == command)
+
+    def close(self):
+        self._stop = True
+        self.release.set()
+        try:
+            self.server.close()
+        except OSError:
+            pass
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+
+
+class AmbiguousSubmitTest(unittest.TestCase):
+    """提交回执丢失后，只有 owner 自己的判决能收尾；提交次数恒为 1。"""
+
+    def setUp(self):
+        self.closed = []
+
+    def tearDown(self):
+        for server in self.closed:
+            server.close()
+
+    def _server(self, responder) -> _BlockingServer:
+        server = _BlockingServer(responder)
+        self.closed.append(server)
+        return server
+
+    def _client(self, server, **kwargs):
+        return wbc.WorldBodyClient(socket_path=server.path, mode=wbc.MODE_CANONICAL,
+                                   read_retries=0, **kwargs)
+
+    def test_a_lost_submit_reply_is_resolved_by_the_owners_own_verdict(self):
+        verdict = {"known": True, "execution_id": "world-exec:amb-1",
+                   "verdict": "SUCCESS", "state": "committed",
+                   "result": "success", "action_type": "MOVE"}
+
+        def responder(command, argument, release):
+            if command == "submit_action":
+                # owner 已经落账，回执永远到不了客户端。
+                release.wait(30)
+                return {"ok": True, "result": {"status": "applied",
+                                               "reason_code": "OK"}}
+            if command == "get_action_result":
+                return {"ok": True, "result": dict(verdict)}
+            return {"ok": True, "result": {}}
+
+        server = self._server(responder)
+        client = self._client(server, timeout=0.2, mutation_timeout=0.2)
+        result = client.submit_action(
+            action="MOVE", execution_id="world-exec:amb-1",
+            params={"destination_location_id": "s1"})
+
+        self.assertEqual(result.outcome, wbc.SUCCESS, result.as_dict())
+        self.assertEqual(result.reason, "owner_verdict:SUCCESS")
+        self.assertEqual(result.attempts, 1, "判决来自 owner，不是第二次提交")
+        self.assertEqual(server.count("submit_action"), 1)
+        self.assertEqual(server.count("get_action_result"), 1)
+        self.assertEqual(client.metrics.submitted, 1)
+
+    def test_an_unresolved_query_keeps_the_doubt_and_submits_once(self):
+        probes = {
+            "not_found": {"ok": True, "result": {"known": False,
+                                                 "verdict": "NOT_FOUND"}},
+            "unknown": {"ok": True, "result": {"known": True, "verdict": "UNKNOWN"}},
+            "unreadable": {"ok": False, "error": "GATEWAY_UNAVAILABLE"},
+        }
+        for name, probe in probes.items():
+            with self.subTest(probe=name):
+                def responder(command, argument, release, _probe=probe):
+                    if command == "submit_action":
+                        release.wait(30)
+                        return {"ok": True, "result": {"status": "applied",
+                                                       "reason_code": "OK"}}
+                    if command == "get_action_result":
+                        return dict(_probe)
+                    return {"ok": True, "result": {}}
+
+                server = self._server(responder)
+                client = self._client(server, timeout=0.2, mutation_timeout=0.2)
+                result = client.submit_action(
+                    action="MOVE", execution_id="world-exec:amb-2", params={})
+                self.assertEqual(result.outcome, wbc.UNKNOWN, result.as_dict())
+                self.assertEqual(result.failure_class, "transport_fault:TIMEOUT")
+                self.assertEqual(server.count("submit_action"), 1)
+                self.assertEqual(server.count("get_action_result"), 1)
+                self.assertEqual(client.metrics.submitted, 1)
+
+    def test_the_mutation_deadline_is_separate_from_the_read_deadline(self):
+        """读会放弃的慢响应，提交仍要等完：两者不是同一个预算。"""
+
+        def responder(command, argument, release):
+            time.sleep(0.5)
+            if command == "submit_action":
+                return {"ok": True, "result": {"status": "applied",
+                                               "reason_code": "OK"}}
+            return {"ok": True, "result": {"readiness": "READY", "ready": True}}
+
+        server = self._server(responder)
+        client = self._client(server, timeout=0.15, mutation_timeout=5.0)
+        # 同一份慢响应：读超时，提交完成 —— 恰好一次。
+        self.assertEqual(client.get_snapshot().outcome, wbc.TIMEOUT)
+        result = client.submit_action(action="MOVE", execution_id="e-slow", params={})
+        self.assertEqual(result.outcome, wbc.SUCCESS, result.as_dict())
+        self.assertEqual(server.count("submit_action"), 1)
+
+    def test_the_default_mutation_deadline_covers_the_owners_commit_lock(self):
+        # Resolver 串行化提交的 _commit_lock 是 10s：默认提交预算必须比它长，
+        # 否则"忙但健康"会被误判成传输故障；读保持短，不盲目放大。
+        self.assertGreater(wbc.DEFAULT_MUTATION_TIMEOUT, 10.0)
+        self.assertLess(wbc.DEFAULT_READ_TIMEOUT, wbc.DEFAULT_MUTATION_TIMEOUT)
+        client = wbc.WorldBodyClient(mode=wbc.MODE_OFF)
+        self.assertEqual(client.timeout, wbc.DEFAULT_READ_TIMEOUT)
+        self.assertEqual(client.mutation_timeout, wbc.DEFAULT_MUTATION_TIMEOUT)
 
 
 if __name__ == "__main__":

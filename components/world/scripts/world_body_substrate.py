@@ -9,6 +9,10 @@ body substrate that ``Body / Embodiment V1`` needs to exist inside the world:
 * body physical resource slots (hands) with **derived** occupancy;
 * exclusive body-resource reservations for in-flight actions;
 * reachability inputs derived from pose + free slots + placement location.
+* consumption receipts: when one instance is consumed, its live placement and a
+  receipt (execution / object / body / proposal fingerprint / before_revision /
+  consumed_at) are written by **one** state change and therefore one atomic
+  save.  The receipt is the attribution; a missing placement never is.
 
 Design constraints (frozen by ``B0B_CONTRACT_FREEZE.md`` / this ticket):
 
@@ -48,8 +52,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-SCHEMA_VERSION = "world.body.substrate.v1.1"
-LEGACY_SCHEMA_VERSIONS = ("world.body.substrate.v1",)
+SCHEMA_VERSION = "world.body.substrate.v1.2"
+#: v1 had no body entity binding; v1.1 had no consumption receipts.  Both are
+#: readable and upgraded in :func:`migrate_substrate` -- the placement structure
+#: itself is never rewritten by either step.
+LEGACY_SCHEMA_VERSIONS = ("world.body.substrate.v1", "world.body.substrate.v1.1")
 KIND = "world_body_substrate"
 WORLD_ENTITY_KIND = "body"
 FEATURE_ENV = "CHIYO_WORLD_BODY_SUBSTRATE_ENABLED"
@@ -60,6 +67,11 @@ STATE_RELATIVE_PATH = ("data", "world", "body_substrate.json")
 MAX_ID_LENGTH = 128
 MAX_PLACEMENTS = 512
 MAX_RESERVATIONS = 32
+#: Bounded retention for consumption receipts (the object lifecycle record).
+#: Reaching the bound fails a *new* consumption closed; an existing receipt is
+#: never pruned to make room, because that would silently drop replay
+#: protection for an execution that already happened.
+MAX_CONSUMPTIONS = 256
 
 #: M15: canonical surface declarations.  A surface exists only when the world
 #: says so AND the object that owns it is present; the list is seeded with the
@@ -105,6 +117,7 @@ _STATE_KEYS = frozenset(
         "orientation",
         "placements",
         "reservations",
+        "consumptions",
     }
 )
 
@@ -216,11 +229,55 @@ def validate_placement_target(target: Any) -> dict[str, Any]:
     }
 
 
+def validate_consumption_receipt(record: Any) -> dict[str, Any]:
+    """Validate one World-owned consumption receipt (object lifecycle record).
+
+    The receipt is the *only* thing that proves an execution consumed an
+    instance: the placement it removed is gone by design, so absence can never
+    be attribution.  Field vocabulary lives in ``world_consumable_contract``
+    (one definition, no second copy); this function only enforces it.
+    """
+
+    import world_consumable_contract as contract
+
+    if not isinstance(record, Mapping) or set(record) != contract.RECEIPT_KEYS:
+        raise BodySubstrateError(
+            "consumption receipt must have exactly the receipt fields"
+        )
+    if record.get("kind") != contract.KIND_RECEIPT:
+        raise BodySubstrateError("consumption receipt kind is not supported")
+    if record.get("schema_version") != contract.SCHEMA_RECEIPT:
+        raise BodySubstrateError("consumption receipt schema is not supported")
+    placement_before = record.get("placement_before")
+    if placement_before is not None:
+        placement_before = validate_placement_target(placement_before)
+    return {
+        "kind": contract.KIND_RECEIPT,
+        "schema_version": contract.SCHEMA_RECEIPT,
+        "receipt_id": _require_text(record["receipt_id"], "receipt.receipt_id"),
+        "execution_id": _require_text(
+            record["execution_id"], "receipt.execution_id", maximum=256
+        ),
+        "object_id": _require_text(record["object_id"], "receipt.object_id"),
+        "body_id": _require_text(record["body_id"], "receipt.body_id"),
+        "actor_id": _require_text(record["actor_id"], "receipt.actor_id"),
+        "proposal_fingerprint": _require_text(
+            record["proposal_fingerprint"], "receipt.proposal_fingerprint"
+        ),
+        "before_revision": _require_revision(
+            record["before_revision"], "receipt.before_revision"
+        ),
+        "consumed_at": _require_text(record["consumed_at"], "receipt.consumed_at"),
+        "source": _require_choice(record["source"], "receipt.source", contract.SOURCES),
+        "placement_before": placement_before,
+    }
+
+
 def validate_substrate(state: Any) -> dict[str, Any]:
     """Validate and return a detached, normalized substrate state."""
 
     if not isinstance(state, Mapping) or set(state) != _STATE_KEYS:
-        raise BodySubstrateError("substrate state must have exactly the V1.1 fields")
+        raise BodySubstrateError("substrate state must have exactly the V1.2 fields")
 
     if state["schema_version"] != SCHEMA_VERSION:
         raise BodySubstrateError("substrate schema_version is not supported")
@@ -262,6 +319,22 @@ def validate_substrate(state: Any) -> dict[str, Any]:
             "reserved_at": _require_text(record["reserved_at"], "reservation.reserved_at"),
         }
 
+    consumptions_raw = state["consumptions"]
+    if not isinstance(consumptions_raw, Mapping) or len(consumptions_raw) > MAX_CONSUMPTIONS:
+        raise BodySubstrateError("consumptions must be a bounded object")
+
+    consumptions: dict[str, Any] = {}
+    for execution_id, receipt in consumptions_raw.items():
+        key = _require_text(execution_id, "consumptions key", maximum=256)
+        normalized_receipt = validate_consumption_receipt(receipt)
+        if normalized_receipt["execution_id"] != key:
+            raise BodySubstrateError(
+                "consumption receipt is filed under a different execution_id"
+            )
+        consumptions[key] = normalized_receipt
+    if len({r["receipt_id"] for r in consumptions.values()}) != len(consumptions):
+        raise BodySubstrateError("consumption receipts must have distinct receipt ids")
+
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": KIND,
@@ -273,6 +346,7 @@ def validate_substrate(state: Any) -> dict[str, Any]:
         "orientation": _require_choice(state["orientation"], "orientation", ORIENTATIONS),
         "placements": placements,
         "reservations": reservations,
+        "consumptions": consumptions,
     }
 
 
@@ -299,8 +373,14 @@ def migrate_substrate(raw: Any) -> tuple[dict[str, Any], bool]:
     """Upgrade an older substrate representation to the current schema.
 
     Returns ``(state, migrated)``.  This is the *only* sanctioned upgrade path:
-    a future ``v1.1 -> v2`` step is added here rather than overwriting JSON, so
+    a future ``v1.2 -> v2`` step is added here rather than overwriting JSON, so
     ``body_id``, the world binding, placements and reservations all survive.
+
+    v1 -> v1.2: the body entity binding is introduced (derived from ``body_id``;
+    nothing recomputed) and the consumption receipt block defaults to empty.
+    v1.1 -> v1.2: only the receipt block is added, again defaulting to empty, so
+    an existing placement map is carried over byte-for-byte in meaning.
+
     Unknown schemas fail closed.
     """
 
@@ -312,8 +392,6 @@ def migrate_substrate(raw: Any) -> tuple[dict[str, Any], bool]:
     if version not in LEGACY_SCHEMA_VERSIONS:
         raise BodySubstrateError(f"substrate schema_version {version!r} is not supported")
 
-    # v1 -> v1.1: the body entity binding is introduced.  The body entity id is
-    # derived from body_id; nothing else changes, nothing is recomputed.
     upgraded = {
         "schema_version": SCHEMA_VERSION,
         "kind": raw.get("kind"),
@@ -325,6 +403,9 @@ def migrate_substrate(raw: Any) -> tuple[dict[str, Any], bool]:
         "orientation": raw.get("orientation"),
         "placements": raw.get("placements") or {},
         "reservations": raw.get("reservations") or {},
+        #: v1.2 addition.  An older home simply has no receipts yet; nothing is
+        #: invented for it and no placement is touched.
+        "consumptions": raw.get("consumptions") or {},
     }
     return validate_substrate(upgraded), True
 
@@ -384,6 +465,7 @@ def initial_substrate(
         "orientation": "south",
         "placements": {},
         "reservations": {},
+        "consumptions": {},
     }
 
 
@@ -635,6 +717,79 @@ def remove_object(
     return _bump(updated)
 
 
+def consumption_receipt(
+    state: Mapping[str, Any], execution_id: str
+) -> Optional[dict[str, Any]]:
+    """The World-owned receipt for one execution (``None`` when absent).
+
+    This is the *only* accepted proof that an execution consumed an instance.
+    A missing placement is never upgraded into that proof.
+    """
+
+    normalized = validate_substrate(state)
+    key = _require_text(execution_id, "execution_id", maximum=256)
+    found = normalized["consumptions"].get(key)
+    return canonical_copy(found) if found is not None else None
+
+
+def receipts_for_object(state: Mapping[str, Any], object_id: Any) -> list[dict[str, Any]]:
+    """Every receipt that consumed this object id (normally zero or one)."""
+
+    normalized = validate_substrate(state)
+    name = _require_text(object_id, "object_id")
+    return [
+        canonical_copy(receipt)
+        for _key, receipt in sorted(normalized["consumptions"].items())
+        if receipt["object_id"] == name
+    ]
+
+
+def consume_object(
+    state: Mapping[str, Any],
+    object_id: str,
+    receipt: Mapping[str, Any],
+    *,
+    expected_revision: Optional[int] = None,
+) -> dict[str, Any]:
+    """One atomic state change: drop the live placement **and** file the receipt.
+
+    Both halves are returned together so the caller can persist them with a
+    single ``SubstrateStore.save()`` -- an owner change plus its evidence in one
+    atomic write.  There is deliberately no "remove first, record later" mode:
+    that is exactly the crash window where a missing object could be mistaken
+    for a committed consumption.
+    """
+
+    normalized = validate_substrate(state)
+    if expected_revision is not None:
+        expected = _require_revision(expected_revision, "expected_revision")
+        if normalized["revision"] != expected:
+            raise StaleSubstrateError(
+                f"stale substrate: expected {expected}, live {normalized['revision']}"
+            )
+    name = _require_text(object_id, "object_id")
+    if name not in normalized["placements"]:
+        raise BodySubstrateError(f"UNKNOWN: {name} has no live placement")
+
+    validated = validate_consumption_receipt(receipt)
+    if validated["object_id"] != name:
+        raise BodySubstrateError("consumption receipt names a different object")
+    if validated["execution_id"] in normalized["consumptions"]:
+        raise BodySubstrateError(
+            "ALREADY_APPLIED: this execution already filed a consumption receipt"
+        )
+    if len(normalized["consumptions"]) >= MAX_CONSUMPTIONS:
+        raise BodySubstrateError(
+            "LIMIT: the consumption receipt block is full; an existing receipt is "
+            "never pruned to make room for a new one"
+        )
+
+    updated = canonical_copy(normalized)
+    del updated["placements"][name]
+    updated["consumptions"][validated["execution_id"]] = validated
+    return _bump(updated)
+
+
 def set_pose(
     state: Mapping[str, Any],
     pose: str,
@@ -757,5 +912,8 @@ def read_model(state: Mapping[str, Any]) -> dict[str, Any]:
         "hands": hand_view(normalized),
         "placements": canonical_copy(normalized["placements"]),
         "reservations": canonical_copy(normalized["reservations"]),
+        #: Bounded lifecycle evidence: how many consumptions this substrate has
+        #: recorded.  The receipts themselves are owner records, not a read model.
+        "consumption_count": len(normalized["consumptions"]),
         "derived": reachability_inputs(normalized),
     }

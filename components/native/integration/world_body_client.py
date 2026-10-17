@@ -50,6 +50,15 @@ READ_OUTCOMES = (OK, NOT_READY, UNAVAILABLE, TIMEOUT, DEPENDENCY_UNAVAILABLE)
 ACTION_OUTCOMES = (SUCCESS, FAILURE, UNKNOWN, STALE, CONFLICT, INVALID,
                    NOT_READY, UNAVAILABLE, TIMEOUT, DEPENDENCY_UNAVAILABLE)
 
+#: A read must give up quickly: it is used to render a reply, so a stuck
+#: service may not hold a turn forever.
+DEFAULT_READ_TIMEOUT = 2.0
+#: A mutation is timed against the owner's *own* commit budget.  The Resolver
+#: serialises commits behind a 10s ``_commit_lock`` (world_action_resolver),
+#: so a shorter client deadline would classify "busy but healthy" as a
+#: transport fault -- which is exactly how a committed MOVE was once reported
+#: as UNKNOWN.  One mutation, one explicit deadline, never unbounded.
+DEFAULT_MUTATION_TIMEOUT = 15.0
 
 def resolve_mode(environment: Optional[Mapping[str, str]] = None) -> str:
     """The gateway-side integration gate.  Defaults to ``off``."""
@@ -75,6 +84,12 @@ class ClientResult:
     reason: Optional[str] = None
     latency_ms: Optional[float] = None
     attempts: int = 1
+    #: Closed-vocabulary class of a non-success outcome (``transport_fault:TIMEOUT``,
+    #: ``owner_verdict:FAILURE``).  Kept apart from ``reason`` so a caller can tell
+    #: "what kind of doubt" from "what the owner said" without parsing prose.
+    failure_class: Optional[str] = None
+    #: Free-form, bounded, log-safe detail for the human reading the record.
+    detail: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -87,6 +102,8 @@ class ClientResult:
             "reason": self.reason,
             "latency_ms": self.latency_ms,
             "attempts": self.attempts,
+            "failure_class": self.failure_class,
+            "detail": self.detail,
         }
 
 
@@ -149,7 +166,8 @@ class WorldBodyClient:
         self,
         *,
         socket_path: Optional[pathlib.Path | str] = None,
-        timeout: float = 2.0,
+        timeout: float = DEFAULT_READ_TIMEOUT,
+        mutation_timeout: float = DEFAULT_MUTATION_TIMEOUT,
         read_retries: int = 2,
         mode: Optional[str] = None,
         environment: Optional[Mapping[str, str]] = None,
@@ -158,7 +176,10 @@ class WorldBodyClient:
         self.environment = dict(env)
         self.mode = mode or resolve_mode(env)
         self.socket_path = pathlib.Path(socket_path) if socket_path else resolve_socket(env)
+        #: Read deadline (every command except the one mutation).
         self.timeout = float(timeout)
+        #: Mutation deadline, sized above the owner's own commit budget.
+        self.mutation_timeout = float(mutation_timeout)
         self.read_retries = max(0, int(read_retries))
         self.metrics = ClientMetrics()
         #: Outcome of the most recent read; lets a caller report readiness
@@ -170,12 +191,14 @@ class WorldBodyClient:
     def enabled(self) -> bool:
         return self.mode != MODE_OFF
 
-    def _call_once(self, command: str, argument: Any = None) -> ClientResult:
+    def _call_once(self, command: str, argument: Any = None, *,
+                   timeout: Optional[float] = None) -> ClientResult:
+        limit = self.timeout if timeout is None else float(timeout)
         started = time.monotonic()
         request = json.dumps({"command": command, "argument": argument}) + "\n"
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(self.timeout)
+                client.settimeout(limit)
                 client.connect(str(self.socket_path))
                 client.sendall(request.encode())
                 buffer = b""
@@ -205,17 +228,18 @@ class WorldBodyClient:
                                 reason=str(payload.get("error")), latency_ms=latency)
         return ClientResult(OK, data=payload.get("result"), latency_ms=latency)
 
-    def call(self, command: str, argument: Any = None, *, retries: int = 0) -> ClientResult:
+    def call(self, command: str, argument: Any = None, *, retries: int = 0,
+             timeout: Optional[float] = None) -> ClientResult:
         """One call, with bounded retries.  Never raises for transport faults."""
 
-        result = self._call_once(command, argument)
+        result = self._call_once(command, argument, timeout=timeout)
         attempts = 1
         # Only transport-level faults are retried, and only for reads.
         while (attempts <= retries
                and result.outcome in (TIMEOUT, UNAVAILABLE)
                and command != "submit_action"):
             time.sleep(min(0.1 * attempts, 0.5))
-            result = self._call_once(command, argument)
+            result = self._call_once(command, argument, timeout=timeout)
             attempts += 1
         result.attempts = attempts
         self.metrics.observe(result)
@@ -261,6 +285,38 @@ class WorldBodyClient:
         result = self._read("get_status")
         return result.outcome == OK and bool((result.data or {}).get("ready"))
 
+    def _resolve_by_owner_verdict(self, execution_id: str) -> Optional[ClientResult]:
+        """Ask the owner what it decided, once, under the *same* execution id.
+
+        This is a read: it writes nothing, mints no authorization and cannot
+        cause a second commit.  Exactly one round trip -- the caller already
+        lost a deadline, and a doubt is reported as a doubt.
+        """
+
+        probe = self.call("get_action_result", {"execution_id": execution_id}, retries=0)
+        if probe.outcome != OK or not isinstance(probe.data, dict):
+            return None
+        view = probe.data
+        if view.get("known") is False:
+            return None
+        verdict = str(view.get("verdict") or "").upper()
+        if verdict not in (SUCCESS, FAILURE):
+            # UNKNOWN / NOT_FOUND / anything else: the owner has not decided.
+            return None
+        if verdict == SUCCESS:
+            self.metrics.action_success += 1
+        else:
+            self.metrics.action_failure += 1
+        return ClientResult(
+            verdict,
+            data=view,
+            reason="owner_verdict:%s" % verdict,
+            latency_ms=probe.latency_ms,
+            attempts=1,
+            failure_class=(None if verdict == SUCCESS else "owner_verdict:FAILURE"),
+            detail="get_action_result:%s" % verdict,
+        )
+
     # ---- the one mutation ------------------------------------------------
     def submit_action(
         self,
@@ -277,6 +333,13 @@ class WorldBodyClient:
         M14A: ``authorization_id`` is issued by the Intent Executor (the
         authority side) and consumed by the service.  Without it the service
         rejects the submission (fail-closed firewall).
+
+        The transport is timed with ``mutation_timeout``, not the read
+        deadline: the owner serialises commits behind its own lock, so a reply
+        that arrives after a short client deadline must not be mistaken for a
+        failure.  If the reply is still lost, the client asks the owner once
+        for the canonical verdict under the same execution id; only that
+        verdict may turn the doubt into SUCCESS/FAILURE.  Nothing is re-sent.
         """
 
         if not self.enabled:
@@ -296,18 +359,25 @@ class WorldBodyClient:
         # capability to the Decision that minted it.
         if decision_ref:
             payload["decision_ref"] = decision_ref
-        result = self.call("submit_action", payload, retries=0)
+        result = self.call("submit_action", payload, retries=0,
+                           timeout=self.mutation_timeout)
         self.metrics.submitted += 1
 
         if result.outcome != OK or not isinstance(result.data, dict):
             if result.outcome in (TIMEOUT, UNAVAILABLE):
-                # Transport fault.  The mutation may or may not have committed;
-                # we say UNKNOWN and let the caller re-submit the SAME id or ask
-                # for the canonical result.  Never auto-retry a new id.
+                # Transport fault.  The mutation may or may not have committed.
+                failure_class = "transport_fault:%s" % result.outcome
+                resolved = self._resolve_by_owner_verdict(execution_id)
+                if resolved is not None:
+                    return resolved
+                # No verdict: this stays UNKNOWN.  The caller must reconcile
+                # under the same id; a new id is never minted here.
                 self.metrics.action_unknown += 1
                 return ClientResult(UNKNOWN, data=result.data,
-                                    reason="transport_fault:%s" % result.outcome,
-                                    latency_ms=result.latency_ms, attempts=result.attempts)
+                                    reason=failure_class,
+                                    latency_ms=result.latency_ms, attempts=result.attempts,
+                                    failure_class=failure_class,
+                                    detail=str(result.reason or ""))
             self.metrics.action_failure += 1
             return result
 
@@ -327,7 +397,9 @@ class WorldBodyClient:
             self.metrics.action_unknown += 1
             outcome = UNKNOWN
         return ClientResult(outcome, data=result.data, reason=code,
-                            latency_ms=result.latency_ms, attempts=result.attempts)
+                            latency_ms=result.latency_ms, attempts=result.attempts,
+                            failure_class=(None if outcome == SUCCESS
+                                           else "owner_status:%s" % (status or "unknown")))
 
 
 # --------------------------------------------------------------------------

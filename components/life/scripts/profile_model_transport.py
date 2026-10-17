@@ -10,13 +10,29 @@ has: same endpoint, same auth, same request shape, plus a normal user agent.
 
 It reads nothing from the model and holds no credentials of its own: the caller passes the
 already-resolved ``base_url``/``api_key`` from the profile.
+
+W05R-R1c: the finite send phase and the response wait are separate
+------------------------------------------------------------------
+The pause confirmation has to be coordinated with the **actual send**, not with a check that
+happened earlier: a request must not start after the operator's ``pause`` returned.  That is only
+possible where the request is really written out, so this transport exposes the two halves:
+
+* :meth:`begin_send` -- connect + headers + body (the finite *send phase*).  When a pause guard
+  is configured, :meth:`complete` holds the guard's shared confirmation lock across exactly this
+  call: the lock is the permit to send, and the bit is re-read while it is held;
+* :meth:`finish_send` -- read and parse the response (the *response wait*).  It always runs with
+  **no** pause/shared/control lock held, so a slow model can never block the operator's pause.
+
+``send_split_capable`` states this as a capability, so a caller that was asked to coordinate a
+pause refuses to send through a transport that does not provide it instead of pretending.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from typing import Any, Optional
 
 #: A plain, honest user agent.  Not a disguise -- just not the default library string that the
@@ -43,13 +59,26 @@ class TransportResult:
         self.model = model
 
 
+class _PendingSend:
+    """A request whose finite send phase is written out; its response is not read yet."""
+
+    def __init__(self, *, connection: Any, started: float, url: str) -> None:
+        self.connection = connection
+        self.started = started
+        self.url = url
+
+
 class OpenAICompatibleTransport:
     """Minimal chat-completions transport with an explicit user agent."""
+
+    #: W05R-R1c: connect + write-out is a separate, finite phase from the response wait, so a
+    #: pause guard can hold the confirmation lock across the send only.
+    send_split_capable = True
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
                  provider: str = "custom", timeout_s: float = 30.0,
                  purpose: str = DEFAULT_PURPOSE, temperature: float = 0.0,
-                 request_json_object: bool = False) -> None:
+                 request_json_object: bool = False, pause_guard: Any = None) -> None:
         if not base_url or not api_key or not model:
             raise ValueError("base_url, api_key and model are all required")
         self.base_url = base_url.rstrip("/")
@@ -60,22 +89,35 @@ class OpenAICompatibleTransport:
         self.purpose = purpose
         self.temperature = float(temperature)
         self.request_json_object = bool(request_json_object)
+        #: The pause request-send guard (``life_pause.RequestSendGuard``) or ``None``.  Only this
+        #: transport holds it, and only across ``begin_send``.
+        self._pause_guard = pause_guard
         self.backend = "openai_compatible_http"
         self.call_count = 0
 
     def describe(self) -> dict[str, Any]:
         return {"backend": self.backend, "provider": self.provider, "model": self.model,
                 "base_url": self.base_url, "api_key_present": bool(self._api_key),
-                "user_agent": USER_AGENT, "calls": self.call_count}
+                "user_agent": USER_AGENT, "calls": self.call_count,
+                "send_split_capable": self.send_split_capable,
+                "pause_guard": self._pause_guard is not None}
 
-    def complete(self, *, system_prompt: str, user_prompt: str,
-                 timeout_s: Optional[float] = None,
-                 max_output_tokens: Optional[int] = None) -> TransportResult:
-        from agency_model_client import (AgencyModelClientError, PROVIDER_AUTH_ERROR,
-                                         PROVIDER_MALFORMED_RESPONSE, PROVIDER_RATE_LIMITED,
-                                         PROVIDER_SERVER_ERROR, TRANSPORT_CONNECTION,
-                                         TRANSPORT_TIMEOUT)
+    # -- the two halves of one request -------------------------------------------------
 
+    def _target(self) -> tuple[str, str, int, str]:
+        parts = urllib.parse.urlsplit("%s/chat/completions" % self.base_url)
+        scheme = parts.scheme or "https"
+        host = parts.hostname or ""
+        if not host:
+            raise ValueError("base_url has no host")
+        port = parts.port or (443 if scheme == "https" else 80)
+        path = parts.path or "/"
+        if parts.query:
+            path = "%s?%s" % (path, parts.query)
+        return scheme, host, int(port), path
+
+    def _build_payload(self, system_prompt: str, user_prompt: str,
+                       max_output_tokens: Optional[int]) -> bytes:
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "system", "content": system_prompt},
@@ -86,45 +128,81 @@ class OpenAICompatibleTransport:
         }
         if self.request_json_object:
             body["response_format"] = {"type": "json_object"}
-        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self.base_url}/chat/completions", data=payload, method="POST",
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {self._api_key}",
-                     "User-Agent": USER_AGENT,
-                     "Accept": "application/json",
-                     "X-Chiyo-Purpose": self.purpose},
-        )
+        return json.dumps(body, ensure_ascii=False).encode("utf-8")
+
+    def begin_send(self, *, system_prompt: str, user_prompt: str,
+                   timeout_s: Optional[float] = None,
+                   max_output_tokens: Optional[int] = None) -> _PendingSend:
+        """Write the request out.  Finite: connect, headers, body.  No response is read."""
+
+        from agency_model_client import (AgencyModelClientError, TRANSPORT_CONNECTION,
+                                         TRANSPORT_TIMEOUT)
+
+        payload = self._build_payload(system_prompt, user_prompt, max_output_tokens)
+        scheme, host, port, path = self._target()
+        timeout = float(timeout_s or self.timeout_s)
+        connection = (http.client.HTTPSConnection(host, port, timeout=timeout)
+                      if scheme == "https"
+                      else http.client.HTTPConnection(host, port, timeout=timeout))
         started = time.monotonic()
         try:
-            with urllib.request.urlopen(request,
-                                        timeout=float(timeout_s or self.timeout_s)) as response:
-                status = int(getattr(response, "status", 200))
-                raw = response.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as exc:
-            status = int(exc.code)
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", errors="replace")[:200]
-            except Exception:  # pragma: no cover - body already consumed
-                detail = ""
-            if status in (401, 403):
-                raise AgencyModelClientError(
-                    PROVIDER_AUTH_ERROR, f"http {status} {detail}") from exc
-            if status == 429:
-                raise AgencyModelClientError(
-                    PROVIDER_RATE_LIMITED, f"http {status} {detail}") from exc
-            if status >= 500:
-                raise AgencyModelClientError(
-                    PROVIDER_SERVER_ERROR, f"http {status} {detail}") from exc
-            raise AgencyModelClientError(
-                PROVIDER_MALFORMED_RESPONSE, f"http {status} {detail}") from exc
-        except TimeoutError as exc:
+            connection.connect()
+            connection.putrequest("POST", path)
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Content-Length", str(len(payload)))
+            connection.putheader("Authorization", "Bearer %s" % self._api_key)
+            connection.putheader("User-Agent", USER_AGENT)
+            connection.putheader("Accept", "application/json")
+            connection.putheader("X-Chiyo-Purpose", self.purpose)
+            connection.endheaders()
+            connection.send(payload)
+        except (socket.timeout, TimeoutError) as exc:
+            connection.close()
             raise AgencyModelClientError(TRANSPORT_TIMEOUT, str(exc)) from exc
-        except urllib.error.URLError as exc:
+        except (OSError, http.client.HTTPException) as exc:
+            connection.close()
             raise AgencyModelClientError(TRANSPORT_CONNECTION, str(exc)) from exc
+        return _PendingSend(connection=connection, started=started,
+                            url="%s://%s:%d%s" % (scheme, host, port, path))
 
-        latency_ms = int((time.monotonic() - started) * 1000)
+    def finish_send(self, pending: _PendingSend) -> TransportResult:
+        """Read and parse the response.  Never runs under a pause/shared/control lock."""
+
+        from agency_model_client import (AgencyModelClientError, PROVIDER_AUTH_ERROR,
+                                         PROVIDER_MALFORMED_RESPONSE, PROVIDER_RATE_LIMITED,
+                                         PROVIDER_SERVER_ERROR, TRANSPORT_CONNECTION,
+                                         TRANSPORT_TIMEOUT)
+
+        connection = pending.connection
+        try:
+            response = connection.getresponse()
+            status = int(getattr(response, "status", 200) or 200)
+            raw = response.read().decode("utf-8", errors="replace")
+        except (socket.timeout, TimeoutError) as exc:
+            raise AgencyModelClientError(TRANSPORT_TIMEOUT, str(exc)) from exc
+        except (OSError, http.client.HTTPException) as exc:
+            raise AgencyModelClientError(TRANSPORT_CONNECTION, str(exc)) from exc
+        finally:
+            try:
+                connection.close()
+            except Exception:  # pragma: no cover - closing a broken socket
+                pass
+
+        if status >= 400:
+            detail = raw[:200]
+            if status in (401, 403):
+                raise AgencyModelClientError(PROVIDER_AUTH_ERROR,
+                                             "http %d %s" % (status, detail))
+            if status == 429:
+                raise AgencyModelClientError(PROVIDER_RATE_LIMITED,
+                                             "http %d %s" % (status, detail))
+            if status >= 500:
+                raise AgencyModelClientError(PROVIDER_SERVER_ERROR,
+                                             "http %d %s" % (status, detail))
+            raise AgencyModelClientError(PROVIDER_MALFORMED_RESPONSE,
+                                         "http %d %s" % (status, detail))
+
+        latency_ms = int((time.monotonic() - pending.started) * 1000)
         self.call_count += 1
         try:
             parsed = json.loads(raw)
@@ -132,11 +210,32 @@ class OpenAICompatibleTransport:
             text = str((choices[0].get("message") or {}).get("content") or "") if choices else ""
         except (ValueError, AttributeError, IndexError) as exc:
             raise AgencyModelClientError(
-                PROVIDER_MALFORMED_RESPONSE, f"unparsable body: {raw[:200]}") from exc
+                PROVIDER_MALFORMED_RESPONSE, "unparsable body: %s" % raw[:200]) from exc
         if not text.strip():
             raise AgencyModelClientError(PROVIDER_MALFORMED_RESPONSE, "empty completion")
         return TransportResult(text=text, latency_ms=latency_ms, status=status,
                                usage=parsed.get("usage"), model=str(parsed.get("model") or ""))
+
+    def complete(self, *, system_prompt: str, user_prompt: str,
+                 timeout_s: Optional[float] = None,
+                 max_output_tokens: Optional[int] = None) -> TransportResult:
+        """One request: hold the pause confirmation lock across the write-out, then wait.
+
+        With a pause guard configured, the shared confirmation lock is held across
+        ``begin_send`` only -- a ``pause`` confirmed before this call can therefore never be
+        overtaken, and a ``pause`` confirmed while the response is pending never waits for the
+        model.  Without a guard the behaviour is exactly the previous one.
+        """
+        guard = self._pause_guard
+        if guard is None:
+            pending = self.begin_send(system_prompt=system_prompt, user_prompt=user_prompt,
+                                      timeout_s=timeout_s, max_output_tokens=max_output_tokens)
+        else:
+            with guard.sending("model"):
+                pending = self.begin_send(system_prompt=system_prompt, user_prompt=user_prompt,
+                                          timeout_s=timeout_s,
+                                          max_output_tokens=max_output_tokens)
+        return self.finish_send(pending)
 
 
 __all__ = ["OpenAICompatibleTransport", "TransportResult", "USER_AGENT"]

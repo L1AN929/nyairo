@@ -10,6 +10,10 @@ What it keeps honest
   twice is a ``duplicate``, never a second experience.
 * The text is built only from the event's structured fields.  A conflict is written as a conflict;
   nothing is described as a success that the owning service did not confirm.
+* A handoff that carries World facts and **no** artifact ref is a World consequence, not a work
+  modification: it is written with a neutral sentence and the owner's own ``world`` / ``action``
+  / ``owner_result`` refs.  It never claims a modified work or a new version, and an event that
+  arrives carrying an unresolved outcome is never upgraded to a success.
 * A Memory failure returns ``DEFER``, which AG-2 keeps in ``pending_handoff_ids`` for a later
   retry, and which never rolls back the artifact or the settlement.
 """
@@ -45,6 +49,18 @@ _KIND_PHRASES = {
     "ABANDONED": "放下了这件事（作品仍然留着）",
     "CONFLICT": "一次改动被拒了：读到的版本已经过期，没有覆盖别人的修改",
 }
+
+#: World consequences are **not** work modifications.  A handoff that carries World facts and
+#: no artifact ref is written with these neutral sentences: they say only that something was
+#: confirmed (the cycle emits such a handoff only from an owner receipt/observation) and let
+#: the owner's own refs carry *what* it was -- no verb, no body effect, no nutrition value and
+#: no "new version" is invented from free text.
+_WORLD_CONFIRMED = "在真实世界里发生了一件已确证的事"
+_WORLD_UNSETTLED = "在真实世界里做过一件事，结果还没有确定"
+#: Outcomes that must never be written as a success.  Today's ``UNKNOWN`` path does not emit a
+#: World consequence at all (``reconcile_unknown_step`` claims nothing), so this is the guard
+#: for a handoff that *does* arrive carrying its own unsettled verdict.
+_UNSETTLED_OUTCOMES = frozenset({"UNKNOWN_EFFECT", "UNKNOWN", "PENDING", "OPEN"})
 
 
 class MemoryAdmissionExperienceConsumer:
@@ -124,14 +140,25 @@ class MemoryAdmissionExperienceConsumer:
             refs.append(("action", str(action_ref)))
         for artifact_ref in (event.get("artifact_refs") or [])[:1]:
             refs.append(("artifact", str(artifact_ref)))
+        # The World owner's own facts travel with the row: a World consequence keeps the
+        # provenance it was admitted for, and no artifact is invented to fill the gap.
+        for world_ref in (event.get("world_refs") or [])[:2]:
+            refs.append(("world", str(world_ref)))
         for settlement_ref in (event.get("settlement_refs") or [])[:1]:
             refs.append(("owner_result", str(settlement_ref)))
         return refs
 
     def _text(self, event: Mapping[str, Any], kind: str,
               refs: list[tuple[str, str]]) -> str:
-        phrase = _KIND_PHRASES.get(kind, f"发生了一件与作品有关的事（{kind or 'UNKNOWN'}）")
         by_kind = {k: v for k, v in refs}
+        worlds = [str(ref) for ref in (event.get("world_refs") or []) if ref]
+        if worlds and not by_kind.get("artifact"):
+            # A World-only consequence: one neutral sentence plus exactly the refs the owner
+            # confirmed.  Nothing here claims a work was modified or that a new version
+            # exists, because no artifact ref says so -- and nothing describes *what* she did
+            # beyond the owner's own fact tokens.
+            return self._trim(self._world_text(event, by_kind, worlds))
+        phrase = _KIND_PHRASES.get(kind, f"发生了一件与作品有关的事（{kind or 'UNKNOWN'}）")
         parts = [phrase]
         if by_kind.get("artifact"):
             parts.append(f"作品 {by_kind['artifact']}")
@@ -139,7 +166,32 @@ class MemoryAdmissionExperienceConsumer:
             parts.append(f"所有者回执 {by_kind['owner_result']}")
         if event.get("occurred_at"):
             parts.append(f"发生在 {event['occurred_at']}")
-        text = "；".join(parts) + "。"
+        return self._trim("；".join(parts) + "。")
+
+    def _world_text(self, event: Mapping[str, Any], by_kind: dict[str, str],
+                    worlds: list[str]) -> str:
+        parts = [_WORLD_UNSETTLED if self._unsettled(event, worlds) else _WORLD_CONFIRMED]
+        parts.append("世界事实 " + "、".join(worlds[:2]))
+        if by_kind.get("action"):
+            parts.append(f"动作 {by_kind['action']}")
+        if by_kind.get("owner_result"):
+            parts.append(f"所有者回执 {by_kind['owner_result']}")
+        if event.get("occurred_at"):
+            parts.append(f"发生在 {event['occurred_at']}")
+        return "；".join(parts) + "。"
+
+    @staticmethod
+    def _unsettled(event: Mapping[str, Any], worlds: list[str]) -> bool:
+        """Never upgrade an unresolved outcome to a success."""
+
+        declared = {str(event.get("outcome_kind") or "").upper(),
+                    str(event.get("settlement_outcome") or "").upper()}
+        if declared & _UNSETTLED_OUTCOMES:
+            return True
+        return any(str(ref).upper().rsplit(":", 1)[-1] in _UNSETTLED_OUTCOMES
+                   for ref in worlds)
+
+    def _trim(self, text: str) -> str:
         return text[: self.max_chars] if self.max_chars else text
 
     def describe(self) -> dict[str, Any]:

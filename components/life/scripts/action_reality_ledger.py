@@ -1754,7 +1754,12 @@ class WorldActionAdapter(ActionAdapterProtocol):
     def validate_prepare(self, action: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
         verb = payload.get("verb")
         target = payload.get("target")
-        if verb not in {"MOVE", "POSE"}:
+        # I: CONSUME joins MOVE/POSE here.  The payload shape is unchanged -- one
+        # ``target`` string (the object instance id for CONSUME, exactly as F's
+        # resolver takes it) -- and the World's own allowlist/gateway still decide
+        # whether the verb may commit.  Without this line a real CONSUME decision
+        # would be refused by AR-0's own contract, before it ever reached the owner.
+        if verb not in {"MOVE", "POSE", "CONSUME"}:
             raise ContractViolationError(f"unsupported WORLD_ACTION verb={verb!r}")
         if not isinstance(target, str) or not target.strip():
             raise ContractViolationError("WORLD_ACTION requires non-empty 'target'")
@@ -1809,7 +1814,10 @@ class WorldActionAdapter(ActionAdapterProtocol):
                 observed_at=ts,
                 recorded_at=ts,
                 enqueued_at=ts,
-                details={"code": out.get("code")},
+                # W05: the resolver's own detail block is carried through verbatim.  Without it
+                # a timed departure and an instant arrival are indistinguishable above this
+                # line, which is exactly how "she set off" used to be recorded as "she is there".
+                details={"code": out.get("code"), **dict(out.get("details") or {})},
             )
             return AdapterSubmissionOutcome(
                 transport_result=tr,
@@ -1836,7 +1844,8 @@ class WorldActionAdapter(ActionAdapterProtocol):
             observed_at=ts,
             recorded_at=ts,
             enqueued_at=ts,
-            details={"code": out.get("code"), "world_revision": out.get("world_revision")},
+            details={"code": out.get("code"), "world_revision": out.get("world_revision"),
+                     **dict(out.get("details") or {})},
         )
         return AdapterSubmissionOutcome(
             transport_result=tr,

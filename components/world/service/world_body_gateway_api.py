@@ -23,6 +23,15 @@ World JSON, no test fixture.
 Object portability: the current World substrate contract has no canonical
 "takeable" capability, so ``PICK_UP`` exposure for ordinary objects is **off**
 and fail-closed here rather than fixed by inventing a rule (ticket 19-21).
+
+Consumption (F): ``CONSUME {object_id}`` is a first-class Resolver verb, so the
+gateway exposes it in ``get_available_actions`` and submits it through the same
+one-shot authorization as every other verb.  Candidates come from the live
+placement plus the world-owned ``consumables`` declaration block plus
+``world_daily_rhythm``'s opening state; building that list writes nothing, mints
+nothing and never touches Body.  One object instance = one consumption; the
+result carries the owner receipt, and ``get_action_result`` reports it beside
+the ledger verdict.
 """
 
 from __future__ import annotations
@@ -291,6 +300,130 @@ class GatewaySurface:
         return {"available": True, "blocked_reason": None, "detail": None,
                 "candidates": [{"object_id": o, "slots": free} for o in takeable_ids]}
 
+    # ---- F: consumable projection (read-only, no ticket, no body) ---------
+    def _economy_facts(self) -> dict[str, Any]:
+        """Property-economy facts for this home: absent / present / unreadable.
+
+        The tri-state read lives in ``world_consumable_contract`` (one owner for
+        this rule).  The gateway must not decide it locally, and must never turn
+        an unreadable document into an empty one: "not an economy object" is a
+        permission claim that needs readable facts.
+        """
+
+        try:
+            import world_consumable_contract as contract
+
+            return contract.economy_facts(self.service.config.world_home)
+        except Exception as error:  # pragma: no cover - contract not deployed
+            return {
+                "status": "unreadable",
+                "economy": None,
+                "reason_code": "ECONOMY_FACTS_UNAVAILABLE",
+                "detail": "consumable contract unavailable (%s)" % type(error).__name__,
+            }
+
+    def _consume_availability(self) -> dict[str, Any]:
+        """What could be consumed right now, from the owners that decide it.
+
+        Read-only by construction: the live placement, the world-owned
+        ``consumables`` declaration block and ``world_daily_rhythm``'s opening
+        state.  Nothing is written here -- no placement change, no authorization
+        ticket, no Body consequence.
+        """
+
+        empty = {"available": False, "blocked_reason": None, "detail": None,
+                 "candidates": [], "declarations_present": False}
+        try:
+            import world_consumable_contract as contract
+        except Exception:  # pragma: no cover - contract not deployed
+            return dict(empty, blocked_reason="CONSUMABLE_CONTRACT_UNAVAILABLE")
+
+        substrate = self._substrate() or {}
+        placements = substrate.get("placements") or {}
+        world = self._world_live() or {}
+        here = (world.get("location") or {}).get("place_id")
+        declarations = contract.load_consumable_declarations(
+            self.service.config.world_home
+        )
+        economy = self._economy_facts()
+        if economy.get("status") == contract.ECONOMY_UNREADABLE:
+            # Nothing can be projected: an unreadable economy might own this very
+            # instance, so no candidate may be offered.
+            return {
+                "available": False,
+                "blocked_reason": contract.ECONOMY_FACTS_UNAVAILABLE,
+                "detail": economy.get("detail"),
+                "candidates": [],
+                "declarations_present": bool(declarations),
+            }
+        labels = self._labels()
+        hands_usable = str(substrate.get("pose") or "").strip() in _HANDS_USABLE_POSES
+
+        candidates: list[dict[str, Any]] = []
+        reasons: list[str] = []
+        for object_id in sorted(placements):
+            if is_test_object(object_id) and not self.include_test_objects:
+                continue
+            verdict = contract.consumption_verdict(
+                object_id=object_id,
+                placement=placements[object_id],
+                declaration=declarations.get(object_id) or {},
+                economy=economy,
+                current_place=here,
+                hands_usable=hands_usable,
+                now=self.service._moment(),
+                environment=getattr(self.service.config, "environment", None),
+            )
+            if verdict["allowed"]:
+                placement = placements[object_id] or {}
+                candidates.append(
+                    {
+                        "object_id": object_id,
+                        "label": labels.get(object_id) or object_id,
+                        "source": verdict["source"],
+                        "placement_kind": placement.get("kind"),
+                    }
+                )
+            elif verdict["reason_code"] != contract.NOT_DECLARED:
+                reasons.append(verdict["reason_code"])
+
+        if candidates:
+            return {
+                "available": True,
+                "blocked_reason": None,
+                "detail": None,
+                "candidates": candidates,
+                "declarations_present": bool(declarations),
+            }
+
+        priority = (
+            # A broken economy outranks every other reason: it is the reason no
+            # other judgement can be trusted.
+            "ECONOMY_FACTS_UNAVAILABLE",
+            "LOCATION_CLOSED",
+            "NOT_HELD_OR_HERE",
+            "POSE_CANNOT_CONSUME",
+            "NOT_FREE",
+            "NOT_CONSUMABLE",
+            "ECONOMY_OBJECT",
+            "DECLARATION_INVALID",
+            "PLACEMENT_KIND_NOT_CONSUMABLE",
+            "RHYTHM_UNAVAILABLE",
+        )
+        blocked = next((code for code in priority if code in reasons), None)
+        detail = None
+        if blocked is None:
+            blocked = "NO_CONSUMABLE_OBJECT"
+            detail = ("no object in this world declares consumable=true and "
+                      "free_to_consume=true")
+        return {
+            "available": False,
+            "blocked_reason": blocked,
+            "detail": detail,
+            "candidates": [],
+            "declarations_present": bool(declarations),
+        }
+
     # ---- read ------------------------------------------------------------
     def get_status(self) -> dict[str, Any]:
         service = self.service
@@ -453,7 +586,11 @@ class GatewaySurface:
         except Exception:  # noqa: BLE001 - no catalog means no candidate
             return []
         try:
-            catalog = {item["location_id"]: item for item in wls.location_catalog()}
+            # W03：显式传本次服务的环境，避免回落到进程环境里的另一个世界。
+            catalog = {
+                item["location_id"]: item
+                for item in wls.location_catalog(self.service.config.environment)
+            }
             current = catalog[str(place_id)]
         except Exception:  # noqa: BLE001
             return []
@@ -485,6 +622,7 @@ class GatewaySurface:
         ]
 
         pick_up = self._pick_up_availability(held=held)
+        consume = self._consume_availability()
 
         actions: list[dict[str, Any]] = [
             {
@@ -518,6 +656,27 @@ class GatewaySurface:
                 "detail": pick_up["detail"],
                 "candidates": pick_up["candidates"],
             },
+            {
+                # F: one object instance, consumed once.  A candidate here is
+                # held or sits free in the current place; the Resolver re-reads
+                # both facts (and the place's opening state) at commit time.
+                "verb": "CONSUME",
+                "available": bool(consume["available"]),
+                "params": {"object_id": "string"},
+                "requires": ["world.location", "body.revision", "body.pose"],
+                "blocked_reason": consume["blocked_reason"],
+                "detail": consume["detail"],
+                "candidates": consume["candidates"],
+                "contract": {
+                    "one_instance_per_consumption": True,
+                    "declaration": "state/world_object_capabilities.json#consumables "
+                                   "(world-owned; consumable + free_to_consume)",
+                    "placement_is_live_source": True,
+                    "held_food_ignores_opening_hours": True,
+                    "body_effect": "consume_operation_load_model:2.0s manipulation "
+                                   "only; no nutrition, satiety, hunger or health",
+                },
+            },
         ]
         return {
             "kind": KIND_GATEWAY_API,
@@ -548,6 +707,11 @@ class GatewaySurface:
             "state": view.get("state"),
             "result": view.get("result"),
             "action_type": view.get("action_type"),
+            # F: for a CONSUME execution the owner receipt is reported next to
+            # the ledger verdict, so "unknown" and "the object is gone" can be
+            # told apart without inferring anything from absence.
+            "consumption_receipt": view.get("consumption_receipt"),
+            "receipt_present": view.get("consumption_receipt") is not None,
             "authoritative": True,
             "source": "resolver_ledger",
         }

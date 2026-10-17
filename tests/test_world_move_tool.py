@@ -92,7 +92,11 @@ class WorldMoveTests(unittest.TestCase):
         self.assertEqual(ongoing['remaining_minutes'], 4)
         self.assertEqual(self.wtd.state_path(self.home).read_bytes(), travel_before)
         arrived = self.move('便利店', self.now + timedelta(minutes=5))
-        self.assertEqual(arrived['status'], 'already_there')
+        # W02：这一次调用在旅程引擎内结算了最后一段并确认到达，如实返回 arrived；
+        # 结算完成后再请求同一目标才是 already_there（下一条断言）。
+        self.assertEqual(arrived['status'], 'arrived')
+        self.assertEqual(
+            self.move('便利店', self.now + timedelta(minutes=6))['status'], 'already_there')
         self.env['CHIYO_WORLD_TRAVEL_TIME_ENABLED'] = 'false'
         self.assertEqual(self.position(), 'convenience_store')
 
@@ -108,7 +112,11 @@ class WorldMoveTests(unittest.TestCase):
         self.assertEqual(second['destination_location_id'], 'convenience_store')
         self.assertEqual(second['estimated_minutes'], 5)
         self.assertEqual(self.position(), 'nearby_street')
-        self.assertEqual(self.move('便利店', self.now + timedelta(minutes=14))['status'], 'already_there')
+        # W02：结算最后一段的调用返回 arrived；已完成后的重复调用才是 already_there。
+        self.assertEqual(
+            self.move('便利店', self.now + timedelta(minutes=14))['status'], 'arrived')
+        self.assertEqual(
+            self.move('便利店', self.now + timedelta(minutes=15))['status'], 'already_there')
 
     def test_fail_closed_input_and_feature_gate(self):
         for args in [None, {}, {'location': 42}, {'location': ''}, {'location': 'x' * 97},

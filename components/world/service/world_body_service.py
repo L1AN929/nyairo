@@ -129,6 +129,10 @@ class WorldBodyService:
             config.world_home,
             ledger_path=config.ledger_path,
             environment={**dict(config.environment), **config.owned_environment()},
+            # The service's own moment is the resolver's clock too: the one
+            # live-source rule (a place's opening hours) must agree with the
+            # moment this service reports everywhere else.
+            now=self._moment,
         )
 
         self.lease = None  # set in startup()
@@ -317,6 +321,20 @@ class WorldBodyService:
     # ------------------------------------------------------------------
     # work
     # ------------------------------------------------------------------
+    def _live_substrate(self) -> Optional[dict[str, Any]]:
+        """The World substrate as it is on disk now (read-only), or ``None``.
+
+        Reconciliation must judge a CONSUME execution against the *owner's*
+        current lifecycle record, not against a copy this process cached at
+        startup.
+        """
+
+        try:
+            store = self.wbs.SubstrateStore(self.wbs.substrate_path(self.config.world_home))
+            return store.load_with_migration()[0]
+        except Exception:
+            return None
+
     def reconcile_now(self, *, persist: bool = False) -> dict[str, Any]:
         from world_body_reconcile import reconcile_startup
 
@@ -332,6 +350,7 @@ class WorldBodyService:
             world_facts={"world_id": (self.world_state or {}).get("world_id"),
                          "world_revision": (self.world_state or {}).get("revision")},
             pose=None,
+            substrate=self._live_substrate(),
         )
         self.body_state = report["state"]
         if persist:
@@ -386,6 +405,9 @@ class WorldBodyService:
                     "world_revision": (self.world_state or {}).get("revision"),
                 },
                 pose=result.get("pose"),
+                # CONSUME results name the instance they consumed; the body
+                # records the resource reference only (no intake semantics).
+                object_id=result.get("object_id"),
             )
             payload["applied_to_body"] = bool(outcome["applied"])
             payload["consequence_reason"] = outcome.get("reason")
@@ -418,6 +440,7 @@ class WorldBodyService:
                 "world_revision": (self.world_state or {}).get("revision"),
             },
             pose=result.get("pose"),
+            object_id=result.get("object_id"),
         )
         payload = {
             "execution_id": (outcome.get("consequence") or {}).get("execution_id"),

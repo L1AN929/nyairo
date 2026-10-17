@@ -200,6 +200,43 @@ class AgencyModelClient:
                 "host_transport": (self._transport.describe() if self._transport is not None
                                    and hasattr(self._transport, "describe") else None)}
 
+    # -- W05R-R1c: the real send boundary is the injected transport -----------------------
+
+    @property
+    def send_split_capable(self) -> bool:
+        """True when the injected transport can separate its send phase from the response wait.
+
+        A caller that was asked to coordinate the operator's pause with the *actual* send can
+        only do that through such a transport; without it the send must be refused instead of
+        being sent on the strength of an earlier check.
+        """
+
+        return bool(self._transport is not None
+                    and getattr(self._transport, "send_split_capable", False))
+
+    def begin_send(self, *, system_prompt: str, user_prompt: str,
+                   timeout_s: Optional[float] = None,
+                   max_output_tokens: Optional[int] = None) -> Any:
+        """The finite send phase, delegated to the transport that really writes it out."""
+
+        if not self.send_split_capable:
+            raise AgencyModelClientError(
+                TRANSPORT_CONNECTION,
+                "the injected transport cannot separate send from response")
+        return self._transport.begin_send(
+            system_prompt=system_prompt, user_prompt=user_prompt,
+            timeout_s=timeout_s or self.timeout_s,
+            max_output_tokens=max_output_tokens or self.max_output_tokens)
+
+    def finish_send(self, pending: Any) -> ModelCallResult:
+        """The response wait, delegated to the same transport (no pause lock is held here)."""
+
+        if not self.send_split_capable:
+            raise AgencyModelClientError(
+                TRANSPORT_CONNECTION,
+                "the injected transport cannot separate send from response")
+        return self._transport.finish_send(pending)
+
     def complete(self, *, system_prompt: str, user_prompt: str,
                  timeout_s: Optional[float] = None,
                  max_output_tokens: Optional[int] = None) -> ModelCallResult:
