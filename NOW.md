@@ -100,7 +100,7 @@ UNKNOWN、版本冲突、NO_ACTION 的完整端到端）还差“同根重启”
 顺手修的真 bug：`private_project_service.read_project_version` 正常路径漏了
 `return answer`，导致单版本接口 500。
 
-## 三、本轮未提交改动
+## 三、本轮改动（已提交 b005fc7）
 
 - `components/phone/web/app.js`、`tests/test_phone_projects_ui.mjs`
 - `components/life/scripts/autonomous_life_cycle.py`、`tests/test_v04_work_revisit_writer_chain.py`
@@ -109,7 +109,7 @@ UNKNOWN、版本冲突、NO_ACTION 的完整端到端）还差“同根重启”
   `scripts/dispatch_worker.py`、`scripts/phone_edge_fixture.py`、
   `docs/engineering/v04-work-revisit-supervisor-plan.md`
 
-工作树里还有大量**不属于本轮**的 dirty Life 文件，不要当成自己的改动，也不要顺手提交。
+以上连同 0.4 既有开发已在 2026-10-21 一并提交为 `b005fc7`，工作树现在是干净的。
 
 ## 四、已知红（不是本轮引入）
 

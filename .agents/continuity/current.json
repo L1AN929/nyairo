@@ -1,9 +1,9 @@
 {
  "schema": "agent.task-continuity.v1",
- "revision": 53,
- "updated_at": "2026-10-21T22:21:23+08:00",
+ "revision": 54,
+ "updated_at": "2026-10-21T22:31:41+08:00",
  "goal": "用户要求按总体设计继续大阶段、非零碎清单，其他要求不变；国内DeepSeek唯一施工writer，父级只监督验收，不goal。选定旧作重访与有来历的续改整链。",
- "phase": "准备工作已交付，用户将在新窗口施工；本轮三项功能已落地并验证、未提交；NOW.md 已改为对照总纲 EP-01..22 的已做/半做/没做清单",
+ "phase": "v0.4 工作树已提交 b005fc7，干净；用户将在新窗口按 NOW.md 第〇步先核查再施工",
  "stop_point": "v0.4 旧作重访：手机历史/对比/派生（夹具点通）、Life 写作旧版上下文（WSL 21 绿）完成；read_project_version 漏 return 已修；真 runtime 重启未认证；未跑全量 scripts/test.py。NOW.md 现按总纲 14 章 22 个工作包标状态，详细批次见 docs/engineering/v04-design-progress.md。",
  "next_actions": [
   "新窗口按 NOW.md 第〇步先派只读子代理按 EP 分组核查（只读、不改文件、找不到证据写未找到），再改 NOW.md，再出任务书施工。",
