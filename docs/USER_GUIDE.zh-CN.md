@@ -1344,3 +1344,90 @@ STOPPED
 - 不是完整的虚拟世界活动系统：当前只做了有界 MOVE 这一条世界动作，`POSE` / `PICK_UP` / `PLACE` 经 AR-0 的真实映射没有做。
 - 不是"科学验证过的长期自主人格"：单次文本差异不构成人格证据；经历是否改变长期行为分布需要多轮、跨天、跨重启观察，本批没有做。
 - **v0.2.0-rc3 是公开测试版，没有切换到任何现有用户的实例**；上面所有结论都来自隔离环境。
+
+## 18 v0.4 她自己的手机（虚拟手机与虚拟购物）
+
+这一节只讲**你自己动手**的三步：准备一部手机、启动它、在浏览器里用它。所有数字（余额、
+价格、物品位置、消耗回执）都来自真实 owner，不是界面补出来的。
+
+### 18.1 准备（只做一次，不会覆盖已有数据）
+
+```bash
+cd /path/to/nyairo-v04-backend
+python3 scripts/phone.py prepare-demo --root /tmp/nyaw05r.jdK3q/v04-phone-p-myphone
+```
+
+* `--root` 必须是**新的绝对路径**；已存在或非空会直接拒绝（`exit 2`，`ROOT_NOT_EMPTY`），
+  一个字节都不动。
+* 它会创建：真实私人事项文档（笔记/收藏/阅读）、真实世界包与 world home、**一次** 10000 JPY
+  的虚拟搬家补助（`move_in_grant`），以及手机虚拟店的商品声明。它**不会**每天发钱，也不会
+  在你重跑时重置余额。
+* 成功时打印一行 JSON，`instance.json` 写在根目录里；失败会打印 `reason_code` 并 `exit 1`，
+  不写 `instance.json`。
+
+### 18.2 启动
+
+```bash
+python3 scripts/phone.py serve --instance /tmp/nyaw05r.jdK3q/v04-phone-p-myphone --port 0
+```
+
+* 只绑 `127.0.0.1`；`--port 0` 让系统分配，**端口在第一行 JSON 里**：
+  `{"ok":true,"url":"http://127.0.0.1:<port>/", ...}`。
+* `serve` 会自己起两个真实子进程（资源服务与身体/世界服务），并在退出时只停**自己起的**
+  pid；数据、socket、日志都留在根目录（`logs/supply.log`、`logs/world.log`）。
+* 每次启动都用**新的 socket 名字**（`run/supply-serve-<generation>.sock`）；旧的 socket 不会被
+  删除，世界服务的 `gateway.sock`/`control.sock` 会被**改名**成 `*.retired-<generation>` 留在
+  原地。重启只更新实例里的有效绑定，余额/笔记/物品都不重置。
+* 浏览器打开那个 `url` 就是手机主屏。按 `Ctrl+C` 或 `SIGTERM` 停止。
+
+### 18.3 手机上能做什么
+
+| 应用 | 真实行为 |
+|---|---|
+| 笔记 | 写一则自己的备忘；**同名新建不会覆盖旧笔记**（每次新建都是独立一条）。修订只针对打开的那一条，且只能改正文——想改标题会被明确拒绝 |
+| 收藏 | 只记出处与版本，不抓外网内容，也不会变成"已读" |
+| 阅读 | 只显示真实取得过的材料与阅读位置；**不声称理解** |
+| 钱包 | 真实余额与真实流水（补助、扣款），币种 JPY |
+| 商店 | 虚拟小店（`phone_virtual_store`）24 小时营业，目录价由 World 给 |
+| 物品 | 买到的物件：归属、位置（如 `room:home/bedroom`）、是否可用、为什么不能用 |
+| 使用 | 吃/用掉一份已拥有且已到家的东西：经原 Resolver 提交，得到一条真实消耗回执 |
+
+重复点"确认购买"不会重复扣款（同一次操作复用同一个 `operation_key`）；结果未知时界面会
+让你**先对账**（`GET /api/phone/operations/<key>`），不会偷偷换 key 重发。
+
+### 18.4 让模型也能用她自己的手机（可选，默认关）
+
+在 profile 的 `chiyo/config.json` 里加：
+
+```json
+{"cli_owner": true, "local_owner_uid": 1000,
+ "phone": {"enabled": true,
+           "base_url": "http://127.0.0.1:<serve 的端口>",
+           "profile_home": "/tmp/nyaw05r.jdK3q/v04-phone-p-myphone",
+           "write_enabled": false,
+           "private_artifacts": false}}
+```
+
+* 入口要和聊天入口绑定一致：CLI 需要 `cli_owner: true` 且 `local_owner_uid` 等于当前用户；
+  网关只认**已存在的私聊绑定**；`local` 入口和被委派的会话一律拒绝。
+* `enabled` 缺失 = 关闭；`write_enabled` 缺失 = **只能读**（买/用/写笔记都会被拒）。
+* `profile_home` 必须等于手机实例根，否则会拒绝（只让个体碰自己那部手机）。
+* `private_artifacts` 是**第二把钥匙**：记忆开着（且不是 `unrestricted`）时，工具默认只能看
+  钱包/商店/物品/对账；想让它读/写私人笔记，必须显式打开这一项。**开手机不会绕过遗忘保护。**
+
+### 18.5 出问题了看哪里
+
+| 现象 | 先看 |
+|---|---|
+| 界面显示"未连接" | `serve` 是否还在、端口是否被别的进程占 |
+| 403 `CSRF_TOKEN_MISSING` | 页面要先读一次 `/api/phone/state` 才能写；刷新即可 |
+| 403 `HOST_NOT_ALLOWED` | 别用域名/局域网地址打开，只认 `127.0.0.1` / `localhost` |
+| `unavailable / WORLD_BODY_SERVICE_UNAVAILABLE` | `logs/world.log`：世界服务没起来（不会自动起） |
+| `unavailable / SUPPLY_UNAVAILABLE` | `logs/supply.log`：资源服务没起来 |
+| `rejected / INSUFFICIENT_FUNDS` | 余额不够，钱包页有真实余额 |
+| `rejected / ALREADY_CONSUMED` | 这份已经用掉了，回执在物品页 |
+
+### 18.6 数据怎么留
+
+`prepare-demo` 建的根目录里就是全部真相的落点（世界家目录、资源库、手机日志）。本版
+**没有任何删除命令**；要清理测试数据请自己手动确认，不要交给脚本。

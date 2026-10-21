@@ -28,6 +28,10 @@ Hard rules enforced here:
 * PICK_UP / PLACE affordances are never emitted (section 6);
 * the mutation gate (off / shadow / canonical) is checked **before** any
   Resolver contact, and shadow never commits (section 7);
+* a verb is admitted *and* its parameters are checked at the same boundary:
+  `REST` is exposed with exactly `state ∈ {start, stop}` + `mode = rest`
+  (`validate_verb_params`), so a wider owner vocabulary such as
+  `sleep_like` is unreachable from here rather than merely un-emitted;
 * nothing in this module writes the World directly.
 """
 
@@ -62,14 +66,30 @@ INTENT_STATUSES = (
 #: receipt, no nutrition), and it is registered here for the same reason: the
 #: Life core reaches the owner *only* through this chain, so a verb the Resolver
 #: commits but this list omits is unreachable from a real decision.
-EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME")
+#:
+#: W: `REST` joins on the same terms.  It is a *narrow* admission -- the verb is
+#: exposed, and `validate_verb_params` immediately pins it to
+#: `state ∈ {start, stop}` + `mode = rest`.  The owner's own vocabulary is wider
+#: (`world_action_resolver.REST_MODES` also has `sleep_like`), so the narrowness
+#: lives here as an explicit rule instead of depending on what an emitter chose
+#: to offer.
+EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST")
 
 #: M15 §19: the production allowlist is explicit.  A future verb does NOT gain
 #: permission by being added to the resolver; it must be added here on purpose.
-ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME")
+ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST")
+
+#: The one REST shape this bridge admits.  These are *admission* sets, not a
+#: copy of the owner's vocabulary: `sleep_like` is refused here on purpose until
+#: a round wires its lying-pose + declared-surface preconditions.
+REST_VERB = "REST"
+REST_STATES = ("start", "stop")
+REST_MODES = ("rest",)
+REST_PARAMS = ("mode", "state")
 
 #: kept for compatibility with older callers/tests; M15 emptied it.
 BLOCKED_VERBS: tuple[str, ...] = ()
+
 
 #: Mutation gate (section 7).
 GATE_ENV = "WORLD_BODY_INTENT_MUTATION_GATE"
@@ -108,6 +128,48 @@ def canonical_json(value: Any) -> str:
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
+
+def validate_verb_params(verb: str, params: Any) -> dict[str, Any]:
+    """The per-verb parameter contract, checked at the one submission boundary.
+
+    Only `REST` has one today; every other admitted verb returns its parameters
+    untouched, so nothing here opens a free-form parameter channel.  A violation
+    raises :class:`ActionIntentError`, which the Intent Executor turns into
+    `REJECTED / INVALID` *before* any authorization is minted -- the refusal is
+    therefore definite, side-effect free and attributable to the request itself.
+    """
+
+    if not isinstance(params, Mapping):
+        raise ActionIntentError("params must be an object for verb %s" % verb)
+    values = dict(params)
+    if verb != REST_VERB:
+        return values
+
+    unknown = sorted(set(values) - set(REST_PARAMS))
+    if unknown:
+        raise ActionIntentError(
+            "REST params has unknown fields: %s (admitted: %s)"
+            % (unknown, list(REST_PARAMS))
+        )
+    missing = sorted(set(REST_PARAMS) - set(values))
+    if missing:
+        raise ActionIntentError(
+            "REST params is incomplete: %s is required (state=start|stop, mode=rest)"
+            % (missing,)
+        )
+    state = str(values["state"]).strip().lower()
+    if state not in REST_STATES:
+        raise ActionIntentError(
+            "REST state must be one of %s (got %r)" % (list(REST_STATES), values["state"])
+        )
+    mode = str(values["mode"]).strip().lower()
+    if mode not in REST_MODES:
+        raise ActionIntentError(
+            "REST mode %r is not admitted here: only %s (the owner's wider "
+            "vocabulary is not reachable from this bridge)"
+            % (values["mode"], list(REST_MODES))
+        )
+    return values
 
 # --------------------------------------------------------------------------
 # the World affordance space (bounded; the Decision selector's input)
@@ -376,11 +438,16 @@ def build_submission(
         )
     execution_id = _text(intent.get("execution_id"), "intent.execution_id", maximum=256)
     # M15 §19: only explicitly allowed verbs may reach the Resolver.
-    if str(intent.get("verb")) not in ACTION_ALLOWLIST:
+    verb = str(intent.get("verb"))
+    if verb not in ACTION_ALLOWLIST:
         raise ActionIntentError(
             "verb %s is not in the production allowlist %s"
             % (intent.get("verb"), list(ACTION_ALLOWLIST))
         )
+    # W: an admitted verb still has to be a *complete, legal* request.  REST's two
+    # parameters are pinned here (state start|stop, mode rest) rather than trusted
+    # from whoever built the intent; every other verb passes through untouched.
+    params = validate_verb_params(verb, intent.get("params") or {})
 
     location = (fresh_snapshot.get("location") or {})
     dependencies = {
@@ -400,7 +467,7 @@ def build_submission(
         "decision_ref": intent.get("decision_ref"),
         "action": intent.get("verb"),
         "execution_id": execution_id,
-        "params": dict(intent.get("params") or {}),
+        "params": params,
         "observed_dependencies": dependencies,
         "source_provenance": intent.get("source_provenance"),
         "authorization_ref": GATEWAY_AUTHORIZATION,

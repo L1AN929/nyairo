@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -49,6 +49,17 @@ SESSION_SCHEMA = "chiyo.life.co_presence.v1"
 #: Event kinds this protocol accepts.  Anything else is an ordinary inbound message.
 KIND_INVITATION = "CO_PRESENCE_INVITATION"
 KIND_END = "CO_PRESENCE_END"
+
+#: LR-3's own word for "this interruption may be applied now".
+INTERRUPT_NOW = "INTERRUPT_NOW"
+
+#: How long the private work waits for an invitation's explicit end before LR-4's own expiry
+#: opens its resume eligibility.  Bounded on purpose: an invitation nobody answers must not be
+#: able to keep her own work stopped.  A caller may narrow/widen this with ``duration_seconds``
+#: or ``expires_at`` on the invitation itself.
+DEFAULT_WAIT_SECONDS = 900
+MIN_WAIT_SECONDS = 60
+MAX_WAIT_SECONDS = 6 * 3600
 
 EFFECT_OBSERVATION_ONLY = "OBSERVATION_ONLY"
 EFFECT_INVITATION = "INVITATION"
@@ -66,6 +77,9 @@ REASON_BUDGET = "REQUEST_BUDGET_REFUSED"
 REASON_ALREADY_OPEN = "A_CO_PRESENCE_SESSION_IS_ALREADY_OPEN"
 REASON_NO_ENGAGEMENT = "INVITATION_DOES_NOT_REQUIRE_ENGAGEMENT"
 REASON_NO_FOREGROUND = "NO_PRIVATE_ACTIVITY_TO_INTERRUPT"
+#: v0.4 B: an idle instance accepts -- there is no save point to wait for, and no private work
+#: to lose.  ``REASON_NO_FOREGROUND`` stays for the callers that still report the older word.
+REASON_IDLE_ACCEPT = "IDLE_WITH_NO_PRIVATE_ACTIVITY"
 
 REQUIRED_INVITATION_FIELDS = ("invitation_id", "source_ref", "occurred_at", "scope")
 
@@ -95,6 +109,26 @@ class CoPresenceError(RuntimeError):
     """A refusal with a reason code.  Never a partially applied protocol step."""
 
 
+#: LR-3's own word for "this interruption may be applied now".  Kept as a module constant so the
+#: decision-first path can compare against it without importing the interruption owner first.
+INTERRUPT_NOW = "INTERRUPT_NOW"
+
+
+class _ConsentNotGiven(RuntimeError):
+    """The committed Decision did not start the joint time, or the safe park was refused.
+
+    Raised from inside AG-2's ``pre_adoption_mutation_hook`` on purpose: an exception there stops
+    the adoption before any Activity is written, which is exactly the guarantee this path needs --
+    no pause, no joint Activity, no half-applied protocol step.
+    """
+
+    def __init__(self, decision: str, reason_code: str, detail: str = "") -> None:
+        super().__init__("%s: %s" % (reason_code, detail))
+        self.decision = decision
+        self.reason_code = reason_code
+        self.detail = detail
+
+
 def _iso(moment: Optional[datetime] = None) -> str:
     return (moment or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(
         timespec="seconds")
@@ -106,6 +140,11 @@ def _instant(value: Any) -> Optional[datetime]:
     except (TypeError, ValueError):
         return None
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def _bounded_text(value: Any, limit: int = 200) -> str:
+    """One line, bounded -- for a report field, never for a decision."""
+    return " ".join(str(value or "").split())[:limit]
 
 
 def _require_text(value: Any, field: str) -> str:
@@ -154,6 +193,12 @@ def parse_invitation(raw: Mapping[str, Any]) -> dict[str, Any]:
     expires = raw.get("expires_at")
     if expires is not None and _instant(expires) is None:
         raise CoPresenceError("INVITATION_EXPIRES_AT_INVALID")
+    refs = raw.get("material_refs")
+    materials: list[str] = []
+    if isinstance(refs, (list, tuple)):
+        materials = [str(item).strip() for item in refs if str(item or "").strip()]
+    elif isinstance(refs, str) and refs.strip():
+        materials = [refs.strip()]
     return {
         "invitation_id": _require_text(raw.get("invitation_id"), "invitation_id"),
         "source_ref": _require_text(raw.get("source_ref"), "source_ref"),
@@ -167,6 +212,9 @@ def parse_invitation(raw: Mapping[str, Any]) -> dict[str, Any]:
         "atomic": bool(raw.get("atomic", False)),
         "evidence_ref": (str(raw.get("evidence_ref")).strip() if raw.get("evidence_ref") else None),
         "duration_seconds": raw.get("duration_seconds"),
+        # v0.4 shared practice: the explicit materials the invitation names (already validated by
+        # the transport).  The protocol carries them; it never opens anything by itself.
+        "material_refs": materials,
     }
 
 
@@ -254,6 +302,41 @@ class FiniteCoPresence:
                        encoding="utf-8")
         os.replace(tmp, path)
         return dict(payload)
+
+    def bind_practice(self, *, invitation_id: Any, practice_session_ref: Any,
+                      event_ref: Any = None, now: Optional[str] = None) -> dict[str, Any]:
+        """Record *which* shared-practice session this open joint time really opened.
+
+        v0.4 shared practice: the content half is only the continuation of a joint time that
+        was really accepted, so the binding is written here -- on the co-presence session the
+        acceptance created -- and read back from it.  A session that is not open (``CLOSED``
+        after an explicit end, ``PARKED_NO_JOINT`` when the joint Activity never came up), an
+        invitation that names another session, or an empty reference is refused by name: an
+        open practice artifact by itself is not consent to keep talking.
+        """
+
+        session = self.read_session()
+        state = str(session.get("state") or "")
+        if state != "OPEN":
+            return {"ok": False, "reason_code": "PRACTICE_BIND_REQUIRES_OPEN_SESSION",
+                    "state": state,
+                    "detail": "only an open joint time can carry a shared practice"}
+        if str(invitation_id or "") != str(session.get("invitation_id") or ""):
+            return {"ok": False, "reason_code": "PRACTICE_BIND_FOR_ANOTHER_SESSION",
+                    "invitation_id": session.get("invitation_id"),
+                    "detail": "the practice must belong to this session's own invitation"}
+        ref = _bounded_text(practice_session_ref, 200)
+        if not ref:
+            return {"ok": False, "reason_code": "PRACTICE_BIND_REQUIRES_SESSION_REF",
+                    "detail": "no shared-practice session was named"}
+        moment_iso = _iso(_instant(now) or datetime.now(timezone.utc))
+        bound = dict(session)
+        bound.update({"practice_session_ref": ref, "practice_bound_at": moment_iso,
+                      "practice_invitation_event_ref": (_bounded_text(event_ref, 200) or None)})
+        self._write_session(bound)
+        return {"ok": True, "reason_code": "", "state": "OPEN",
+                "session_ref": session_ref(str(session.get("invitation_id") or "")),
+                "practice_session_ref": ref, "bound_at": moment_iso}
 
     # -- ordinary inbound messages ---------------------------------------------------------
 
@@ -380,9 +463,16 @@ class FiniteCoPresence:
                         "foreground_activity_ref": foreground.get("activity_id")})
             return out
         if foreground is None:
-            out.update({"decision": DECISION_DEFER, "reason_code": REASON_NO_FOREGROUND,
-                        "detail": "there is no private Activity to interrupt, so there is no "
-                                  "save point to return to yet",
+            # v0.4 B: an idle instance may accept.  With no private Activity there is nothing to
+            # interrupt and nothing to park, so the joint time is simply the next Activity -- this
+            # is *not* a global refusal, and it is not a deferral either: nothing is waiting on a
+            # save point that does not exist.  An instance with no private checkpoint is exactly
+            # this case.
+            out.update({"decision": DECISION_ACCEPT,
+                        "reason_code": REASON_IDLE_ACCEPT,
+                        "detail": "there is no private Activity to interrupt, so the joint time "
+                                  "starts as an ordinary Activity with no save point to keep",
+                        "idle": True,
                         "interruptibility": interruptibility or None})
             return out
 
@@ -610,11 +700,9 @@ class FiniteCoPresence:
         return {"ok": True, "event_id": getattr(record, "event_id", event["event_id"]),
                 "request_status": getattr(record, "request_status", "OPEN")}
 
-    def _adopt_joint_activity(self, invitation: Mapping[str, Any],
-                              moment_iso: str) -> dict[str, Any]:
-        """One real Decision+Adoption cycle.  The Decision decides, not this module."""
+    def _joint_adoption_spec(self, invitation: Mapping[str, Any]) -> dict[str, Any]:
+        """The adoption spec one joint time is created with -- built once, used by both paths."""
         import activity_progress_completion_lr5 as lr5
-        import agency_decision_ag1 as ag1
         import life_integration_ag2 as ag2
 
         reference = session_effect_ref(invitation["invitation_id"])
@@ -651,12 +739,20 @@ class FiniteCoPresence:
                 "policy_version": lr5.POLICY_EXTERNAL_RESULT_V1,
             },
         )
+        return spec.to_dict()
+
+    def _adopt_joint_activity(self, invitation: Mapping[str, Any],
+                              moment_iso: str) -> dict[str, Any]:
+        """One real Decision+Adoption cycle.  The Decision decides, not this module."""
+        import agency_decision_ag1 as ag1
+
+        reference = session_effect_ref(invitation["invitation_id"])
         try:
             out = self.runtime.coordinator.run_decision_and_adoption_cycle(
                 trigger_kind=ag1.TRIGGER_USER_REQUEST_EVENT,
                 trigger_ref=reference,
                 observed_at=moment_iso,
-                adoption_spec=spec.to_dict(),
+                adoption_spec=self._joint_adoption_spec(invitation),
                 execute_initial_step=False)
         except Exception as exc:
             return {"ok": False, "reason_code": "DECISION_CYCLE_REFUSED",
@@ -672,6 +768,352 @@ class FiniteCoPresence:
             "adoption_status": getattr(adoption, "adoption_status", None),
             "activity_ref": getattr(integration, "activity_ref", None),
             "single_foreground": True,
+        }
+
+    # -- the decision-first path (v0.4 B: the resident's own route) ------------------------
+
+    def begin_from_decision(self, invitation: Mapping[str, Any], *,
+                            now: Optional[str] = None) -> dict[str, Any]:
+        """Accept, defer or decline one invitation -- **the Decision decides first**, once.
+
+        Order, and why it is this order:
+
+        1. ``consider``: the owners' own legality gate (foreign subject or home, expiry, the
+           operator's pause, an ATOMIC foreground, the request ledger).  An idle instance accepts
+           here -- no private save point is not a refusal;
+        2. **one** AG-1 Decision, reserved against the instance's own request ledger *before it is
+           sent* (``BudgetedCognitionAdapter``), with the bounded ``contact`` situation.  Nothing
+           has touched an Activity at this point: NO_ACTION, DEFER, WAIT, a decline, an exhausted
+           budget or a failed/exception-raising cognition all leave the running work exactly as
+           its owner had it -- same status, same revision, same checkpoint, same foreground, and
+           no session record anywhere;
+        3. only when that committed Decision says START does AG-2 adopt it, and the *adoption*
+           hands the foreground over: LR-4's own WAITING transition with a resume condition on
+           this session's end event (bounded, so a silent invitation cannot keep the book shut),
+           then the joint Activity.  The handoff is CAS-checked inside the owner and a refusal
+           raises **before** anything is written;
+        4. if the start fails *after* the handoff, the condition is released through LR-4's own
+           event path (a resume eligibility), the outcome is recorded as UNKNOWN with a named
+           reason, and a ``PARKED_NO_JOINT`` session is kept so an explicit end still reconciles.
+
+        One invitation costs **one** decision request (one reservation), and a deferral names its
+        condition so the event is never re-asked on the next tick.
+        """
+        import agency_decision_ag1 as ag1
+        import life_integration_ag2 as ag2
+        import life_request_budget as lrb
+
+        moment = _instant(now) or datetime.now(timezone.utc)
+        moment_iso = moment.isoformat(timespec="seconds")
+        decision = self.consider(invitation, now=moment_iso)
+        out: dict[str, Any] = {
+            "ok": False, "stage": "CONSIDER", "decision": decision["decision"],
+            "reason_code": decision["reason_code"], "detail": decision.get("detail", ""),
+            "llm_calls": 0, "session": None, "session_ref": None,
+            "joint_activity_ref": None, "private_activity_ref": None,
+            "decision_record_ref": None, "selected_candidate_ref": None,
+            "pause_applied": False, "activity_started": False, "park_applied": False,
+            "handoff": None, "idle": bool(decision.get("idle")),
+        }
+        if decision["decision"] != DECISION_ACCEPT:
+            return out
+
+        reference = session_effect_ref(invitation["invitation_id"])
+        request = self._ingest_invitation(invitation, moment_iso)
+
+        # -- the one decision request, reserved before it is sent ---------------------------
+        service = getattr(self.runtime, "decision_service", None)
+        original = getattr(service, "cognition_adapter", None)
+        ledger = getattr(getattr(self.cycle, "budget", None), "requests", None)
+        budget = getattr(ledger, "reserve", None)
+        # The instance's own ceiling, read before anything is sent: a spent ledger means this
+        # invitation costs **no** request at all (and therefore cannot touch an Activity either).
+        if ledger is not None and hasattr(ledger, "check"):
+            verdict = dict(ledger.check() or {})
+            if verdict.get("allowed") is not True:
+                out.update({"stage": "BUDGET_REFUSED", "decision": DECISION_DEFER,
+                            "reason_code": str(verdict.get("reason_code")
+                                               or "REQUEST_BUDGET_REFUSED"),
+                            "detail": "the request ledger refuses this invitation: %s"
+                                      % verdict.get("reason_code"),
+                            "llm_calls": 0, "request": request})
+                return out
+        wrapped = None
+        assigned_wrapper = False
+        if isinstance(original, lrb.BudgetedCognitionAdapter) and original.budget is ledger:
+            wrapped = original
+        elif budget is not None and original is not None:
+            admission = (self._admission()
+                         if getattr(original, "send_split_capable", False) else None)
+            wrapped = lrb.BudgetedCognitionAdapter(original, ledger, admission=admission)
+            service.cognition_adapter = wrapped
+            assigned_wrapper = True
+        attempt_start = len(getattr(wrapped, "attempts", []) or [])
+        attempts = lambda: len(getattr(wrapped, "attempts", []) or []) - attempt_start
+        try:
+            cycle_out = self.runtime.coordinator.run_decision_and_adoption_cycle(
+                trigger_kind=ag1.TRIGGER_USER_REQUEST_EVENT,
+                trigger_ref=reference,
+                observed_at=moment_iso,
+                adoption_spec=self._joint_adoption_spec(invitation),
+                # The handoff is built from the *owner's own* current foreground, and the owner
+                # CAS-checks it again when it runs; nothing is cleared here.
+                handoff_spec=self._handoff_spec_for(invitation, moment_iso),
+                execute_initial_step=False,
+                # The Decision's bounded view of what is being asked: the invitation's scope
+                # label and the session state.  No body, no private material, no authority.
+                situation_context={"contact": self.contact_context(invitation)})
+        except ag2.ForegroundHandoffStranded as stranded:
+            release = self._release_handoff(stranded.handoff, moment_iso)
+            session = self._parked_session(invitation, moment_iso, decision,
+                                           stranded.handoff, "HANDOFF_STRANDED")
+            self._write_session(session)
+            out.update({"stage": "HANDOFF_STRANDED", "decision": "",
+                        "reason_code": "JOINT_START_FAILED_AFTER_HANDOFF",
+                        "detail": _bounded_text(stranded.cause, 300),
+                        "llm_calls": max(1, attempts()), "request": request,
+                        "handoff": dict(stranded.handoff), "release": release,
+                        "park_applied": True, "session": session,
+                        "private_activity_ref": stranded.handoff.get("activity_ref"),
+                        "private_recovery": self._recovery_facts(decision, stranded.handoff,
+                                                                 release)})
+            return out
+        except lrb.RequestBudgetError as exc:
+            out.update({"stage": "BUDGET_REFUSED", "decision": DECISION_DEFER,
+                        "reason_code": str(getattr(exc, "reason_code", "") or "REQUEST_BUDGET_REFUSED"),
+                        "detail": _bounded_text(getattr(exc, "detail", "") or str(exc), 300),
+                        "llm_calls": 0, "request": request})
+            return out
+        except Exception as exc:
+            out.update({"stage": "DECISION_CYCLE_REFUSED", "decision": "",
+                        "reason_code": "DECISION_CYCLE_REFUSED",
+                        "detail": _bounded_text("%s: %s" % (type(exc).__name__, exc), 300),
+                        "llm_calls": attempts(), "request": request})
+            return out
+        finally:
+            if assigned_wrapper and original is not None:
+                try:
+                    service.cognition_adapter = original
+                except Exception:
+                    pass
+
+        record = (cycle_out.get("decision_result") or {}).get("decision_record")
+        adoption = (cycle_out.get("adoption_result") or {}).get("adoption_record")
+        integration = cycle_out.get("integration_record")
+        handoff = ((cycle_out.get("adoption_result") or {}).get("handoff_result") or None)
+        chosen = str(getattr(record, "decision", "") or "")
+        adoption_status = str(getattr(adoption, "adoption_status", "") or "")
+        joint_ref = getattr(integration, "activity_ref", None)
+        out.update({"llm_calls": max(1, attempts()), "request": request, "decided": chosen,
+                    "decision_record_ref": getattr(record, "decision_id", None),
+                    "selected_candidate_ref": getattr(record, "selected_candidate_ref", None),
+                    "adoption_status": adoption_status,
+                    "joint_activity_ref": joint_ref,
+                    "handoff": dict(handoff) if isinstance(handoff, Mapping) else None,
+                    "park_applied": bool(handoff),
+                    "private_activity_ref": (handoff or {}).get("activity_ref")})
+        if record is None or not chosen:
+            failed = dict(cycle_out.get("decision_result") or {})
+            out.update({"decision": "", "stage": "DECISION_NOT_COMMITTED",
+                        "reason_code": "DECISION_NOT_COMMITTED",
+                        "failure_class": str(failed.get("failure_class")
+                                             or failed.get("stale_reason") or "DECISION_NOT_COMMITTED"),
+                        "detail": "no committed Decision exists; this is UNKNOWN, not a refusal"})
+            return out
+        accepted = adoption_status == "APPLIED" and bool(joint_ref)
+        if accepted:
+            session = {
+                "schema_version": SESSION_SCHEMA,
+                "state": "OPEN",
+                "invitation_id": invitation["invitation_id"],
+                "source_ref": invitation["source_ref"],
+                "scope": invitation["scope"],
+                "subject_id": self.subject_id,
+                "home": self.home,
+                "opened_at": moment_iso,
+                "expires_at": invitation.get("expires_at"),
+                "private_activity_ref": (handoff or {}).get("activity_ref"),
+                "private_checkpoint_ref": decision.get("private_checkpoint_ref"),
+                "pause_transition_ref": None,
+                "resume_condition_ref": (handoff or {}).get("resume_condition_ref"),
+                "resume_condition_expires_at": (handoff or {}).get("condition_expires_at"),
+                "joint_activity_ref": joint_ref,
+                "joint_activity_status": "ACTIVE",
+                "single_foreground": True,
+                "true_concurrency": "DEFERRED_BEYOND_CURRENT_CONTRACT",
+                "decision_ref": out.get("decision_record_ref"),
+            }
+            self._write_session(session)
+            out.update({"ok": True, "stage": "JOINT_OPEN", "decision": DECISION_ACCEPT,
+                        "reason_code": "CO_PRESENCE_STARTED",
+                        "detail": "the Decision accepted; the adoption handed the foreground "
+                                  "over and started the joint Activity",
+                        "session": session,
+                        "session_ref": "co_presence:%s" % invitation["invitation_id"],
+                        "activity_started": True,
+                        "private_recovery": self._recovery_facts(decision, handoff, None)})
+            return out
+
+        # -- not accepted: nothing was handed over, and nothing is left hanging --------------
+        if chosen in {ag1.DECISION_WAIT, ag1.DECISION_DEFER}:
+            out.update({"decision": DECISION_DEFER, "stage": "DEFERRED_BY_DECISION",
+                        "reason_code": ("DECISION_WAIT" if chosen == ag1.DECISION_WAIT
+                                        else "DECISION_DEFER"),
+                        "detail": "the Decision chose %s; the running work is untouched and the "
+                                  "invitation is answered later" % chosen})
+        elif chosen == ag1.DECISION_START:
+            out.update({"decision": "", "stage": "ADOPTION_NOT_APPLIED",
+                        "reason_code": "ADOPTION_NOT_APPLIED",
+                        "detail": "the Decision chose START but the adoption did not apply "
+                                  "(status=%s)" % (adoption_status or "NONE")})
+        else:
+            out.update({"decision": DECISION_DECLINE, "stage": "DECLINED_BY_DECISION",
+                        "reason_code": "DECISION_%s" % (chosen or "UNKNOWN"),
+                        "detail": "the Decision chose %s, not the joint time"
+                                  % (chosen or "nothing")})
+        out["decision_record_ref"] = out.get("decision_record_ref")
+        return out
+
+    def _admission(self):
+        """The instance's own request-start handshake (the operator's pause bit)."""
+        try:
+            import life_pause
+        except Exception:  # pragma: no cover - the owner is always importable here
+            return None
+
+        root = self.state_root
+
+        def _admit(kind: str, schema_retry_index: int = 0) -> None:
+            life_pause.admit_request(root, stage="before_%s_request" % str(kind or "request"))
+
+        return _admit
+
+    def _handoff_spec_for(self, invitation: Mapping[str, Any],
+                          moment_iso: str) -> Optional[dict[str, Any]]:
+        """The bounded handoff this adoption would perform, or ``None`` when nothing is running."""
+        foreground = self._foreground()
+        if not foreground:
+            return None
+        activity_id = str(foreground.get("activity_id") or "")
+        revision = foreground.get("revision")
+        if not activity_id or revision is None:
+            return None
+        import activity_waiting_agenda as awa
+
+        return {
+            "activity_ref": activity_id,
+            "expected_revision": int(revision),
+            "waiting_on_ref": session_ref(invitation["invitation_id"]),
+            "condition_kind": awa.COND_KIND_EVENT_MATCH,
+            "parameters": {"expected_event_kind": KIND_END,
+                           "expected_ref": session_ref(invitation["invitation_id"])},
+            "source_refs": [session_ref(invitation["invitation_id"]),
+                            invitation["source_ref"]],
+            "idempotency_key": "co_presence:wait:%s" % invitation["invitation_id"],
+            "condition_expires_at": self._wait_until(invitation, moment_iso),
+        }
+
+    def _wait_until(self, invitation: Mapping[str, Any], moment_iso: str) -> str:
+        """The bounded window this wait may last -- never an open-ended stop of her own work."""
+        window = invitation.get("duration_seconds")
+        try:
+            window_s = int(window) if window is not None else DEFAULT_WAIT_SECONDS
+        except (TypeError, ValueError):
+            window_s = DEFAULT_WAIT_SECONDS
+        window_s = max(MIN_WAIT_SECONDS, min(window_s, MAX_WAIT_SECONDS))
+        return invitation.get("expires_at") or _iso(
+            _instant(moment_iso) + timedelta(seconds=window_s))
+
+    def _release_handoff(self, handoff: Mapping[str, Any],
+                         moment_iso: str) -> dict[str, Any]:
+        """Let LR-4 release a handoff that never became a joint time (its own event path)."""
+        event = {
+            "event_id": "cevt:co_presence_handoff_release:%s" % handoff.get("activity_ref"),
+            "event_category": "EXTERNAL",
+            "event_kind": KIND_END,
+            "occurred_at": moment_iso,
+            "observed_at": moment_iso,
+            "recorded_at": moment_iso,
+            "enqueued_at": moment_iso,
+            "source_refs": [str(handoff.get("waiting_on_ref") or "")],
+            "waiting_on_ref": str(handoff.get("waiting_on_ref") or ""),
+        }
+        try:
+            evaluation = self.runtime.waiting_coordinator.evaluate_event(event)
+        except Exception as exc:
+            return {"ok": False, "reason_code": "HANDOFF_RELEASE_REFUSED",
+                    "detail": _bounded_text("%s: %s" % (type(exc).__name__, exc), 200)}
+        return {"ok": True,
+                "new_eligibility_refs": list(evaluation.get("emitted_eligibilities") or []),
+                "resume_requires_decision": True}
+
+    def _parked_session(self, invitation: Mapping[str, Any], moment_iso: str,
+                        decision: Mapping[str, Any], handoff: Mapping[str, Any],
+                        reason_code: str) -> dict[str, Any]:
+        """The record an explicit end can still be matched to after a stranded handoff."""
+        return {
+            "schema_version": SESSION_SCHEMA, "state": "PARKED_NO_JOINT",
+            "invitation_id": invitation["invitation_id"],
+            "source_ref": invitation["source_ref"], "scope": invitation["scope"],
+            "subject_id": self.subject_id, "home": self.home,
+            "opened_at": moment_iso, "expires_at": invitation.get("expires_at"),
+            "private_activity_ref": handoff.get("activity_ref"),
+            "private_checkpoint_ref": decision.get("private_checkpoint_ref"),
+            "resume_condition_ref": handoff.get("resume_condition_ref"),
+            "resume_condition_expires_at": handoff.get("condition_expires_at"),
+            "joint_activity_ref": None, "joint_activity_status": None,
+            "single_foreground": True,
+            "true_concurrency": "DEFERRED_BEYOND_CURRENT_CONTRACT",
+            "reason_code": reason_code,
+        }
+
+    def _assess_hold_request(self, invitation: Mapping[str, Any],
+                             moment_iso: str) -> dict[str, Any]:
+        """LR-3's own verdict on this explicit hold request -- an assessment, not a pause."""
+        import activity_interruption as ai
+
+        try:
+            event = ai.CommunicationEventAdapter.adapt({
+                "event_id": "comm_evt:co_presence:%s" % invitation["invitation_id"],
+                "subject_id": self.canonical_subject,
+                "channel_ref": "channel:co_presence",
+                "conversation_ref": "conv:co_presence:%s" % invitation["invitation_id"],
+                "message_ref": "msg:co_presence:%s" % invitation["invitation_id"],
+                "message_class": ai.MESSAGE_CLASS_EXPLICIT_HOLD_REQUEST,
+                "request_boundary_pause": False,
+                "occurred_at": invitation["occurred_at"],
+                "observed_at": moment_iso,
+                "recorded_at": moment_iso,
+                "enqueued_at": moment_iso,
+                "source_refs": ["channel:co_presence", invitation["source_ref"]],
+            })
+            assessments = self.runtime.interruption_coordinator.assess_events(
+                [event], apply_immediate_pause=False)
+        except Exception as exc:
+            return {"read_error": "%s: %s" % (type(exc).__name__, exc)}
+        return dict(assessments[-1]) if assessments else {}
+
+    def _recovery_facts(self, decision: Mapping[str, Any], handoff: Any,
+                        release: Any) -> dict[str, Any]:
+        """What the private work looks like now, and how it comes back -- stated, not implied."""
+        held = dict(handoff or {}) if isinstance(handoff, Mapping) else {}
+        activity_ref = held.get("activity_ref") or decision.get("foreground_activity_ref")
+        if held:
+            how = ("the private Activity is WAITING under LR-4 with the session's end condition "
+                   "(and its own expiry); the end event or that expiry opens a resume "
+                   "eligibility, and a new Decision is what resumes it")
+            if isinstance(release, Mapping) and release.get("new_eligibility_refs"):
+                how = ("the wait was already released through LR-4 and a resume eligibility is "
+                       "open; a new Decision is what resumes it")
+        else:
+            how = "nothing was stopped: the private Activity is exactly as its owner left it"
+        return {
+            "activity_ref": activity_ref,
+            "activity": self._activity_view(activity_ref),
+            "checkpoint_ref": decision.get("private_checkpoint_ref"),
+            "resume_condition_ref": held.get("resume_condition_ref"),
+            "recoverable": True,
+            "how": how,
         }
 
     # -- ending the joint time -------------------------------------------------------------
@@ -709,7 +1151,7 @@ class FiniteCoPresence:
                     "resume_requires_decision": True,
                     "replayed": True,
                     "true_concurrency": "DEFERRED_BEYOND_CURRENT_CONTRACT"}
-        if state != "OPEN":
+        if state not in {"OPEN", "PARKED_NO_JOINT"}:
             raise CoPresenceError("NO_OPEN_SESSION")
         if str(end_event["invitation_id"]) != str(session.get("invitation_id")):
             raise CoPresenceError("END_EVENT_IS_FOR_ANOTHER_SESSION")
@@ -761,6 +1203,30 @@ class FiniteCoPresence:
                            "Adoption (LR-4 explicit resume); this module does not resume it",
             "true_concurrency": "DEFERRED_BEYOND_CURRENT_CONTRACT",
         }
+
+    def contact_context(self, invitation: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        """The bounded local-contact block one Decision may see -- no body, no private material.
+
+        It says what an invitation *is* and what accepting it would mean for the running
+        Activity.  It never says what she should choose, and it cannot act.
+        """
+        session = self.read_session()
+        out: dict[str, Any] = {
+            "available": True,
+            "co_presence_state": str(session.get("state") or "NONE"),
+            "invitation_scope": (invitation or {}).get("scope"),
+            "delivered_to_user": False,
+            "external_channel_sent": False,
+            "private_text_included": False,
+        }
+        if invitation:
+            out["invitation_id"] = invitation.get("invitation_id")
+            out["invitation_kind"] = KIND_INVITATION
+            out["what_accepting_means"] = (
+                "the running Activity is set down at its own checkpoint and one finite joint "
+                "Activity starts; it ends only at an explicit end, and coming back to the old "
+                "work is a new Decision")
+        return out
 
     def _activity_view(self, activity_ref: Any) -> dict[str, Any]:
         """One Activity as the owner reports it right now."""
@@ -910,6 +1376,8 @@ def operator_action(root: Path | str, *, raw: Optional[str] = None) -> dict[str,
 
 __all__ = [
     "CoPresenceError",
+    "INTERRUPT_NOW",
+    "REASON_IDLE_ACCEPT",
     "DECISION_ACCEPT",
     "DECISION_DECLINE",
     "DECISION_DEFER",

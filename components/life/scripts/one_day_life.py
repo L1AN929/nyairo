@@ -68,6 +68,7 @@ for _path in (str(HERE), str(_COMPONENTS), str(_COMPONENTS / "world" / "scripts"
 import autonomous_life_control as control
 import autonomous_life_resident as resident_module
 import life_pause
+import life_runtime_coverage as runtime_coverage
 
 INSTANCE_FILENAME = "instance.json"
 MODEL_ENV_FILENAME = "model_env"
@@ -133,6 +134,22 @@ VERDICT_PASS = "PASS"
 VERDICT_INTERRUPTED = "INTERRUPTED"
 VERDICT_NOT_PASS = "NOT_PASS"
 VERDICT_NO_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+
+#: Where the report's coverage numbers came from.  Only ``PROVEN_PROCESS_LEDGER`` -- a record
+#: each process wrote with its own ``time.monotonic()`` -- can support a PASS.  A journal's
+#: wake span and an old summary's wall span are both reported, both labelled unverified.
+COVERAGE_BASIS_LEDGER = "PROVEN_PROCESS_LEDGER"
+COVERAGE_BASIS_LEGACY = "LEGACY_SUMMARY_WALL_SPAN_UNVERIFIED"
+COVERAGE_BASIS_JOURNAL = "JOURNAL_ONLY_UNVERIFIED"
+COVERAGE_BASIS_ABSENT = "NO_COVERAGE_RECORD"
+
+#: How a window with no owner output may be read.  None of these is "she chose to rest":
+#: a rest is an owner-recorded decision, and a technical failure is not a choice.
+QUIET_OWNER_OUTPUT = "OWNER_OUTPUT_PRESENT"
+QUIET_NO_OWNER_OUTPUT = "QUIET_AND_UNBLOCKED"
+QUIET_MODEL_UNAVAILABLE = "TECHNICAL_MODEL_UNAVAILABLE"
+QUIET_BLOCKED = "TECHNICAL_BLOCKED"
+QUIET_UNVERIFIED = "UNVERIFIED_NO_RECORD"
 
 EXIT_OK = 0
 EXIT_REFUSED = 1
@@ -1254,14 +1271,161 @@ def _parse_iso(value: Any) -> Optional[datetime]:
         return None
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
-def build_report(root: Path | str, *, target_seconds: int = DEFAULT_DURATION_SECONDS,
-                 gap_factor: float = 2.5) -> dict[str, Any]:
-    """The 24h report.  It never mints PASS from a clock alone.
+def _journal_window(records: list[dict[str, Any]], *, poll_seconds: int,
+                    gap_factor: float) -> dict[str, Any]:
+    """The old journal-only arithmetic, kept for old readers -- and never a verdict basis.
 
-    ``PASS`` requires all three of: an observed coverage of at least ``target_seconds``, no
-    unexplained gap between journal records, and at least one owner-confirmed result.  A window
-    that filled up with blocked rounds, or a run whose process was down for part of it, is
-    reported as exactly that.
+    A journal holds *wakes*.  The runner merges a QUIET window and a NOT_DUE window into a
+    silent step, so the distance between two records is mostly "nothing was due", not "the
+    process was down".  The numbers are still returned (an old record and an old reader need
+    them), but they are labelled unverified and no verdict is decided from them.
+    """
+
+    moments = sorted(m for m in (_parse_iso(record.get("at")) for record in records) if m)
+    first, last = (moments[0], moments[-1]) if moments else (None, None)
+    span = int((last - first).total_seconds()) if first and last else 0
+    threshold = max(1.0, float(poll_seconds) * float(gap_factor))
+    gaps: list[dict[str, Any]] = []
+    for previous, current in zip(moments, moments[1:]):
+        seconds = int((current - previous).total_seconds())
+        if seconds > threshold:
+            gaps.append({"from": previous.isoformat(timespec="seconds"),
+                         "to": current.isoformat(timespec="seconds"), "seconds": seconds})
+    gap_seconds = sum(gap["seconds"] for gap in gaps)
+    return {"first": first, "last": last, "span_seconds": span, "gaps": gaps,
+            "gap_seconds": gap_seconds, "observed_seconds": max(0, span - gap_seconds)}
+
+
+def _report_quiet(summary: Mapping[str, Any], counters: Mapping[str, Any]) -> dict[str, Any]:
+    """What a window with no owner output may and may not be read as.
+
+    Zero actions and zero requests are not evidence that she was not alive, and they are not a
+    choice to rest either: a rest is an owner-recorded decision, and nothing in this report is
+    one.  What *can* be named is the technical reason a window produced nothing -- an
+    unreachable model, a blocked owner, a refused request -- because that is not her doing.
+    """
+
+    detail = summary.get("model_calls_detail")
+    detail = detail if isinstance(detail, Mapping) else {}
+    requests = detail.get("total_requests")
+    blocked: dict[str, int] = {}
+    raw = counters.get("blocked_reasons")
+    if isinstance(raw, Mapping):
+        for key, value in raw.items():
+            try:
+                count = int(value or 0)
+            except (TypeError, ValueError):
+                count = 0
+            if count > 0:
+                blocked[str(key)] = count
+    model = summary.get("model")
+    probe = (model or {}).get("probe") if isinstance(model, Mapping) else None
+    probe_status = probe.get("status") if isinstance(probe, Mapping) else None
+    acted = int(counters.get("actions") or 0)
+    confirmed = int(counters.get("owner_confirmed_versions") or 0)
+    has_counters = isinstance(summary.get("counters"), Mapping) and bool(summary.get("counters"))
+    recorded = (summary.get("present") is not False and isinstance(summary.get("kind"), str)
+                and has_counters)
+
+    model_blocked = sorted(reason for reason in blocked if "MODEL" in reason.upper())
+    if not recorded:
+        reading = QUIET_UNVERIFIED
+    elif model_blocked or probe_status == "UNREACHABLE":
+        reading = QUIET_MODEL_UNAVAILABLE
+    elif blocked:
+        reading = QUIET_BLOCKED
+    elif acted or confirmed:
+        reading = QUIET_OWNER_OUTPUT
+    else:
+        reading = QUIET_NO_OWNER_OUTPUT
+
+    if reading == QUIET_UNVERIFIED:
+        basis = ("no resident record was read: nothing here says whether the window was quiet "
+                 "or whether the process was alive")
+    elif reading == QUIET_MODEL_UNAVAILABLE:
+        basis = ("the model was unavailable (%s): a technical failure is not a quiet day and not "
+                 "her choosing to rest" % ", ".join(model_blocked or [str(probe_status)]))
+    elif reading == QUIET_BLOCKED:
+        basis = ("windows were blocked by their own owner (%s): that is a refusal, not a choice "
+                 "to rest" % ", ".join(sorted(blocked)))
+    elif reading == QUIET_OWNER_OUTPUT:
+        basis = "%s owner-confirmed result(s) and %s acted window(s) are recorded" % (confirmed,
+                                                                                     acted)
+    else:
+        basis = ("a zero-action window is legal: no owner output and no counted request is not "
+                 "evidence that she was not alive, and it is not a recorded choice to rest "
+                 "either")
+
+    return {
+        "reading": reading,
+        "reading_basis": basis,
+        "owner_output": {"actions": acted, "owner_confirmed_results": confirmed},
+        "requests": requests,
+        "requests_known": requests is not None,
+        "requests_source": detail.get("total_source"),
+        "model_probe": probe_status,
+        "blocked_reasons": blocked,
+        "reads_as_selected_rest": False,
+        "note": ("zero owner output and zero requests are never read as \"not alive\"; "
+                 "unavailability, blocked windows and model failures are named as technical, "
+                 "never as rest"),
+    }
+
+
+def _current_tail(view: Mapping[str, Any], *, moment: datetime) -> dict[str, Any]:
+    """Where the measured part ends, and whether that end was a real closure.
+
+    ``closed_process_seconds`` is time a process measured *and* then stopped for;
+    ``open_tail_seconds`` is time an open process measured up to its last heartbeat, whose
+    interval was never handed over.  Everything after that heartbeat is not measured at all, so
+    it is reported as a distance, never as life.
+    """
+
+    processes = [row for row in (view.get("processes") or []) if isinstance(row, Mapping)]
+    last = dict(processes[-1]) if processes else None
+    open_tail = bool(last) and str(last.get("closed")) != runtime_coverage.CLOSED_STOP
+    out: dict[str, Any] = {
+        "ledger_present": str((view.get("sources") or {}).get("ledger") or "ABSENT") == "PRESENT",
+        "closed_process_seconds": int(view.get("closed_process_seconds") or 0),
+        "open_tail_seconds": int(view.get("open_tail_seconds") or 0),
+        "open": open_tail,
+        "last_process": last,
+        "last_edge": None,
+        "since_last_edge_seconds": None,
+        "unmeasured_after": None,
+        "unmeasured_seconds": None,
+    }
+    if last:
+        # Where the record itself ends: a stop for a closed process, the last heartbeat for an
+        # open one.  The distance from there to ``now`` is reported as a distance -- wall clock
+        # after the record is not life, and it is not counted as coverage either.
+        edge_value = (last.get("stopped_at") or last.get("last_heartbeat_at")
+                      or last.get("started_at"))
+        edge = _parse_iso(edge_value)
+        out["last_edge"] = edge_value
+        out["since_last_edge_seconds"] = int((moment - edge).total_seconds()) if edge else None
+        if open_tail:
+            heartbeat_value = last.get("last_heartbeat_at") or last.get("started_at")
+            heartbeat = _parse_iso(heartbeat_value)
+            out["unmeasured_after"] = heartbeat_value
+            out["unmeasured_seconds"] = (int((moment - heartbeat).total_seconds())
+                                         if heartbeat else None)
+    return out
+
+
+def build_report(root: Path | str, *, target_seconds: int = DEFAULT_DURATION_SECONDS,
+                 gap_factor: float = 2.5, now: Optional[datetime] = None) -> dict[str, Any]:
+    """The 24h report.  It reads the coverage ledger and never mints PASS from a clock.
+
+    ``PASS`` requires *proven* coverage: at least ``target_seconds`` of it, every process
+    closed with its own monotonic measurement, no offline gap, no unknown remainder and no
+    clock ambiguity.  A journal-only record has no such measurement, so it is reported as
+    unverified and can never pass: the journal's first/last wake instant is a wall span, and
+    the distance between two wakes is mostly silence -- the runner merges QUIET and NOT_DUE
+    into one silent step -- not downtime.  Nothing here mints ``SOAK_VERIFIED``: a reached
+    threshold is arithmetic over measured seconds, not a judgement that a day of life happened.
+    ``now`` is injectable so a test can place the record a year away without waiting a second;
+    an injected clock still proves nothing about a real 24h run.
     """
 
     root = Path(root)
@@ -1271,72 +1435,143 @@ def build_report(root: Path | str, *, target_seconds: int = DEFAULT_DURATION_SEC
     summary = resident.read_status()
     records = _journal_records(state_root)
     counters = dict(summary.get("counters") or {})
+    moment = now if isinstance(now, datetime) else _now()
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
 
-    moments = sorted(m for m in (_parse_iso(record.get("at")) for record in records) if m)
-    first, last = (moments[0], moments[-1]) if moments else (None, None)
-    coverage = int((last - first).total_seconds()) if first and last else 0
     poll = int(summary.get("poll_seconds") or DEFAULT_POLL_SECONDS)
-    threshold = max(1.0, float(poll) * float(gap_factor))
-    gaps: list[dict[str, Any]] = []
-    for previous, current in zip(moments, moments[1:]):
-        seconds = int((current - previous).total_seconds())
-        if seconds > threshold:
-            gaps.append({"from": previous.isoformat(timespec="seconds"),
-                         "to": current.isoformat(timespec="seconds"), "seconds": seconds})
-    downtime = sum(gap["seconds"] for gap in gaps)
-    observed = max(0, coverage - downtime)
+    journal = _journal_window(records, poll_seconds=poll, gap_factor=gap_factor)
+    view = resident.recorded_coverage(now=moment)
+    sources = view.get("sources") or {}
+    ledger_present = str(sources.get("ledger") or "ABSENT") == "PRESENT"
+    legacy_present = str(sources.get("legacy_summary") or "ABSENT") == "PRESENT_UNPROVEN"
+    if ledger_present:
+        coverage_basis = COVERAGE_BASIS_LEDGER
+    elif legacy_present:
+        coverage_basis = COVERAGE_BASIS_LEGACY
+    elif records:
+        coverage_basis = COVERAGE_BASIS_JOURNAL
+    else:
+        coverage_basis = COVERAGE_BASIS_ABSENT
+
+    covered = int(view.get("covered_seconds") or 0)
+    offline = int(view.get("offline_gap_seconds") or 0)
+    unknown = int(view.get("unknown_seconds") or 0)
+    overlap_seconds = int(view.get("overlap_seconds") or 0)
+    complete = bool(view.get("coverage_complete"))
+    continuous = bool(view.get("continuous"))
+    ambiguous = bool(view.get("time_ambiguity"))
+    tail = _current_tail(view, moment=moment)
+    soak = runtime_coverage.soak_labels(view)
 
     confirmed = int(counters.get("owner_confirmed_versions") or 0)
     acted = int(counters.get("actions") or 0)
     running = bool(summary.get("running"))
-    if not records:
+    quiet = _report_quiet(summary, counters)
+    target = int(target_seconds)
+
+    if coverage_basis == COVERAGE_BASIS_ABSENT:
         verdict = VERDICT_NO_EVIDENCE
-        basis = "no tick was ever journalled; there is nothing to judge"
-    elif running:
+        basis = ("no tick was ever journalled and no process coverage ledger exists; there is "
+                 "nothing to judge")
+    elif coverage_basis == COVERAGE_BASIS_LEDGER and running:
         verdict = VERDICT_RUNNING
-        basis = ("the resident is still running; observed %ss of the %ss target"
-                 % (observed, target_seconds))
-    elif observed >= target_seconds and not gaps:
-        if confirmed or acted:
-            verdict = VERDICT_PASS
-            basis = ("observed coverage %ss >= %ss with no gap and %s owner-confirmed result(s)"
-                     % (observed, target_seconds, confirmed))
-        else:
-            verdict = VERDICT_NOT_PASS
-            basis = ("the window was covered but no window produced a choice or an action: a "
-                     "zero-action day is legal, and it does not by itself verify the autonomous "
-                     "chain")
-    elif observed >= target_seconds and gaps:
+        basis = ("the resident is still running: %ss closed + %ss open tail measured, and %ss "
+                 "after the last heartbeat is not measured yet -- a running process is not a "
+                 "closed day" % (tail["closed_process_seconds"], tail["open_tail_seconds"],
+                                 tail["unmeasured_seconds"]
+                                 if tail["unmeasured_seconds"] is not None else 0))
+    elif coverage_basis == COVERAGE_BASIS_LEDGER and covered >= target and complete \
+            and continuous and not ambiguous:
+        verdict = VERDICT_PASS
+        basis = ("proven coverage %ss >= %ss: every process closed with its own monotonic "
+                 "measurement, no offline gap, no unknown remainder, no clock ambiguity (a "
+                 "reached threshold is still not %s)" % (covered, target, soak["soak_verified"]))
+    elif coverage_basis == COVERAGE_BASIS_LEDGER and covered >= target:
         verdict = VERDICT_INTERRUPTED
-        basis = ("observed coverage %ss >= %ss but %ss of it is downtime in %s gap(s): a day "
-                 "with a stopped process is not a day of life"
-                 % (observed, target_seconds, downtime, len(gaps)))
+        basis = ("proven coverage %ss >= %ss but the measured time is not one continuous day: "
+                 "%ss offline, %ss unknown, %ss overlapping, coverage_complete=%s, continuous=%s"
+                 % (covered, target, offline, unknown, overlap_seconds, complete, continuous))
+    elif coverage_basis == COVERAGE_BASIS_LEDGER:
+        verdict = VERDICT_NOT_PASS
+        basis = ("proven coverage %ss is below the %ss target (%ss closed + %ss open tail, %ss "
+                 "unknown, %ss offline)" % (covered, target, tail["closed_process_seconds"],
+                                            tail["open_tail_seconds"], unknown, offline))
     else:
         verdict = VERDICT_NOT_PASS
-        basis = "observed coverage %ss is below the %ss target" % (observed, target_seconds)
+        if coverage_basis == COVERAGE_BASIS_LEGACY:
+            basis = ("no per-process coverage ledger exists: the only record is an old summary's "
+                     "wall span, and its %ss are counted as unknown (%s), never as coverage -- "
+                     "this window is unverified and cannot pass" % (unknown, coverage_basis))
+        else:
+            basis = ("no per-process coverage ledger exists (%s): the %ss journal wake span and "
+                     "its %ss of unnamed gaps are not proven coverage, so this window is "
+                     "unverified and cannot pass"
+                     % (coverage_basis, journal["span_seconds"], journal["gap_seconds"]))
+
+    if quiet["reading"] != QUIET_UNVERIFIED:
+        basis = "%s; %s" % (basis, quiet["reading_basis"])
+
+    window = {
+        "started_at": summary.get("started_at"),
+        "this_process_started_at": summary.get("this_process_started_at"),
+        "stopped_at": summary.get("stopped_at"),
+        "running": running,
+        "starts": summary.get("starts"),
+        "ticks": summary.get("ticks"),
+        "first_journal_at": (journal["first"].isoformat(timespec="seconds")
+                             if journal["first"] else None),
+        "last_journal_at": (journal["last"].isoformat(timespec="seconds")
+                            if journal["last"] else None),
+        "journal_span_seconds": journal["span_seconds"],
+        # The old keys stay for old readers, each with its basis named beside it: they hold
+        # *proven* coverage only when a ledger exists, and the journal's own numbers otherwise
+        # (which are an observation span of wakes, not life and not downtime).
+        "coverage_seconds": covered if ledger_present else journal["span_seconds"],
+        "downtime_seconds": offline if ledger_present else journal["gap_seconds"],
+        "downtime_seconds_basis": ("MEASURED_OFFLINE_GAP" if ledger_present
+                                   else "JOURNAL_WAKE_GAP_UNVERIFIED_NOT_DOWNTIME"),
+        "observed_seconds": covered if ledger_present else journal["observed_seconds"],
+        "observed_seconds_basis": ("PROVEN_PROCESS_ONLINE_SECONDS" if ledger_present
+                                   else "JOURNAL_WAKE_SPAN_UNVERIFIED"),
+        "gaps": ([dict(gap) for gap in (view.get("gaps") or [])] if ledger_present
+                 else list(journal["gaps"])),
+        "coverage_basis": coverage_basis,
+        "closed_process_seconds": int(view.get("closed_process_seconds") or 0),
+        "open_tail_seconds": int(view.get("open_tail_seconds") or 0),
+        "unknown_seconds": unknown,
+        "unknown": [dict(entry) for entry in (view.get("unknown") or [])],
+        "overlap_seconds": overlap_seconds,
+        "time_ambiguity": ambiguous,
+        "wall_rollback": bool(view.get("wall_rollback")),
+        "covered_exceeds_wall_span": bool(view.get("covered_exceeds_wall_span")),
+        "wall_span_seconds": view.get("wall_span_seconds"),
+        "process_count": view.get("process_count"),
+        "coverage_complete": complete,
+        "continuous": continuous,
+        "measured": view,
+        "current_tail": tail,
+        "target_seconds": target,
+        "soak_label": soak["soak_24h"],
+    }
 
     return {
         "kind": "one_day_life_report",
         "instance": str(root),
-        "generated_at": _iso(),
+        "generated_at": _iso(moment),
         "read_only": True,
         "subject_id": data.get("subject_id"),
-        "window": {
-            "started_at": summary.get("started_at"),
-            "this_process_started_at": summary.get("this_process_started_at"),
-            "stopped_at": summary.get("stopped_at"),
-            "running": running,
-            "starts": summary.get("starts"),
-            "ticks": summary.get("ticks"),
-            "first_journal_at": first.isoformat(timespec="seconds") if first else None,
-            "last_journal_at": last.isoformat(timespec="seconds") if last else None,
-            "coverage_seconds": coverage,
-            "downtime_seconds": downtime,
-            "observed_seconds": observed,
-            "gaps": gaps,
-            "target_seconds": int(target_seconds),
-            "soak_label": summary.get("soak_24h"),
+        "window": window,
+        "soak": {
+            "soak_24h": soak["soak_24h"],
+            "soak_7d": soak["soak_7d"],
+            "soak_verified": soak["soak_verified"],
+            "soak_basis": soak["soak_basis"],
+            "note": ("a reached threshold is not SOAK_VERIFIED: \"she really lived a day\" is a "
+                     "reviewer's judgement over the journal, the coverage ledger and the owners' "
+                     "results, never arithmetic over two clocks"),
         },
+        "quiet": quiet,
         "activity": {
             "check_windows": counters.get("check_windows"),
             "event_wakes": counters.get("event_wakes"),
@@ -1374,6 +1609,12 @@ def build_report(root: Path | str, *, target_seconds: int = DEFAULT_DURATION_SEC
             "the instance's own records",
             "a stopped process is never counted as experience",
             "zero actions is a legal day and is not evidence that the chain was exercised",
+            "a reached threshold is not SOAK_VERIFIED: a day of life is a reviewer's judgement, "
+            "not a clock difference, and an injected clock proves nothing about a real run",
+            "a gap between two journal wake records is not downtime: the runner merges quiet "
+            "and not-due windows into one silent step",
+            "zero owner output and zero requests are not evidence that she was not alive, and "
+            "silence is never turned into a choice to rest",
         ],
     }
 
@@ -1473,6 +1714,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--instance", required=True, help="the isolated instance root")
     parser.add_argument("--create-private-items", action="store_true",
                         help="also create the typed private-items document at prepare time")
+    parser.add_argument("--supply-socket",
+                        help="the Life Supply owner's own Unix socket for prepare")
     parser.add_argument("--governance-socket")
     parser.add_argument("--subject", default="chiyo")
     parser.add_argument("--title", default="")
@@ -1507,12 +1750,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--reading-content",
                         help="the operator's reading material (pages separated by %s)"
                              % "%%PAGE%%")
-    parser.add_argument("--create-private-items", action="store_true",
-                        help="also create the typed private-items document at prepare time")
+    # ``--create-private-items`` is declared once, together with the other prepare flags above.
     parser.add_argument("--memory-db", help="the M0 evidence database, when there is one")
     parser.add_argument("--memory-controls-db")
     parser.add_argument("--memory-subject")
     parser.add_argument("--page", type=int, default=1)
+    parser.add_argument("--unclear",
+                        help="record that this page was not understood (an unclear marker)")
     parser.add_argument("--memo", help="the body of a private memo")
     parser.add_argument("--reference-source-id")
     parser.add_argument("--reference-source-revision")

@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit
 import life_pause
+import life_runtime_coverage as runtime_coverage
 
 HERE = Path(__file__).resolve().parent
 _COMPONENTS = HERE.parents[1]
@@ -60,9 +61,13 @@ for _path in (str(HERE), str(_COMPONENTS / "native"), str(_COMPONENTS / "native"
 
 RESIDENT_SUMMARY_FILENAME = "resident_summary.json"
 RESIDENT_JOURNAL_FILENAME = "resident_journal.jsonl"
+#: The process ledger: one row per process that ever owned this state root, with that process's
+#: own monotonic measurement.  Kept beside the summary so the summary can stay small, and so a
+#: restart can tell "the previous process closed" from "the previous process vanished".
+RESIDENT_COVERAGE_FILENAME = "resident_coverage.json"
 DEFAULT_POLL_SECONDS = 180
-SOAK_24H_SECONDS = 24 * 3600
-SOAK_7D_SECONDS = 7 * 24 * 3600
+SOAK_24H_SECONDS = runtime_coverage.SOAK_24H_SECONDS
+SOAK_7D_SECONDS = runtime_coverage.SOAK_7D_SECONDS
 
 STATE_ROOT_ENV = ("NYA02_RESIDENT_STATE", "NYA02_LIFE_STATE")
 INSTALL_ROOT_ENV = ("CHIYO_LIFE_INSTALL_ROOT", "NYA02_RESIDENT_INSTALL_ROOT")
@@ -137,14 +142,6 @@ def _compact_round_view(view: Any, keys: tuple[str, ...]) -> Optional[dict[str, 
     return out
 
 
-
-def _parse(text: Any) -> Optional[datetime]:
-    try:
-        return datetime.fromisoformat(str(text))
-    except (TypeError, ValueError):
-        return None
-
-
 def probe_model_provider(environment: Mapping[str, str], *,
                          timeout_s: float = 5.0) -> dict[str, Any]:
     """A bounded, *free* reachability pre-check of the configured provider endpoint.
@@ -213,12 +210,30 @@ class AutonomousLifeResident:
 
     def __init__(self, *, state_root: Path | str, environment: Optional[Mapping[str, str]] = None,
                  poll_seconds: int = DEFAULT_POLL_SECONDS, act: bool = True,
-                 clock: Any = None, sleeper: Any = None) -> None:
+                 clock: Any = None, sleeper: Any = None, monotonic: Any = None,
+                 segment_request_cap: Optional[int] = None) -> None:
+        """``segment_request_cap`` is *this process only*: at most that many more HTTP
+        attempts than the persisted ledger had already spent when the segment started.
+
+        It can only ever **lower** the instance's own ceilings
+        (``min(configured, used + cap)``): it never opens a run window, never resets the
+        ledger and never raises a limit, so a short operator segment (for example 600s /
+        6 requests) cannot buy itself a fresh allowance.
+        """
         self.state_root = Path(state_root)
         self.env = dict(os.environ if environment is None else environment)
         self.poll_seconds = max(1, int(poll_seconds))
+        #: Only a per-process *lowering* of the persisted ceilings (see the docstring above).
+        self.segment_request_cap: Optional[int] = (None if segment_request_cap is None
+                                                  else max(1, int(segment_request_cap)))
+        self.segment_cap: dict[str, Any] = {"requested": self.segment_request_cap,
+                                            "applied": False, "source": "PROCESS_SEGMENT_ONLY"}
         self.act = bool(act)
         self._clock = clock or _now
+        #: ``time.monotonic()`` is the only clock that can prove *this* process stayed up: it is
+        #: per process and per boot, so it is never added to another process's measurement and
+        #: never used to bridge a gap.  Injected in tests, real everywhere else.
+        self._monotonic = monotonic or time.monotonic
         self._sleeper = sleeper or time.sleep
         self.runtime: Any = None
         self.assembled: Any = None
@@ -229,6 +244,10 @@ class AutonomousLifeResident:
         self.started_at: Optional[str] = None
         self.soak_started_at: Optional[str] = None
         self.stopped_at: Optional[str] = None
+        #: R: this process's own identity and measurement, kept apart from the state root.
+        self.process_id: Optional[str] = None
+        self.process_open = False
+        self._process_monotonic_start: Optional[float] = None
         self.starts = 0
         self.ticks = 0
         self.model_probe: dict[str, Any] = {}
@@ -240,6 +259,7 @@ class AutonomousLifeResident:
             "check_windows": 0, "event_wakes": 0, "real_events": 0,
             "windows_with_material": 0, "no_action": 0, "defer": 0,
             "blocked_reasons": {}, "actions": 0, "owner_confirmed_versions": 0,
+            "owner_version_unknown": 0, "owner_version_refs": {},
             "unknown_settlements": 0, "reconciliations": 0,
             "pending_unknown_last": 0, "pending_unknown_max": 0,
             "journey_settlements": 0, "journey_arrivals": 0,
@@ -257,6 +277,163 @@ class AutonomousLifeResident:
     @property
     def journal_path(self) -> Path:
         return self.state_root / RESIDENT_JOURNAL_FILENAME
+
+    @property
+    def coverage_path(self) -> Path:
+        return self.state_root / RESIDENT_COVERAGE_FILENAME
+
+    # -- the process ledger (R) ----------------------------------------------------------
+
+    def _coverage_read(self) -> dict[str, Any]:
+        """The persisted process ledger, or ``{}`` when this state root never wrote one.
+
+        Only a real ledger counts.  A summary without one is *not* upgraded into a ledger: an
+        old record's wall span cannot be turned back into a per-process measurement.
+        """
+
+        try:
+            data = json.loads(self.coverage_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(data, dict) or not isinstance(data.get("processes"), list):
+            return {}
+        return data
+
+    def _coverage_rows(self) -> list[dict[str, Any]]:
+        rows = self._coverage_read().get("processes") or []
+        return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+    def _coverage_write(self, rows: list[dict[str, Any]]) -> None:
+        self.state_root.mkdir(parents=True, exist_ok=True)
+        payload = {"kind": runtime_coverage.KIND,
+                   "schema_version": runtime_coverage.SCHEMA_VERSION,
+                   "state_root": str(self.state_root),
+                   "processes": list(rows)}
+        tmp = self.coverage_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1, sort_keys=True),
+                       encoding="utf-8")
+        os.replace(tmp, self.coverage_path)
+
+    def _live_online_seconds(self) -> Optional[int]:
+        """What *this* process has measured itself alive for, from its own monotonic clock."""
+
+        if self._process_monotonic_start is None:
+            return None
+        return max(0, int(self._monotonic() - self._process_monotonic_start))
+
+    def _open_process_record(self) -> None:
+        """Append this process to the ledger, unclosed.  A previous unclosed row is left alone.
+
+        A row that never reached its own stop is the evidence that the process vanished, so it
+        is never "repaired" on the next start: the interval after its last heartbeat stays
+        unknown, and only a real stop can turn a process's interval into coverage.
+        """
+
+        moment = self.started_at or _iso(self._clock())
+        self.started_at = moment
+        self._process_monotonic_start = self._monotonic()
+        self.process_id = runtime_coverage.process_identity(
+            pid=os.getpid(), started_at=moment, host=socket.gethostname())
+        self.process_open = True
+        rows = self._coverage_rows()
+        rows.append(runtime_coverage.new_process_record(
+            process_id=self.process_id, pid=os.getpid(), started_at=moment,
+            monotonic_started=self._process_monotonic_start))
+        self._coverage_write(rows)
+
+    def _update_process_record(self, *, close: bool = False) -> None:
+        """Refresh (or close) this process's own row.  Every other row is left untouched."""
+
+        if not self.process_id:
+            return
+        rows = self._coverage_rows()
+        moment = _iso(self._clock())
+        online = self._live_online_seconds()
+        for index, row in enumerate(rows):
+            if row.get("process_id") != self.process_id:
+                continue
+            if close:
+                rows[index] = runtime_coverage.close_process_record(
+                    row, closed_at=moment, online_seconds=online)
+            else:
+                rows[index] = runtime_coverage.heartbeat(row, at=moment, online_seconds=online)
+        self._coverage_write(rows)
+
+    def _first_recorded_start(self) -> Optional[str]:
+        """The first start this state root ever recorded, from the ledger when it has one."""
+
+        rows = self._coverage_rows()
+        if not rows:
+            return None
+        return str(rows[0].get("started_at") or "") or None
+
+    def runtime_coverage(self) -> dict[str, Any]:
+        """Proven coverage, kept apart from the wall span and from what is unknown."""
+
+        rows = self._coverage_rows()
+        moment = self._clock()
+        for index, row in enumerate(rows):
+            # The live process's own row is refreshed from its monotonic clock, so a summary
+            # taken between two ticks is still its real measurement and not the last heartbeat.
+            if self.process_id and row.get("process_id") == self.process_id and self.process_open:
+                rows[index] = runtime_coverage.heartbeat(
+                    row, at=_iso(moment), online_seconds=self._live_online_seconds())
+        view = runtime_coverage.coverage(
+            rows, now=moment,
+            legacy_seconds=(0 if rows else
+                            runtime_coverage.legacy_summary_seconds(self.read_status())),
+            current_process_id=self.process_id if self.process_open else None)
+        return view
+
+    def recorded_coverage(self, *, now: Any = None) -> dict[str, Any]:
+        """The ledger as *any* reader sees it: written rows only, no live process claimed.
+
+        ``runtime_coverage()`` refreshes this process's own row from its own monotonic clock,
+        which is only true inside the process that is running.  A report -- or any second
+        process -- must not borrow that: it reads the ledger as written, so an unclosed row's
+        tail (from its last heartbeat to ``now``) stays ``unknown`` instead of being counted as
+        measured life, and a summary with no ledger contributes its wall span to ``unknown``
+        instead of to coverage.
+        """
+
+        rows = self._coverage_rows()
+        moment = now if isinstance(now, datetime) else self._clock()
+        return runtime_coverage.coverage(
+            rows, now=moment,
+            legacy_seconds=(0 if rows else
+                            runtime_coverage.legacy_summary_seconds(self.read_status())),
+            current_process_id=None)
+
+    def _coverage_fields(self) -> dict[str, Any]:
+        """The record's coverage block, with the old key kept and honestly re-based."""
+
+        view = self.runtime_coverage()
+        labels = runtime_coverage.soak_labels(view)
+        covered = int(view.get("covered_seconds") or 0)
+        return {
+            # The old key is kept so a reader keeps working, but it is no longer the wall span:
+            # it is the seconds some process actually measured itself alive for.
+            "observed_seconds": covered,
+            "observed_seconds_basis": "PROVEN_PROCESS_ONLINE_SECONDS",
+            "wall_span_seconds": view.get("wall_span_seconds"),
+            "process_online_seconds": view.get("process_online_seconds"),
+            "covered_seconds": covered,
+            "offline_gap_seconds": view.get("offline_gap_seconds"),
+            "unknown_seconds": view.get("unknown_seconds"),
+            "coverage_complete": view.get("coverage_complete"),
+            "continuous": view.get("continuous"),
+            "overlap_seconds": view.get("overlap_seconds"),
+            "time_ambiguity": view.get("time_ambiguity"),
+            "covered_exceeds_wall_span": view.get("covered_exceeds_wall_span"),
+            "wall_rollback": view.get("wall_rollback"),
+            "process_id": self.process_id,
+            "process_open": self.process_open,
+            "soak_24h": labels["soak_24h"],
+            "soak_7d": labels["soak_7d"],
+            "soak_basis": labels["soak_basis"],
+            "soak_verified": labels["soak_verified"],
+            "coverage": view,
+        }
 
     def read_status(self) -> dict[str, Any]:
         """The persisted record, readable from any process without touching the runtime."""
@@ -349,6 +526,61 @@ class AutonomousLifeResident:
             self.last_error = "CONTINUITY_SOURCE_FAILED: %s: %s" % (type(exc).__name__, exc)
             return None
 
+    # -- the operator segment cap (lower-only) -------------------------------------------
+
+    def _apply_segment_cap(self, requests: Any) -> Optional[dict[str, Any]]:
+        """Lower this process's ceilings to ``used + segment_request_cap``; refuse if unverifiable.
+
+        The ledger is the only source of "already spent": its own ``view()`` reports the active
+        UTC day and this run window's counts.  Nothing here writes the ledger, opens a window or
+        raises a ceiling -- ``min(configured, used + cap)`` is the whole rule, so the cap can only
+        make this segment cheaper than the instance already allows.  When the requested cap is
+        absent this is a no-op.  When the usage cannot be read (corrupt/unreadable ledger) the
+        promise could be false, so the segment is refused before any model surface exists.
+        """
+
+        if self.segment_request_cap is None:
+            return None
+        cap = int(self.segment_request_cap)
+        if requests is None:
+            return {"ok": False, "reason": "SEGMENT_REQUEST_CAP_UNVERIFIED",
+                    "detail": ("a segment request cap was asked for, but this instance carries no "
+                               "persisted request budget to lower (never inventing a ceiling)")}
+        try:
+            view = dict(requests.view() or {})
+        except Exception as exc:
+            return {"ok": False, "reason": "SEGMENT_REQUEST_CAP_UNVERIFIED",
+                    "detail": "%s: %s" % (type(exc).__name__, exc)}
+        day_used = view.get("utc_day_calls")
+        window_used = view.get("run_window_calls")
+        day_max = getattr(requests, "utc_day_max", None)
+        window_max = getattr(requests, "run_window_max", None)
+        if (day_max is not None and not isinstance(day_used, int)) \
+                or (window_max is not None and not isinstance(window_used, int)):
+            return {"ok": False, "reason": "SEGMENT_REQUEST_CAP_UNVERIFIED",
+                    "detail": ("the persisted request ledger did not report what it already spent "
+                               "(state=%s), so 'at most %d more' cannot be promised"
+                               % (view.get("state"), cap))}
+        applied_day = (None if day_max is None
+                       else min(int(day_max), int(day_used) + cap))
+        applied_window = (None if window_max is None
+                          else min(int(window_max), int(window_used) + cap))
+        requests.utc_day_max = applied_day
+        requests.run_window_max = applied_window
+        self.segment_cap = {
+            "requested": cap,
+            "applied": True,
+            "source": "PROCESS_SEGMENT_ONLY",
+            "raised_any_ceiling": False,
+            "utc_day": {"configured_max": day_max, "used_at_start": day_used,
+                        "applied_max": applied_day},
+            "run_window": {"configured_max": window_max, "used_at_start": window_used,
+                           "applied_max": applied_window,
+                           "run_id": view.get("run_id")},
+            "note": ("min(configured, used_at_start + requested); the same run window and the "
+                     "same ledger are continued, and no new window is opened"),
+        }
+        return None
     # -- start / stop --------------------------------------------------------------------
 
     def start(self) -> dict[str, Any]:
@@ -364,9 +596,15 @@ class AutonomousLifeResident:
         moment = self._clock()
         self.started_at = _iso(moment)
         # The soak clock is the *first* start of this state root, not this process: a restart
-        # must not restart the observation window, or "24 hours" would mean nothing.
-        self.soak_started_at = previous.get("started_at") or self.started_at
-        self.starts = int(previous.get("starts") or 0) + 1
+        # must not restart the observation window, or "24 hours" would mean nothing.  R: when a
+        # summary was lost but the process ledger survived, the ledger's first start is used --
+        # a restart still does not reset the window, and it still does not make the window real.
+        self.soak_started_at = (previous.get("started_at") or self._first_recorded_start()
+                                or self.started_at)
+        self.starts = max(int(previous.get("starts") or 0), len(self._coverage_rows())) + 1
+        # R: this process's own row, with its own monotonic measurement.  Written before any
+        # window, so a crash from here on is visible as an unclosed interval instead of silence.
+        self._open_process_record()
         self.model_probe = probe_model_provider(self.env)
         self._replay_journal()
         self._load_model_env_file()
@@ -405,6 +643,13 @@ class AutonomousLifeResident:
         except Exception as exc:
             self.last_error = "REQUEST_BUDGET_REFUSED: %s: %s" % (type(exc).__name__, exc)
             return {"ok": False, "reason": "REQUEST_BUDGET_REFUSED", "detail": self.last_error}
+        # Operator segment cap: only a *lowering* of the ceilings this instance already
+        # carries, applied before any model surface exists.  A cap that cannot be verified
+        # against the persisted ledger refuses the segment instead of running unbounded.
+        cap_refusal = self._apply_segment_cap(requests)
+        if cap_refusal is not None:
+            self.last_error = str(cap_refusal.get("detail") or "")
+            return cap_refusal
         # W05R-R1b: the decision transport is admitted at each attempt's send boundary
         # against this instance's own pause bit (the same state root the operator writes).
         admission = assembly.pause_request_admission(self.state_root)
@@ -476,9 +721,25 @@ class AutonomousLifeResident:
             out["revision"] = runtime_state.get("revision")
         except Exception as exc:
             out["runtime_state_error"] = "%s: %s" % (type(exc).__name__, exc)
+        # rc1-C: the work this process will *actually* continue is the cycle's own selection
+        # (bound work, or the admitted history's artifact, and -- only when neither exists --
+        # the newest ACTIVE artifact that is not one of this instance's non-work documents).
+        # ``latest_resumable`` is the port's generic recency rule and does not know which
+        # artifact is a piece of writing, so a baseline taken from it alone could report the
+        # reading material or the private-items document as "the work" while the round
+        # continued something else -- or nothing.
+        cycle = self.assembled.get("cycle")
+        selection_reader = getattr(cycle, "resume_selection", None)
         try:
-            point = self.assembled["artifact_port"].latest_resumable()
-            out["work"] = point.to_dict() if point is not None else None
+            if callable(selection_reader):
+                point, selection = selection_reader()
+                out["work"] = point.to_dict() if point is not None else None
+                out["work_selection"] = selection
+                out["work_selection_source"] = "CYCLE_SELECTION"
+            else:  # pragma: no cover - every assembled cycle has the reader
+                point = self.assembled["artifact_port"].latest_resumable()
+                out["work"] = point.to_dict() if point is not None else None
+                out["work_selection_source"] = "LATEST_RESUMABLE"
         except Exception as exc:
             out["work_error"] = "%s: %s" % (type(exc).__name__, exc)
         try:
@@ -505,6 +766,7 @@ class AutonomousLifeResident:
     def stop(self) -> dict[str, Any]:
         """Release the runtime, and with it the canonical writer lease."""
 
+        # Taken first, while the cycle is still attached: the payload keeps what the round read.
         payload = self.summary()
         runtime, self.runtime = self.runtime, None
         if runtime is not None:
@@ -514,10 +776,17 @@ class AutonomousLifeResident:
                 self.last_error = "CLOSE_FAILED: %s: %s" % (type(exc).__name__, exc)
         self.assembled = None
         self.stopped_at = _iso(self._clock())
+        # R: this process closes its own row with its own final monotonic measurement.  This is
+        # the only thing that turns an interval into coverage; a process that never gets here
+        # leaves its row unclosed and its tail unknown.
+        self._update_process_record(close=True)
+        self.process_open = False
         payload.update({"running": False, "stopped_at": self.stopped_at,
                         "stop_reason": self._stop_reason, "last_error": self.last_error})
+        payload.update(self._coverage_fields())
         self._write_summary(payload)
-        return {"ok": True, "stopped_at": self.stopped_at, "reason": self._stop_reason}
+        return {"ok": True, "stopped_at": self.stopped_at, "reason": self._stop_reason,
+                "coverage": self.runtime_coverage()}
 
     # -- the loop ------------------------------------------------------------------------
 
@@ -552,6 +821,9 @@ class AutonomousLifeResident:
         self.last_tick = record
         self._journal(record)
         self._accumulate(record)
+        # R: the heartbeat is written every tick, so a crash leaves a *measured* last instant
+        # behind instead of a start time that would be read as "up since then".
+        self._update_process_record()
         self._write_summary(self.summary())
         return record
 
@@ -599,8 +871,17 @@ class AutonomousLifeResident:
                 self.counters["blocked_reasons"].get(reason, 0) + 1
         if status_class == CLASS_ACTED:
             self.counters["actions"] += 1
-            if outcome == "ACTED":
+            version = self._owner_version(wake)
+            if version is not None:
                 self.counters["owner_confirmed_versions"] += 1
+                refs = self.counters["owner_version_refs"]
+                refs[version] = refs.get(version, 0) + 1
+                for stale in sorted(refs)[:-20]:
+                    refs.pop(stale, None)
+            else:
+                # An ACTED wake proves the chain ran.  It does not prove a version was created
+                # by the owner, and the two are no longer counted as the same thing.
+                self.counters["owner_version_unknown"] += 1
         if status_class == CLASS_UNKNOWN:
             self.counters["unknown_settlements"] += 1
         try:
@@ -610,28 +891,74 @@ class AutonomousLifeResident:
         self.counters["pending_unknown_last"] = pending
         self.counters["pending_unknown_max"] = max(self.counters["pending_unknown_max"], pending)
 
+    def _owner_version(self, wake: Mapping[str, Any]) -> Optional[str]:
+        """The owner-created version this wake *names*, or None when it names nothing.
+
+        The runner's wake record is the only place this process can read the owner's receipt
+        from, and today it carries ``extra`` with the budget snapshot only.  The minimal field
+        contract this reads (recorded in ``docs/engineering/v04-day-life-runtime-result.md``
+        for the runner's writer) is ``extra.owner_version_created`` plus one of
+        ``extra.owner_version_id`` / ``extra.step_path``.  Absent that, the answer is UNKNOWN:
+        it is never inferred from ``outcome == ACTED``, from an action id, or from a counter.
+        """
+
+        extra = wake.get("extra")
+        if not isinstance(extra, Mapping):
+            return None
+        created = extra.get("owner_version_created")
+        named = extra.get("owner_version_id") or extra.get("owner_version_ref")
+        if isinstance(named, str) and named.strip():
+            return named.strip()
+        step_path = extra.get("step_path")
+        if created is True and isinstance(step_path, str) and step_path.strip():
+            return step_path.strip()
+        return None
+
+    def _wait(self, seconds: float) -> None:
+        """A bounded, interruptible wait: never longer than asked, and never past a deadline."""
+
+        waited = 0.0
+        total = max(0.0, float(seconds))
+        while waited < total and not self._stop.is_set():
+            step = min(1.0, total - waited)
+            self._sleeper(step)
+            waited += step
+
     def run(self, *, max_ticks: Optional[int] = None,
             duration_seconds: Optional[int] = None) -> dict[str, Any]:
-        """The low-frequency loop.  Nothing happens between windows, on purpose."""
+        """The low-frequency loop.  Nothing happens between windows, on purpose.
+
+        R: the deadline is wall clock (an operator's ``--duration-seconds`` means real hours,
+        not process uptime), and the wait between ticks is clipped to what is left of it.  The
+        old loop slept a whole ``poll_seconds`` in one-second steps no matter how little time
+        was left, so a 60-second run with a 180-second poll took three minutes to stop.
+        """
 
         began = self._clock()
+        began_monotonic = self._monotonic()
         deadline = (began.timestamp() + float(duration_seconds)) if duration_seconds else None
         while not self._stop.is_set():
             self.tick()
             if max_ticks is not None and self.ticks >= int(max_ticks):
                 break
-            if deadline is not None and self._clock().timestamp() >= deadline:
+            remaining = (None if deadline is None
+                         else deadline - self._clock().timestamp())
+            if remaining is not None and remaining <= 0:
                 break
-            # A one-second interruptible wait: the loop never spins per second, and a stop
-            # signal is still honoured promptly.
-            waited = 0.0
-            while waited < self.poll_seconds and not self._stop.is_set():
-                step = min(1.0, self.poll_seconds - waited)
-                self._sleeper(step)
-                waited += step
+            wait = float(self.poll_seconds) if remaining is None else min(
+                float(self.poll_seconds), remaining)
+            if wait <= 0:
+                break
+            self._wait(wait)
         return {"ticks": self.ticks, "stopped": self._stop.is_set(),
                 "stop_reason": self._stop_reason,
-                "observed_seconds": int((self._clock() - began).total_seconds())}
+                # This process's own monotonic measurement, and the wall span it lived in.  The
+                # two are reported separately for the same reason the summary reports them.
+                "observed_seconds": max(0, int(self._monotonic() - began_monotonic)),
+                "process_online_seconds": max(0, int(self._monotonic() - began_monotonic)),
+                "wall_seconds": max(0, int((self._clock() - began).total_seconds())),
+                "deadline_seconds": (None if deadline is None
+                                     else int(deadline - began.timestamp()))}
 
     # -- the journey half (W05) -----------------------------------------------------------
 
@@ -718,43 +1045,73 @@ class AutonomousLifeResident:
             if name.startswith("NYA02_MODEL_") and value.strip() and not self.env.get(name):
                 self.env[name] = value.strip()
 
+    def _writer_calls(self, cycle: Any, name: str) -> Optional[int]:
+        """One model surface's own request count for *this* process, or None when unknown."""
+
+        writer = getattr(cycle, name, None)
+        count = getattr(writer, "call_count", None)
+        return count if isinstance(count, int) and not isinstance(count, bool) else None
+
     def _model_calls_detail(self) -> dict[str, Any]:
         """The provider requests, counted from the persisted ledger when there is one.
 
         W05R: ``max_cognition_calls_per_day`` never bounded the content generation, and the
         writer's own ``call_count`` is per process, so a restart made the day look cheaper
-        than it was.  When the instance carries a ``LifeRequestBudget`` the numbers below
-        come from that ledger instead: it counts every attempt -- decision, content
-        generation and schema retry -- and it survives a restart.
+        than it was.  When the instance carries a ``LifeRequestBudget`` the total comes from
+        that ledger instead: it counts every attempt -- decision, content generation, the
+        private reading response and schema retry -- and it survives a restart.
+
+        R: the reading response is a real model request about private material, so it is a
+        surface of its own here.  Reading only ``cycle.writer`` made the content total miss it,
+        and a missing surface is reported as ``None``/unknown rather than as 0.
         """
 
         cycle = (self.assembled or {}).get("cycle")
+        cognition = int(self.counters.get("model_calls") or 0)
+        content = self._writer_calls(cycle, "writer")
+        reading = self._writer_calls(cycle, "reading_response_writer")
+        surfaces = {"content_generation": content, "reading_response": reading}
+        measured = [count for count in (content, reading) if isinstance(count, int)]
+        surface_total = sum(measured) if measured else None
         requests = getattr(getattr(cycle, "budget", None), "requests", None)
+        base = {"cognition_calls": cognition,
+                "content_generation_calls": surface_total,
+                "reading_response_calls": reading,
+                "surfaces": surfaces,
+                "surface_scope": "this process (not replayed from the journal)",
+                "reading_response_counted": reading is not None}
         if requests is not None:
             view = requests.view()
-            return {"cognition_calls": int(self.counters.get("model_calls") or 0),
-                    "content_generation_calls": getattr(
-                        getattr(cycle, "writer", None), "call_count", None),
-                    "total_requests": view.get("utc_day_calls"),
-                    "content_generation_scope": "counted by the persisted request ledger",
-                    "daily_budget_counts": "decision + content + retry requests",
+            ledger_total = view.get("utc_day_calls")
+            if isinstance(ledger_total, int) and not isinstance(ledger_total, bool):
+                return {**base,
+                        "total_requests": ledger_total,
+                        "total_source": "PERSISTED_REQUEST_LEDGER",
+                        "content_generation_scope": "counted by the persisted request ledger",
+                        "daily_budget_counts": ("decision + content + reading_response + "
+                                                "retry requests"),
+                        "ledger_state": view.get("state"),
+                        "request_budget": view}
+            # The ledger exists but cannot be read: that is unknown, not a cheap day.
+            return {**base,
+                    "total_requests": None,
+                    "total_source": "LEDGER_UNREADABLE",
+                    "ledger_state": view.get("state"),
+                    "ledger_reason": view.get("reason_code"),
+                    "content_generation_scope": "ledger unreadable; per-surface counts only",
+                    "daily_budget_counts": "unknown",
                     "request_budget": view}
-        cognition = int(self.counters.get("model_calls") or 0)
-        writer = getattr(cycle, "writer", None)
-        content = getattr(writer, "call_count", None)
-        total = cognition + content if isinstance(content, int) else None
-        return {"cognition_calls": cognition,
-                "content_generation_calls": content,
-                "total_requests": total,
+        return {**base,
+                "total_requests": (cognition + surface_total
+                                   if surface_total is not None else None),
+                "total_source": "PROCESS_COUNTERS_ONLY",
                 "content_generation_scope": "this process (not replayed from the journal)",
-                "daily_budget_counts": "cognition calls only"}
+                "daily_budget_counts": "cognition calls only",
+                "ledger_state": "ABSENT"}
 
     # -- the record ----------------------------------------------------------------------
 
     def summary(self) -> dict[str, Any]:
-        moment = self._clock()
-        started = _parse(self.soak_started_at)
-        observed = int((moment - started).total_seconds()) if started else 0
         assembled = self.assembled or {}
         cycle = assembled.get("cycle")
         try:
@@ -772,17 +1129,13 @@ class AutonomousLifeResident:
             "starts": self.starts,
             "ticks": self.ticks,
             "last_tick_at": (self.last_tick or {}).get("at"),
-            "observed_seconds": observed,
-            # A wall clock can only report that the time threshold has been reached.  It cannot
-            # read the journal, cannot prove the process stayed up and cannot see the owner's
-            # results, so it must never mint the acceptance label itself: `SOAK_VERIFIED_24H`
-            # is a judgement a reviewer records after reading those three, not a number this
-            # counter can produce.  The recorded history is left exactly as it is.
-            "soak_24h": ("SOAK_THRESHOLD_REACHED_24H" if observed >= SOAK_24H_SECONDS
-                         else "SOAK_RUNNING_24H"),
-            "soak_7d": ("SOAK_THRESHOLD_REACHED_7D" if observed >= SOAK_7D_SECONDS
-                        else "SOAK_RUNNING_7D" if observed >= SOAK_24H_SECONDS
-                        else "SOAK_PENDING_7D"),
+            # R: `observed_seconds` used to be `now - first_start`, a wall span that counted
+            # downtime as life.  The key is kept for old readers, but it is now proven coverage
+            # (`covered_seconds`), and the wall span, the measured process time, the offline
+            # gaps and the unknown remainder are reported beside it.  No number here mints
+            # `SOAK_VERIFIED_24H`: that label is a reviewer's judgement over the journal, the
+            # process ledger and the owners' results, so `soak_verified` stays NOT_VERIFIED.
+            **self._coverage_fields(),
             "poll_seconds": self.poll_seconds,
             "act": self.act,
             "autonomous_enabled": (getattr(assembled.get("runner"), "enabled", None)
@@ -812,6 +1165,10 @@ class AutonomousLifeResident:
             "model": {"probe": self.model_probe,
                       "cognition_attached": getattr(cycle, "runtime", None) is not None},
             "budget": budget,
+            # Operator segment cap (lower-only).  Reported as it really was applied, so a
+            # reader can tell "this segment could spend at most N more" from the instance's own
+            # persisted ceilings.
+            "segment_request_cap": self.segment_cap,
             "counters": self.counters,
             # A reader must not read the cognition counter as the whole provider bill: one acted
             # round makes a decision call *and* a content call, and only the first is budgeted.

@@ -51,6 +51,13 @@ RESULT_KIND = "world_action_result"
 SCHEMA_VERSION = "world.action.resolver.v1"
 
 AUTHORITY_VERIFIED_MAIN_SELF = "verified_main_self_tool"
+#: v0.4: the *only* other authority this resolver accepts, and only for
+#: ``CONSUME``.  It is stamped by the World/Body service's explicit local-owner
+#: command (``submit_local_owner_action``) after the transport peer check and
+#: the server-side owner binding.  A caller cannot pass it through the gateway,
+#: and a local owner operation is never recorded as a main-self one.
+AUTHORITY_LOCAL_OWNER_PHONE = "local_owner_phone"
+LOCAL_OWNER_SOURCE = "local_owner_phone"
 
 # --------------------------------------------------------------------------
 # Frozen error vocabulary + provenance (ticket section 10)
@@ -153,6 +160,10 @@ LEGACY_CODE_MAP: dict[str, str] = {
     "LOCATION_NOT_REACHABLE": CODE_NOT_REACHABLE,
     "ROUTE_NOT_REACHABLE": CODE_NOT_REACHABLE,
     "UNKNOWN_LOCATION": CODE_UNKNOWN_TARGET,
+    # v0.4 (rc1 repair): a room target the body is not standing in.  The
+    # canonical code is NOT_REACHABLE (the hand is not there); the specific
+    # spelling stays what a caller reads, so it maps onto it.
+    "NOT_CURRENT_AREA": CODE_NOT_REACHABLE,
     "INVALID_LOCATION_ID": CODE_INVALID_PROPOSAL,
     "LOCATION_CLOSED": CODE_NOT_ALLOWED,
     "TRAVEL_NOT_ALLOWED": CODE_NOT_ALLOWED,
@@ -172,7 +183,43 @@ LEGACY_CODE_MAP: dict[str, str] = {
     "invalid_execution_id": CODE_INVALID_PROPOSAL,
 }
 
-ACTIONS = ("MOVE", "PICK_UP", "PLACE", "POSE", "CONSUME")
+#: v0.4 room-living adds two verbs: ``ARRANGE`` (move **owned** furniture; never
+#: a pick-up) and ``TOGGLE_FIXTURE`` (an absolute on/off of a declared fixture).
+ACTIONS = (
+    "MOVE",
+    "PICK_UP",
+    "PLACE",
+    "POSE",
+    "CONSUME",
+    "REST",
+    "ARRANGE",
+    "TOGGLE_FIXTURE",
+)
+
+#: v0.4: the verbs one explicit *local owner* command may carry.  ``CONSUME``
+#: keeps the phone-shopping channel; ``MOVE``/``PICK_UP``/``PLACE``/``POSE``/
+#: ``REST`` are the resident-world verbs.  This tuple and the gateway's
+#: ``GATEWAY_LOCAL_OWNER_VERBS`` must stay identical (both are the same
+#: permission statement, and a drift would make one side wider than the other).
+LOCAL_OWNER_ACTIONS = (
+    "MOVE",
+    "PICK_UP",
+    "PLACE",
+    "POSE",
+    "CONSUME",
+    "REST",
+    "ARRANGE",
+    "TOGGLE_FIXTURE",
+)
+
+#: REST is a command, not a timer.  ``body_runtime`` owns the recovery state
+#: machine and the mode vocabulary; these are mirrored here so a malformed
+#: command is refused before the Body is asked anything.
+REST_STATES = ("start", "stop")
+REST_MODES = ("rest", "sleep_like")
+#: A body can only rest from a resting pose: posture is the World's measurement.
+RESTING_POSES = ("seated", "lying")
+REST_SLEEP_POSE = "lying"
 
 TERMINAL_SUCCESS = frozenset({"applied", "noop"})
 TERMINAL_FAILURE = frozenset({"rejected", "failed", "disabled"})
@@ -491,17 +538,41 @@ def _m15_destination_verdict(
             return ("UNKNOWN_DESTINATION",
                     f"surface {surface_id} is not declared by the world")
         owner_catalog = substrate.surface_owner_catalog(surface_id)
-        if owner_catalog:
-            try:
-                import world_body_binding as binding
-                owned = {str(i.get("catalog_item_id"))
-                         for i in (binding.load_economy(hermes_home) or {}).get("items") or []
-                         if isinstance(i, Mapping) and str(i.get("disposition")) == "OWNED"}
-            except Exception:  # pragma: no cover
-                owned = set()
-            if owner_catalog not in owned:
+        owner_instance = substrate.surface_owner_instance(surface_id)
+        try:
+            import world_body_binding as binding
+
+            owned = {
+                str(i.get("catalog_item_id"))
+                for i in (binding.load_economy(hermes_home) or {}).get("items") or []
+                if isinstance(i, Mapping) and str(i.get("disposition")) == "OWNED"
+            }
+            owned_map = binding.owned_catalog_map(hermes_home)
+        except Exception:  # pragma: no cover
+            owned = set()
+            owned_map = {}
+        if owner_instance is not None:
+            # v0.4 room-living: an instance surface (`desk_surface:<item>`) is
+            # real only while *that* piece of owned furniture stands here.  Two
+            # desks therefore never share one surface, and a surface whose desk
+            # was moved away stops accepting placement instead of stranding it.
+            if owned_map.get(owner_instance) != owner_catalog:
                 return ("UNKNOWN_DESTINATION",
                         f"surface {surface_id} has no present owner object")
+            try:
+                store = substrate.SubstrateStore(substrate.substrate_path(hermes_home))
+                live = store.load()
+                placement = (
+                    substrate.placement_of(live, owner_instance) if live else None
+                )
+            except Exception:  # pragma: no cover - unreadable substrate denies
+                placement = None
+            if placement is None or str(placement.get("location_id")) != str(location_id):
+                return ("UNKNOWN_DESTINATION",
+                        f"surface {surface_id} has no present owner object")
+        elif owner_catalog and owner_catalog not in owned:
+            return ("UNKNOWN_DESTINATION",
+                    f"surface {surface_id} has no present owner object")
         return None, None
 
     if kind == "container":
@@ -529,6 +600,11 @@ _CONSUME_VERDICT_CODES = {
     "NOT_CONSUMABLE": CODE_NOT_CONSUMABLE,
     "NOT_FREE": CODE_NOT_CONSUMABLE,
     "ECONOMY_OBJECT": CODE_NOT_CONSUMABLE,
+    # v0.4: the owned-purchase permit refuses with these when the voucher is
+    # not proven.  They are consumability refusals, not transport errors.
+    "PURCHASE_VOUCHER_MISSING": CODE_NOT_CONSUMABLE,
+    "PURCHASE_NOT_OWNED": CODE_NOT_CONSUMABLE,
+    "NOT_AN_ECONOMY_INSTANCE": CODE_NOT_CONSUMABLE,
     # An unreadable property economy cannot prove "not an economy object", so
     # this is a refusal, not a pass.
     "ECONOMY_FACTS_UNAVAILABLE": CODE_NOT_CONSUMABLE,
@@ -608,6 +684,42 @@ class WorldResolver:
     def _substrate(self) -> Optional[dict[str, Any]]:
         module = self._substrate_module()
         return module.SubstrateStore(module.substrate_path(self.hermes_home)).load()
+
+    # -- v0.4: local-owner provenance (derived here, never supplied) --------
+
+    def _local_owner_context(self, normalized: Mapping[str, Any]) -> dict[str, Any]:
+        """The server-side local-owner context of one submission.
+
+        Derived from this resolver's own runtime identity (the real uid, its own
+        home) and from the proposal's body/subject identity -- a caller supplies
+        none of it.  It is recorded only for the local-owner authority.
+        """
+
+        return {
+            "source": LOCAL_OWNER_SOURCE,
+            "uid": os.getuid() if hasattr(os, "getuid") else None,
+            "binding": {
+                "subject": str(normalized.get("actor_id") or ""),
+                "world_home": str(self.hermes_home),
+            },
+        }
+
+    def _local_owner_refs(self, normalized: Mapping[str, Any]) -> list[str]:
+        """Ledger-side provenance refs for a local-owner submission."""
+
+        if normalized.get("authority") != AUTHORITY_LOCAL_OWNER_PHONE:
+            return []
+        context = self._local_owner_context(normalized)
+        binding = context["binding"]
+        return [
+            "world.local_owner_phone:source=%s,uid=%s,subject=%s,home=%s"
+            % (
+                context["source"],
+                context["uid"],
+                binding["subject"],
+                binding["world_home"],
+            )
+        ]
 
     # -- locking ----------------------------------------------------------
 
@@ -698,8 +810,18 @@ class WorldResolver:
                 reason_code=str(error),
             )
 
-        # authorization -- unchanged legacy contract
-        if normalized["authority"] != AUTHORITY_VERIFIED_MAIN_SELF:
+        # authorization -- unchanged legacy contract, plus v0.4's explicit
+        # local-owner phone authority.  That authority may carry exactly the
+        # verbs in ``LOCAL_OWNER_ACTIONS`` and nothing else; it is stamped by the
+        # service's ``submit_local_owner_action`` and can never be passed by a
+        # client, so widening the list here does not widen the public surface.
+        if normalized["authority"] == AUTHORITY_LOCAL_OWNER_PHONE:
+            if normalized["action"] not in LOCAL_OWNER_ACTIONS:
+                return _reject(
+                    normalized, "rejected", CODE_AUTHORITY_REQUIRED,
+                    reason_code="local_owner_authority_verb_not_allowed",
+                )
+        elif normalized["authority"] != AUTHORITY_VERIFIED_MAIN_SELF:
             return _reject(
                 normalized, "rejected", CODE_AUTHORITY_REQUIRED,
                 reason_code="verified_main_self_required",
@@ -716,11 +838,14 @@ class WorldResolver:
             "PLACE": self._resolve_place,
             "POSE": self._resolve_pose,
             "CONSUME": self._resolve_consume,
+            "REST": self._resolve_rest,
+            "ARRANGE": self._resolve_arrange,
+            "TOGGLE_FIXTURE": self._resolve_toggle_fixture,
         }[normalized["action"]]
 
         try:
             with self._commit_lock():
-                return handler(normalized, crash_after=crash_after)
+                result = handler(normalized, crash_after=crash_after)
         except (ledger.LedgerError, ledger.LedgerCorruptError):
             return _reject(normalized, "failed", CODE_LEDGER_CORRUPT)
         except ResolverCrash:
@@ -731,6 +856,16 @@ class WorldResolver:
             )
         except Exception:
             return _reject(normalized, "failed", CODE_WORLD_UNAVAILABLE)
+        # v0.4: a local-owner result always says *who* submitted it, whatever the
+        # verb was -- a MOVE must not read like a main-self decision just because
+        # only the CONSUME path used to stamp the provenance.
+        if (
+            normalized.get("authority") == AUTHORITY_LOCAL_OWNER_PHONE
+            and isinstance(result, dict)
+        ):
+            result.setdefault("authority", AUTHORITY_LOCAL_OWNER_PHONE)
+            result.setdefault("local_owner", self._local_owner_context(normalized))
+        return result
 
     # -- shared idempotency gate -----------------------------------------
 
@@ -817,7 +952,11 @@ class WorldResolver:
             "expected_versions": dict(normalized["observed_dependencies"]),
             "world_mutation_refs": list(world_mutation_refs or []),
             "body_consequence_refs": list(body_consequence_refs or []),
-            "cross_authority_refs": list(cross_authority_refs or []),
+            # v0.4: every local-owner submission carries its provenance refs on
+            # every ledger entry it produces (not only on CONSUME), so a reader
+            # can always tell an operator command from a main-self one.
+            "cross_authority_refs": list(cross_authority_refs or [])
+            + self._local_owner_refs(normalized),
             "before_state_ref": self.ledger.state_ref(before),
             "after_state_ref": self.ledger.state_ref(after),
             "before": before,
@@ -1084,7 +1223,7 @@ class WorldResolver:
         if placement is None:
             return _reject(
                 normalized, "rejected", CODE_UNKNOWN_TARGET,
-                reason_code=f"UNKNOWN: {object_id} has no placement",
+                reason_code=f"UNKNOWN_TARGET: {object_id} has no placement",
                 before=before, dependencies=live,
             )
         if placement["kind"] == module.PLACEMENT_HAND:
@@ -1218,7 +1357,7 @@ class WorldResolver:
         if placement is None:
             return _reject(
                 normalized, "rejected", CODE_UNKNOWN_TARGET,
-                reason_code=f"UNKNOWN: {object_id} has no placement",
+                reason_code=f"UNKNOWN_TARGET: {object_id} has no placement",
                 before=before, dependencies=live,
             )
         if placement["kind"] != module.PLACEMENT_HAND:
@@ -1253,7 +1392,9 @@ class WorldResolver:
 
         # M15: destination rule (Resolver-owned, deterministic)
         world_state = self._world_state() or {}
-        world_place = (world_state.get("location") or {}).get("place_id")
+        world_location = world_state.get("location") or {}
+        world_place = world_location.get("place_id")
+        world_area = world_location.get("area_id")
         dest_code, dest_detail = _m15_destination_verdict(
             target, world_place=world_place, hermes_home=self.hermes_home,
             environment=self.environment,
@@ -1262,6 +1403,28 @@ class WorldResolver:
             return _reject(
                 normalized, "rejected", _M15_DESTINATION_CODES.get(dest_code, CODE_UNKNOWN_TARGET),
                 reason_code=f"{dest_code}: {dest_detail}",
+                before=before, dependencies=live,
+            )
+        # The room a hand can set something down in is the room this body is
+        # standing in: a room target names a *place*, it is not a teleport.  The
+        # rule above only proves the room is part of this World and reachable;
+        # here the resolver's own reading of the live state says the body is not
+        # there, so nothing is placed and nothing is written.
+        # It is only asserted when the World itself declares where the body is
+        # (a state without an area cannot be compared, and then the topology
+        # rule stays the only authority -- no behaviour is invented from a
+        # missing fact).
+        if (
+            target["kind"] == module.PLACEMENT_ROOM
+            and world_place
+            and world_area
+            and (target["location_id"], target["area_id"]) != (world_place, world_area)
+        ):
+            return _reject(
+                normalized, "rejected", CODE_NOT_REACHABLE,
+                reason_code="NOT_CURRENT_AREA: %s/%s is not the body's current "
+                "area %s/%s"
+                % (target["location_id"], target["area_id"], world_place, world_area),
                 before=before, dependencies=live,
             )
         if target["kind"] == module.PLACEMENT_HAND and target["slot_id"] != placement["slot_id"]:
@@ -1402,6 +1565,503 @@ class WorldResolver:
             before=before, after=after, dependencies=live, ledger_status="committed",
         )
 
+    # -- REST (v0.4: an explicit recovery command, never a timer) ---------
+
+    def _travel_in_progress(self) -> Optional[dict[str, Any]]:
+        """The owner's own in-transit record, read-only (``None`` when idle)."""
+
+        try:
+            import world_travel_delivery as wtd
+        except ImportError:  # pragma: no cover - flat/packaged import spelling
+            return None
+        try:
+            if not wtd.travel_enabled(self.environment):
+                return None
+            state = wtd.load_state(self.hermes_home, self.environment)
+        except Exception:  # noqa: BLE001 - unreadable travel state is not "travelling"
+            return None
+        if not isinstance(state, Mapping):
+            return None
+        for item in state.get("travels") or []:
+            if isinstance(item, Mapping) and item.get("status") == wtd.TRAVEL_STATUS_IN_PROGRESS:
+                return dict(item)
+        return None
+
+    def _rest_surfaces_here(
+        self, state: Mapping[str, Any], *, mode: str = "sleep_like"
+    ) -> list[dict[str, Any]]:
+        """Rest surfaces that are really here, derived from live placements.
+
+        A bed in another room is not a bed: the owner furniture's own placement
+        (which owns the fact) must be at this place.  The legacy bare
+        ``bed_surface`` placement keeps working unchanged; a purchased bed or
+        chair becomes usable through the instance-scoped surface of *that*
+        instance, so two beds can never share one.
+        """
+
+        module = self._substrate_module()
+        world = self._world_state() or {}
+        here = (world.get("location") or {}).get("place_id")
+        if not here:
+            return []
+        try:
+            catalog = self._binding_module().owned_catalog_map(self.hermes_home)
+            return module.rest_surfaces_here(
+                state, catalog, location_id=here, mode=mode
+            )
+        except Exception:  # noqa: BLE001 - unreadable substrate means "no surface"
+            return []
+
+    def _rest_surface_here(self, state: Mapping[str, Any]) -> Optional[str]:
+        """The first declared rest surface really placed where she is now."""
+
+        surfaces = self._rest_surfaces_here(state, mode="sleep_like")
+        return surfaces[0]["surface_id"] if surfaces else None
+
+    def _resolve_rest(
+        self, normalized: Mapping[str, Any], *, crash_after: Optional[str]
+    ) -> dict[str, Any]:
+        """Open or close one recovery session.  World facts in, a commit out.
+
+        The Body's own thresholds (``RECOVERY_OPEN_FATIGUE``, already-active,
+        no-open-session) are *not* decided here: the body runtime owns them and
+        the service applies them before this resolver is contacted.  What the
+        Resolver owns is the World side -- travelling, posture, and whether a
+        rest surface is really present -- plus the one commit and its ledger
+        evidence.
+        """
+
+        module, state, blocked = self._substrate_gate(normalized)
+        if blocked is not None:
+            return blocked
+
+        _require_params(normalized["params"], {"state", "mode"})
+        finished, _frame = self._replay_frame(normalized)
+        if finished is not None:
+            return finished
+
+        try:
+            desired = _text(
+                normalized["params"].get("state"), "state", maximum=16
+            ).lower()
+            if desired not in REST_STATES:
+                raise ResolverError(f"state must be one of {list(REST_STATES)}")
+            raw_mode = normalized["params"].get("mode")
+            if raw_mode is None:
+                mode = "rest"
+            else:
+                mode = _text(raw_mode, "mode", maximum=16).lower()
+                if mode not in REST_MODES:
+                    raise ResolverError(f"mode must be one of {list(REST_MODES)}")
+                if desired != "start":
+                    raise ResolverError("mode is only accepted with state=start")
+        except ResolverError as error:
+            return _reject(
+                normalized, "rejected", CODE_INVALID_PROPOSAL, reason_code=str(error)
+            )
+
+        live = self._dependencies()
+        stale = self._stale_keys(normalized["observed_dependencies"], live)
+        if stale:
+            return _reject(
+                normalized, "rejected", CODE_STALE_STATE,
+                reason_code="stale_dependency",
+                dependencies=live, stale_dependencies=stale,
+            )
+
+        before = module.read_model(state)
+        pose = str(before.get("pose") or "")
+        surface_id: Optional[str] = None
+
+        travelling = self._travel_in_progress()
+        if travelling is not None:
+            return _reject(
+                normalized, "rejected", CODE_NOT_ALLOWED,
+                reason_code="REST_WHILE_TRAVELLING: travel %s -> %s is in progress"
+                % (travelling.get("origin_location_id"),
+                   travelling.get("destination_location_id")),
+                before=before, dependencies=live,
+            )
+
+        if desired == "start":
+            if pose not in RESTING_POSES:
+                return _reject(
+                    normalized, "rejected", CODE_NOT_ALLOWED,
+                    reason_code="REST_REQUIRES_RESTING_POSE: pose is %s" % (pose or "unknown"),
+                    before=before, dependencies=live,
+                )
+            if mode == "sleep_like":
+                if pose != REST_SLEEP_POSE:
+                    return _reject(
+                        normalized, "rejected", CODE_NOT_ALLOWED,
+                        reason_code="SLEEP_LIKE_REQUIRES_LYING_POSE: pose is %s" % pose,
+                        before=before, dependencies=live,
+                    )
+                surface_id = self._rest_surface_here(state)
+                if surface_id is None:
+                    return _reject(
+                        normalized, "rejected", CODE_NOT_ALLOWED,
+                        reason_code="SLEEP_LIKE_REQUIRES_REST_SURFACE: no declared "
+                        "rest surface is placed here",
+                        before=before, dependencies=live,
+                    )
+
+        mutation_ref = (
+            "recovery:start:%s" % mode if desired == "start" else "recovery:stop"
+        )
+        committed_code = "recovery_%s_committed" % desired
+
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="prepared", reason_code="recovery_prepared",
+                before=before, dependencies=live,
+            )
+        )
+        if crash_after == CRASH_AFTER_PREPARED:
+            raise ResolverCrash("crash after prepared (test)")
+
+        after = module.read_model(self._substrate() or state)
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="committed", reason_code=committed_code,
+                before=before, after=after, dependencies=live,
+                world_mutation_refs=[mutation_ref],
+                body_consequence_refs=["recovery:%s" % desired],
+            )
+        )
+        result = _result(
+            normalized, status="applied", code=CODE_OK, reason_code=committed_code,
+            before=before, after=after, dependencies=live, ledger_status="committed",
+        )
+        # The Body input is a *fact of this commit*, not a guess by the adapter:
+        # body_consequence maps these two keys onto the one legal RECOVERY input.
+        result["recovery_state"] = desired
+        result["recovery_mode"] = mode
+        result["rest_surface_id"] = surface_id
+        result["pose"] = pose
+        return result
+    # -- ARRANGE / TOGGLE_FIXTURE (v0.4 room-living) ----------------------
+
+    def _room_environment(self):
+        import world_room_environment
+
+        return world_room_environment
+
+    def _economy_module(self):
+        import world_property_economy
+
+        return world_property_economy
+
+    def _resolve_arrange(
+        self, normalized: Mapping[str, Any], *, crash_after: Optional[str]
+    ) -> dict[str, Any]:
+        """Move one piece of **owned, delivered, relocatable** furniture.
+
+        This is deliberately not PICK_UP: nothing enters a hand, ``takeable`` is
+        untouched, and a bed can be moved while still being impossible to pick
+        up.  Children already resting on the furniture's own surface are carried
+        in the same atomic substrate write, so a move can never strand them on a
+        surface that no longer exists here.
+        """
+
+        module, state, blocked = self._substrate_gate(normalized)
+        if blocked is not None:
+            return blocked
+
+        _require_params(normalized["params"], {"object_id", "target"})
+        finished, _frame = self._replay_frame(normalized)
+        if finished is not None:
+            return finished
+
+        try:
+            object_id = _text(normalized["params"].get("object_id"), "object_id")
+            target = module.validate_placement_target(
+                normalized["params"].get("target")
+            )
+        except (ResolverError, module.BodySubstrateError) as error:
+            return _reject(
+                normalized, "rejected", CODE_INVALID_PROPOSAL, reason_code=str(error)
+            )
+        if target["kind"] not in (module.PLACEMENT_ROOM, module.PLACEMENT_SURFACE):
+            return _reject(
+                normalized, "rejected", CODE_NOT_ALLOWED,
+                reason_code="DESTINATION_NOT_ALLOWED: furniture is arranged into a "
+                "room or installed as its own surface",
+            )
+
+        live = self._dependencies()
+        stale = self._stale_keys(normalized["observed_dependencies"], live)
+        if stale:
+            return _reject(
+                normalized, "rejected", CODE_STALE_STATE, reason_code="stale_dependency",
+                dependencies=live, stale_dependencies=stale,
+            )
+
+        before = module.read_model(state)
+        placements = before["placements"]
+        current = placements.get(object_id)
+        if current is None:
+            return _reject(
+                normalized, "rejected", CODE_UNKNOWN_TARGET,
+                reason_code=f"UNKNOWN_TARGET: {object_id} has no placement",
+                before=before, dependencies=live,
+            )
+        if dict(current) == dict(target):
+            return _reject(
+                normalized, "noop", CODE_NOOP, reason_code="already_arranged",
+                before=before, after=before, dependencies=live,
+            )
+
+        world_state = self._world_state() or {}
+        world_location = world_state.get("location") or {}
+        economy = self._economy_module()
+        verdict = economy.arrange_verdict(
+            item_instance_id=object_id,
+            target=target,
+            placements=placements,
+            world_location=world_location,
+            hermes_home=self.hermes_home,
+            environment=self.environment,
+        )
+        if not verdict.get("allowed"):
+            detail = verdict.get("reason_code") or "NOT_ALLOWED"
+            if verdict.get("detail"):
+                detail = "%s: %s" % (detail, verdict["detail"])
+            return _reject(
+                normalized, "rejected", CODE_NOT_ALLOWED, reason_code=detail,
+                before=before, dependencies=live,
+            )
+
+        declared_surfaces = [
+            module.surface_instance_id(kind, object_id)
+            for kind in (verdict.get("declaration") or {}).get("surfaces") or ()
+        ]
+        if str(current.get("kind")) == module.PLACEMENT_SURFACE:
+            current_surface = str(current.get("surface_id"))
+            if current_surface not in declared_surfaces:
+                declared_surfaces.append(current_surface)
+        # Children are the objects resting on this furniture's own surface.  The
+        # furniture instance itself is never its own child, even when it is
+        # placed *as* that surface.
+        carried = sorted(
+            child
+            for child, child_target in placements.items()
+            if child != object_id
+            and str((child_target or {}).get("kind")) == module.PLACEMENT_SURFACE
+            and str((child_target or {}).get("surface_id")) in declared_surfaces
+        )
+
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="prepared", reason_code="arrange_prepared",
+                before=before, dependencies=live,
+            )
+        )
+        if crash_after == CRASH_AFTER_PREPARED:
+            raise ResolverCrash("crash after prepared (test)")
+
+        try:
+            updated = module.place_object(
+                state, object_id, target, expected_revision=state["revision"]
+            )
+            for child in carried:
+                updated = module.place_object(
+                    updated,
+                    child,
+                    {
+                        "kind": module.PLACEMENT_SURFACE,
+                        "location_id": target["location_id"],
+                        "surface_id": placements[child]["surface_id"],
+                    },
+                )
+            module.SubstrateStore(module.substrate_path(self.hermes_home)).save(
+                updated, expected_revision=state["revision"]
+            )
+        except module.BodySubstrateError as error:
+            self.ledger.append_unlocked(
+                self._entry(
+                    normalized, status="failed", reason_code="substrate_rejected",
+                    before=before, dependencies=live,
+                )
+            )
+            return _reject(
+                normalized, "failed", CODE_NOT_ALLOWED, reason_code=str(error),
+                before=before, dependencies=live, ledger_status="failed",
+            )
+        if crash_after == CRASH_AFTER_MUTATION:
+            raise ResolverCrash("crash after mutation (test)")
+
+        after = module.read_model(self._substrate())
+        refs = [f"placement.{object_id}={target['kind']}"]
+        refs.extend(f"placement.{child}=carried_with_surface" for child in carried)
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="committed", reason_code="arrange_committed",
+                before=before, after=after, dependencies=live,
+                world_mutation_refs=refs,
+                cross_authority_refs=self._cross_authority_refs(object_id),
+            )
+        )
+        result = _result(
+            normalized, status="applied", code=CODE_OK,
+            reason_code="arrange_committed", before=before, after=after,
+            dependencies=live, ledger_status="committed",
+        )
+        result["arranged"] = {
+            "object_id": object_id,
+            "target": dict(target),
+            "carried": carried,
+            "surface_ids": declared_surfaces,
+        }
+        return result
+
+    def _resolve_toggle_fixture(
+        self, normalized: Mapping[str, Any], *, crash_after: Optional[str]
+    ) -> dict[str, Any]:
+        """Set one declared fixture's power **absolutely** (``on`` / ``off``).
+
+        ``state`` is required and absolute: there is no blind toggle, so a
+        retried command cannot flip the lamp back.  The same target state is a
+        zero-write ``noop``; only a real change writes substrate and commits.
+        """
+
+        module, state, blocked = self._substrate_gate(normalized)
+        if blocked is not None:
+            return blocked
+
+        _require_params(normalized["params"], {"object_id", "state"})
+        finished, _frame = self._replay_frame(normalized)
+        if finished is not None:
+            return finished
+
+        try:
+            object_id = _text(normalized["params"].get("object_id"), "object_id")
+            wanted = _text(
+                normalized["params"].get("state"), "state", maximum=8
+            ).lower()
+        except ResolverError as error:
+            return _reject(
+                normalized, "rejected", CODE_INVALID_PROPOSAL, reason_code=str(error)
+            )
+        if wanted not in module.FIXTURE_POWERS:
+            return _reject(
+                normalized, "rejected", CODE_INVALID_PROPOSAL,
+                reason_code="state must be one of %s" % (list(module.FIXTURE_POWERS),),
+            )
+
+        live = self._dependencies()
+        stale = self._stale_keys(normalized["observed_dependencies"], live)
+        if stale:
+            return _reject(
+                normalized, "rejected", CODE_STALE_STATE, reason_code="stale_dependency",
+                dependencies=live, stale_dependencies=stale,
+            )
+
+        before = module.read_model(state)
+        environment = self._room_environment()
+        try:
+            catalog = self._binding_module().owned_catalog_map(self.hermes_home)
+        except Exception:  # noqa: BLE001
+            catalog = {}
+        declaration = environment.declaration_of_object(object_id, catalog)
+        if declaration is None or not declaration.get("powerable"):
+            return _reject(
+                normalized, "rejected", CODE_NOT_ALLOWED,
+                reason_code="NOT_A_FIXTURE: %s has no declared powerable fixture"
+                % object_id,
+                before=before, dependencies=live,
+            )
+        placement = module.placement_of(state, object_id)
+        world = self._world_state() or {}
+        here = (world.get("location") or {}).get("place_id")
+        here_area = (world.get("location") or {}).get("area_id")
+        if placement is None or here is None:
+            return _reject(
+                normalized, "rejected", CODE_NOT_REACHABLE,
+                reason_code="FIXTURE_NOT_HERE: %s is not placed here" % object_id,
+                before=before, dependencies=live,
+            )
+        if str(placement.get("location_id")) != str(here) or (
+            placement.get("area_id") is not None
+            and here_area is not None
+            and str(placement.get("area_id")) != str(here_area)
+        ):
+            return _reject(
+                normalized, "rejected", CODE_NOT_REACHABLE,
+                reason_code="FIXTURE_NOT_HERE: %s is in another place/area" % object_id,
+                before=before, dependencies=live,
+            )
+
+        existing = module.fixture_of(state, object_id)
+        current_power = (existing or {}).get("power")
+        if current_power == wanted:
+            return _reject(
+                normalized, "noop", CODE_NOOP,
+                reason_code="fixture_already_%s" % wanted,
+                before=before, after=before, dependencies=live,
+            )
+
+        since = _now_iso()
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="prepared", reason_code="fixture_prepared",
+                before=before, dependencies=live,
+            )
+        )
+        if crash_after == CRASH_AFTER_PREPARED:
+            raise ResolverCrash("crash after prepared (test)")
+
+        try:
+            updated = module.set_fixture(
+                state,
+                object_id,
+                wanted,
+                since=since,
+                declared_source=declaration.get("declared_source"),
+                expected_revision=state["revision"],
+            )
+            module.SubstrateStore(module.substrate_path(self.hermes_home)).save(
+                updated, expected_revision=state["revision"]
+            )
+        except module.BodySubstrateError as error:
+            self.ledger.append_unlocked(
+                self._entry(
+                    normalized, status="failed", reason_code="substrate_rejected",
+                    before=before, dependencies=live,
+                )
+            )
+            return _reject(
+                normalized, "failed", CODE_NOT_ALLOWED, reason_code=str(error),
+                before=before, dependencies=live, ledger_status="failed",
+            )
+        if crash_after == CRASH_AFTER_MUTATION:
+            raise ResolverCrash("crash after mutation (test)")
+
+        stored = module.fixture_of(updated, object_id) or {}
+        after = module.read_model(self._substrate())
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="committed", reason_code="fixture_committed",
+                before=before, after=after, dependencies=live,
+                world_mutation_refs=[f"world.fixture={object_id}:{wanted}"],
+                cross_authority_refs=self._cross_authority_refs(object_id),
+            )
+        )
+        result = _result(
+            normalized, status="applied", code=CODE_OK,
+            reason_code="fixture_committed", before=before, after=after,
+            dependencies=live, ledger_status="committed",
+        )
+        result["fixture"] = {
+            "object_id": object_id,
+            "state": wanted,
+            "previous_state": current_power,
+            "since": stored.get("since"),
+            "declared_source": stored.get("declared_source"),
+            "band": declaration.get("light_band"),
+        }
+        return result
+
     # -- CONSUME (F: one instance in, one receipt out, one body consequence) --
 
     def _consume_contract(self):
@@ -1502,7 +2162,7 @@ class WorldResolver:
         if placement is None:
             return _reject(
                 normalized, "rejected", CODE_UNKNOWN_TARGET,
-                reason_code="UNKNOWN: %s has no live placement "
+                reason_code="UNKNOWN_TARGET: %s has no live placement "
                 "(a missing object is not a consumption record)" % object_id,
                 before=before, dependencies=live,
             )
@@ -1529,7 +2189,9 @@ class WorldResolver:
         verdict = contract.consumption_verdict(
             object_id=object_id,
             placement=placement,
-            declaration=contract.declaration_of(object_id, self.hermes_home),
+            declaration=contract.declaration_of(
+                object_id, self.hermes_home, economy=facts.get("economy")
+            ),
             economy=facts,
             current_place=here,
             hands_usable=bool(module.reachability_inputs(state)["hands_usable"]),
@@ -1634,7 +2296,8 @@ class WorldResolver:
                     f"world.consumption={stored['receipt_id']}",
                 ],
                 # Only a proven-present economy can produce an economy instance,
-                # so cross-authority bookkeeping is only meaningful then.
+                # so cross-authority bookkeeping is only meaningful then.  The
+                # local-owner provenance refs are added by ``_entry`` itself.
                 cross_authority_refs=(
                     self._cross_authority_refs(object_id)
                     if contract.is_economy_instance(facts["economy"], object_id)
@@ -1651,6 +2314,11 @@ class WorldResolver:
         # execution without re-deriving anything (read-only evidence).
         result["object_id"] = object_id
         result["consumption_receipt"] = stored
+        if verdict.get("purchase_voucher") is not None:
+            result["purchase_voucher"] = dict(verdict["purchase_voucher"])
+        if normalized["authority"] == AUTHORITY_LOCAL_OWNER_PHONE:
+            result["authority"] = AUTHORITY_LOCAL_OWNER_PHONE
+            result["local_owner"] = self._local_owner_context(normalized)
         return result
 
     # -- reconciliation ---------------------------------------------------

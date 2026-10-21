@@ -52,11 +52,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-SCHEMA_VERSION = "world.body.substrate.v1.2"
-#: v1 had no body entity binding; v1.1 had no consumption receipts.  Both are
-#: readable and upgraded in :func:`migrate_substrate` -- the placement structure
-#: itself is never rewritten by either step.
-LEGACY_SCHEMA_VERSIONS = ("world.body.substrate.v1", "world.body.substrate.v1.1")
+SCHEMA_VERSION = "world.body.substrate.v1.3"
+#: v1 had no body entity binding; v1.1 had no consumption receipts; v1.2 had no
+#: fixture (light/fixture power) block.  All are readable and upgraded in
+#: :func:`migrate_substrate` -- the placement structure itself is never rewritten
+#: by any step.  v1.3 is the smallest compatible extension: one optional
+#: ``fixtures`` map, empty meaning "power UNKNOWN" (never "off").
+LEGACY_SCHEMA_VERSIONS = (
+    "world.body.substrate.v1",
+    "world.body.substrate.v1.1",
+    "world.body.substrate.v1.2",
+)
 KIND = "world_body_substrate"
 WORLD_ENTITY_KIND = "body"
 FEATURE_ENV = "CHIYO_WORLD_BODY_SUBSTRATE_ENABLED"
@@ -84,10 +90,57 @@ MAX_CONSUMPTIONS = 256
 #: declared here.  It grants nothing by itself.
 DECLARED_CAPABILITIES: dict[str, dict[str, Any]] = {}
 
-SURFACES: dict[str, dict[str, str]] = {
-    "bed_surface": {"surface_id": "bed_surface", "owner_catalog_item_id": "basic_bed"},
+#: v0.4 room-living: **surface kinds** (not one global surface).  A surface kind
+#: names the catalog item that must really exist for the surface to be real, and
+#: what the surface can physically support.  A surface *instance* is addressed as
+#: ``<kind>:<owner item_instance_id>`` and is only real while that instance has a
+#: live placement in the same place -- two desks therefore never share one
+#: ``desk_surface`` and things put on one desk can never appear on the other.
+#:
+#: ``bed_surface`` additionally keeps its legacy bare spelling: the M13A.1
+#: bootstrap declared that id before instances existed, and existing live worlds
+#: must keep working without a reset.  ``desk_surface`` / ``chair_surface`` are
+#: deliberately **instance-only** (a bare id is not declared), which is what
+#: removes the global-surface collision at the source.
+SURFACE_KINDS: dict[str, dict[str, Any]] = {
+    "bed_surface": {
+        "surface_id": "bed_surface",
+        "owner_catalog_item_id": "basic_bed",
+        "label": "bed",
+        "pose_condition": "lying",
+        "rest_modes": ("rest", "sleep_like"),
+        "legacy_bare": True,
+    },
+    "desk_surface": {
+        "surface_id": "desk_surface",
+        "owner_catalog_item_id": "simple_desk",
+        "label": "desk",
+        "pose_condition": None,
+        "rest_modes": (),
+        "legacy_bare": False,
+    },
+    "chair_surface": {
+        "surface_id": "chair_surface",
+        "owner_catalog_item_id": "simple_chair",
+        "label": "chair",
+        "pose_condition": "seated",
+        "rest_modes": ("rest",),
+        "legacy_bare": False,
+    },
 }
 
+#: Backwards-compatible view (older code iterates the keys / reads
+#: ``owner_catalog_item_id``).  It is the same declaration, not a second copy.
+SURFACES: dict[str, dict[str, Any]] = SURFACE_KINDS
+
+#: Fixture power records (v1.3).  Bounded like every other block; an absent entry
+#: means the power is **UNKNOWN**, never "off".
+MAX_FIXTURES = 64
+FIXTURE_POWERS = ("on", "off")
+FIXTURE_POWER_ON = "on"
+FIXTURE_POWER_OFF = "off"
+
+_FIXTURE_KEYS = frozenset({"power", "since", "declared_source", "revision"})
 HAND_SLOTS = ("left_hand", "right_hand")
 POSES = ("standing", "seated", "lying", "transitioning")
 ORIENTATIONS = ("north", "south", "east", "west", "up", "down")
@@ -118,6 +171,7 @@ _STATE_KEYS = frozenset(
         "placements",
         "reservations",
         "consumptions",
+        "fixtures",
     }
 )
 
@@ -335,6 +389,26 @@ def validate_substrate(state: Any) -> dict[str, Any]:
     if len({r["receipt_id"] for r in consumptions.values()}) != len(consumptions):
         raise BodySubstrateError("consumption receipts must have distinct receipt ids")
 
+    fixtures_raw = state["fixtures"]
+    if not isinstance(fixtures_raw, Mapping) or len(fixtures_raw) > MAX_FIXTURES:
+        raise BodySubstrateError("fixtures must be a bounded object")
+
+    fixtures: dict[str, Any] = {}
+    for object_id, record in fixtures_raw.items():
+        name = _require_text(object_id, "fixtures key")
+        if not isinstance(record, Mapping) or set(record) != _FIXTURE_KEYS:
+            raise BodySubstrateError(
+                "fixture record must have exactly power/since/declared_source/revision"
+            )
+        fixtures[name] = {
+            "power": _require_choice(record["power"], "fixture.power", FIXTURE_POWERS),
+            "since": _require_text(record["since"], "fixture.since", maximum=64),
+            "declared_source": _require_text(
+                record["declared_source"], "fixture.declared_source", maximum=128
+            ),
+            "revision": _require_revision(record["revision"], "fixture.revision"),
+        }
+
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": KIND,
@@ -347,6 +421,7 @@ def validate_substrate(state: Any) -> dict[str, Any]:
         "placements": placements,
         "reservations": reservations,
         "consumptions": consumptions,
+        "fixtures": fixtures,
     }
 
 
@@ -373,14 +448,16 @@ def migrate_substrate(raw: Any) -> tuple[dict[str, Any], bool]:
     """Upgrade an older substrate representation to the current schema.
 
     Returns ``(state, migrated)``.  This is the *only* sanctioned upgrade path:
-    a future ``v1.2 -> v2`` step is added here rather than overwriting JSON, so
+    a future ``v1.3 -> v2`` step is added here rather than overwriting JSON, so
     ``body_id``, the world binding, placements and reservations all survive.
 
     v1 -> v1.2: the body entity binding is introduced (derived from ``body_id``;
     nothing recomputed) and the consumption receipt block defaults to empty.
     v1.1 -> v1.2: only the receipt block is added, again defaulting to empty, so
     an existing placement map is carried over byte-for-byte in meaning.
-
+    v1.2 -> v1.3: only the ``fixtures`` block is added, empty.  An empty block
+    means every fixture's power is **UNKNOWN** (not "off"), so an upgraded home
+    reports "no light state known" until a real toggle command writes one.
     Unknown schemas fail closed.
     """
 
@@ -406,6 +483,8 @@ def migrate_substrate(raw: Any) -> tuple[dict[str, Any], bool]:
         #: v1.2 addition.  An older home simply has no receipts yet; nothing is
         #: invented for it and no placement is touched.
         "consumptions": raw.get("consumptions") or {},
+        #: v1.3 addition: no fixture power is invented on upgrade.
+        "fixtures": raw.get("fixtures") or {},
     }
     return validate_substrate(upgraded), True
 
@@ -466,6 +545,7 @@ def initial_substrate(
         "placements": {},
         "reservations": {},
         "consumptions": {},
+        "fixtures": {},
     }
 
 
@@ -618,18 +698,256 @@ def declared_capability(object_id: Any, hermes_home: Optional[Path | str] = None
     return dict(entry) if isinstance(entry, Mapping) else {}
 
 
-def surface_declared(surface_id: Any) -> bool:
-    """M15: is this surface id a canonical surface of the world?"""
+def surface_kind_of(surface_id: Any) -> Optional[str]:
+    """The declared *kind* of a surface id, or ``None``.
 
-    return str(surface_id) in SURFACES
+    ``"desk_surface:item-abc"`` -> ``"desk_surface"``; ``"bed_surface"`` ->
+    ``"bed_surface"``; anything else -> ``None``.  The kind is the only thing the
+    world declares; *which* piece of furniture it belongs to is the instance
+    suffix, and that is what stops two desks from sharing one surface.
+    """
+
+    text = str(surface_id or "")
+    kind = text.split(":", 1)[0]
+    return kind if kind in SURFACE_KINDS else None
+
+
+def surface_owner_instance(surface_id: Any) -> Optional[str]:
+    """The owner item instance a surface id is bound to (``None`` when bare)."""
+
+    text = str(surface_id or "")
+    if ":" not in text:
+        return None
+    owner = text.split(":", 1)[1].strip()
+    return owner or None
+
+
+def surface_instance_id(surface_kind: Any, object_id: Any) -> str:
+    """The instance-scoped surface id of one piece of furniture."""
+
+    kind = _require_text(surface_kind, "surface_kind", maximum=32)
+    if kind not in SURFACE_KINDS:
+        raise BodySubstrateError(f"surface kind {kind!r} is not declared")
+    return "%s:%s" % (kind, _require_text(object_id, "object_id"))
+
+
+def surface_declared(surface_id: Any) -> bool:
+    """Is this surface id a declared surface of the world?
+
+    A bare id is only legal for a kind that predates instances (``bed_surface``);
+    ``desk_surface`` / ``chair_surface`` exist **only** as instance-scoped ids,
+    so a global id can never bind every desk in the world to one surface.
+    """
+
+    kind = surface_kind_of(surface_id)
+    if kind is None:
+        return False
+    if surface_owner_instance(surface_id) is None:
+        return bool(SURFACE_KINDS[kind].get("legacy_bare"))
+    return True
 
 
 def surface_owner_catalog(surface_id: Any) -> Optional[str]:
-    """M15: the catalog item that must exist for the surface to be real."""
+    """The catalog item that must exist for the surface to be real."""
 
-    entry = SURFACES.get(str(surface_id))
-    return entry.get("owner_catalog_item_id") if entry else None
+    kind = surface_kind_of(surface_id)
+    return SURFACE_KINDS[kind]["owner_catalog_item_id"] if kind else None
 
+
+def surface_declaration(surface_id: Any) -> dict[str, Any]:
+    """The full declaration of a surface kind (``{}`` when undeclared)."""
+
+    kind = surface_kind_of(surface_id)
+    return dict(SURFACE_KINDS[kind]) if kind else {}
+
+
+def derived_surfaces(
+    placements: Mapping[str, Any],
+    catalog_by_instance: Mapping[str, str],
+    *,
+    location_id: Optional[str] = None,
+    area_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """The surfaces that are *really* here, derived from live placements.
+
+    A surface instance exists only when its owner furniture instance
+    (1) is a real economy instance of the declared catalog item and
+    (2) has a live placement of its own in this place/area.  Nothing is stored:
+    move the desk and its surface moves with it; there is no second registry to
+    drift, and no global surface id to collide.
+
+    Children (placements whose ``surface_id`` is this surface) are listed on the
+    surface, which is what lets a furniture move carry them explicitly.
+    """
+
+    if location_id is None:
+        return []
+    surfaces: list[dict[str, Any]] = []
+    for object_id in sorted(placements):
+        target = placements[object_id] or {}
+        catalog_item = catalog_by_instance.get(str(object_id))
+        if not catalog_item:
+            continue
+        for kind, declaration in sorted(SURFACE_KINDS.items()):
+            if declaration["owner_catalog_item_id"] != catalog_item:
+                continue
+            if str(target.get("location_id")) != str(location_id):
+                continue
+            if area_id is not None and target.get("kind") == PLACEMENT_ROOM:
+                if str(target.get("area_id") or "") != str(area_id):
+                    continue
+            surface_id = surface_instance_id(kind, object_id)
+            surfaces.append(
+                {
+                    "surface_id": surface_id,
+                    "surface_kind": kind,
+                    "label": declaration.get("label"),
+                    "owner_object_id": str(object_id),
+                    "owner_catalog_item_id": catalog_item,
+                    "location_id": target.get("location_id"),
+                    "area_id": target.get("area_id"),
+                    "pose_condition": declaration.get("pose_condition"),
+                    "rest_modes": list(declaration.get("rest_modes") or ()),
+                    "items": sorted(
+                        child
+                        for child, child_target in placements.items()
+                        if str((child_target or {}).get("kind")) == PLACEMENT_SURFACE
+                        and str((child_target or {}).get("surface_id")) == surface_id
+                    ),
+                }
+            )
+    return surfaces
+
+
+def surfaces_here(
+    state: Mapping[str, Any],
+    catalog_by_instance: Mapping[str, str],
+    *,
+    location_id: Optional[str],
+    area_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Derived surfaces for one place/area, plus the legacy bare-surface view.
+
+    The legacy bare ``bed_surface`` placement the M13A.1 bootstrap wrote is kept
+    as its own entry (never merged into an instance surface twice).
+    """
+
+    normalized = validate_substrate(state)
+    placements = normalized["placements"]
+    derived = derived_surfaces(
+        placements,
+        catalog_by_instance,
+        location_id=location_id,
+        area_id=area_id,
+    )
+    seen_kinds = {item["surface_kind"] for item in derived}
+    for object_id in sorted(placements):
+        target = placements[object_id] or {}
+        if str(target.get("kind")) != PLACEMENT_SURFACE:
+            continue
+        surface_id = str(target.get("surface_id"))
+        kind = surface_kind_of(surface_id)
+        if kind is None or surface_owner_instance(surface_id) is not None:
+            continue
+        if location_id is not None and str(target.get("location_id")) != str(location_id):
+            continue
+        if kind in seen_kinds:
+            continue
+        declaration = SURFACE_KINDS[kind]
+        derived.append(
+            {
+                "surface_id": surface_id,
+                "surface_kind": kind,
+                "label": declaration.get("label"),
+                "owner_object_id": None,
+                "owner_catalog_item_id": declaration["owner_catalog_item_id"],
+                "location_id": target.get("location_id"),
+                "area_id": target.get("area_id"),
+                "pose_condition": declaration.get("pose_condition"),
+                "rest_modes": list(declaration.get("rest_modes") or ()),
+                "items": sorted(
+                    child
+                    for child, child_target in placements.items()
+                    if str((child_target or {}).get("kind")) == PLACEMENT_SURFACE
+                    and str((child_target or {}).get("surface_id")) == surface_id
+                ),
+            }
+        )
+    return derived
+
+
+def rest_surfaces_here(
+    state: Mapping[str, Any],
+    catalog_by_instance: Mapping[str, str],
+    *,
+    location_id: Optional[str],
+    mode: str = "sleep_like",
+) -> list[dict[str, Any]]:
+    """Surfaces that really support this rest mode at this place."""
+
+    return [
+        item
+        for item in surfaces_here(
+            state, catalog_by_instance, location_id=location_id
+        )
+        if mode in (item.get("rest_modes") or [])
+    ]
+
+
+def fixture_of(state: Mapping[str, Any], object_id: Any) -> Optional[dict[str, Any]]:
+    """The recorded power of one fixture, or ``None`` (UNKNOWN -- never "off")."""
+
+    normalized = validate_substrate(state)
+    found = normalized["fixtures"].get(str(object_id))
+    return canonical_copy(found) if found is not None else None
+
+
+def set_fixture(
+    state: Mapping[str, Any],
+    object_id: Any,
+    power: Any,
+    *,
+    since: Any = None,
+    declared_source: Any = None,
+    expected_revision: Optional[int] = None,
+) -> dict[str, Any]:
+    """Write one fixture's absolute power state (the only light truth).
+
+    Absolutely idempotent by state: writing the same power again is refused with
+    ``ALREADY_APPLIED`` so a replay cannot produce a second effect, and the
+    caller never has to guess whether "on" happened twice.
+    """
+
+    normalized = validate_substrate(state)
+    if expected_revision is not None:
+        expected = _require_revision(expected_revision, "expected_revision")
+        if normalized["revision"] != expected:
+            raise StaleSubstrateError(
+                f"stale substrate: expected {expected}, live {normalized['revision']}"
+            )
+    name = _require_text(object_id, "object_id")
+    wanted = _require_choice(power, "fixture.power", FIXTURE_POWERS)
+    existing = normalized["fixtures"].get(name)
+    if existing is not None and existing["power"] == wanted:
+        raise BodySubstrateError(
+            f"ALREADY_APPLIED: {name} is already {wanted}"
+        )
+    if existing is None and len(normalized["fixtures"]) >= MAX_FIXTURES:
+        raise BodySubstrateError("LIMIT: the fixture block is full")
+    updated = canonical_copy(normalized)
+    updated["fixtures"][name] = {
+        "power": wanted,
+        "since": _require_text(since, "fixture.since", maximum=64)
+        if since is not None
+        else _now_iso(),
+        "declared_source": _require_text(
+            declared_source if declared_source is not None else "catalog_declaration",
+            "fixture.declared_source",
+            maximum=128,
+        ),
+        "revision": normalized["revision"] + 1,
+    }
+    return _bump(updated)
 
 def placement_of(state: Mapping[str, Any], object_id: str) -> Optional[dict[str, Any]]:
     """The single authoritative placement of ``object_id`` (or ``None``)."""
@@ -911,6 +1229,7 @@ def read_model(state: Mapping[str, Any]) -> dict[str, Any]:
         "orientation": normalized["orientation"],
         "hands": hand_view(normalized),
         "placements": canonical_copy(normalized["placements"]),
+        "fixtures": canonical_copy(normalized["fixtures"]),
         "reservations": canonical_copy(normalized["reservations"]),
         #: Bounded lifecycle evidence: how many consumptions this substrate has
         #: recorded.  The receipts themselves are owner records, not a read model.

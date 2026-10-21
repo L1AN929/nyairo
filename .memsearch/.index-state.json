@@ -1,0 +1,18 @@
+{
+  "collection": "memsearch_global",
+  "failed_files": [],
+  "indexed_chunks": 0,
+  "indexed_files": 0,
+  "last_completed_at": "2026-10-21T14:28:45.800396Z",
+  "last_started_at": "2026-10-21T14:28:43.340484Z",
+  "last_success_at": "2026-10-21T14:28:45.800396Z",
+  "milvus_uri": "~/.memsearch/milvus.db",
+  "operation": "index",
+  "paths": [
+    "D:/nyairo-rc1-body-backend/.memsearch/memory"
+  ],
+  "schema_version": 1,
+  "status": "ok",
+  "total_files": 0,
+  "updated_at": "2026-10-21T14:28:45.800396Z"
+}

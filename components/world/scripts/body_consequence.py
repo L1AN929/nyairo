@@ -55,13 +55,33 @@ KIND_PENDING = "pending_body_consequence"
 #: no recovery, comfort or satiety: see ``CONSUME_LOAD_NOTE``.
 SUPPORTED_ACTIONS = ("MOVE", "POSE", "REST", "PICK_UP", "PLACE", "CONSUME")
 
-#: Movement duration is not carried by the resolver result today, so a
-#: deterministic per-action default is used and recorded as an assumption.
-#: This is a load model, NOT an activity label.
+#: Movement / posture duration.  The world owner *can* now supply a real
+#: duration (a measured walk, or the world topology's own route seconds); the
+#: table below is only the fallback used when it cannot, and every fallback is
+#: recorded in ``notes``.  This is a load model, NOT an activity label.
 MOVEMENT_SECONDS_BY_ACTION = {
     "MOVE": 600.0,
     "POSE": 5.0,
 }
+
+#: Where a movement duration came from.  ``assumed_default`` means "nobody could
+#: measure this", and it is never presented as a measurement.
+MEASUREMENT_MEASURED_TRAVEL = "measured_travel"
+MEASUREMENT_MEASURED_TRAVEL_RECOVERED = "measured_travel_recovered"
+MEASUREMENT_ROUTE_ESTIMATE = "route_estimate"
+MEASUREMENT_ASSUMED = "assumed_default"
+MEASUREMENT_SOURCES = (
+    MEASUREMENT_MEASURED_TRAVEL,
+    MEASUREMENT_MEASURED_TRAVEL_RECOVERED,
+    MEASUREMENT_ROUTE_ESTIMATE,
+    MEASUREMENT_ASSUMED,
+)
+#: A load duration is bounded here so a corrupt travel record cannot ask for an
+#: unbounded advance.
+MAX_MEASUREMENT_SECONDS = 24 * 3600.0
+
+#: A timed departure defers the walk's load until the owner's arrival settlement.
+MOVEMENT_DEFERRED_NOTE = "movement_load_deferred:arrival_pending"
 
 #: Effort classification per action type.  The resolver stays ignorant of it.
 EFFORT_BY_ACTION = {
@@ -153,6 +173,43 @@ def consequence_id(execution_id: str, action_type: str, body_id: str) -> str:
     return "body-consequence:" + _digest(identity)[:32]
 
 
+def _movement_measurement(
+    action: str, world_facts: Optional[Mapping[str, Any]]
+) -> tuple[float, str]:
+    """``(seconds, source)`` for a movement action.  Never invents a measurement.
+
+    The caller (the World/Body service) may pass what it actually knows:
+
+    * ``measured_travel`` -- the owner's own completed walk, in seconds;
+    * ``measured_travel_recovered`` -- the same, settled after a crash window;
+    * ``route_estimate`` -- the world topology's declared route duration.
+
+    Anything else (missing, out of bounds, not a number) falls back to the
+    per-action constant and says ``assumed_default`` out loud.
+    """
+
+    facts = world_facts or {}
+    source = facts.get("movement_source")
+    seconds: Optional[float] = None
+    raw = facts.get("movement_seconds")
+    if raw is not None and not isinstance(raw, bool):
+        try:
+            candidate = float(raw)
+        except (TypeError, ValueError):
+            candidate = None
+        if (
+            candidate is not None
+            and candidate > 0.0
+            and candidate == candidate  # NaN guard
+            and candidate != float("inf")
+        ):
+            seconds = min(candidate, MAX_MEASUREMENT_SECONDS)
+        else:
+            source = None
+    if seconds is None or source not in MEASUREMENT_SOURCES:
+        return MOVEMENT_SECONDS_BY_ACTION[action], MEASUREMENT_ASSUMED
+    return round(seconds, 3), str(source)
+
 # --------------------------------------------------------------------------
 # the mapping  (Resolver facts -> BodyRuntimeInput)
 # --------------------------------------------------------------------------
@@ -212,16 +269,30 @@ def build_consequence(
     inputs: list[dict[str, Any]] = []
 
     if action in MOVEMENT_SECONDS_BY_ACTION:
+        seconds, measurement_source = _movement_measurement(action, world_facts)
         item: dict[str, Any] = {
             "class": "PHYSICAL_RESULT",
-            "movement_duration_seconds": MOVEMENT_SECONDS_BY_ACTION[action],
+            "movement_duration_seconds": seconds,
             "effort": EFFORT_BY_ACTION[action],
             "execution_id": execution_id,
         }
         if pose:
             item["pose"] = pose
         inputs.append(item)
-        record["notes"].append(f"movement_load_assumed:{MOVEMENT_SECONDS_BY_ACTION[action]}s")
+        # The provenance of the duration travels with the consequence: an
+        # assumed 600 s walk and a measured 150 s walk must never look alike.
+        record["movement_measurement"] = {
+            "source": measurement_source,
+            "duration_seconds": seconds,
+        }
+        if measurement_source == MEASUREMENT_ASSUMED:
+            record["notes"].append(
+                "movement_load_assumed:%ss:route_duration_unavailable" % seconds
+            )
+        else:
+            record["notes"].append(
+                "movement_load_measured:%ss:%s" % (seconds, measurement_source)
+            )
 
     elif action in ("PICK_UP", "PLACE", "CONSUME"):
         # a small manipulation: resource context, deliberately tiny load so the
@@ -254,8 +325,12 @@ def build_consequence(
         )
 
     if action in RECOVERY_ACTIONS:
-        mode = result.get("recovery_mode") or "rest"
-        inputs.append({"class": "RECOVERY", "mode": str(mode), "state": "start"})
+        # REST is a *command*: start opens one recovery session, stop closes it.
+        # Both travel as the one legal RECOVERY input class; the runtime still
+        # owns the state machine (threshold, interruption, completion).
+        mode = str(result.get("recovery_mode") or "rest")
+        state = str(result.get("recovery_state") or "start")
+        inputs.append({"class": "RECOVERY", "mode": mode, "state": state})
 
     if not inputs:
         record["state"] = CONSEQUENCE_STATE_SKIPPED
@@ -552,6 +627,79 @@ def apply_for_execution(
         }
 
 
+def defer_for_execution(
+    result: Mapping[str, Any],
+    *,
+    body_id: str,
+    ledger: "ConsequenceLedger",
+    at: Any,
+    world_facts: Optional[Mapping[str, Any]] = None,
+    pose: Optional[str] = None,
+    note: str = MOVEMENT_DEFERRED_NOTE,
+) -> dict[str, Any]:
+    """Record that this execution's load is *not* settled yet.
+
+    A timed departure is a real World fact whose physical cost has not happened
+    yet: the walk is not over.  Charging the whole route at departure time would
+    be a fabricated measurement, so the adapter writes an explicit ``pending``
+    record instead -- no inputs, no advance, no runtime write.  The owner's
+    arrival settlement later appends the *applied* record for the same
+    ``consequence_id`` (exactly once).
+    """
+
+    execution_id = _text(result.get("execution_id"), "execution_id")
+    action = str(result.get("action") or result.get("action_type") or "")
+    cid = consequence_id(execution_id, action, body_id)
+
+    with ledger.locked() as records:
+        existing = ledger.current_state(records).get(cid)
+        if existing is not None:
+            # A replay of the same execution never creates a second record.
+            return {
+                "deferred": False,
+                "reason": "already_recorded",
+                "consequence": existing,
+                "state": None,
+                "transition": None,
+            }
+        record = build_consequence(
+            result,
+            body_id=body_id,
+            world_facts=world_facts,
+            pose=pose,
+            applied_at=str(at),
+        )
+        record["state"] = CONSEQUENCE_STATE_PENDING
+        record["inputs"] = []
+        record.pop("input_summary", None)
+        record["notes"] = [
+            item for item in record["notes"] if not item.startswith("movement_load")
+        ]
+        record["notes"].append(note)
+        record["movement_settlement"] = "pending"
+        stored = ledger.append_unlocked(record)
+    return {
+        "deferred": True,
+        "reason": note,
+        "consequence": stored,
+        "state": None,
+        "transition": None,
+    }
+
+
+def pending_movements(ledger: "ConsequenceLedger") -> list[dict[str, Any]]:
+    """Pending records whose load is still owed (read-only).
+
+    Used by the owner tick to settle a walk whose arrival was written but whose
+    body load never landed (process died in between).
+    """
+
+    return [
+        record
+        for record in ledger.pending()
+        if record.get("action_type") == "MOVE"
+    ]
+
 def reconcile_pending(
     ledger: ConsequenceLedger,
     *,
@@ -584,3 +732,161 @@ def reconcile_pending(
         pose=pose,
         runtime_version=runtime_version,
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.4 room-living: the one legal ENVIRONMENT (room light) body input
+# ---------------------------------------------------------------------------
+
+#: A gap longer than this is *not* filled with a fabricated "the lamp was on the
+#: whole time" observation.  A stopped process means unknown, not continuous.
+MAX_ENVIRONMENT_GAP_SECONDS = 900.0
+MIN_ENVIRONMENT_SECONDS = 60.0
+
+
+def build_environment_input(light: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+    """The single ENVIRONMENT input for a light fact (``None`` = no stimulus).
+
+    Delegated to ``world_room_environment`` so the band table has exactly one
+    definition.  ``None`` is returned for unknown light, an off lamp and an
+    undeclared room -- never a zero that would look like a measurement.
+    """
+
+    import world_room_environment as room
+
+    return room.environment_input(light)
+
+
+def _instant_of(value: Any) -> Any:
+    """Parse a bounded ISO instant (``None`` when it is absent/unreadable)."""
+
+    if value is None:
+        return None
+    try:
+        from datetime import datetime
+
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def advance_environment(
+    *,
+    runtime_state: Mapping[str, Any],
+    light: Optional[Mapping[str, Any]],
+    at: Any,
+    min_seconds: float = MIN_ENVIRONMENT_SECONDS,
+    max_gap_seconds: float = MAX_ENVIRONMENT_GAP_SECONDS,
+) -> dict[str, Any]:
+    """Advance the body by the declared room light, at most once per tick.
+
+    Pure: the caller persists ``state`` and appends ``transition``.  The Body's
+    rate constants, thresholds and signal bands are untouched -- this only feeds
+    the existing ``ENVIRONMENT.sensory_intensity`` input.  A ``dim`` lamp that
+    never reaches ``sensory_load_elevated`` is a correct outcome, not a bug.
+    """
+
+    from datetime import datetime, timedelta
+
+    import body_runtime as br
+    import world_room_environment as room
+
+    before = br.validate_runtime(runtime_state)
+    last = before.get("last_advanced_at")
+    if not last:
+        return {"advanced": False, "reason": "no_body_clock", "wrote": False}
+    try:
+        last_dt = datetime.fromisoformat(str(last))
+        now_dt = datetime.fromisoformat(str(at))
+    except ValueError:
+        return {"advanced": False, "reason": "unreadable_body_clock", "wrote": False}
+    if now_dt < last_dt:
+        return {"advanced": False, "reason": "clock_went_backwards", "wrote": False}
+    # The observation anchor: we may only speak about the window we can justify.
+    # If the lamp was switched on *after* the last body advance, the light has
+    # only been on since then -- claiming the whole interval would be a fabricated
+    # "it was lit all along".  This is also what keeps an old root from being
+    # stuck: a lamp switched on now starts a fresh (short) window instead of
+    # inheriting a days-old gap.
+    started = _instant_of(light.get("since")) if isinstance(light, Mapping) else None
+    anchor = last_dt if started is None or started <= last_dt else started
+    if now_dt < anchor:
+        return {"advanced": False, "reason": "clock_went_backwards", "wrote": False}
+    elapsed = (now_dt - anchor).total_seconds()
+    if elapsed < float(min_seconds):
+        return {
+            "advanced": False,
+            "reason": "interval_too_short",
+            "elapsed_seconds": round(elapsed, 3),
+            "anchor": anchor.isoformat(),
+            "wrote": False,
+        }
+
+    gap_unknown = elapsed > float(max_gap_seconds)
+    if gap_unknown:
+        # The process was not running across this window: what the light did in
+        # between is unknown.  We therefore apply **no** environment input and
+        # claim nothing about the gap -- but we still move the Body clock to now
+        # over one bounded, input-free window, exactly so the next tick is a
+        # normal one instead of being refused by the same gap forever.
+        start_dt = now_dt - timedelta(seconds=float(max_gap_seconds))
+        inputs = None
+        result = br.advance(
+            before,
+            start_dt.isoformat(),
+            now_dt.isoformat(),
+            [],
+            before["runtime_version"],
+        )
+    else:
+        inputs = build_environment_input(light)
+        if inputs is None:
+            return {
+                "advanced": False,
+                "reason": "no_environment_input",
+                "elapsed_seconds": round(elapsed, 3),
+                "anchor": anchor.isoformat(),
+                "wrote": False,
+            }
+        result = br.advance(
+            before,
+            anchor.isoformat(),
+            now_dt.isoformat(),
+            [inputs],
+            before["runtime_version"],
+        )
+
+    if not result.get("advanced") and not gap_unknown:
+        return {
+            "advanced": False,
+            "reason": "advance_produced_no_change",
+            "elapsed_seconds": round(elapsed, 3),
+            "wrote": False,
+            "input": inputs,
+        }
+    transition = br.build_transition(
+        before,
+        result["state"],
+        at=now_dt.isoformat(),
+        cause_class=br.CAUSE_ENVIRONMENT if inputs is not None else br.CAUSE_TIME_ADVANCE,
+        cause_classes=result["cause_classes"],
+        input_summary={
+            **result["inputs_summary"],
+            "environment_source": room.environment_note(light or {}),
+            "environment_model": room.ENVIRONMENT_MODEL,
+            "observation_anchor": anchor.isoformat(),
+            "environment_gap_unknown": bool(gap_unknown),
+        },
+    )
+    return {
+        "advanced": bool(result.get("advanced")),
+        "clock_moved": True,
+        "reason": "environment_gap_unknown" if gap_unknown else "environment_applied",
+        "gap_unknown": bool(gap_unknown),
+        "elapsed_seconds": round(elapsed, 3),
+        "wrote": True,
+        "input": inputs,
+        "state": result["state"],
+        "transition": transition,
+    }

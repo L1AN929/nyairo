@@ -26,10 +26,12 @@ What this module is, and is not
   ``resolve_operation`` **before** anything is retried -- the retry reuses the same
   ``operation_key``, so a second version cannot be minted for one intended edit.
 
-The write pair (``create_artifact`` + ``commit_markdown``) is the narrow write port the order
-authorises.  Both are gated by the service's own ``ARTIFACT_EXTERNAL_ACTION`` switch
-(``switches.py:38``) and by a Governance grant reservation (``life_supply.py:655``); this
-module can neither bypass nor widen either.
+The writes are the narrow set the order authorises: ``create_artifact`` + ``commit_markdown`` (the
+v0.2 continuation pair) and, since v0.4's work-closeout package, ``archive_artifact`` -- the
+owner's own lifecycle verb, which closes a work without deleting anything.  All of them are gated
+by the service's own ``ARTIFACT_EXTERNAL_ACTION`` switch (``switches.py:38``) and by a Governance
+grant reservation (``life_supply.py:655``); this module can neither bypass nor widen either.
+``tombstone`` is deliberately **not** exposed: it is terminal and hides the content.
 """
 from __future__ import annotations
 
@@ -40,15 +42,27 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, Mapping, Optional, Sequence
 
-#: Read operations this port may send.  Mirrors ``life_supply.READ_OPS``.
+#: Read operations this port may send.  Mirrors ``life_supply.READ_OPS``, including the two v0.4
+#: history reads (``list_versions`` / ``read_version``): both are pure reads of immutable version
+#: rows, so this port can never move a head, write an operation row or restore an old state.
 READ_OPS = frozenset({
     "list_artifacts", "read_artifact", "read_head", "read_effect_receipt", "lookup_operation",
+    "list_versions", "read_version",
 })
-#: Command operations this port may send.  Mirrors the artifact half of ``life_supply.COMMAND_OPS``.
-COMMAND_OPS = frozenset({"create_artifact", "commit_markdown"})
+#: Command operations this port may send.  Mirrors the artifact half of ``life_supply.COMMAND_OPS``
+#: (``life_supply.py:230-233``, where the lifecycle verbs are spelled ``archive_artifact`` and
+#: ``tombstone``).  Only ``archive_artifact`` of the two lifecycle verbs is exposed here: an archive
+#: keeps every row, version and the content, while a tombstone hides the content and is terminal, so
+#: nothing Life does needs it.
+COMMAND_OPS = frozenset({"create_artifact", "commit_markdown", "archive_artifact"})
 
 DEFAULT_TIMEOUT = 5.0
 MAX_RESPONSE_BYTES = 1_000_000
+#: v0.4 work-revisit history bounds.  One page of version metadata, and how many characters of one
+#: historical body this port will ask for.  The owner enforces the same numbers, so these are the
+#: caller's own request bound, not a way to bypass the owner's.
+DEFAULT_VERSION_PAGE = 20
+MAX_VERSION_CONTENT_CHARS = 20000
 
 #: Service status strings, as the owner actually returns them.
 STATUS_OK = "OK"
@@ -117,6 +131,11 @@ class ArtifactOutcome:
     coordinated: Optional[bool] = None
     reservation_id: Optional[str] = None
     uow_id: Optional[str] = None
+    #: The owner's artifact ``lifecycle`` and ``revision`` as this answer reported them.  The archive
+    #: answer carries both (``{"status":"OK","lifecycle":"ARCHIVED","revision":n}``); a commit answer
+    #: carries neither, which is why they stay ``None`` instead of being guessed from the request.
+    lifecycle: Optional[str] = None
+    revision: Optional[int] = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -271,6 +290,111 @@ class LifeArtifactPort:
         head = answer.get("head")
         return dict(head) if isinstance(head, dict) else None
 
+    # -- v0.4 work-revisit: bounded history reads --------------------------------------
+
+    def list_versions(self, artifact_id: str, *, limit: int = DEFAULT_VERSION_PAGE,
+                      before_version_number: Optional[int] = None) -> dict[str, Any]:
+        """One bounded page of this artifact's version history, newest first.
+
+        Metadata only: the owner answers with each version's number, parent, stored
+        ``content_sha256`` and stored character count -- never a body.  The body of one named
+        version is ``read_version``'s job, so paging the history can never pull a whole work out
+        of the owner by accident.
+
+        ``complete`` is the honest word on purpose: ``True`` only when this answer is the whole
+        history (no older page is offered *and* the page holds every version the owner counted).
+        When it is ``False`` the answer says which of the two it is in ``reason_code``
+        (``HISTORY_PAGE_TRUNCATED`` / ``HISTORY_COUNT_MISMATCH``), so a caller cannot present a
+        short list as "the whole history".
+        """
+        request: dict[str, Any] = {"op": "list_versions", "subject": self.subject_id,
+                                   "artifact_id": str(artifact_id),
+                                   "limit": int(limit)}
+        if before_version_number is not None:
+            request["before_version_number"] = int(before_version_number)
+        answer = self._call(request)
+        if answer.get("status") != STATUS_OK:
+            raise ArtifactOwnerRefused(answer.get("status", ""), answer.get("reason", ""),
+                                       str(answer.get("detail") or ""))
+        rows = answer.get("versions")
+        entries: list[dict[str, Any]] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, Mapping) or not row.get("version_id"):
+                continue
+            entries.append({
+                "version_id": str(row.get("version_id")),
+                "artifact_id": str(row.get("artifact_id") or answer.get("artifact_id") or ""),
+                "version_number": row.get("version_number"),
+                "parent_version_id": row.get("parent_version_id"),
+                "content_sha256": row.get("content_sha256"),
+                "content_chars": row.get("content_chars"),
+                "created_at": row.get("created_at"),
+                "operation_key": row.get("operation_key"),
+            })
+        total = answer.get("total_versions")
+        total = int(total) if isinstance(total, int) and not isinstance(total, bool) else None
+        next_cursor = answer.get("next_before_version_number")
+        if isinstance(next_cursor, bool) or not isinstance(next_cursor, int):
+            next_cursor = None
+        complete = (next_cursor is None and (total is None or total == len(entries))
+                    and before_version_number is None)
+        reason = ""
+        if not complete:
+            # Say which fact is missing instead of one vague "incomplete": a page that starts
+            # mid-history is paged by construction; a first page that stops short of the owner's
+            # own count is short; a first page with an older page left is truncated.
+            if before_version_number is not None:
+                reason = "HISTORY_PAGED"
+            elif next_cursor is not None:
+                reason = "HISTORY_PAGE_TRUNCATED"
+            else:
+                reason = "HISTORY_COUNT_MISMATCH"
+        return {
+            "artifact_id": str(answer.get("artifact_id") or artifact_id),
+            "lifecycle": answer.get("lifecycle"),
+            "entries": entries,
+            "count": len(entries),
+            "total_versions": total,
+            "next_before_version_number": next_cursor,
+            "has_more": next_cursor is not None,
+            "complete": complete,
+            "reason_code": reason,
+            "source": "ManagedArtifact",
+        }
+
+    def read_version(self, artifact_id: str, version_id: str, *,
+                     max_chars: int = MAX_VERSION_CONTENT_CHARS) -> dict[str, Any]:
+        """One *named* historical version of one artifact: its body and the owner's own hashes.
+
+        Pure read.  The owner refuses a version that belongs to another artifact, so a version id
+        cannot be replayed through a different artifact's name.  ``content_sha256`` is always the
+        hash of the **full stored body** even when ``content`` was cut at ``max_chars``, so a
+        truncated answer still says honestly which whole text it is a prefix of
+        (``content_truncated`` / ``content_chars`` / ``returned_chars``).
+        """
+        answer = self._call({"op": "read_version", "subject": self.subject_id,
+                             "artifact_id": str(artifact_id),
+                             "version_id": str(version_id),
+                             "max_chars": int(max_chars)})
+        if answer.get("status") != STATUS_OK:
+            raise ArtifactOwnerRefused(answer.get("status", ""), answer.get("reason", ""),
+                                       str(answer.get("detail") or ""))
+        return {
+            "artifact_id": str(answer.get("artifact_id") or artifact_id),
+            "version_id": str(answer.get("version_id") or version_id),
+            "version_number": answer.get("version_number"),
+            "parent_version_id": answer.get("parent_version_id"),
+            "content": answer.get("content") if isinstance(answer.get("content"), str) else "",
+            "content_chars": answer.get("content_chars"),
+            "returned_chars": answer.get("returned_chars"),
+            "content_sha256": answer.get("content_sha256"),
+            "content_truncated": bool(answer.get("content_truncated")),
+            "lifecycle": answer.get("lifecycle"),
+            "created_at": answer.get("created_at"),
+            "operation_key": answer.get("operation_key"),
+            "source": "ManagedArtifact",
+        }
+
     def resume_point(self, artifact_id: str) -> ArtifactResumePoint:
         """Read one artifact's real continuation point from the owner."""
         view = self.read_artifact(artifact_id)
@@ -354,6 +478,49 @@ class LifeArtifactPort:
         })
         return self._outcome(answer, operation_key=operation_key)
 
+    def archive_artifact(
+        self,
+        *,
+        artifact_id: str,
+        expected_revision: int,
+        grant_id: str,
+        operation_key: str,
+    ) -> ArtifactOutcome:
+        """Ask the existing owner to move one artifact to ``ARCHIVED`` -- never a delete.
+
+        The verb is the service's own ``archive_artifact`` (``life_supply.COMMAND_OPS``,
+        ``life_supply.py:230-233``), whose nested payload is exactly
+        ``{subject_id, artifact_id, expected_revision}`` (``_NESTED_ARTIFACT_LIFECYCLE``,
+        ``life_supply.py:260``).  ``expected_revision`` is the owner's compare-and-swap
+        precondition -- the artifact ``revision`` the caller read before deciding, not a version id
+        and not a pre-check that is then swapped for a newer number.
+
+        What the owner does with it (``artifact/store.py:440-495``): the artifact's ``lifecycle``
+        becomes ``ARCHIVED`` and its ``revision`` moves by exactly one.  Every version row, the
+        head, the content and the sibling artifacts are untouched; nothing is deleted and no
+        tombstone is written.  A stale precondition answers ``CONFLICT`` with the owner's own
+        current revision, a missing/lost grant answers ``DENY``/``BLOCKED``, and an already
+        ``ARCHIVED`` artifact answered with a *new* key answers ``NO_CHANGE`` (the work is closed,
+        but not by this operation -- the caller must not read that as its own success).
+        """
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) \
+                or expected_revision < 1:
+            raise LifeArtifactError(
+                "expected_revision must be the integer artifact revision read from the owner (>= 1)")
+        if not str(operation_key or "").strip():
+            raise LifeArtifactError("archive_artifact requires an operation_key")
+        answer = self._call({
+            "op": "archive_artifact",
+            "grant_id": str(grant_id),
+            "operation_key": str(operation_key),
+            "artifact": {
+                "subject_id": self.subject_id,
+                "artifact_id": str(artifact_id),
+                "expected_revision": int(expected_revision),
+            },
+        })
+        return self._outcome(answer, operation_key=operation_key)
+
     # -- resolving an UNKNOWN without duplicating an effect ----------------------------
 
     def resolve_operation(self, operation_key: str) -> ArtifactOutcome:
@@ -408,6 +575,30 @@ class LifeArtifactPort:
             raw={"receipt": receipt, "lookup": found},
         )
 
+    def operation_row(self, operation_key: str) -> Optional[dict[str, Any]]:
+        """The owner's own durable record of one operation (``lookup_operation``), or ``None``.
+
+        This is a **read** of the ManagedArtifact owner's operation ledger -- the row holds the
+        operation kind, the real artifact, the request digest the owner stored, and the original
+        result (which version that key created, and against which parent).  It exists so a caller
+        can verify "this key already landed *this* request on *this* artifact" without a second
+        store and without trusting a content comparison against a head that may have moved.
+
+        ``None`` is the owner positively saying "no such operation".  An unreadable answer raises
+        ``LifeArtifactUnavailable``; it is never reported as "no such operation".
+        """
+        answer = self._call({"op": "lookup_operation", "owner": "ManagedArtifact",
+                             "operation_id": str(operation_key)})
+        status = answer.get("status")
+        if status == STATUS_KNOWN:
+            row = answer.get("operation")
+            return dict(row) if isinstance(row, dict) else None
+        if status == STATUS_NOT_FOUND:
+            return None
+        raise ArtifactOwnerRefused(str(status or STATUS_UNKNOWN),
+                                   str(answer.get("reason") or ""),
+                                   "the owner could not answer lookup_operation")
+
     # -- answer classification ---------------------------------------------------------
 
     def _outcome(self, answer: Mapping[str, Any], *, operation_key: str) -> ArtifactOutcome:
@@ -423,6 +614,10 @@ class LifeArtifactPort:
             coordinated=answer.get("coordinated"),
             reservation_id=answer.get("reservation_id"),
             uow_id=answer.get("uow_id"),
+            # The lifecycle answer carries these; every other answer simply has no lifecycle in it,
+            # and "absent" stays None instead of being filled in with a guess.
+            lifecycle=answer.get("lifecycle"),
+            revision=answer.get("revision"),
             reason=str(answer.get("reason") or ""),
             detail=str(answer.get("detail") or ""),
             raw=dict(answer),
@@ -473,6 +668,8 @@ __all__ = [
     "operation_key_for",
     "parse_grant_ids",
     "COMMAND_OPS",
+    "DEFAULT_VERSION_PAGE",
+    "MAX_VERSION_CONTENT_CHARS",
     "READ_OPS",
     "REASON_GOVERNANCE_REFUSED",
     "STATUS_BLOCKED",

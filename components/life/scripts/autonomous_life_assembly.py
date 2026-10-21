@@ -28,6 +28,7 @@ What this module does, and the rules it obeys
 from __future__ import annotations
 
 import hashlib
+import inspect
 import os
 import sys
 from pathlib import Path
@@ -231,6 +232,152 @@ def resolve_body_port(environment: Mapping[str, str]) -> dict[str, Any]:
             "socket": socket_path}
 
 
+def resolve_research_service(port: Any, environment: Mapping[str, str]) -> dict[str, Any]:
+    """B's ``ResearchWorkspaceService`` over *this* instance's owner port, or a named reason.
+
+    ``READY`` means the real service object was built by B's own factory
+    (``research_from_env``) from the same environment the private-project service uses.  Every
+    other answer carries no service at all, so the cycle offers no research option and creates
+    nothing -- there is deliberately no stand-in store, because a local copy of the research
+    library would be a second place where "her work" could live.
+    """
+
+    try:
+        here = str(Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import research_work_context as rwc
+    except Exception as exc:
+        return {"service": None, "status": "UNAVAILABLE", "reason": "RESEARCH_SEAM_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    module = rwc.research_module()
+    if module is None:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": "RESEARCH_SERVICE_NOT_IN_TREE",
+                "detail": "no research_workspace_service module on the life scripts path"}
+    factory = getattr(module, "research_from_env", None)
+    if not callable(factory):
+        return {"service": None, "status": "UNAVAILABLE", "reason": "RESEARCH_FACTORY_MISSING",
+                "detail": "research_workspace_service.research_from_env is absent"}
+    env = dict(environment or {})
+    # The two non-project artifacts this instance already binds.  The research workspace reads its
+    # own names for them, so they are handed over here (compose only -- the meaning stays B's): the
+    # reading material is listed as *read-only material* and the private-items document is never
+    # scanned as either material or research.
+    bindings = resolve_artifact_bindings(env)
+    if bindings.get("reading_artifact_id"):
+        env.setdefault("NYAIRO_LIFE_READING_ARTIFACT_ID", str(bindings["reading_artifact_id"]))
+    if bindings.get("private_items_artifact_id"):
+        env.setdefault("NYAIRO_LIFE_PRIVATE_ITEMS_ARTIFACT_ID",
+                       str(bindings["private_items_artifact_id"]))
+    try:
+        # The documented signature is ``research_from_env(port, env)``; a factory that only takes
+        # the environment is accepted too, so the seam never guesses wrong about the arity.
+        positional = 0
+        try:
+            positional = len([p for p in inspect.signature(factory).parameters.values()
+                              if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)])
+        except (TypeError, ValueError):
+            positional = 2
+        service = factory(port, env) if positional >= 2 else factory(env)
+    except Exception as exc:
+        return {"service": None, "status": "UNAVAILABLE", "reason": "RESEARCH_FROM_ENV_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+    if service is None:
+        return {"service": None, "status": "UNAVAILABLE", "reason": "RESEARCH_FROM_ENV_REFUSED",
+                "detail": "the research factory answered with no service"}
+    return {"service": service, "status": "READY", "reason": "",
+            "service_type": type(service).__name__}
+
+def resolve_practice_service(port: Any, environment: Mapping[str, str]) -> dict[str, Any]:
+    """B's ``PersonalPracticeService`` over *this* instance's owner port, or a named reason.
+
+    ``READY`` means the real service object was built by B's own factory (``practice_from_env``)
+    from the same environment the private-project service uses -- which is also where A's Memory
+    service comes from, so a review can only ever cite experiences this instance can recall.
+    Every other answer carries no service at all: no review option is offered, no method is named
+    and nothing can be written.  There is deliberately no stand-in workspace.
+    """
+
+    try:
+        here = str(Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import life_practice_context as lpc
+    except Exception as exc:
+        return {"service": None, "status": "UNAVAILABLE", "reason": "PRACTICE_SEAM_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    module = lpc.practice_module()
+    if module is None:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": "PRACTICE_SERVICE_NOT_IN_TREE",
+                "detail": "no personal_practice_service module on the life scripts path"}
+    factory = getattr(module, "practice_from_env", None)
+    if not callable(factory):
+        return {"service": None, "status": "UNAVAILABLE", "reason": "PRACTICE_FACTORY_MISSING",
+                "detail": "personal_practice_service.practice_from_env is absent"}
+    env = dict(environment or {})
+    try:
+        # The documented signature is ``practice_from_env(port, env)``; a factory that only takes
+        # the environment is accepted too, so the seam never guesses wrong about the arity.
+        positional = 0
+        try:
+            positional = len([p for p in inspect.signature(factory).parameters.values()
+                              if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)])
+        except (TypeError, ValueError):
+            positional = 2
+        service = factory(port, env) if positional >= 2 else factory(env)
+    except Exception as exc:
+        return {"service": None, "status": "UNAVAILABLE", "reason": "PRACTICE_FROM_ENV_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+    if service is None:
+        return {"service": None, "status": "UNAVAILABLE", "reason": "PRACTICE_FROM_ENV_REFUSED",
+                "detail": "the practice factory answered with no service"}
+    return {"service": service, "status": "READY", "reason": "",
+            "service_type": type(service).__name__}
+
+
+
+def resolve_sharing_service(environment: Mapping[str, str], *, subject_id: Any = None,
+                            grant_id: Any = None) -> dict[str, Any]:
+    """B's ``LifeSharingService`` (`sharing_from_env`), or a named reason there is none.
+
+    ``READY`` means B's own factory built the service over the *same* owner bindings the
+    private-project service uses, so a share is an artifact of this instance and its local inbox
+    is this instance's inbox.  Every other answer carries no service at all: no draft is offered
+    and nothing can be delivered, because a stand-in inbox would be a second owner.
+
+    The three bindings (socket / workspace / subject + artifact grant) come from the environment,
+    which is where the instance records them.  ``subject_id`` / ``grant_id`` are the caller's own
+    facts for the same instance and only fill a spelling the environment does not carry -- the
+    owner's own env names are used, never a new one.
+    """
+
+    try:
+        here = str(Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import life_sharing_context as lsc
+    except Exception as exc:  # noqa: BLE001 - a seam that cannot be built is reported
+        return {"service": None, "status": "UNAVAILABLE", "reason": "SHARING_SEAM_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    env = {str(key): str(value) for key, value in (environment or {}).items()}
+    if subject_id and not any(env.get(name) for name in
+                              ("NYAIRO_LIFE_SUBJECT", "CHIYO_LIFE_SUPPLY_SUBJECT",
+                               "LIFE_SUPPLY_SUBJECT")):
+        env["NYAIRO_LIFE_SUBJECT"] = str(subject_id)
+    if grant_id and not any(env.get(name) for name in
+                            ("NYAIRO_ARTIFACT_GRANT", "NYA02_ARTIFACT_GRANT",
+                             "CHIYO_LIFE_SUPPLY_ARTIFACT_GRANT", "LIFE_SUPPLY_ARTIFACT_GRANT")):
+        env["NYAIRO_ARTIFACT_GRANT"] = str(grant_id)
+    service, reason = lsc.service_from_env(env)
+    if service is None:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": reason or "SHARING_SERVICE_UNAVAILABLE", "detail": ""}
+    return {"service": service, "status": "READY", "reason": "",
+            "service_type": type(service).__name__}
+
+
 def resolve_situation_source(environment: Mapping[str, str], *, home: Any = None) -> dict[str, Any]:
     """A's situation reader (``life_situation_view.LifeSituationView``), or a named reason.
 
@@ -312,7 +459,8 @@ def resolve_world_provider(environment: Mapping[str, str], *,
                 "detail": "status=%s" % (getattr(status, "outcome", None),),
                 "bridge_dir": text}
     provider = wmos.WorldMoveOpportunityProvider(
-        client=client, action_intent=world_action_intent, bridge_dir=text)
+        client=client, action_intent=world_action_intent, bridge_dir=text,
+        environment=env, world_home=_first(env, WORLD_HOME_ENV))
     return {"provider": provider, "status": "READY", "reason": "", "bridge_dir": text}
 
 
@@ -392,6 +540,74 @@ def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0,
     return ModelContinuationWriter(client, max_new_chars=300)
 
 
+def _practice_responder(environment: Mapping[str, str], *, timeout_s: float = 30.0,
+                        requests: Any = None, admission: Any = None,
+                        pause_guard: Any = None) -> Any:
+    """The shared-practice content responder, over the instance's own provider, or ``None``.
+
+    A content step is a real request about private material, so it is built from the *same*
+    profile resolution, the same transport (with the same pause send guard) and the same request
+    ledger as the other writers: one reservation per call, at the HTTP boundary.  A profile that
+    cannot be resolved yields ``None`` -- no deterministic stand-in is ever used for her words.
+    """
+
+    try:
+        import shared_practice_life as spl
+        from profile_model_transport import OpenAICompatibleTransport
+        from agency_model_client import AgencyModelClient
+    except Exception:
+        return None
+    config = _model_config(environment)
+    if config is None:
+        return None
+    transport = OpenAICompatibleTransport(
+        base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
+        provider=config.get("provider") or "custom", timeout_s=timeout_s,
+        purpose="shared_practice", request_json_object=True, pause_guard=pause_guard)
+    client = AgencyModelClient(config=config, transport=transport, purpose="shared_practice",
+                               timeout_s=timeout_s, max_output_tokens=700)
+    if requests is not None:
+        from life_request_budget import BudgetedModelClient
+
+        client = BudgetedModelClient(client, requests, admission=admission)
+    return spl.ModelPracticeResponder(client, max_output_tokens=700)
+
+
+def _model_reading_response(environment: Mapping[str, str], *, timeout_s: float = 30.0,
+                            requests: Any = None, admission: Any = None,
+                            pause_guard: Any = None) -> Any:
+    """The private page-response writer (A's ``ModelReadingResponse``), or ``None``.
+
+    It is built over the *same* profile resolution, the same transport (with the same pause send
+    guard) and the same request ledger as the work writer, because a page response is a real
+    model request about private material and must be admitted, bounded and budgeted exactly like
+    one.  With no usable provider -- or while A's module is not present -- this returns ``None``
+    and the cycle keeps its previous behaviour and reports ``NOT_CONFIGURED``: no stand-in
+    answers, because an invented note would be a private work the subject never wrote.
+    """
+
+    try:
+        from profile_model_transport import OpenAICompatibleTransport
+        from agency_model_client import AgencyModelClient
+        from subject_reading_response import ModelReadingResponse
+    except Exception:
+        return None
+    config = _model_config(environment)
+    if config is None:
+        return None
+    transport = OpenAICompatibleTransport(
+        base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
+        provider=config.get("provider") or "custom", timeout_s=timeout_s,
+        purpose="reading_response", request_json_object=True, pause_guard=pause_guard)
+    client = AgencyModelClient(config=config, transport=transport, purpose="reading_response",
+                               timeout_s=timeout_s, max_output_tokens=512)
+    if requests is not None:
+        from life_request_budget import BudgetedModelClient
+
+        client = BudgetedModelClient(client, requests, admission=admission)
+    return ModelReadingResponse(client)
+
+
 def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0,
                     requests: Any = None, admission: Any = None,
                     pause_guard: Any = None) -> Any:
@@ -433,6 +649,136 @@ def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0,
     return adapter
 
 
+def resolve_shared_practice(runtime: Any, *, cycle: Any, env: Mapping[str, str],
+                           subject_id: Any, inbox: Any = None,
+                           admission: Any = None, requests: Any = None) -> dict[str, Any]:
+    """v0.4 B: A's shared-practice service over *this* instance's own owner port, or a reason.
+
+    The two A services are built by A's own factory from the same workspace/grant/subject
+    bindings the private-project service already speaks; the subject half is bound to a source
+    verifier made of this instance's *own* read surfaces (A's basis kinds), so a subject-side
+    write can never be bound to a source somebody made up.
+
+    ``status="READY"`` means the real service object exists.  Anything else names what is
+    missing: a half-wired content half is never presented as a working one.
+    """
+
+    try:
+        import shared_practice_life as spl
+        import shared_practice_service as sps
+        from life_artifact_port import LifeArtifactPort
+    except Exception as exc:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": "SHARED_PRACTICE_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    subject = str(subject_id or "").strip()
+    if not subject:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": "SHARED_PRACTICE_SUBJECT_REQUIRED",
+                "detail": "the instance has no Supply subject, so no practice can be bound"}
+    supply = resolve_supply_configuration(env)
+    if supply["missing"]:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": "SUPPLY_CONFIGURATION_MISSING",
+                "missing": list(supply["missing"]),
+                "detail": "no owner port, so no shared practice"}
+    try:
+        port = LifeArtifactPort(supply["supply_socket"], supply["subject_id"])
+    except Exception as exc:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": "SHARED_PRACTICE_PORT_REFUSED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    verifier = spl.LifeSourceVerifier(
+        inbox=inbox,
+        decision_reader=getattr(runtime, "decision_read", None),
+        action_reader=getattr(runtime, "action_read", None),
+        adoption_reader=getattr(runtime, "integration_read", None))
+    # A's factory resolves its bindings *by name*.  This instance already knows all three facts
+    # -- they are exactly what the Supply port was opened with -- but the one-day profile spells
+    # the subject ``NYA02_SUBJECT`` / ``CHIYO_NATIVE_LIFE_SUPPLY_SUBJECT``, names A never looks
+    # for.  So the owner-side facts are handed over under A's own names instead of hoping a
+    # profile happens to use them: a content half that silently degrades to UNAVAILABLE on every
+    # real profile is the same as having none.
+    practice_env = dict(env)
+    practice_env["NYAIRO_LIFE_SUBJECT"] = subject
+    if supply.get("artifact_grant_id"):
+        practice_env["NYAIRO_ARTIFACT_GRANT"] = str(supply["artifact_grant_id"])
+    if supply.get("supply_socket"):
+        practice_env["NYAIRO_LIFE_SUPPLY_SOCKET"] = str(supply["supply_socket"])
+    workspace = _first(env, ("CHIYO_LIFE_SUPPLY_WORKSPACE_ID", "NYAIRO_LIFE_WORKSPACE_ID",
+                             "LIFE_SUPPLY_WORKSPACE_ID"))
+    if workspace:
+        practice_env["NYAIRO_LIFE_WORKSPACE_ID"] = workspace
+    subject_service = sps.shared_practice_service_from_env(
+        port, practice_env, actor=sps.CALLER_LIFE, source_verifier=verifier)
+    if subject_service is None:
+        return {"service": None, "status": "UNAVAILABLE",
+                "reason": "SHARED_PRACTICE_NOT_CONFIGURED",
+                "detail": "the workspace / grant / subject bindings are incomplete"}
+    person_service = sps.shared_practice_service_from_env(port, practice_env,
+                                                          actor=sps.CALLER_USER)
+    #: The content request shares the instance's *persistent* request ledger with AG-1 and the
+    #: other writers (one object, one ledger), and it is admitted at the transport's send boundary:
+    #: a bare request that skipped either would be a request nobody paid for.
+    requests = requests if requests is not None else getattr(
+        getattr(cycle, "budget", None), "requests", None)
+    responder = _practice_responder(env, requests=requests, admission=admission,
+                                    pause_guard=admission)
+    service = spl.SharedPracticeLife(subject=subject_service, person=person_service,
+                                     responder=responder)
+    return {"service": service, "status": "READY", "reason": "",
+            "model_ready": responder is not None,
+            "person_half": person_service is not None,
+            "source_verifier": verifier.describe()}
+
+
+def resolve_local_contacts(runtime: Any, *, cycle: Any, state_root: Path | str, env: Mapping[str, str],
+                          subject_id: Any, admission: Any = None,
+                          requests: Any = None) -> dict[str, Any]:
+    """v0.4 B: A's local-contact inbox, the co-presence protocol, and the resident's pass.
+
+    All three are built from *this instance's* identity -- the Supply subject it already feeds
+    FiniteCoPresence, and the home it already hands the World -- never from anything a client
+    sent.  ``home_ref`` is the instance's ``CHIYO_WORLD_HOME`` when the profile has one and the
+    Life state root otherwise; the inbox and the protocol are given the *same* string, because
+    an invitation is only accepted when it names this home.
+
+    A profile that cannot build the seam gets a named ``UNAVAILABLE`` record: no inbox, no
+    protocol, no port.  There is deliberately no stand-in ledger.
+    """
+    try:
+        import life_co_presence as cop
+        import life_local_contact as lc
+        import life_social_contacts as lsc
+    except Exception as exc:
+        return {"status": "UNAVAILABLE", "reason": "CONTACT_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    subject = str(subject_id or "").strip()
+    if not subject:
+        return {"status": "UNAVAILABLE", "reason": "CONTACT_SUBJECT_REQUIRED",
+                "detail": "the instance has no Supply subject, so no local contact can be bound"}
+    home = _first(env, WORLD_HOME_ENV) or str(state_root)
+    try:
+        inbox = lc.LocalContactInbox(state_root, subject_id=subject, home_ref=home)
+    except Exception as exc:
+        return {"status": "UNAVAILABLE", "reason": "CONTACT_INBOX_REFUSED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    protocol = cop.FiniteCoPresence(runtime, state_root=state_root, subject_id=subject,
+                                    home=home, cycle=cycle)
+    # v0.4 shared practice: the content half over this instance's own owner port.  It is wired
+    # *before* the port so the port can hold it, and its status is reported either way.
+    practice = resolve_shared_practice(runtime, cycle=cycle, env=env, subject_id=subject,
+                                       inbox=inbox, admission=admission, requests=requests)
+    port = lsc.SocialContactPort(runtime, state_root=state_root, subject_id=subject, home=home,
+                                 inbox=inbox, protocol=protocol, cycle=cycle,
+                                 practice=practice.get("service"))
+    return {"status": "READY", "inbox": inbox, "protocol": protocol, "port": port,
+            "subject_id": subject, "home_ref": home,
+            "shared_practice": {key: value for key, value in practice.items()
+                                if key != "service"},
+            "ledger_path": str(getattr(inbox, "path", "") or "")}
+
+
 def assemble_autonomous_life(
     runtime: Any,
     *,
@@ -441,6 +787,7 @@ def assemble_autonomous_life(
     experience_provider: Any = None,
     world_provider: Any = None,
     writer: Any = None,
+    reading_response_writer: Any = None,
     requests: Any = None,
     pause_admission: Any = None,
     enabled: bool = False,
@@ -507,10 +854,32 @@ def assemble_autonomous_life(
         return {"state": BLOCKED, "reason": "NO_CONTENT_WRITER",
                 "detail": "the profile has no usable provider for the content writer"}
 
+    # rc1-v04: the private page response rides the same client, the same transport pause guard
+    # and the same request ledger as the work writer.  ``None`` is a first-class answer: the
+    # reading step then keeps its previous behaviour and reports ``NOT_CONFIGURED``.  It is
+    # deliberately *not* a reason to block the assembly, because reading without an annotation
+    # is still a real read.
+    if reading_response_writer is None:
+        reading_response_writer = _model_reading_response(
+            env, requests=requests, admission=admission, pause_guard=admission)
+
     port = LifeArtifactPort(supply["supply_socket"], supply["subject_id"])
     artifact_adapter = SupplyManagedArtifactActionAdapter(
         port, grant_id=supply["artifact_grant_id"],
         workspace_id=env.get("CHIYO_LIFE_SUPPLY_WORKSPACE_ID"))
+    # v0.4 research: B's research workspace over the *same* owner port and the same env bindings
+    # the private-project service uses.  ``None`` is a first-class answer: no research option is
+    # offered and nothing can be created, because a stand-in store would be a second library.
+    research = resolve_research_service(port, env)
+    # v0.4 C: B's practice workspace (reviews + methods) over the *same* owner port and the same
+    # env bindings.  ``None`` is a first-class answer: no review option is offered, no method is
+    # named and nothing can be written, because a stand-in workspace would be a second library and
+    # its memory would be a second Memory.
+    practice = resolve_practice_service(port, env)
+    # v0.4 sharing: B's sharing service over the *same* owner bindings (or a named reason).  With
+    # none, the cycle offers no draft/action at all -- and nothing pretends a share was delivered.
+    sharing = resolve_sharing_service(env, subject_id=supply["subject_id"],
+                                      grant_id=supply["artifact_grant_id"])
 
     # D (life-v1): the two injected readers and the explicit work binding.
     #   * ``situation`` is A's view: the Body column comes from the instance's own gateway
@@ -529,6 +898,53 @@ def assemble_autonomous_life(
     situation_source = situation["source"]
     situation_record = {k: v for k, v in situation.items() if k != "source"}
 
+    # v0.4 stage A: her own "later" and the private-project seam.
+    #   * ``future`` is a store in this cycle's own state root (one JSON document, atomic writes).
+    #   * ``project_gateway`` is B's owner service when it is wired; with none, the gateway is
+    #     *unavailable* by name, no project option is offered and nothing can be created -- there
+    #     is deliberately no local stand-in library of works.
+    #   * ``questions`` reads her own private ``unclear`` markers, which is the material a project
+    #     option may be seeded from.  An unreadable private document simply yields no option.
+    future_items = None
+    project_gateway = None
+    project_questions = None
+    try:
+        import life_future_items as lfi
+        import life_project_options as lpo
+
+        future_items = lfi.FutureItems(root, subject_id=supply["subject_id"])
+        project_gateway = lpo.resolve_gateway(
+            environment=env, subject_id=supply["subject_id"],
+            workspace_id=env.get("CHIYO_LIFE_SUPPLY_WORKSPACE_ID"))
+        _items_id = bindings.get("private_items_artifact_id")
+        if _items_id:
+            import private_daily_items as pdi
+
+            _store = pdi.PrivateDailyItems(port, str(_items_id))
+
+            def project_questions(_store=_store):
+                # The metadata view is deliberately text-free, so the note itself is read through
+                # the document's own explicit accessor (``full_text``) -- never inferred from a
+                # flag.  A question with no note is not a seed and is skipped.
+                try:
+                    rows: list[dict[str, Any]] = []
+                    for row in _store.items(pdi.ITEM_UNCLEAR_MARKER):
+                        item_id = str(row.get("item_id") or "")
+                        if not item_id or not row.get("has_note"):
+                            continue
+                        rows.append({
+                            "marker_id": item_id,
+                            "source_id": str(row.get("source_id") or ""),
+                            "source_revision": str(row.get("source_revision") or ""),
+                            "note": _store.full_text(item_id),
+                        })
+                    return rows
+                except Exception:
+                    return []
+    except Exception as exc:  # a seam that cannot be built is reported, never faked
+        project_questions = None
+        _seam_error = f"{type(exc).__name__}: {exc}"[:200]
+
     cycle = alc.AutonomousLifeCycle(
         runtime,
         artifact_port=port,
@@ -536,6 +952,7 @@ def assemble_autonomous_life(
         workspace_id=env.get("CHIYO_LIFE_SUPPLY_WORKSPACE_ID"),
         artifact_grant_id=supply["artifact_grant_id"],
         writer=writer,
+        reading_response_writer=reading_response_writer,
         experience_provider=experience_provider,
         world_opportunity_provider=world_provider,
         # The chain is *capable* once it is assembled; whether it actually runs is the
@@ -550,8 +967,40 @@ def assemble_autonomous_life(
         appraisal_source=appraisal_source,
         work_artifact_id=work_artifact,
         reading_artifact_id=bindings["reading_artifact_id"],
+        # v0.4 stage A: her own "later" store and the private-project seam (both optional).
+        future_items=future_items,
+        project_owner=project_gateway,
+        project_questions_provider=project_questions,
         private_items_artifact_id=bindings["private_items_artifact_id"],
+        # v0.4 research: B's workspace over this exact owner port (or ``None``).  With none, no
+        # research option exists and nothing can be created; with one, the decision and writing
+        # prompts carry bounded, versioned source text and the created work is an ordinary
+        # continuable artifact written through AR-0.
+        research_workspace=research["service"],
+        # v0.4 C: the bounded practice seam over B's workspace (or ``None``).  With one, the
+        # decision prompt sees her recallable experiences and her relevant methods, a review option
+        # can be created and a method draft saved, and the writer's prompt carries the methods as
+        # *document* context -- never as permission, code or persona.
+        practice_workspace=practice["service"],
+        # v0.4 sharing: B's owner seam (or ``None``).  With one, the decision prompt carries her
+        # open drafts and the sources she could share from, and one owner call settles the single
+        # sharing request a Decision may make.  ``LOCAL_DELIVERED`` stays a local-inbox fact.
+        sharing_service=sharing["service"],
     )
+    # v0.4 B: the local-contact seam (A's inbox + the finite co-presence protocol).  It is built
+    # on the *same* subject and home the cycle already uses, so an invitation that names another
+    # instance is declined by the protocol rather than accepted by a guess.  The port is attached
+    # to the cycle (bounded cognition view) and handed back as ``contact_port`` for the resident's
+    contacts = resolve_local_contacts(runtime, cycle=cycle, state_root=root, env=env,
+                                      subject_id=supply["subject_id"], admission=admission,
+                                      requests=requests)
+    if contacts.get("status") == "READY":
+        cycle.social_contacts = contacts["port"]
+        cycle.contact_inbox = contacts["inbox"]
+        cycle.co_presence = contacts["protocol"]
+    contacts_record = {key: value for key, value in contacts.items()
+                       if key not in {"inbox", "protocol", "port"}}
+    contact_port = contacts.get("port")
     # The World feed is assembled only when a real observation seam exists.  Without one the
     # cycle must not consult the World at all -- that is the behaviour every pre-B6 profile
     # keeps -- and a profile with no World service must never be handed a guessed opportunity.
@@ -602,6 +1051,26 @@ def assemble_autonomous_life(
         "situation": situation_record,
         "continuity_wired": continuity_source is not None,
         "appraisal_wired": appraisal_source is not None,
+        # rc1-v04: whether a private page response is wired at all, said plainly, so a reader can
+        # tell "the model had nothing to add" (``NO_CHANGE``) from "nothing was asking".
+        "reading_response": {
+            "wired": reading_response_writer is not None,
+            "state": "READY" if reading_response_writer is not None else "NOT_CONFIGURED",
+        },
+        # v0.4 research: what was really wired, said plainly, so a reader can tell "no workspace in
+        # this tree" from "the workspace had no material".  The service object itself is not handed
+        # back here -- it lives on the cycle, where the seam owns it.
+        "research": {key: value for key, value in research.items() if key != "service"},
+        # v0.4 C: what was really wired for practices, said plainly (the service object stays on
+        # the cycle, where the seam owns it).
+        "sharing": {key: value for key, value in sharing.items() if key != "service"},
+        "practice": {key: value for key, value in practice.items() if key != "service"},
+        # v0.4 B: the local-contact seam, said plainly -- which identity it was bound to, whether
+        # A's ledger exists yet, and the live port the resident step drives.  The inbox and the
+        # protocol objects are not re-exported here; they live on the cycle, where the seam owns
+        # them, and this record only describes them.
+        "contacts": contacts_record,
+        "contact_port": contact_port,
     }
 
 
@@ -619,10 +1088,42 @@ def runner_tick(assembled: Mapping[str, Any], *, act: bool = True) -> dict[str, 
                 "detail": assembled.get("detail")}
     runner = assembled["runner"]
     poller = assembled.get("feed_poller")
-    events = poller.wake(runner, act=act) if poller is not None else []
-    due = runner.run_due(act=act)
+    # v0.4 C: the bounded, zero-model upkeep runs **first, once per tick**, before anything is
+    # polled.  Both reasons come from the real chain:
+    #   (a) a closed window still has to re-check the dependency conditions and let LR-4 reach its
+    #       own due/expired verdicts -- before this it only happened inside a wake, so a NOT_DUE
+    #       tick with no event scanned nothing at all.  It costs no request and no round;
+    #   (b) an eligibility LR-4 opens *in this tick* is then visible to the eligibility feed's own
+    #       poll in the same tick instead of one tick later.
+    # The wake below is told this tick already maintained (`maintain=False` + the report), so the
+    # upkeep never runs twice for one tick, and nothing here bypasses the switch, the budget or the
+    # lease: `wake` still checks all three.
+    upkeep = runner.maintain()
+    # v0.4 B: the local-contact pass runs **once per tick**, before the feeds are polled, so that
+    #   (a) an ordinary message is merely observed (no pause, no Activity, no model call), and
+    #   (b) an invitation's own Decision happens before anything this tick could adopt on its
+    #       behalf -- and a joint time that just ended is visible to the eligibility feed's same
+    #       tick poll.  The pass is bounded (`max_per_tick`), it claims before it works, and it
+    #       records exactly one transport result per event.
+    contacts = assembled.get("contact_port")
+    contact_step = contacts.tick() if contacts is not None else None
+    if contact_step and int(contact_step.get("llm_calls") or 0) > 0:
+        # The invitation already used this tick's fresh decision. Leave feeds untouched so
+        # their events remain available to the next normal tick, rather than asking twice.
+        return {"ok": True, "waiting": upkeep, "contacts": contact_step, "events": [],
+                "feed_errors": [], "due": {"kind": "CHECK_WINDOW", "status": "CONTACT_DECISION_HANDLED",
+                                           "llm_calls": 0, "decision": None,
+                                           "detail": "this tick already considered an explicit invitation"}}
+    events: list[Any] = []
+    if poller is not None:
+        for event in poller.poll():
+            events.append(runner.wake_on_event(event, act=act, maintain=False,
+                                               maintained=upkeep))
+    due = runner.run_due(act=act, maintain=False, maintained=upkeep)
     return {
         "ok": True,
+        "waiting": upkeep,
+        "contacts": contact_step,
         "events": [record.to_dict() for record in events],
         "feed_errors": list(getattr(poller, "last_errors", []) or []),
         "due": due.to_dict(),
@@ -658,8 +1159,11 @@ __all__ = [
     "ENV_RUN_ID",
     "request_budget",
     "resolve_situation_source",
+    "resolve_sharing_service",
+    "resolve_shared_practice",
     "resolve_body_port",
     "resolve_work_artifact_id",
+    "resolve_research_service",
     "WORK_ARTIFACT_ENV",
     "WORLD_HOME_ENV",
 ]

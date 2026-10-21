@@ -46,6 +46,11 @@ from typing import Any, Optional
 
 SCHEMA_DECLARATIONS = "world.object.capabilities.v1"
 DECLARATIONS_KEY = "consumables"
+#: v0.4: the catalog-level declaration block.  A purchased instance id is
+#: derived at purchase time, so it cannot be declared in advance by instance
+#: id; the world declares the *catalog item* instead.  Same document, same
+#: owner, no second declaration store.
+CATALOG_DECLARATIONS_KEY = "consumable_catalog"
 MAX_DECLARATIONS = 512
 
 SCHEMA_RECEIPT = "world.consumption.receipt.v1"
@@ -58,7 +63,11 @@ MAX_RECEIPTS = 256
 
 SOURCE_HELD = "held"
 SOURCE_PLACE_SUPPLY = "place_supply"
-SOURCES = (SOURCE_HELD, SOURCE_PLACE_SUPPLY)
+#: v0.4 phone shopping: the one narrow third source -- an instance the owner
+#: *bought* and whose purchase voucher is proven below.  A world-declared free
+#: consumable keeps its old sources; nothing else gains this one.
+SOURCE_PURCHASED = "purchased_item"
+SOURCES = (SOURCE_HELD, SOURCE_PLACE_SUPPLY, SOURCE_PURCHASED)
 
 #: Exact receipt fields.  ``placement_before`` records *what* was removed,
 #: which is evidence the placement map can no longer carry afterwards.
@@ -96,6 +105,18 @@ ALREADY_CONSUMED = "ALREADY_CONSUMED"
 POSE_CANNOT_CONSUME = "POSE_CANNOT_CONSUME"
 LOCATION_CLOSED = "LOCATION_CLOSED"
 RHYTHM_UNAVAILABLE = "RHYTHM_UNAVAILABLE"
+
+# -- v0.4: the owned-purchase consumption permit ----------------------------
+#: ``consumption_permit`` values a declaration may carry.  ``free`` is the
+#: v0.3 vocabulary (``free_to_consume=true``); ``owned_purchase`` is the one
+#: narrow exception opened in v0.4 and it requires a proven purchase voucher.
+PERMIT_FREE = "free"
+PERMIT_OWNED_PURCHASE = "owned_purchase"
+PERMITS = (PERMIT_FREE, PERMIT_OWNED_PURCHASE)
+#: Verdict codes for the permit path.
+PURCHASE_VOUCHER_MISSING = "PURCHASE_VOUCHER_MISSING"
+PURCHASE_NOT_OWNED = "PURCHASE_NOT_OWNED"
+NOT_AN_ECONOMY_INSTANCE = "NOT_AN_ECONOMY_INSTANCE"
 
 # -- property-economy facts ------------------------------------------------
 #: Where the property economy keeps its single document (same home as the rest
@@ -198,16 +219,58 @@ def load_consumable_declarations(
     return out
 
 
+def load_catalog_declarations(hermes_home: Optional[Any] = None) -> dict[str, Any]:
+    """The ``consumable_catalog`` block (declarations keyed by catalog item).
+
+    Same document, same world owner as ``consumables``.  Lenient and bounded,
+    never invented: a missing/broken block simply declares nothing.
+    """
+
+    document = declarations_document(hermes_home)
+    if document is None:
+        return {}
+    block = document.get(CATALOG_DECLARATIONS_KEY)
+    if not isinstance(block, Mapping):
+        return {}
+    out: dict[str, Any] = {}
+    for name in sorted(block)[:MAX_DECLARATIONS]:
+        key = _text(name)
+        if key is None:
+            continue
+        out[key] = block[name]
+    return out
+
+
 def declaration_of(
-    object_id: Any, hermes_home: Optional[Any] = None
+    object_id: Any,
+    hermes_home: Optional[Any] = None,
+    *,
+    economy: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
-    """One object's consumable declaration (``{}`` when it declares nothing)."""
+    """One object's consumable declaration (``{}`` when it declares nothing).
+
+    Resolution order, and only this order:
+
+    1. an instance-id declaration in ``consumables`` (v0.3 behaviour, unchanged);
+    2. v0.4: for a *provably present* economy instance, the catalog-level
+       declaration of the catalog item that instance belongs to.  An instance id
+       minted at purchase time cannot be declared in advance, so the world
+       declares the catalog item instead.  No economy facts, no lookup 2.
+    """
 
     name = _text(object_id)
     if name is None:
         return {}
     found = load_consumable_declarations(hermes_home).get(name)
-    return dict(found) if isinstance(found, Mapping) else {}
+    if isinstance(found, Mapping):
+        return dict(found)
+    if economy is None:
+        return {}
+    catalog_item_id = economy_instances(economy).get(name)
+    if not catalog_item_id:
+        return {}
+    catalog_found = load_catalog_declarations(hermes_home).get(catalog_item_id)
+    return dict(catalog_found) if isinstance(catalog_found, Mapping) else {}
 
 
 def economy_instances(economy: Optional[Mapping[str, Any]]) -> dict[str, str]:
@@ -241,8 +304,99 @@ def economy_instances(economy: Optional[Mapping[str, Any]]) -> dict[str, str]:
 
 
 def is_economy_instance(economy: Optional[Mapping[str, Any]], object_id: Any) -> bool:
+    """Is this object id a property-economy item instance (per given facts)?"""
+
     name = _text(object_id)
     return bool(name and name in economy_instances(economy))
+
+
+def purchase_voucher(
+    economy: Optional[Mapping[str, Any]], object_id: Any
+) -> dict[str, Any]:
+    """The owner's purchase evidence for one economy instance, or a refusal.
+
+    This is the *only* thing that can turn an economy instance into consumable
+    food, and it is derived, never supplied: the instance must be an economy
+    item whose ``acquisition_kind`` is ``PURCHASE``, whose ``disposition`` is
+    ``OWNED``, and which is named by a matching ``PURCHASE`` / ``DEBIT``
+    transaction (same ``purchase_intent_id``, ``catalog_item_id`` and
+    ``transaction_id`` as the item's own acquisition provenance).
+
+    The economy record is *not* mutated by a consumption: ownership stays as it
+    was and the "it is gone" truth lives in the substrate receipt.
+    """
+
+    name = _text(object_id)
+    if name is None:
+        return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                "detail": "object_id must be bounded text"}
+    if not isinstance(economy, Mapping):
+        return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                "detail": "no readable property-economy facts"}
+    items = economy.get("items")
+    if not isinstance(items, list):
+        return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                "detail": "economy declares no item instances"}
+    item = None
+    for entry in items:
+        if isinstance(entry, Mapping) and entry.get("item_instance_id") == name:
+            item = entry
+            break
+    if item is None:
+        return {"ok": False, "reason_code": NOT_AN_ECONOMY_INSTANCE,
+                "detail": "%s is not a property-economy instance" % name}
+    if item.get("acquisition_kind") != "PURCHASE":
+        return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                "detail": "item was not acquired by purchase"}
+    if item.get("disposition") != "OWNED":
+        return {"ok": False, "reason_code": PURCHASE_NOT_OWNED,
+                "detail": "item disposition is %r, not OWNED"
+                % (item.get("disposition"),)}
+    provenance = item.get("acquisition_provenance")
+    if not isinstance(provenance, Mapping):
+        return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                "detail": "item carries no acquisition provenance"}
+    transaction_id = provenance.get("transaction_id")
+    intent_id = provenance.get("purchase_intent_id")
+    transactions = economy.get("transactions")
+    if not isinstance(transactions, list):
+        return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                "detail": "economy declares no transactions"}
+    for transaction in transactions:
+        if not isinstance(transaction, Mapping):
+            continue
+        if transaction.get("transaction_id") != transaction_id:
+            continue
+        if (
+            transaction.get("transaction_kind") != "PURCHASE"
+            or transaction.get("direction") != "DEBIT"
+        ):
+            return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                    "detail": "the named transaction is not a purchase debit"}
+        if (
+            transaction.get("purchase_intent_id") != intent_id
+            or transaction.get("catalog_item_id") != item.get("catalog_item_id")
+        ):
+            return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+                    "detail": "purchase transaction does not match the item"}
+        return {
+            "ok": True,
+            "reason_code": None,
+            "detail": None,
+            "voucher": {
+                "item_instance_id": name,
+                "catalog_item_id": item.get("catalog_item_id"),
+                "transaction_id": transaction_id,
+                "purchase_intent_id": intent_id,
+                "amount": transaction.get("amount"),
+                "occurred_at": transaction.get("occurred_at"),
+                "source": (provenance.get("source")
+                           if isinstance(provenance, Mapping) else None),
+                "disposition": item.get("disposition"),
+            },
+        }
+    return {"ok": False, "reason_code": PURCHASE_VOUCHER_MISSING,
+            "detail": "no purchase transaction names this item"}
 
 def economy_path(hermes_home: Optional[Any] = None) -> Path:
     """The property-economy document this home owns (never created here)."""
@@ -466,15 +620,47 @@ def consumption_verdict(
             NOT_CONSUMABLE,
             "consumable=%r for %s" % (declaration.get("consumable"), name),
         )
-    if not _true(declaration.get("free_to_consume")):
+    # -- v0.4: which permit does this declaration actually carry? -----------
+    # ``free`` is the v0.3 rule (free_to_consume=true).  ``owned_purchase`` is
+    # the one narrow exception v0.4 opens, and it is not a claim the caller can
+    # make: it needs the owner's own purchase voucher, proven below.  Anything
+    # else is NOT_FREE, exactly as before.
+    permit = _text(declaration.get("consumption_permit"))
+    voucher: Optional[dict[str, Any]] = None
+    if _true(declaration.get("free_to_consume")):
+        if permit is not None and permit != PERMIT_FREE:
+            return _denied(
+                NOT_FREE,
+                "free_to_consume=true conflicts with consumption_permit=%r for %s"
+                % (permit, name),
+            )
+        permit = PERMIT_FREE
+    elif permit == PERMIT_OWNED_PURCHASE:
+        if facts["status"] != ECONOMY_PRESENT:
+            return _denied(
+                PURCHASE_VOUCHER_MISSING,
+                "%s declares an owned-purchase permit but no readable property-"
+                "economy facts are present" % name,
+            )
+        proof = purchase_voucher(facts["economy"], name)
+        if not proof["ok"]:
+            return _denied(proof["reason_code"], proof["detail"])
+        voucher = dict(proof["voucher"])
+    else:
         return _denied(
             NOT_FREE,
             "free_to_consume=%r for %s" % (declaration.get("free_to_consume"), name),
         )
 
-    # Only a *validated, present* economy can name an instance.  ``absent``
-    # keeps the pre-existing behaviour (no economy owner -> no economy objects).
-    if facts["status"] == ECONOMY_PRESENT and is_economy_instance(facts["economy"], name):
+    # Only a *validated, present* economy can name an instance, and an economy
+    # instance stays refused unless the owned-purchase permit proved a voucher
+    # above.  ``absent`` keeps the pre-existing behaviour (no economy owner ->
+    # no economy objects).
+    if (
+        facts["status"] == ECONOMY_PRESENT
+        and is_economy_instance(facts["economy"], name)
+        and voucher is None
+    ):
         return _denied(
             ECONOMY_OBJECT,
             "%s is a property-economy instance; this version has no payment or "
@@ -488,7 +674,12 @@ def consumption_verdict(
         )
 
     source = SOURCE_HELD if held else SOURCE_PLACE_SUPPLY
-    if not held:
+    if voucher is not None:
+        # A bought instance is never *place supply*: the receipt names the
+        # purchase, so a later reader can tell "the shop gave it" from "she
+        # bought it and it is hers".
+        source = SOURCE_PURCHASED
+    if not held and voucher is None:
         open_state = place_open_state(current_place, now, environment)
         if open_state["status"] != "OPEN":
             return _denied(
@@ -498,13 +689,18 @@ def consumption_verdict(
                 open_state=open_state,
             )
 
-    return {
+    allowed = {
         "allowed": True,
         "reason_code": ALLOWED,
         "detail": "ok",
         "source": source,
         "declaration": dict(declaration),
     }
+    if voucher is not None:
+        # The proven voucher travels with the verdict so the receipt and any
+        # reconciler can cite the purchase instead of re-deriving it.
+        allowed["purchase_voucher"] = voucher
+    return allowed
 
 
 def place_open_state(
@@ -621,8 +817,6 @@ def verify_receipt(
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
 __all__ = [
     "ALLOWED",
     "ALREADY_CONSUMED",
@@ -653,6 +847,14 @@ __all__ = [
     "SOURCES",
     "SOURCE_HELD",
     "SOURCE_PLACE_SUPPLY",
+    "SOURCE_PURCHASED",
+    "CATALOG_DECLARATIONS_KEY",
+    "NOT_AN_ECONOMY_INSTANCE",
+    "PERMIT_FREE",
+    "PERMIT_OWNED_PURCHASE",
+    "PERMITS",
+    "PURCHASE_NOT_OWNED",
+    "PURCHASE_VOUCHER_MISSING",
     "build_receipt",
     "consumption_verdict",
     "declaration_of",
@@ -662,9 +864,11 @@ __all__ = [
     "economy_path",
     "economy_view",
     "is_economy_instance",
+    "load_catalog_declarations",
     "load_consumable_declarations",
     "now_iso",
     "place_open_state",
     "proposal_fingerprint",
+    "purchase_voucher",
     "verify_receipt",
 ]

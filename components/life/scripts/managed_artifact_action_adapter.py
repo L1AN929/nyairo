@@ -35,6 +35,18 @@ original operation, this adapter re-reads that version through the same official
 record still shows that version, produced by that ``operation_key``, with the bytes this action
 submitted.  A read that cannot establish that returns no evidence at all, and AR-1 keeps the
 action open -- the adapter never turns a claim into an observation.
+
+The archive verb (v0.4 work closeout)
+-------------------------------------
+``archive_artifact`` is the owner's own lifecycle verb, and this adapter treats it differently from
+a commit on purpose: a commit is *progress*, an archive is *the end of one work*.  ``OK`` means
+this operation closed this artifact; ``NO_CHANGE`` means it was already closed by someone else,
+which is not this action's success; ``CONFLICT`` means the revision the intent was based on is no
+longer current, and the caller must reconsider instead of having a newer revision swapped in.  The
+observed-result rule is the same as for a commit, only the fact differs: the owner's own operation
+row, its effect receipt and the artifact's current state must all agree that *this* key archived
+it before an :class:`artifact_archived_verified` attestation is handed over.  The artifact, its
+versions and its content survive an archive; nothing here deletes or tombstones anything.
 """
 from __future__ import annotations
 
@@ -74,11 +86,20 @@ from life_artifact_port import (  # noqa: E402
     LifeArtifactPort,
     LifeArtifactUnavailable,
 )
+from artifact_closeout import CLOSEOUT_PREDICATE  # noqa: E402
 
 #: The narrow verbs this adapter may execute.  Anything else is refused before submission.
 OP_READ_ARTIFACT = "read_artifact"
 OP_COMMIT_VERSION = "commit_artifact_version"
-SUPPORTED_OPS = frozenset({OP_READ_ARTIFACT, OP_COMMIT_VERSION})
+#: The owner's own lifecycle verb (``life_supply.COMMAND_OPS`` spells it ``archive_artifact``).  It
+#: closes one work and keeps every row, version and the content -- this adapter has no tombstone
+#: verb at all, because a tombstone is terminal and hides the content.
+OP_ARCHIVE_ARTIFACT = "archive_artifact"
+SUPPORTED_OPS = frozenset({OP_READ_ARTIFACT, OP_COMMIT_VERSION, OP_ARCHIVE_ARTIFACT})
+
+#: The kind the owner's own operation ledger records for a lifecycle change: ``artifact/store.py``
+#: inserts the target ``lifecycle`` (``"ARCHIVED"``) into ``artifact_operations.operation_kind``.
+ARCHIVE_OPERATION_KIND = "ARCHIVED"
 
 #: Authority domain recorded on every receipt, so a later reader can tell which owner spoke.
 AUTHORITY_DOMAIN = "artifact_authority"
@@ -167,6 +188,19 @@ class SupplyManagedArtifactActionAdapter(ActionAdapterProtocol):
             normalized["expected_head"] = expected_head
             normalized["content"] = content
             normalized["content_sha256"] = _sha256_hex(content)
+        elif op == OP_ARCHIVE_ARTIFACT:
+            # The archive intent is exactly these three parts: which owner artifact, the owner
+            # revision the decision was based on, and the derived Supply operation key.  The key is
+            # not part of the frozen payload because AR-0 already derives it from the action's
+            # ``idempotency_key``; a payload that could name its own key would let one intended
+            # archive be replayed as another.
+            expected_revision = payload.get("expected_revision")
+            if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) \
+                    or expected_revision < 1:
+                raise ContractViolationError(
+                    "'expected_revision' must be the integer artifact revision read from the "
+                    "owner (>= 1); an archive without one is not a full intent")
+            normalized["expected_revision"] = expected_revision
         return normalized
 
     # -- submit ------------------------------------------------------------------------
@@ -195,6 +229,12 @@ class SupplyManagedArtifactActionAdapter(ActionAdapterProtocol):
         if op == OP_READ_ARTIFACT:
             return self._do_read(action=action, attempt=attempt, artifact_id=artifact_id,
                                  operation_key=operation_key)
+
+        if op == OP_ARCHIVE_ARTIFACT:
+            return self._do_archive(
+                action=action, attempt=attempt, artifact_id=artifact_id,
+                expected_revision=int(payload["expected_revision"]),
+                operation_key=operation_key, fault_hook=fault_hook)
 
         expected_head = payload.get("expected_head")
         content = str(payload.get("content", ""))
@@ -280,14 +320,15 @@ class SupplyManagedArtifactActionAdapter(ActionAdapterProtocol):
 
     def _success(self, *, action, attempt, operation_key, owner_status, version_id,
                  version_number, version_created, content_sha256, details,
-                 observed_result: Optional[ResultEvidence] = None) -> AdapterSubmissionOutcome:
+                 observed_result: Optional[ResultEvidence] = None,
+                 receipt_kind: str = "managed_artifact_commit_receipt") -> AdapterSubmissionOutcome:
         evidence_ref = (f"artifactversion:{version_id}" if version_id
                         else f"supply_op:{operation_key}")
         receipt = ActionReceipt(
             receipt_id=self._receipt_id(attempt, operation_key),
             action_id=str(action["action_id"]),
             attempt_id=str(attempt["attempt_id"]),
-            receipt_kind="managed_artifact_commit_receipt",
+            receipt_kind=receipt_kind,
             provider=PROVIDER,
             provider_operation_ref=operation_key,
             status_claim=RECEIPT_CLAIM_SUCCEEDED,
@@ -357,9 +398,20 @@ class SupplyManagedArtifactActionAdapter(ActionAdapterProtocol):
         provider-reported, and AR-1 keeps the action open.  The evidence id is derived from
         (action, version, observer), so re-verifying the same fact never adds a second root
         evidence, and this method only ever reads -- it can never mint a second version.
+
+        For an ``archive_artifact`` intent the same discipline applies with a different fact: the
+        evidence exists only when the owner's own operation row for *this* key says the archive
+        happened, the owner's effect receipt for that key says ``APPLIED``, and the artifact's
+        current state still reads back ``ARCHIVED`` at exactly the revision that operation
+        produced (``_observed_archive_result``).  An artifact that merely *is* ``ARCHIVED`` -- by
+        another operation, or before this action existed -- is never turned into this action's
+        evidence.
         """
         payload = dict(action.get("frozen_payload") or {})
-        if str(payload.get("op") or "") != OP_COMMIT_VERSION:
+        op = str(payload.get("op") or "")
+        if op == OP_ARCHIVE_ARTIFACT:
+            return self._observed_archive_result(action=action, payload=payload)
+        if op != OP_COMMIT_VERSION:
             return None
         artifact_id = str(payload.get("artifact_id") or "")
         if not artifact_id:
@@ -410,6 +462,114 @@ class SupplyManagedArtifactActionAdapter(ActionAdapterProtocol):
             recorded_at=ts,
         )
 
+    def _observed_archive_result(self, *, action, payload) -> Optional[ResultEvidence]:
+        """Three owner-side facts, and only when all three agree: this key archived this artifact.
+
+        1. the owner's **operation row** for this action's original ``operation_key`` exists, is an
+           ``ARCHIVED`` lifecycle operation on this artifact, and its own stored result says
+           ``OK``/``ARCHIVED`` at a revision;
+        2. the owner's **effect receipt** for that same key exists, is ``APPLIED`` and names the
+           same artifact;
+        3. the artifact **reads back** ``ARCHIVED`` right now, at exactly that revision, so the
+           state the operation produced is still the state the owner serves.
+
+        A stale or replayed answer cannot pass this: an ``ARCHIVED`` artifact archived by a
+        *different* operation key has no operation row under this key (its own key answers
+        ``NO_CHANGE`` without a receipt), and any later lifecycle change moves the revision away
+        from the one this operation recorded.  The evidence only ever reads.
+        """
+        import json
+
+        artifact_id = str(payload.get("artifact_id") or "")
+        expected_revision = payload.get("expected_revision")
+        if not artifact_id:
+            return None
+        operation_key = self.operation_key_for(str(action["idempotency_key"]))
+        try:
+            resolved = self.port.resolve_operation(operation_key)
+            if resolved.effect_state != EffectState.APPLIED:
+                return None
+            if resolved.reason != "EFFECT_RECEIPT_FOUND":
+                # Only an effect receipt is the owner saying the effect landed; an operation row
+                # without a receipt is exactly the "already archived" (NO_CHANGE) case.
+                return None
+            receipt = dict((resolved.raw or {}).get("receipt") or {})
+            row = self.port.operation_row(operation_key)
+            if not isinstance(row, dict):
+                return None
+            view = self.port.read_artifact(artifact_id)
+        except (LifeArtifactUnavailable, ArtifactOwnerRefused):
+            return None
+        if str(row.get("operation_kind") or "") != ARCHIVE_OPERATION_KIND:
+            return None
+        if str(row.get("artifact_id") or "") != artifact_id:
+            return None
+        try:
+            recorded = json.loads(str(row.get("result_json") or "{}"))
+        except ValueError:
+            return None
+        if not isinstance(recorded, dict):
+            return None
+        if str(recorded.get("status") or "") != "OK":
+            return None
+        if str(recorded.get("lifecycle") or "") != ARCHIVE_OPERATION_KIND:
+            return None
+        if str(recorded.get("artifact_id") or "") != artifact_id:
+            return None
+        archived_revision = recorded.get("revision")
+        if isinstance(archived_revision, bool) or not isinstance(archived_revision, int):
+            return None
+        if isinstance(expected_revision, int) and not isinstance(expected_revision, bool) \
+                and archived_revision != expected_revision + 1:
+            return None
+        if str(receipt.get("artifact_id") or "") != artifact_id:
+            return None
+        if str(receipt.get("status") or "") != "APPLIED":
+            return None
+        if str(receipt.get("effect_kind") or "") != ARCHIVE_OPERATION_KIND:
+            return None
+        artifact = dict(view.get("artifact") or {})
+        if str(artifact.get("lifecycle") or "") != ARCHIVE_OPERATION_KIND:
+            return None
+        if int(artifact.get("revision") or 0) != archived_revision:
+            return None
+        action_id = str(action["action_id"])
+        ts = _utc_now_iso()
+        return ResultEvidence(
+            evidence_id=(
+                f"aevid:{_sha256_hex(f'{action_id}:{operation_key}:archive_observer')[:16]}"),
+            action_id=action_id,
+            observer_kind="artifact_observer",
+            artifact_ref=artifact_id,
+            verified=True,
+            expected_hash=None,
+            observed_hash=None,
+            source_refs=[f"supply_op:{operation_key}",
+                         f"supply_receipt:{receipt.get('receipt_id')}"],
+            details={
+                "observer": "supply_read_port",
+                # The attestation this evidence carries.  It is what the adapter *saw*, and it is
+                # recorded next to the three owner facts it was built from.
+                "attestation": CLOSEOUT_PREDICATE,
+                "predicate": CLOSEOUT_PREDICATE,
+                "operation_key": operation_key,
+                "operation_kind": ARCHIVE_OPERATION_KIND,
+                "artifact_id": artifact_id,
+                "lifecycle": ARCHIVE_OPERATION_KIND,
+                "revision_before": expected_revision,
+                "revision_after": archived_revision,
+                "receipt_id": receipt.get("receipt_id"),
+                "receipt_status": "APPLIED",
+                "operation_outcome": recorded.get("status"),
+                "owner_status": "OK",
+                "archived_by_this_operation": True,
+                "version_created": False,
+            },
+            occurred_at=ts,
+            observed_at=ts,
+            recorded_at=ts,
+        )
+
     def _do_read(self, *, action, attempt, artifact_id, operation_key) -> AdapterSubmissionOutcome:
         try:
             view = self.port.read_artifact(artifact_id)
@@ -445,6 +605,109 @@ class SupplyManagedArtifactActionAdapter(ActionAdapterProtocol):
             transport_result=TRANSPORT_OK_SUCCEEDED,
             provider_operation_ref=operation_key,
             receipt=receipt,
+        )
+
+    def _do_archive(
+        self,
+        *,
+        action,
+        attempt,
+        artifact_id,
+        expected_revision,
+        operation_key,
+        fault_hook,
+    ) -> AdapterSubmissionOutcome:
+        """Close one work through the owner's own ``archive_artifact``, and report only its answer.
+
+        Three answers mean three *different* things and are kept apart:
+
+        * ``OK`` (``APPLIED``) -- this operation archived this artifact.  The receipt says so and
+          ``observed_result_for_action`` re-reads the owner before any evidence is handed over.
+        * ``NO_CHANGE`` -- the artifact was **already** ``ARCHIVED`` when this key arrived.  The
+          work is closed, but not by this operation, so this returns a succeeded action **without**
+          any ``artifact_archived_verified`` evidence: an archive someone else did is not evidence
+          that this action archived it.
+        * ``CONFLICT`` -- the owner's revision moved past the one the intent was based on.  The
+          caller must re-read and reconsider; this adapter never swaps in a newer revision itself.
+        """
+        if self.fault_injection_drop_response_after_write:
+            # The owner archive really happens; the caller never sees the answer.  This is the only
+            # honest way to exercise "resolve the UNKNOWN with the *original* key".
+            self.fault_injection_drop_response_after_write = False
+            try:
+                self.port.archive_artifact(
+                    artifact_id=artifact_id, expected_revision=expected_revision,
+                    grant_id=self.grant_id, operation_key=operation_key)
+            except (LifeArtifactUnavailable, ArtifactOwnerRefused):
+                pass
+            if fault_hook is not None:
+                fault_hook("response_lost_after_archive")
+            return AdapterSubmissionOutcome(
+                transport_result=TRANSPORT_ERR_AMBIGUOUS_POST_SUBMIT,
+                provider_operation_ref=operation_key,
+                error_class="SUPPLY_RESPONSE_LOST",
+                error_ref=f"err:{operation_key}:response_lost",
+            )
+        try:
+            outcome = self.port.archive_artifact(
+                artifact_id=artifact_id, expected_revision=expected_revision,
+                grant_id=self.grant_id, operation_key=operation_key)
+        except LifeArtifactUnavailable:
+            return AdapterSubmissionOutcome(
+                transport_result=TRANSPORT_ERR_AMBIGUOUS_POST_SUBMIT,
+                provider_operation_ref=operation_key,
+                error_class="SUPPLY_UNREACHABLE",
+                error_ref=f"err:{operation_key}:unreachable",
+            )
+        except ArtifactOwnerRefused as exc:
+            return self._rejection(action=action, attempt=attempt, operation_key=operation_key,
+                                   owner_status=exc.status, detail=f"{exc.reason}:{exc.detail}")
+
+        if fault_hook is not None:
+            fault_hook("during_adapter_call")
+
+        if outcome.effect_state == EffectState.APPLIED:
+            return self._success(
+                action=action, attempt=attempt, operation_key=operation_key,
+                owner_status=outcome.status, version_id=None, version_number=None,
+                version_created=False, content_sha256="",
+                receipt_kind="managed_artifact_archive_receipt",
+                details={"lifecycle": outcome.lifecycle or ARCHIVE_OPERATION_KIND,
+                         "owner_revision": outcome.revision,
+                         "archived_by_this_operation": True,
+                         "attestation": CLOSEOUT_PREDICATE},
+                # The owner said it archived.  Ask the same official read port whether the owner's
+                # own operation record, its effect receipt and the artifact's current state all
+                # agree that *this* key did it; anything short of that leaves this None.
+                observed_result=self.observed_result_for_action(action=action))
+        if outcome.effect_state == EffectState.NO_CHANGE:
+            return self._success(
+                action=action, attempt=attempt, operation_key=operation_key,
+                owner_status=outcome.status, version_id=None, version_number=None,
+                version_created=False, content_sha256="",
+                receipt_kind="managed_artifact_archive_receipt",
+                details={"lifecycle": outcome.lifecycle or ARCHIVE_OPERATION_KIND,
+                         "owner_revision": outcome.revision,
+                         "archived_by_this_operation": False,
+                         "attestation": None,
+                         "owner_detail": (outcome.detail or outcome.reason
+                                          or "already archived before this operation")},
+                observed_result=None)
+        if outcome.effect_state == EffectState.CONFLICT:
+            return self._rejection(
+                action=action, attempt=attempt, operation_key=operation_key,
+                owner_status=outcome.status,
+                detail=(f"stale expected_revision; owner revision is "
+                        f"{outcome.raw.get('revision')!r}"))
+        if outcome.effect_state in {EffectState.REFUSED, EffectState.NOT_FOUND}:
+            return self._rejection(
+                action=action, attempt=attempt, operation_key=operation_key,
+                owner_status=outcome.status, detail=f"{outcome.reason}:{outcome.detail}")
+        return AdapterSubmissionOutcome(
+            transport_result=TRANSPORT_ERR_AMBIGUOUS_POST_SUBMIT,
+            provider_operation_ref=operation_key,
+            error_class=f"SUPPLY_{outcome.status or 'UNKNOWN'}",
+            error_ref=f"err:{operation_key}:{outcome.status or 'unknown'}",
         )
 
     # -- reconcile ---------------------------------------------------------------------
@@ -494,8 +757,10 @@ class SupplyManagedArtifactActionAdapter(ActionAdapterProtocol):
 
 
 __all__ = [
+    "ARCHIVE_OPERATION_KIND",
     "AUTHORITY_DOMAIN",
     "ManagedArtifactActionError",
+    "OP_ARCHIVE_ARTIFACT",
     "OP_COMMIT_VERSION",
     "OP_READ_ARTIFACT",
     "SUPPORTED_OPS",

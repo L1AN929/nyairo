@@ -56,11 +56,67 @@ GATEWAY_READ_COMMANDS = (
     "get_available_actions",
     "get_action_result",
     "get_status",
+    "get_environment",
     "ping",
 )
 #: The one mutating command (ticket section 10).
+# The one mutating command (ticket section 10).
 GATEWAY_MUTATING_COMMANDS = ("submit_action",)
-GATEWAY_COMMANDS = GATEWAY_READ_COMMANDS + GATEWAY_MUTATING_COMMANDS
+# v0.4: the explicit local-owner command.  Separate from submit_action so the
+# authority it stamps is its own (local_owner_phone), never the main-self one,
+# and so it can be switched off at the service on its own.
+GATEWAY_LOCAL_OWNER_COMMANDS = ("submit_local_owner_action",)
+GATEWAY_COMMANDS = (
+    GATEWAY_READ_COMMANDS + GATEWAY_MUTATING_COMMANDS + GATEWAY_LOCAL_OWNER_COMMANDS
+)
+# Verbs the local-owner command may carry.  One tuple, one permission
+# statement: this must stay identical to the Resolver's ``LOCAL_OWNER_ACTIONS``
+# (a drift would make one side wider than the other).  CONSUME keeps the phone
+# shopping channel; MOVE/PICK_UP/PLACE/POSE/REST are the resident-world verbs the
+# phone now owns -- each still goes through the same one-shot authorization,
+# the same Resolver lock/revision/postcondition chain and the same ledger.
+GATEWAY_LOCAL_OWNER_VERBS = (
+    "MOVE",
+    "PICK_UP",
+    "PLACE",
+    "POSE",
+    "CONSUME",
+    "REST",
+    "ARRANGE",
+    "TOGGLE_FIXTURE",
+)
+GATEWAY_LOCAL_OWNER_SOURCE = "local_owner_phone"
+GATEWAY_LOCAL_OWNER_AUTHORITY = "local_owner_phone"
+# Explicit, server-side opt-in: its value is the bound subject. Unset means
+# the local-owner command is not bound at all (fail closed).
+GATEWAY_LOCAL_OWNER_BINDING_ENV = "CHIYO_WORLD_LOCAL_OWNER_PHONE"
+_LOCAL_OWNER_REQUEST_KEYS = frozenset(
+    {
+        "action",
+        "verb",
+        "execution_id",
+        "params",
+        "observed_dependencies",
+        "authorization_id",
+        "decision_ref",
+    }
+)
+# Anything that looks like a permission claim is refused: the service stamps
+# these, a client may not supply them.
+_LOCAL_OWNER_FORBIDDEN_KEYS = frozenset(
+    {
+        "authority",
+        "confirm_apply",
+        "main_self_verified",
+        "verified_main_self",
+        "uid",
+        "gid",
+        "binding",
+        "source",
+        "permission",
+        "home",
+    }
+)
 
 #: Explicitly refused, so a probing caller gets a clear answer rather than a
 #: generic "unknown command" (ticket section 9).
@@ -113,6 +169,9 @@ HAND_SLOTS = ("left_hand", "right_hand")
 
 MAX_TEXT = 240
 
+#: v0.4: a body can only rest from a resting pose (World owns posture; the
+#: Resolver enforces the same tuple).  Mirrored, never re-decided here.
+RESTING_POSES = ("seated", "lying")
 
 class GatewayAPIError(ValueError):
     """The gateway asked for something the narrow interface does not offer."""
@@ -133,6 +192,36 @@ def is_test_object(object_id: Any) -> bool:
     if not isinstance(object_id, str):
         return False
     return object_id.startswith(TEST_OBJECT_PREFIXES) or TEST_OBJECT_MARKER in object_id
+
+
+def _normalized_local_owner_binding(value: Any) -> Optional[dict[str, Any]]:
+    """Normalize the *server-side* local-owner binding, or ``None``.
+
+    ``None`` means "this service is not allowed to accept local-owner
+    commands".  A malformed binding is ``None`` too: a half-configured binding
+    must never widen the surface.
+    """
+
+    if not isinstance(value, Mapping):
+        return None
+    source = value.get("source")
+    uid = value.get("uid")
+    subject = value.get("subject")
+    home = value.get("world_home")
+    if source != GATEWAY_LOCAL_OWNER_SOURCE:
+        return None
+    if isinstance(uid, bool) or not isinstance(uid, int) or uid < 0:
+        return None
+    if not isinstance(subject, str) or not subject.strip():
+        return None
+    if not isinstance(home, str) or not home.strip():
+        return None
+    return {
+        "source": GATEWAY_LOCAL_OWNER_SOURCE,
+        "uid": uid,
+        "subject": subject.strip(),
+        "world_home": home.strip(),
+    }
 
 
 def socket_permissions(path: pathlib.Path) -> dict[str, Any]:
@@ -156,7 +245,13 @@ def socket_permissions(path: pathlib.Path) -> dict[str, Any]:
 class GatewaySurface:
     """Read + submit_action over a bounded view of the running service."""
 
-    def __init__(self, service: Any, *, include_test_objects: bool = False):
+    def __init__(
+        self,
+        service: Any,
+        *,
+        include_test_objects: bool = False,
+        local_owner_binding: Optional[Mapping[str, Any]] = None,
+    ):
         self.service = service
         self.include_test_objects = bool(include_test_objects)
 
@@ -172,6 +267,14 @@ class GatewaySurface:
         except Exception:  # pragma: no cover - stub services
             _run_dir = None
         self.authorizations = waa.AuthorizationRegistry(_run_dir) if _run_dir else None
+        # v0.4: the local-owner (phone) command exists only when the *service*
+        # was explicitly bound to a subject.  A binding that is not
+        # well-formed is treated as "not bound" (fail closed).
+        self.local_owner_binding = _normalized_local_owner_binding(
+            local_owner_binding
+            if local_owner_binding is not None
+            else getattr(service, "local_owner_phone_binding", None)
+        )
 
     # ---- helpers ---------------------------------------------------------
     def _substrate(self) -> Optional[dict[str, Any]]:
@@ -300,6 +403,127 @@ class GatewaySurface:
         return {"available": True, "blocked_reason": None, "detail": None,
                 "candidates": [{"object_id": o, "slots": free} for o in takeable_ids]}
 
+    # ---- v0.4 REST: is a recovery command legal *right now*? -------------
+    def _travel_in_progress(self) -> Optional[dict[str, Any]]:
+        """The owner's in-transit record (read-only), or ``None``."""
+
+        try:
+            import world_travel_delivery as wtd
+        except Exception:  # noqa: BLE001 - no travel module means not travelling
+            return None
+        try:
+            if not wtd.travel_enabled(getattr(self.service.config, "environment", None)):
+                return None
+            state = wtd.load_state(
+                self.service.config.world_home,
+                getattr(self.service.config, "environment", None),
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        if not isinstance(state, Mapping):
+            return None
+        for item in state.get("travels") or []:
+            if isinstance(item, Mapping) and item.get("status") == wtd.TRAVEL_STATUS_IN_PROGRESS:
+                return dict(item)
+        return None
+
+    def _rest_surface_here(self, substrate: Mapping[str, Any]) -> Optional[str]:
+        """The declared rest surface really placed where she is (or ``None``).
+
+        Derived from live placements: the legacy bare ``bed_surface`` placement
+        and the instance-scoped surface of an owned bed both count, and a bed in
+        another area does not.
+        """
+
+        here = (self._world_live().get("location") or {}).get("place_id")
+        if not here:
+            return None
+        try:
+            import world_body_binding as binding
+
+            catalog = binding.owned_catalog_map(self.service.config.world_home)
+        except Exception:  # noqa: BLE001 - no join means no rest surface
+            return None
+        try:
+            surfaces = self.service.wbs.rest_surfaces_here(
+                substrate, catalog, location_id=here, mode="sleep_like"
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        return surfaces[0]["surface_id"] if surfaces else None
+
+    def _rest_availability(self) -> dict[str, Any]:
+        """The physical + Body truth behind REST (bands only, zero raw values).
+
+        Everything here is a *capability fact*: travelling, posture, whether a
+        bed is really here, whether a session is already open, and whether the
+        Body says rest is needed at all.  The fatigue **value** never leaves this
+        method -- only the verdict.
+        """
+
+        service = self.service
+        substrate = self._substrate() or {}
+        pose = str(substrate.get("pose") or "")
+        travelling = self._travel_in_progress() is not None
+        surface_id = self._rest_surface_here(substrate)
+        body = service.body_state or {}
+        recovery = body.get("recovery") or {}
+        recovery_state = str(recovery.get("state") or "inactive")
+        active = recovery_state == "active"
+        try:
+            import body_runtime as br
+
+            threshold = float(br.RECOVERY_OPEN_FATIGUE)
+        except Exception:  # noqa: BLE001 - no runtime means no verdict
+            threshold = None
+        fatigue: Optional[float] = None
+        try:
+            fatigue = float((body.get("somatic") or {}).get("fatigue"))
+        except (TypeError, ValueError):
+            fatigue = None
+        needs = fatigue is not None and threshold is not None and fatigue >= threshold
+        resting_pose = pose in RESTING_POSES
+        start_available = bool(not active and not travelling and resting_pose and needs)
+        sleep_like_available = bool(start_available and pose == "lying" and surface_id)
+
+        blocked: Optional[str] = None
+        detail: Optional[str] = None
+        if active:
+            blocked = "RECOVERY_ALREADY_ACTIVE"
+            detail = "a recovery session is already open; stop it instead"
+        elif travelling:
+            blocked = "TRAVELLING"
+            detail = "a walk is in progress; rest is not available while moving"
+        elif not resting_pose:
+            blocked = "REST_REQUIRES_RESTING_POSE"
+            detail = "pose %s cannot rest; sit down or lie down first" % (pose or "unknown")
+        elif fatigue is None or threshold is None:
+            blocked = "BODY_STATE_UNAVAILABLE"
+            detail = "the Body runtime cannot answer whether rest is needed"
+        elif not needs:
+            blocked = "RECOVERY_NOT_NEEDED"
+            detail = "fatigue is below the recovery threshold; rest is not needed right now"
+
+        return {
+            "available": bool(start_available or active),
+            "blocked_reason": None if (start_available or active) else blocked,
+            "detail": None if (start_available or active) else detail,
+            "start_available": start_available,
+            "stop_available": active,
+            # Per-direction reasons, so "stop what is not open" and "start when
+            # it is not needed" are never reported as the same thing.
+            "start_blocked_reason": None if start_available else blocked,
+            "start_detail": None if start_available else detail,
+            "stop_blocked_reason": None if active else "NO_OPEN_RECOVERY",
+            "sleep_like_available": sleep_like_available,
+            "candidates": [],
+            "current": {
+                "pose": pose or None,
+                "recovery_state": recovery_state,
+                "travelling": travelling,
+                "rest_surface": surface_id,
+            },
+        }
     # ---- F: consumable projection (read-only, no ticket, no body) ---------
     def _economy_facts(self) -> dict[str, Any]:
         """Property-economy facts for this home: absent / present / unreadable.
@@ -367,7 +591,14 @@ class GatewaySurface:
             verdict = contract.consumption_verdict(
                 object_id=object_id,
                 placement=placements[object_id],
-                declaration=declarations.get(object_id) or {},
+                declaration=(
+                    declarations.get(object_id)
+                    or contract.declaration_of(
+                        object_id,
+                        self.service.config.world_home,
+                        economy=economy.get("economy"),
+                    )
+                ),
                 economy=economy,
                 current_place=here,
                 hands_usable=hands_usable,
@@ -539,16 +770,93 @@ class GatewaySurface:
         # body_summary() already proves the qualitative shape; re-derive here
         # through the service so the gateway never touches body_runtime.
         summary = service.body_summary()
+        recovery = dict(summary.get("recovery") or {})
+        # v0.4: the progress of an open session is reported as the existing
+        # three-band vocabulary, never as a percentage or a float.
+        progress = (state.get("recovery") or {}).get("progress")
+        if isinstance(progress, (int, float)) and not isinstance(progress, bool):
+            recovery["progress_band"] = (
+                bsi.BAND_MILD
+                if progress < 0.34
+                else bsi.BAND_NOTICEABLE
+                if progress < 0.67
+                else bsi.BAND_STRONG
+            )
+        else:
+            recovery["progress_band"] = None
         return {
             "kind": KIND_GATEWAY_API,
             "schema_version": SCHEMA_GATEWAY_API,
             "available": True,
-            "recovery": summary.get("recovery"),
+            "recovery": recovery,
             "latch": produced.get("latch"),
             "signals": produced.get("signals"),
             "bands_only": True,
             "raw_values_exposed": False,
         }
+    def get_environment(self) -> dict[str, Any]:
+        """The derived room environment of the current place/area (read-only).
+
+        ``light`` is a *declared* fact (declared fixture + recorded power).  When
+        it cannot be known it says ``unknown`` with a reason code -- it is never
+        reported as ``0`` and never as "dark".  Surfaces are instance-scoped.
+        """
+
+        service = self.service
+        world_home = service.config.world_home
+        environment = getattr(service.config, "environment", None)
+        live = self._world_live()
+        location = live.get("location") or {}
+        substrate = self._substrate()
+        payload: dict[str, Any] = {
+            "kind": KIND_GATEWAY_API,
+            "schema_version": SCHEMA_GATEWAY_API,
+            "source": "world_room_environment",
+            "location": location,
+            "read_is_pure": True,
+        }
+        try:
+            import sys
+
+            scripts_dir = str(getattr(service.config, "scripts_dir", ""))
+            if scripts_dir and scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            import world_body_binding as binding
+            import world_room_environment as room
+
+            light = room.light_for_home(
+                world_home, now=service._moment(), location=location
+            )
+            catalog = binding.owned_catalog_map(world_home)
+            surfaces = (
+                service.wbs.surfaces_here(
+                    substrate,
+                    catalog,
+                    location_id=location.get("place_id"),
+                    area_id=location.get("area_id"),
+                )
+                if substrate
+                else []
+            )
+            feature_on = room.feature_enabled(environment)
+        except Exception:  # noqa: BLE001 - unknown, never invented
+            light = {
+                "status": "unknown",
+                "reason_code": "ROOM_ENVIRONMENT_UNAVAILABLE",
+                "power": None,
+                "band": None,
+                "source": "world_room_environment",
+            }
+            surfaces = []
+            feature_on = False
+        payload["light"] = light
+        payload["surfaces"] = surfaces
+        payload["fixture_block_present"] = bool(
+            (substrate or {}).get("fixtures")
+        )
+        payload["environment_channel_enabled"] = bool(feature_on)
+        payload["body_input_model"] = "environment.light.v1"
+        return payload
 
     def _labels(self) -> dict[str, str]:
         """Economy-joined readable names, so the model never sees a raw 70-char id."""
@@ -567,6 +875,101 @@ class GatewaySurface:
         except Exception:
             labels = {}
         return labels
+
+    def _room_living_availability(self) -> dict[str, Any]:
+        """Candidates for ARRANGE / TOGGLE_FIXTURE, derived from the owners.
+
+        An ARRANGE candidate is owned + delivered + relocatable **and** already
+        placed at home; a fixture candidate is a declared powerable fixture
+        placed in this area.  Nothing is invented when a document is unreadable:
+        the list is simply empty with a reason.
+        """
+
+        substrate = self._substrate() or {}
+        world_home = self.service.config.world_home
+        environment = getattr(self.service.config, "environment", None)
+        location = self._world_live().get("location") or {}
+        place = location.get("place_id")
+        area = location.get("area_id")
+        labels = self._labels()
+        arrange: list[dict[str, Any]] = []
+        fixtures: list[dict[str, Any]] = []
+        rooms: list[dict[str, Any]] = []
+        reason: Optional[str] = None
+        try:
+            import world_body_binding as binding
+            import world_property_economy as economy
+            import world_room_environment as room
+
+            catalog = binding.owned_catalog_map(world_home)
+            state = binding.load_economy(world_home) or {}
+            placements = substrate.get("placements") or {}
+            fixture_records = substrate.get("fixtures") or {}
+            home_place = economy.HOME_ITEM_LOCATION.split("/", 1)[0]
+            for item in state.get("items") or []:
+                if not isinstance(item, Mapping):
+                    continue
+                if str(item.get("disposition")) != economy.DISPOSITION_OWNED:
+                    continue
+                object_id = str(item.get("item_instance_id"))
+                placement = placements.get(object_id)
+                declaration = economy.catalog_declaration(item.get("catalog_item_id"))
+                label = labels.get(object_id) or object_id
+                if (
+                    declaration.get("relocatable")
+                    and item.get("current_location") == economy.HOME_ITEM_LOCATION
+                    and placement
+                    and str(placement.get("location_id")) == home_place
+                ):
+                    arrange.append(
+                        {
+                            "object_id": object_id,
+                            "label": label,
+                            "catalog_item_id": item.get("catalog_item_id"),
+                            "placement": dict(placement),
+                            "surfaces": [
+                                self.service.wbs.surface_instance_id(kind, object_id)
+                                for kind in declaration.get("surfaces") or ()
+                            ],
+                        }
+                    )
+                fixture_declaration = room.declaration_of_object(object_id, catalog)
+                if (
+                    fixture_declaration
+                    and fixture_declaration.get("powerable")
+                    and placement
+                    and str(placement.get("location_id")) == str(place)
+                    and (
+                        placement.get("area_id") is None
+                        or area is None
+                        or str(placement.get("area_id")) == str(area)
+                    )
+                ):
+                    record = fixture_records.get(object_id) or {}
+                    fixtures.append(
+                        {
+                            "object_id": object_id,
+                            "label": label,
+                            "power": record.get("power"),
+                            "since": record.get("since"),
+                            "band": fixture_declaration.get("light_band"),
+                            "declared_source": fixture_declaration.get("declared_source"),
+                            "place_id": place,
+                            "area_id": area,
+                        }
+                    )
+            rooms = [
+                {"location_id": home_place, "area_id": found}
+                for found in sorted(economy.declared_home_areas(environment))
+            ]
+        except Exception:  # noqa: BLE001 - no join, no candidate
+            reason = "ROOM_LIVING_UNAVAILABLE"
+        return {
+            "arrange": arrange,
+            "fixtures": fixtures,
+            "rooms": rooms,
+            "reason_code": reason,
+        }
 
     def _reachable_move_candidates(self) -> list[dict[str, Any]]:
         """B6-3: reachable destinations from the World's own location catalog.
@@ -623,6 +1026,8 @@ class GatewaySurface:
 
         pick_up = self._pick_up_availability(held=held)
         consume = self._consume_availability()
+        rest = self._rest_availability()
+        room_living = self._room_living_availability()
 
         actions: list[dict[str, Any]] = [
             {
@@ -675,6 +1080,73 @@ class GatewaySurface:
                     "held_food_ignores_opening_hours": True,
                     "body_effect": "consume_operation_load_model:2.0s manipulation "
                                    "only; no nutrition, satiety, hunger or health",
+                },
+            },
+            {
+                # v0.4: REST is a command, not a timer.  One session at a time;
+                # posture and a real bed are World facts, "does it need rest at
+                # all" is the Body's own threshold -- both are facts here, never
+                # raw values.
+                "verb": "REST",
+                "available": bool(rest["available"]),
+                "params": {"state": ["start", "stop"], "mode": ["rest", "sleep_like"]},
+                "requires": ["body.pose", "body.recovery"],
+                "blocked_reason": rest["blocked_reason"],
+                "detail": rest["detail"],
+                "start_available": rest["start_available"],
+                "stop_available": rest["stop_available"],
+                "sleep_like_available": rest["sleep_like_available"],
+                "start_blocked_reason": rest["start_blocked_reason"],
+                "stop_blocked_reason": rest["stop_blocked_reason"],
+                "current": rest["current"],
+                "contract": {
+                    "starts_a_session_not_a_timer": True,
+                    "command_success_is_not_recovery": True,
+                    "sleep_like_is_a_mode_not_a_daily_task": True,
+                    "body_effect": "recovery session state only; no hunger, "
+                                   "nutrition, healing or scheduled sleep",
+                },
+            },
+            {
+                # v0.4 room-living: ARRANGE moves **owned furniture**.  It is not
+                # a pick-up: `takeable` is untouched, the bed stays impossible to
+                # hold, and children already on the furniture's own surface are
+                # carried in the same atomic write.
+                "verb": "ARRANGE",
+                "available": bool(room_living["arrange"]),
+                "params": {"object_id": "string", "target": "placement_target(room|surface)"},
+                "requires": ["body.revision", "body.pose"],
+                "blocked_reason": (
+                    None if room_living["arrange"]
+                    else room_living["reason_code"] or "NO_ARRANGEABLE_FURNITURE"
+                ),
+                "candidates": room_living["arrange"],
+                "rooms": room_living["rooms"],
+                "contract": {
+                    "moves_owned_furniture_only": True,
+                    "not_a_pick_up": True,
+                    "takeable_unchanged": True,
+                    "children_carried_with_the_surface": True,
+                    "home_only": True,
+                },
+            },
+            {
+                # v0.4 room-living: an absolute fixture state.  There is no blind
+                # toggle, and an unknown power is never reported as "off".
+                "verb": "TOGGLE_FIXTURE",
+                "available": bool(room_living["fixtures"]),
+                "params": {"object_id": "string", "state": ["on", "off"]},
+                "requires": ["body.revision", "body.pose"],
+                "blocked_reason": (
+                    None if room_living["fixtures"]
+                    else room_living["reason_code"] or "NO_DECLARED_FIXTURE_HERE"
+                ),
+                "candidates": room_living["fixtures"],
+                "contract": {
+                    "absolute_state": True,
+                    "no_blind_toggle": True,
+                    "unknown_is_not_off": True,
+                    "declared_fixtures_only": True,
                 },
             },
         ]
@@ -839,6 +1311,197 @@ class GatewaySurface:
             "source": "authorization_firewall",
         }
 
+    def submit_local_owner_action(self, request: Any) -> dict[str, Any]:
+        """The explicit *local owner* (phone) command.
+
+        Same firewall as ``submit_action`` -- the one-shot authorization is
+        still verified and consumed before the Resolver is contacted -- but two
+        deliberate differences:
+
+        * the binding is server-side only (``CHIYO_WORLD_LOCAL_OWNER_PHONE``);
+          an unbound service refuses, and a request may not carry any
+          permission-shaped field;
+        * the stamp is ``local_owner_phone``, never ``verified_main_self_tool``,
+          so the ledger and receipt provably say "the local owner did this from
+          the phone" instead of claiming a main-self decision.
+
+        The verb allowlist is ``CONSUME`` only.
+        """
+
+        if not isinstance(request, Mapping):
+            raise GatewayAPIError("submit_local_owner_action requires an object")
+        binding = self.local_owner_binding
+        if binding is None:
+            return {
+                "kind": KIND_GATEWAY_API,
+                "schema_version": SCHEMA_GATEWAY_API,
+                "execution_id": str(request.get("execution_id") or ""),
+                "action": str(request.get("action") or request.get("verb") or ""),
+                "status": "rejected",
+                "reason_code": "LOCAL_OWNER_PHONE_NOT_BOUND",
+                "detail": "this service is not bound to a local owner phone surface",
+                "world_unchanged": True,
+                "body_unchanged": True,
+                "authoritative": True,
+                "source": "local_owner_firewall",
+            }
+        forbidden = set(request) & _LOCAL_OWNER_FORBIDDEN_KEYS
+        if forbidden:
+            raise GatewayAPIError(
+                "permissions are stamped by the service, not supplied by the "
+                "caller: %s" % sorted(forbidden)
+            )
+        unknown = set(request) - _LOCAL_OWNER_REQUEST_KEYS
+        if unknown:
+            raise GatewayAPIError("unknown request fields: %s" % sorted(unknown))
+
+        action = _text(request.get("action") or request.get("verb"), "action", maximum=32)
+        execution_id = _text(request.get("execution_id"), "execution_id", maximum=256)
+        params = request.get("params") or {}
+        if not isinstance(params, Mapping):
+            raise GatewayAPIError("params must be an object")
+        observed = request.get("observed_dependencies") or {}
+        if not isinstance(observed, Mapping):
+            raise GatewayAPIError("observed_dependencies must be an object")
+        if action not in GATEWAY_LOCAL_OWNER_VERBS:
+            return {
+                "kind": KIND_GATEWAY_API,
+                "schema_version": SCHEMA_GATEWAY_API,
+                "execution_id": execution_id,
+                "action": action,
+                "status": "rejected",
+                "reason_code": "LOCAL_OWNER_VERB_NOT_ALLOWED",
+                "detail": "the local-owner command accepts %s only"
+                % (list(GATEWAY_LOCAL_OWNER_VERBS),),
+                "world_unchanged": True,
+                "body_unchanged": True,
+                "authoritative": True,
+                "source": "local_owner_firewall",
+            }
+
+        # The registry firewall is unchanged: verify + consume before the
+        # Resolver sees anything (fail-closed).
+        if self.authorizations is None:
+            return self._reject_authorization(
+                execution_id, action, "AUTHORIZATION_REGISTRY_UNAVAILABLE",
+                "no authorization registry is wired to this surface",
+            )
+        authorization_id = request.get("authorization_id")
+        if not isinstance(authorization_id, str) or not authorization_id.strip():
+            return self._reject_authorization(
+                execution_id, action, "AUTHORIZATION_REQUIRED",
+                "submit_local_owner_action requires an issued authorization_id",
+            )
+        try:
+            record = self.authorizations.verify_and_consume(
+                authorization_id=authorization_id,
+                execution_id=execution_id,
+                verb=action,
+                params=dict(params),
+                actor=GATEWAY_ACTOR,
+                decision_id=request.get("decision_ref"),
+            )
+        except waa.AuthorizationError as error:
+            return self._reject_authorization(
+                execution_id, action, str(error),
+                "authorization verify/consume failed (fail-closed)",
+            )
+
+        proposal = {
+            "action": action,
+            "execution_id": execution_id,
+            "actor_id": binding["subject"] or GATEWAY_ACTOR,
+            "body_id": (self.service.body_state or {}).get("body_id"),
+            "authority": GATEWAY_LOCAL_OWNER_AUTHORITY,
+            "confirm_apply": True,
+            "observed_dependencies": {k: observed[k] for k in sorted(observed)},
+            "params": dict(params),
+        }
+        # Exposure policy.  The verb must be exposed right now; when it is
+        # blocked we answer with the *specific* capability fact (travelling /
+        # posture / nothing held / recovery not needed ...) instead of a generic
+        # "not exposed", so the caller never has to guess why.  Nothing is
+        # submitted in either case.
+        exposure = next(
+            (
+                entry
+                for entry in self.get_available_actions()["actions"]
+                if entry.get("verb") == action
+            ),
+            None,
+        )
+        blocked: Optional[str] = None
+        detail: Optional[str] = None
+        if exposure is None:
+            blocked = "NOT_EXPOSED"
+            detail = "verb %s is not part of this surface" % action
+        elif action == "REST":
+            # One session, two directions: ask *which* direction was requested so
+            # "stop what is not open" is never reported as "rest is not needed".
+            desired = str((params or {}).get("state") or "").strip().lower()
+            if desired == "stop":
+                if not exposure.get("stop_available"):
+                    blocked = exposure.get("stop_blocked_reason") or "NO_OPEN_RECOVERY"
+                    detail = "no recovery session is open, so there is nothing to stop"
+            elif not exposure.get("start_available"):
+                blocked = exposure.get("start_blocked_reason") or "NOT_EXPOSED"
+                detail = exposure.get("detail")
+        elif not exposure.get("available"):
+            blocked = exposure.get("blocked_reason") or "NOT_EXPOSED"
+            detail = exposure.get("detail")
+        if blocked is not None:
+            return {
+                "kind": KIND_GATEWAY_API,
+                "schema_version": SCHEMA_GATEWAY_API,
+                "execution_id": execution_id,
+                "action": action,
+                "status": "rejected",
+                "reason_code": blocked,
+                "detail": detail or "verb %s is not exposed to the gateway right now" % action,
+                "blocked_reason": blocked,
+                "world_unchanged": True,
+                "body_unchanged": True,
+                "authoritative": True,
+                "source": "local_owner_exposure",
+            }
+        result = self.service.act(proposal)
+        return {
+            "kind": KIND_GATEWAY_API,
+            "schema_version": SCHEMA_GATEWAY_API,
+            "execution_id": result.get("execution_id"),
+            "action": result.get("action"),
+            "status": result.get("status"),
+            "reason_code": result.get("reason_code"),
+            "applied_to_body": result.get("applied_to_body"),
+            "consequence_reason": result.get("consequence_reason"),
+            "consequence_id": result.get("consequence_id"),
+            "movement_settlement": result.get("movement_settlement"),
+            "recovery_state": result.get("recovery_state"),
+            "legacy_reason_code": result.get("legacy_reason_code"),
+            "detail": result.get("detail"),
+            "consumption_receipt": result.get("consumption_receipt"),
+            "purchase_voucher": result.get("purchase_voucher"),
+            "fixture": result.get("fixture"),
+            "arranged": result.get("arranged"),
+            "rest_surface_id": result.get("rest_surface_id"),
+            "source": "resolver",
+            "local_owner": {
+                "source": GATEWAY_LOCAL_OWNER_SOURCE,
+                "uid": binding["uid"],
+                "binding": {
+                    "subject": binding["subject"],
+                    "world_home": binding["world_home"],
+                },
+                "caller": "local_owner_phone_surface",
+                "authorization": {
+                    "authorization_id": record.get("authorization_id"),
+                    "decision_ref": record.get("decision_id"),
+                    "intent_id": record.get("intent_id"),
+                    "state": "CONSUMED",
+                },
+            },
+        }
+
     # ---- dispatch --------------------------------------------------------
     def handle(self, command: Any, argument: Any = None) -> dict[str, Any]:
         name = str(command or "").strip().lower()
@@ -860,6 +1523,7 @@ class GatewaySurface:
             handler = {
                 "ping": lambda: {"pong": True},
                 "get_status": self.get_status,
+                "get_environment": self.get_environment,
                 "get_snapshot": self.get_snapshot,
                 "get_observation": self.get_observation,
                 "get_body_signals": self.get_body_signals,
@@ -868,6 +1532,9 @@ class GatewaySurface:
                     (argument or {}).get("execution_id") if isinstance(argument, Mapping) else argument
                 ),
                 "submit_action": lambda: self.submit_action(argument),
+                "submit_local_owner_action": lambda: (
+                    self.submit_local_owner_action(argument)
+                ),
             }[name]
             payload = handler()
         except GatewayAPIError as error:

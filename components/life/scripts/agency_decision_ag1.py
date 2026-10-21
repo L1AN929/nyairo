@@ -131,6 +131,9 @@ from candidate_sources_ag0 import (
     CandidateRecord,
     CandidateSet,
 )
+# v0.4 stage A: the future-items domain is the single definition of what a "later item" is; the
+# decision validator borrows it rather than keeping a second, drifting copy of the shape.
+import life_future_items
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +302,34 @@ FAILURE_CLASS_UNKNOWN_REASON_CODE = "INVALID_MODEL_OUTPUT:UNKNOWN_REASON_CODE"
 FAILURE_CLASS_STALE_BEFORE_COMMIT = "STALE_BEFORE_COMMIT"
 FAILURE_CLASS_INTERRUPTED_DURING_COGNITION = "DECISION_ATTEMPT_FAILED:INTERRUPTED_DURING_COGNITION"
 FAILURE_CLASS_CANDIDATE_EXPLOSION = "DECISION_ATTEMPT_FAILED:CANDIDATE_EXPLOSION"
+#: v0.4 C: the model named a method handle this round does not offer (or named one at all with no
+#: practice workspace wired).  Same class of refusal as an invented candidate: an identifier the
+#: model was not given is not its to produce.
+FAILURE_CLASS_INVENTED_METHOD_REF = "INVALID_MODEL_OUTPUT:INVENTED_METHOD_REF"
+FAILURE_CLASS_INVALID_METHOD_TRIAL = "INVALID_MODEL_OUTPUT:INVALID_METHOD_TRIAL"
+#: v0.4 schema-repair: two refusals that already existed but carried **no** failure class, so
+#: ``decide`` labelled them with its ``INVALID_SCHEMA`` fallback (line 4423).  A hidden chain of
+#: thought or a universal score in the answer is neither a schema shape error nor a bad JSON, and
+#: recording it as one is exactly the kind of mislabel this module is being repaired for.
+FAILURE_CLASS_FORBIDDEN_HIDDEN_REASONING = "INVALID_MODEL_OUTPUT:FORBIDDEN_HIDDEN_REASONING"
+FAILURE_CLASS_FORBIDDEN_UNIVERSAL_UTILITY = "INVALID_MODEL_OUTPUT:FORBIDDEN_UNIVERSAL_UTILITY"
+
+#: v0.4 C: the bounded handle a Decision may name for one of her own method drafts.  It is not an
+#: owner id and it authorises nothing: it only says "this is the practice I am following now".
+METHOD_REF_PREFIX = "method:"
+#: The one narrow evaluation the model may attach: its own verdict on the method it followed.
+METHOD_TRIAL_OUTCOMES = frozenset({"HELPED", "NOT_HELPED", "UNKNOWN"})
+METHOD_TRIAL_KEYS = frozenset({"method_ref", "outcome", "detail", "experience_ids"})
+MAX_METHOD_TRIAL_DETAIL_CHARS = 280
+#: v0.4 C: the *one* bounded practice proposal a Decision may carry ("一件我想试的有范围做法").
+#: It is saved by B's practice workspace as a TENTATIVE draft -- never as a verified Skill, never
+#: as a preference, belief or persona trait, and never as an executable program.
+METHOD_PROPOSAL_KEYS = frozenset({"title", "instruction", "scope", "uncertainty",
+                                  "experience_ids", "review_refs"})
+MAX_METHOD_TITLE_CHARS = 120
+MAX_METHOD_INSTRUCTION_CHARS = 800
+MAX_METHOD_SCOPE_CHARS = 240
+MAX_METHOD_UNCERTAINTY_CHARS = 200
 
 # ---------------------------------------------------------------------------
 # Section 24: Hard Constraint Statuses & Codes
@@ -484,13 +515,19 @@ class DecisionReasonCodeRegistry:
     @classmethod
     def validate_codes(cls, codes: Sequence[str], *, allow_empty: bool = False) -> list[str]:
         if isinstance(codes, (str, bytes)) or not isinstance(codes, Iterable):
-            raise DecisionValidationError("reason_codes must be a list of registered reason code strings")
+            raise DecisionValidationError(
+                "reason_codes must be a list of registered reason code strings",
+                schema_field=SCHEMA_FIELD_REASON_CODES, schema_rule=SCHEMA_RULE_NOT_A_LIST,
+                schema_extra={"value_type": _json_type_name(codes)},
+            )
         normalized: list[str] = []
         for raw in codes:
             if not isinstance(raw, str) or raw.strip() not in VALID_DECISION_REASON_CODES:
                 raise DecisionValidationError(
                     f"unregistered reason_code={raw!r}; must belong to DecisionReasonCodeRegistry ({cls.VERSION})",
                     failure_class=FAILURE_CLASS_UNKNOWN_REASON_CODE,
+                    schema_field=SCHEMA_FIELD_REASON_CODES,
+                    schema_rule=SCHEMA_RULE_UNREGISTERED_CODE,
                 )
             c = raw.strip()
             if c not in normalized:
@@ -499,6 +536,8 @@ class DecisionReasonCodeRegistry:
             raise DecisionValidationError(
                 "reason_codes must contain at least one registered reason code",
                 failure_class=FAILURE_CLASS_UNKNOWN_REASON_CODE,
+                schema_field=SCHEMA_FIELD_REASON_CODES,
+                schema_rule=SCHEMA_RULE_EMPTY_NOT_ALLOWED,
             )
         return normalized
 
@@ -594,9 +633,15 @@ class MissingConstraintAuthorityError(AgencyDecisionError):
 class UniversalUtilityForbiddenError(AgencyDecisionError):
     """Sections 22, 41-42: Raised when universal utility scores or argmax rankings are introduced."""
 
+    #: v0.4 schema-repair: same reason as ``HiddenReasoningForbiddenError``.
+    failure_class = FAILURE_CLASS_FORBIDDEN_UNIVERSAL_UTILITY
+
 
 class HiddenReasoningForbiddenError(AgencyDecisionError):
     """Section 10 & 75: Raised when full chain-of-thought or hidden scratchpad tokens are persisted."""
+
+    #: v0.4 schema-repair: named, so a forbidden-CoT answer is not filed as a schema shape error.
+    failure_class = FAILURE_CLASS_FORBIDDEN_HIDDEN_REASONING
 
 
 class DecisionImmutabilityError(AgencyDecisionError):
@@ -606,9 +651,260 @@ class DecisionImmutabilityError(AgencyDecisionError):
 class DecisionValidationError(AgencyDecisionError):
     """Section 59: Raised when model/decision output fails strict structural or semantic validation."""
 
-    def __init__(self, message: str, *, failure_class: str = FAILURE_CLASS_INVALID_SCHEMA) -> None:
+    def __init__(self, message: str, *, failure_class: str = FAILURE_CLASS_INVALID_SCHEMA,
+                 schema_field: Optional[str] = None, schema_rule: Optional[str] = None,
+                 schema_extra: Optional[Mapping[str, Any]] = None) -> None:
         super().__init__(message)
         self.failure_class = failure_class
+        #: v0.4 schema-repair: *where* the refusal happened and *which* rule broke, both from the
+        #: closed vocabularies below.  They exist because the observed failure only ever said
+        #: ``INVALID_SCHEMA``: the human-readable message names the field but can also quote the
+        #: model ("unknown keys: [...]", "reason_code=...", "method_ref=..."), so the message itself
+        #: can never be journalled.  These two are nameable with no model text at all.
+        self.schema_field = schema_field
+        self.schema_rule = schema_rule
+        self.schema_extra = dict(schema_extra or {})
+
+
+#: v0.4 schema-repair vocabulary.  A *field* is a key name of this module's own DecisionOutput
+#: contract; a *rule* is which check refused it.  Neither is model text.
+SCHEMA_FIELD_DECISION_OUTPUT = "decision_output"
+SCHEMA_FIELD_DECISION = "decision"
+SCHEMA_FIELD_SELECTED_CANDIDATE_ID = "selected_candidate_id"
+SCHEMA_FIELD_DEFERRED_CANDIDATE_IDS = "deferred_candidate_ids"
+SCHEMA_FIELD_REASON_CODES = "reason_codes"
+SCHEMA_FIELD_SHORT_RATIONALE = "short_rationale"
+SCHEMA_FIELD_LATER_ITEM = "later_item"
+SCHEMA_FIELD_FUTURE_ITEM_ACTIONS = "future_item_actions"
+SCHEMA_FIELD_METHOD_REF = "method_ref"
+SCHEMA_FIELD_METHOD_TRIAL = "method_trial"
+SCHEMA_FIELD_METHOD_PROPOSAL = "method_proposal"
+SCHEMA_FIELD_SHARING = "sharing"
+SCHEMA_FIELDS = frozenset({
+    SCHEMA_FIELD_DECISION_OUTPUT, SCHEMA_FIELD_DECISION, SCHEMA_FIELD_SELECTED_CANDIDATE_ID,
+    SCHEMA_FIELD_DEFERRED_CANDIDATE_IDS, SCHEMA_FIELD_REASON_CODES, SCHEMA_FIELD_SHORT_RATIONALE,
+    SCHEMA_FIELD_LATER_ITEM, SCHEMA_FIELD_FUTURE_ITEM_ACTIONS, SCHEMA_FIELD_METHOD_REF,
+    SCHEMA_FIELD_METHOD_TRIAL, SCHEMA_FIELD_METHOD_PROPOSAL, SCHEMA_FIELD_SHARING,
+})
+
+#: The placeholder a refusal uses when it cannot name a field, and the word a bad value is replaced
+#: by.  Deliberately *not* a member of ``SCHEMA_FIELDS``: it is the absence of a name.
+SCHEMA_FIELD_UNKNOWN = "unknown"
+
+SCHEMA_RULE_NOT_AN_OBJECT = "NOT_A_JSON_OBJECT"
+SCHEMA_RULE_UNKNOWN_KEYS = "UNKNOWN_TOP_LEVEL_KEYS"
+SCHEMA_RULE_MISSING_OR_WRONG_TYPE = "MISSING_OR_WRONG_TYPE"
+SCHEMA_RULE_NOT_A_LIST = "NOT_A_LIST"
+SCHEMA_RULE_EMPTY_NOT_ALLOWED = "EMPTY_NOT_ALLOWED"
+SCHEMA_RULE_UNREGISTERED_CODE = "UNREGISTERED_CODE"
+SCHEMA_RULE_TOO_LONG = "TOO_LONG"
+SCHEMA_RULE_REFUSED_BY_DOMAIN = "REFUSED_BY_DOMAIN"
+SCHEMA_RULE_FORBIDDEN_HIDDEN_REASONING = "FORBIDDEN_HIDDEN_REASONING"
+SCHEMA_RULE_UNCLASSIFIED = "UNCLASSIFIED"
+SCHEMA_RULES = frozenset({
+    SCHEMA_RULE_NOT_AN_OBJECT, SCHEMA_RULE_UNKNOWN_KEYS, SCHEMA_RULE_MISSING_OR_WRONG_TYPE,
+    SCHEMA_RULE_NOT_A_LIST, SCHEMA_RULE_EMPTY_NOT_ALLOWED, SCHEMA_RULE_UNREGISTERED_CODE,
+    SCHEMA_RULE_TOO_LONG, SCHEMA_RULE_REFUSED_BY_DOMAIN, SCHEMA_RULE_FORBIDDEN_HIDDEN_REASONING,
+    SCHEMA_RULE_UNCLASSIFIED,
+})
+
+#: An unknown top-level key is *model* output, so it is never journalled verbatim: a key can carry
+#: someone's words (``{"notes": "<private text>"}``).  Only the count is recorded, plus a hit
+#: against this fixed alias list -- names authored here, so a hit reads "the answer carried an
+#: extra ``reasoning`` key" and can never echo whatever the model actually wrote.
+SCHEMA_ALIAS_KEYS = frozenset({
+    "answer", "analysis", "comment", "confidence", "explanation", "json", "meta", "metadata",
+    "note", "notes", "output", "rationale", "reasoning", "reasoning_content", "response",
+    "result", "thought", "thoughts", "thinking", "why",
+})
+SCHEMA_KEY_SHAPES = frozenset({"ascii_identifier", "other"})
+#: The only keys a persisted refusal record may carry.  Applied again on the way out so a future
+#: caller cannot accidentally store more than this (defence in depth, not the only defence).
+SCHEMA_DETAIL_KEYS = ("failure_class", "field", "rule", "value_type", "unknown_key_count",
+                      "unknown_key_alias_hits", "unknown_key_shapes")
+
+#: Every failure class this module itself can record.  ``failure_class`` inside a refusal record
+#: must be one of these constants -- an arbitrary value becomes ``SCHEMA_DETAIL_UNKNOWN`` instead
+#: of being echoed back.
+SCHEMA_DETAIL_FAILURE_CLASSES = frozenset({
+    FAILURE_CLASS_MODEL_TIMEOUT, FAILURE_CLASS_MODEL_REFUSAL, FAILURE_CLASS_INVALID_JSON,
+    FAILURE_CLASS_INVALID_SCHEMA, FAILURE_CLASS_INVENTED_CANDIDATE,
+    FAILURE_CLASS_HARD_CONSTRAINT_VIOLATION, FAILURE_CLASS_ILLEGAL_DECISION_ENUM,
+    FAILURE_CLASS_ILLEGAL_DECISION_MATRIX, FAILURE_CLASS_ATOMIC_VIOLATION,
+    FAILURE_CLASS_UNKNOWN_REASON_CODE, FAILURE_CLASS_STALE_BEFORE_COMMIT,
+    FAILURE_CLASS_INTERRUPTED_DURING_COGNITION, FAILURE_CLASS_CANDIDATE_EXPLOSION,
+    FAILURE_CLASS_INVENTED_METHOD_REF, FAILURE_CLASS_INVALID_METHOD_TRIAL,
+    FAILURE_CLASS_FORBIDDEN_HIDDEN_REASONING, FAILURE_CLASS_FORBIDDEN_UNIVERSAL_UTILITY,
+})
+SCHEMA_DETAIL_UNKNOWN = "UNKNOWN"
+#: The seven JSON type names a ``value_type`` may be; anything else is dropped.
+SCHEMA_VALUE_TYPES = frozenset({"null", "bool", "number", "string", "object", "array", "other"})
+#: Upper bound for the derived integer counts (a bound, not a guess: nobody offers 64 extra keys).
+SCHEMA_DETAIL_MAX_COUNT = 64
+
+
+def _json_type_name(value: Any) -> str:
+    """The JSON type of a model value.  A type name is not content."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, (list, tuple)):
+        return "array"
+    return "other"
+
+
+def _unknown_key_facts(keys: Iterable[Any]) -> dict[str, Any]:
+    """Counts and alias hits for unknown keys -- never the keys themselves."""
+    names = [str(key) for key in keys]
+    lowered = [name.strip().lower() for name in names]
+    ascii_identifier = sum(1 for name in names
+                           if name.isascii() and name.replace("_", "").isalnum())
+    return {
+        "unknown_key_count": len(names),
+        "unknown_key_alias_hits": sorted({name for name in lowered if name in SCHEMA_ALIAS_KEYS}),
+        "unknown_key_shapes": {"ascii_identifier": ascii_identifier,
+                               "other": len(names) - ascii_identifier},
+    }
+
+
+def describe_schema_refusal(exc: BaseException) -> dict[str, Any]:
+    """A value-free account of *why* an answer was refused: field, rule and derived counts.
+
+    This is the record a real failed attempt leaves behind, so the next run can say
+    "``short_rationale`` was TOO_LONG" instead of only "INVALID_SCHEMA".  The raw values come from
+    the exception's own attributes, and every one of them is re-checked by
+    ``sanitize_schema_refusal`` -- an attribute that somehow carried arbitrary text cannot reach a
+    journal through here.
+    """
+
+    extra = getattr(exc, "schema_extra", None)
+    raw: dict[str, Any] = {
+        "failure_class": getattr(exc, "failure_class", None),
+        "field": getattr(exc, "schema_field", None),
+        "rule": getattr(exc, "schema_rule", None),
+    }
+    if isinstance(extra, Mapping):
+        for key in ("value_type", "unknown_key_count", "unknown_key_alias_hits",
+                    "unknown_key_shapes"):
+            if key in extra:
+                raw[key] = extra[key]
+    return sanitize_schema_refusal(raw) or {}
+
+
+def sanitize_schema_refusal(detail: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+    """Rebuild a refusal record from **validated values only** -- the whitelist is the easy half.
+
+    A key being allowed says nothing about its *value*: ``{"field": "<someone's words>"}`` passes a
+    key-only filter and lands in the journal.  So every value is re-derived here:
+
+    * ``failure_class`` must be one of this module's own failure-class constants (else ``UNKNOWN``);
+    * ``field`` / ``rule`` must be members of the closed vocabularies (else ``unknown`` /
+      ``UNCLASSIFIED``);
+    * ``value_type`` must be one of the seven JSON type names (else dropped);
+    * ``unknown_key_count`` must be a real int in ``0..SCHEMA_DETAIL_MAX_COUNT`` (bools dropped);
+    * ``unknown_key_alias_hits`` may only hold names from ``SCHEMA_ALIAS_KEYS`` (deduped, capped);
+    * ``unknown_key_shapes`` may only hold ``SCHEMA_KEY_SHAPES`` keys with ints in the same bound.
+
+    Nothing is echoed back: a value that fails validation becomes a fixed word or is dropped.
+    """
+
+    if not isinstance(detail, Mapping) or not detail:
+        return None
+    out: dict[str, Any] = {}
+
+    failure_class = detail.get("failure_class")
+    out["failure_class"] = (failure_class if isinstance(failure_class, str)
+                            and failure_class in SCHEMA_DETAIL_FAILURE_CLASSES
+                            else SCHEMA_DETAIL_UNKNOWN)
+
+    field = detail.get("field")
+    out["field"] = field if isinstance(field, str) and field in SCHEMA_FIELDS \
+        else SCHEMA_FIELD_UNKNOWN
+
+    rule = detail.get("rule")
+    out["rule"] = rule if isinstance(rule, str) and rule in SCHEMA_RULES \
+        else SCHEMA_RULE_UNCLASSIFIED
+
+    value_type = detail.get("value_type")
+    if isinstance(value_type, str) and value_type in SCHEMA_VALUE_TYPES:
+        out["value_type"] = value_type
+
+    count = detail.get("unknown_key_count")
+    if isinstance(count, int) and not isinstance(count, bool) \
+            and 0 <= count <= SCHEMA_DETAIL_MAX_COUNT:
+        out["unknown_key_count"] = count
+
+    hits = detail.get("unknown_key_alias_hits")
+    if isinstance(hits, (list, tuple)):
+        clean_hits = sorted({name for name in hits
+                             if isinstance(name, str) and name in SCHEMA_ALIAS_KEYS})
+        if clean_hits:
+            out["unknown_key_alias_hits"] = clean_hits[:len(SCHEMA_ALIAS_KEYS)]
+
+    shapes = detail.get("unknown_key_shapes")
+    if isinstance(shapes, Mapping):
+        clean_shapes: dict[str, int] = {}
+        for key, value in shapes.items():
+            if key in SCHEMA_KEY_SHAPES and isinstance(value, int) \
+                    and not isinstance(value, bool) and 0 <= value <= SCHEMA_DETAIL_MAX_COUNT:
+                clean_shapes[key] = value
+        if clean_shapes:
+            out["unknown_key_shapes"] = clean_shapes
+    if (out["failure_class"] == SCHEMA_DETAIL_UNKNOWN
+            and out["field"] == SCHEMA_FIELD_UNKNOWN
+            and out["rule"] == SCHEMA_RULE_UNCLASSIFIED):
+        # Nothing was nameable.  An all-placeholder record is noise, not evidence, and writing one
+        # would let a future reader mistake "we know nothing" for "we checked".
+        return None
+    return out
+
+
+def failure_journal_payload(
+    *,
+    opportunity_id: str,
+    attempt_id: str,
+    failure_class: str,
+    failure_ref: Optional[str],
+    model_run_ref: Optional[str],
+    schema_detail: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """The ``DECISION_ATTEMPT_FAILED`` journal payload, now naming *why* when it is known.
+
+    Without a schema detail the payload is byte-for-byte the six keys older entries carry, so
+    historical journals stay comparable.  With one, a single additive ``schema_refusal`` object
+    says which field and which rule -- still no model text.
+    """
+
+    payload: dict[str, Any] = {
+        "event_type": "DECISION_ATTEMPT_FAILED",
+        "opportunity_id": opportunity_id,
+        "attempt_id": attempt_id,
+        "failure_class": failure_class,
+        "failure_ref": failure_ref,
+        "model_run_ref": model_run_ref,
+    }
+    clean = sanitize_schema_refusal(schema_detail)
+    if clean:
+        payload["schema_refusal"] = clean
+    return payload
+
+
+def _annotate_schema_field(exc: "DecisionValidationError", field: str,
+                           rule: Optional[str] = None) -> "DecisionValidationError":
+    """Name the field a nested refusal came from (``later_item``, ``sharing``, ...), once."""
+
+    if getattr(exc, "schema_field", None) is None:
+        exc.schema_field = field
+    if getattr(exc, "schema_rule", None) is None:
+        exc.schema_rule = rule or SCHEMA_RULE_UNCLASSIFIED
+    return exc
 
 
 class CognitionAdapterError(RuntimeError):
@@ -736,7 +1032,12 @@ def sanitize_short_rationale(
     if raw_rationale is None:
         return None, False
     if not isinstance(raw_rationale, str):
-        raise DecisionValidationError("short_rationale must be a string or null")
+        raise DecisionValidationError(
+            "short_rationale must be a string or null",
+            schema_field=SCHEMA_FIELD_SHORT_RATIONALE,
+            schema_rule=SCHEMA_RULE_MISSING_OR_WRONG_TYPE,
+            schema_extra={"value_type": _json_type_name(raw_rationale)},
+        )
     cleaned = raw_rationale.strip()
     if not cleaned:
         return None, False
@@ -744,7 +1045,8 @@ def sanitize_short_rationale(
         raise HiddenReasoningForbiddenError("short_rationale must not contain <think> or scratchpad dumps")
     if len(cleaned) > MAX_SHORT_RATIONALE_CHARS:
         raise DecisionValidationError(
-            f"short_rationale exceeds MAX_SHORT_RATIONALE_CHARS ({len(cleaned)} > {MAX_SHORT_RATIONALE_CHARS})"
+            f"short_rationale exceeds MAX_SHORT_RATIONALE_CHARS ({len(cleaned)} > {MAX_SHORT_RATIONALE_CHARS})",
+            schema_field=SCHEMA_FIELD_SHORT_RATIONALE, schema_rule=SCHEMA_RULE_TOO_LONG,
         )
 
     lower_text = cleaned.lower()
@@ -763,8 +1065,291 @@ def sanitize_short_rationale(
 
 # ---------------------------------------------------------------------------
 # Sections 83-87, 164: AgencyDecisionAuthority & Capability Guards
+def validate_method_trial(raw: Any, *, method_ref: Optional[str] = None) -> dict[str, Any]:
+    """v0.4 C: one bounded trial evaluation, validated by *its own* small contract.
+
+    The shape is deliberately tiny -- which practice, which verdict, a bounded sentence and the
+    experiences it rests on -- because the *evaluation* is the whole object here.  It is not a
+    write: B's practice workspace records it, and only against evidence A can still read, so a
+    successful version write can never be laundered into "it helped".
+    """
+
+    if not isinstance(raw, Mapping):
+        raise DecisionValidationError(
+            "method_trial must be a JSON object", failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL)
+    unknown = {str(key) for key in raw} - METHOD_TRIAL_KEYS
+    if unknown:
+        raise DecisionValidationError(
+            f"method_trial carries unknown keys: {sorted(unknown)}",
+            failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL)
+    ref = raw.get("method_ref")
+    text = ref.strip() if isinstance(ref, str) else ""
+    if not text or not text.startswith(METHOD_REF_PREFIX) or ":" in text[len(METHOD_REF_PREFIX):]:
+        raise DecisionValidationError(
+            "method_trial.method_ref must be a bounded practice handle",
+            failure_class=FAILURE_CLASS_INVENTED_METHOD_REF)
+    if method_ref is not None and text != str(method_ref).strip():
+        # One trial, one subject: a verdict may not be filed against a different practice than
+        # the one this Decision said it was following.
+        raise DecisionValidationError(
+            f"method_trial.method_ref={text!r} does not match the chosen method_ref={method_ref!r}",
+            failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL)
+    outcome = raw.get("outcome")
+    verdict = outcome.strip().upper() if isinstance(outcome, str) else ""
+    if verdict not in METHOD_TRIAL_OUTCOMES:
+        raise DecisionValidationError(
+            f"method_trial.outcome must be one of {sorted(METHOD_TRIAL_OUTCOMES)}",
+            failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL)
+    detail = raw.get("detail")
+    if detail is not None and not isinstance(detail, str):
+        raise DecisionValidationError(
+            "method_trial.detail must be text", failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL)
+    ids = raw.get("experience_ids") or []
+    if isinstance(ids, (str, bytes)) or not isinstance(ids, Iterable):
+        raise DecisionValidationError(
+            "method_trial.experience_ids must be a list",
+            failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL)
+    clean_ids: list[str] = []
+    for item in list(ids)[:8]:
+        if not isinstance(item, str) or not item.strip():
+            raise DecisionValidationError(
+                "method_trial.experience_ids must be non-empty strings",
+                failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL)
+        if item.strip() not in clean_ids:
+            clean_ids.append(item.strip())
+    return {
+        "method_ref": text,
+        "outcome": verdict,
+        "detail": (detail or "").strip()[:MAX_METHOD_TRIAL_DETAIL_CHARS],
+        "experience_ids": clean_ids,
+    }
+
+
 # ---------------------------------------------------------------------------
 
+
+def validate_method_proposal(raw: Any) -> dict[str, Any]:
+    """v0.4 C: one bounded, *scoped* practice proposal, checked before it can be saved.
+
+    A method is one concrete thing to try, the conditions it is believed to hold under, and what is
+    still unknown -- never a general preference, a persona trait or a program.  The references it
+    cites are re-checked by B's service against A's Memory at write time; here they are only
+    required to be well-formed, because a host with no Memory must be able to propose a *draft*.
+    """
+
+    if not isinstance(raw, Mapping):
+        raise DecisionValidationError(
+            "method_proposal must be a JSON object", failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+    unknown = {str(key) for key in raw} - METHOD_PROPOSAL_KEYS
+    if unknown:
+        raise DecisionValidationError(
+            f"method_proposal carries unknown keys: {sorted(unknown)}",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+
+    def _text(name: str, limit: int, *, required: bool) -> str:
+        value = raw.get(name)
+        if value is None and not required:
+            return ""
+        if not isinstance(value, str):
+            raise DecisionValidationError(
+                f"method_proposal.{name} must be text",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        text = " ".join(value.split())
+        if required and not text:
+            raise DecisionValidationError(
+                f"method_proposal.{name} must not be empty",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        return text[:limit]
+
+    def _refs(name: str, limit: int) -> list[str]:
+        value = raw.get(name) or []
+        if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+            raise DecisionValidationError(
+                f"method_proposal.{name} must be a list",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        out: list[str] = []
+        for item in list(value)[:limit]:
+            if not isinstance(item, str) or not item.strip():
+                raise DecisionValidationError(
+                    f"method_proposal.{name} must be non-empty strings",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+            if item.strip() not in out:
+                out.append(item.strip())
+        return out
+
+    return {
+        "title": _text("title", MAX_METHOD_TITLE_CHARS, required=True),
+        "instruction": _text("instruction", MAX_METHOD_INSTRUCTION_CHARS, required=True),
+        "scope": _text("scope", MAX_METHOD_SCOPE_CHARS, required=False),
+        "uncertainty": _text("uncertainty", MAX_METHOD_UNCERTAINTY_CHARS, required=False),
+        "experience_ids": _refs("experience_ids", 8),
+        "review_refs": _refs("review_refs", 6),
+    }
+
+#: v0.4 sharing: the ONE extra life-side action a Decision may propose, and the closed vocabulary
+#: it is spelled with.  The owner of every field is B's ``life_sharing_service``; this module only
+#: refuses a proposal whose *shape* could not be a legal request (wrong op, invented identifier,
+#: unbounded text, a free-form recipient).  Nothing here sends anything: the cycle asks the owner,
+#: and only the owner's own answer is recorded.
+SHARING_ACTION_PREPARE = "prepare"
+SHARING_ACTION_SEND_LOCAL = "send_local"
+SHARING_ACTION_DEFER = "defer"
+SHARING_ACTION_DROP = "drop"
+SHARING_ACTIONS = (SHARING_ACTION_PREPARE, SHARING_ACTION_SEND_LOCAL,
+                   SHARING_ACTION_DEFER, SHARING_ACTION_DROP)
+
+SHARING_PROPOSAL_KEYS = frozenset({
+    "op", "source_artifact_id", "share_text", "excerpt_chars", "title", "expires_after_s",
+    "share_id", "expected_head", "defer_condition", "opportunity_ref", "reason",
+})
+#: Fields an audience/channel must never travel in: B fixes both (`local:owner` / `local_inbox`)
+#: and refuses anything else.  Naming one here is an invention, not a narrower request.
+SHARING_FORBIDDEN_KEYS = frozenset({
+    "audience", "channel", "recipient", "to", "email", "url", "telegram", "api",
+})
+MAX_SHARE_TEXT_CHARS = 2000
+MAX_SHARE_EXCERPT_CHARS = 400
+MAX_SHARE_TITLE_CHARS = 80
+MAX_SHARE_CONDITION_CHARS = 200
+MAX_SHARE_REASON_CHARS = 200
+MIN_SHARE_EXPIRY_S = 60
+MAX_SHARE_EXPIRY_S = 2_592_000
+
+
+def validate_sharing_action(raw: Any) -> dict[str, Any]:
+    """One bounded sharing request: its *shape* only, never an audience and never a send.
+
+    The ops are exactly B's ``SHARE_ACTIONS`` minus ``expire`` (an expired draft is something the
+    owner's own clock reports; A does not get to declare a draft dead by hand).  ``prepare`` binds a
+    real source artifact and an *explicit* bounded text (or an explicit prefix length) -- a share
+    with nothing to say is refused here exactly as the owner would refuse it.
+    """
+
+    if not isinstance(raw, Mapping):
+        raise DecisionValidationError(
+            "sharing must be a JSON object", failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+    forbidden = {str(key) for key in raw} & SHARING_FORBIDDEN_KEYS
+    if forbidden:
+        raise DecisionValidationError(
+            f"sharing may not name an audience or channel ({sorted(forbidden)}): the owner fixes "
+            "them, and there is no free-form recipient",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+    unknown = {str(key) for key in raw} - SHARING_PROPOSAL_KEYS
+    if unknown:
+        raise DecisionValidationError(
+            f"sharing carries unknown keys: {sorted(unknown)}",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+
+    op = raw.get("op")
+    op = op.strip() if isinstance(op, str) else ""
+    if op not in SHARING_ACTIONS:
+        raise DecisionValidationError(
+            f"sharing.op={raw.get('op')!r} must be one of {list(SHARING_ACTIONS)}",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+
+    def _text(name: str, limit: int, *, required: bool = False) -> str:
+        value = raw.get(name)
+        if value is None:
+            if required:
+                raise DecisionValidationError(
+                    f"sharing.{name} is required for op={op}",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+            return ""
+        if not isinstance(value, str):
+            raise DecisionValidationError(
+                f"sharing.{name} must be text", failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        text = " ".join(value.split()) if limit <= MAX_SHARE_CONDITION_CHARS else value.strip()
+        if required and not text:
+            raise DecisionValidationError(
+                f"sharing.{name} must not be empty for op={op}",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        return text[:limit]
+
+    def _count(name: str, low: int, high: int) -> Optional[int]:
+        value = raw.get(name)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise DecisionValidationError(
+                f"sharing.{name} must be an integer",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        if value < low or value > high:
+            raise DecisionValidationError(
+                f"sharing.{name}={value} is outside [{low}, {high}]",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        return value
+
+    def _ref(text: str, name: str, prefix: str) -> str:
+        """One structured reference of the expected prefix, or a decision-schema refusal."""
+
+        try:
+            return _validate_structured_ref(text, name, allowed_prefixes=frozenset({prefix}))
+        except AgencyDecisionError as exc:
+            raise DecisionValidationError(
+                f"{name}={text!r} is not a bounded {prefix} reference",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA) from exc
+
+    def _share_ref(name: str) -> str:
+        value = raw.get(name)
+        text = value.strip() if isinstance(value, str) else ""
+        if not text:
+            raise DecisionValidationError(
+                f"sharing.{name} is required for op={op}",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        if not text.startswith("artifact:"):
+            raise DecisionValidationError(
+                f"sharing.{name}={value!r} is not a share artifact reference",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        return _ref(text, f"sharing.{name}", "artifact")
+
+    def _head_ref() -> str:
+        value = raw.get("expected_head")
+        text = value.strip() if isinstance(value, str) else ""
+        if not text:
+            raise DecisionValidationError(
+                "sharing.expected_head is required: the draft version this action was decided on",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        return _ref(text, "sharing.expected_head", "artifact-version")
+
+    if op == SHARING_ACTION_PREPARE:
+        source = raw.get("source_artifact_id")
+        text = source.strip() if isinstance(source, str) else ""
+        if not text or not text.startswith("artifact:"):
+            raise DecisionValidationError(
+                "sharing.source_artifact_id must be one of the source artifacts this round offered",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        share_text = _text("share_text", MAX_SHARE_TEXT_CHARS)
+        excerpt = _count("excerpt_chars", 1, MAX_SHARE_EXCERPT_CHARS)
+        if not share_text and excerpt is None:
+            # The owner refuses this too (SHARE_TEXT_REQUIRED); refusing it here keeps the
+            # "never send the whole private material by accident" rule visible in the prompt.
+            raise DecisionValidationError(
+                "sharing needs share_text (explicit words) or excerpt_chars (an explicit prefix)",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        return {
+            "op": op,
+            "source_artifact_id": _ref(text, "sharing.source_artifact_id", "artifact"),
+            "share_text": share_text,
+            "excerpt_chars": excerpt,
+            "title": _text("title", MAX_SHARE_TITLE_CHARS),
+            "expires_after_s": _count("expires_after_s", MIN_SHARE_EXPIRY_S, MAX_SHARE_EXPIRY_S),
+        }
+
+    share_id = _share_ref("share_id")
+    expected_head = _head_ref()
+    action: dict[str, Any] = {"op": op, "share_id": share_id, "expected_head": expected_head}
+    if op == SHARING_ACTION_DEFER:
+        condition = _text("defer_condition", MAX_SHARE_CONDITION_CHARS)
+        opportunity = _text("opportunity_ref", MAX_SHARE_CONDITION_CHARS)
+        if not condition and not opportunity:
+            raise DecisionValidationError(
+                "sharing.defer needs defer_condition or opportunity_ref: what are we waiting for?",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA)
+        action["defer_condition"] = condition
+        action["opportunity_ref"] = opportunity
+    elif op == SHARING_ACTION_DROP:
+        action["reason"] = _text("reason", MAX_SHARE_REASON_CHARS)
+    return action
 
 @dataclass(frozen=True)
 class AgencyDecisionCapability:
@@ -1528,6 +2113,27 @@ class DecisionRecord:
     target_activity_ref: Optional[str] = None
     deferred_candidate_refs: tuple[str, ...] = ()
     reevaluation_hint_ref: Optional[str] = None
+    #: v0.4 stage A: her own "later" as the Decision itself bounded it -- one proposal (already
+    #: validated by ``life_future_items``) and at most a few actions on items she already has.
+    #: Both are *records of what she said*, never a write: the cycle performs the store write and
+    #: reports its own result.  Absent is ``None`` / ``()``, never an empty invented intent.
+    later_item_proposal: Optional[dict[str, Any]] = None
+    future_item_actions: tuple[dict[str, Any], ...] = ()
+    #: v0.4 C: the *one* of her own practices this round chose to follow (a bounded handle the
+    #: session offered), and -- optionally -- her own bounded verdict on whether it helped.
+    #: Neither is authority: a method is document context, and a trial is an evaluation that only
+    #: B's practice workspace may record, against evidence A can still read.
+    method_ref: Optional[str] = None
+    method_trial: Optional[dict[str, Any]] = None
+    #: v0.4 C: at most one bounded practice proposal ("一件我想试的做法", with its scope and its
+    #: unknown).  It is a *proposal*: the cycle asks B's practice workspace to save it as a
+    #: TENTATIVE draft after the Decision commits, and a refusal is reported as a refusal.
+    method_proposal: Optional[dict[str, Any]] = None
+    #: v0.4 sharing: at most one bounded life-side sharing request (prepare / defer / send_local /
+    #: drop).  It is a *record of what she asked for*, never a send: the cycle calls B's
+    #: ``LifeSharingService`` after the Decision commits, and only the owner's own answer (with its
+    #: local receipt) is written back.  ``audience``/``channel`` are absent by construction.
+    sharing_action: Optional[dict[str, Any]] = None
     short_rationale: Optional[str] = None
     invalid_rationale_claim_dropped: bool = False
     model_run_ref: Optional[str] = None
@@ -1656,6 +2262,49 @@ class DecisionRecord:
                 "reevaluation_hint_ref",
                 _validate_structured_ref(self.reevaluation_hint_ref, "reevaluation_hint_ref"),
             )
+        # v0.4 stage A: the two "later" projections are re-validated through their own domain, so
+        # a record rebuilt from disk can never carry a shape the validator would refuse.
+        if self.later_item_proposal is not None:
+            try:
+                object.__setattr__(self, "later_item_proposal",
+                                   life_future_items.validate_proposal(self.later_item_proposal))
+            except life_future_items.FutureItemError as exc:
+                raise DecisionValidationError(
+                    f"later_item_proposal is not a valid future-item proposal: {exc}",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                ) from exc
+        if self.future_item_actions is None:
+            object.__setattr__(self, "future_item_actions", ())
+        else:
+            try:
+                object.__setattr__(
+                    self, "future_item_actions",
+                    tuple(life_future_items.validate_actions(list(self.future_item_actions))))
+            except life_future_items.FutureItemError as exc:
+                raise DecisionValidationError(
+                    f"future_item_actions is not a valid action list: {exc}",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                ) from exc
+        # v0.4 C: the chosen practice handle and her own bounded verdict are re-validated on every
+        # rebuild, so a record read back from disk can never carry a shape the validator refuses.
+        if self.method_ref is not None:
+            text = self.method_ref.strip() if isinstance(self.method_ref, str) else ""
+            if not text or not text.startswith(METHOD_REF_PREFIX) or ":" in text[len(METHOD_REF_PREFIX):]:
+                raise DecisionValidationError(
+                    f"method_ref={self.method_ref!r} is not a bounded practice handle",
+                    failure_class=FAILURE_CLASS_INVENTED_METHOD_REF,
+                )
+            object.__setattr__(self, "method_ref", text)
+        if self.method_trial is not None:
+            object.__setattr__(self, "method_trial",
+                               validate_method_trial(self.method_trial,
+                                                     method_ref=self.method_ref))
+        if self.method_proposal is not None:
+            object.__setattr__(self, "method_proposal",
+                               validate_method_proposal(self.method_proposal))
+        if self.sharing_action is not None:
+            object.__setattr__(self, "sharing_action",
+                               validate_sharing_action(self.sharing_action))
         if self.model_run_ref is not None:
             object.__setattr__(
                 self,
@@ -1730,6 +2379,18 @@ class DecisionRecord:
             "snapshot_fingerprint": self.snapshot_fingerprint,
             "supersedes_ref": self.supersedes_ref,
             "exploration_seed": self.exploration_seed,
+            # v0.4 stage A: what she said she would do later, and what she decided about items she
+            # already had.  Recorded with the Decision so a rebuilt record keeps the same intent.
+            "later_item_proposal": copy.deepcopy(self.later_item_proposal),
+            "future_item_actions": [copy.deepcopy(row) for row in self.future_item_actions],
+            # v0.4 C: the practice handle she followed this round and her own bounded verdict on
+            # it (if she gave one).  Recorded with the Decision so a rebuilt record keeps intent.
+            "method_ref": self.method_ref,
+            "method_trial": copy.deepcopy(self.method_trial),
+            "method_proposal": copy.deepcopy(self.method_proposal),
+            # v0.4 sharing: the one sharing request this Decision made, if any.  It is the
+            # *request*, never the delivery: the delivery fact lives in B's owner and is read back.
+            "sharing_action": copy.deepcopy(self.sharing_action),
             "created_at": self.created_at,
         }
 
@@ -1742,6 +2403,7 @@ class DecisionRecord:
         d["candidate_refs"] = tuple(d.get("candidate_refs") or ())
         d["hard_constraint_result_refs"] = tuple(d.get("hard_constraint_result_refs") or ())
         d["reason_codes"] = tuple(d.get("reason_codes") or ())
+        d["future_item_actions"] = tuple(d.get("future_item_actions") or ())
         d["deferred_candidate_refs"] = tuple(d.get("deferred_candidate_refs") or ())
         return cls(**d)
 
@@ -2205,6 +2867,36 @@ class AccessibilityBuilder:
 
 
 # ---------------------------------------------------------------------------
+# v0.4 Day-Life Legality: sourced facts & the single-foreground contract
+# ---------------------------------------------------------------------------
+
+#: The one sourced fact key through which the life cycle tells AG-1 that the current foreground
+#: Activity has no executable step left (material read out, source revoked, unknown revision...).
+#: It is a *fact*, never an offer: it can withdraw the current CONTINUE and it can never create a
+#: decision, change capacity, or alter a world fact.
+OBSERVED_FACT_CURRENT_STEP_UNAVAILABLE = "current_step_unavailable_true"
+
+
+def observed_fact_is_true(
+    observed_facts: Optional[Mapping[str, Any]], fact_key: str
+) -> bool:
+    """True only when ``fact_key`` is an ASCII key whose value *is* the boolean ``True``.
+
+    ``"true"``, ``1`` and ``False`` are not the fact: the channel is typed, so a merely truthy
+    value can never withdraw a legal decision.
+    """
+    if not isinstance(observed_facts, Mapping):
+        return False
+    for raw_key, raw_value in observed_facts.items():
+        if not isinstance(raw_key, str) or not raw_key.isascii():
+            continue
+        if raw_key.strip() != fact_key:
+            continue
+        return raw_value is True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Decision Legality Matrix & DecisionOutputValidator (Sections 55-60, 64-75)
 # ---------------------------------------------------------------------------
 
@@ -2226,6 +2918,25 @@ class DecisionOutputValidator:
         intr = context_snapshot.interruptibility
         cur_act = context_snapshot.current_activity_ref
         cur_status = context_snapshot.current_activity_status
+        # v0.4 day-life legality: the single-foreground contract is owned by the Activity store and
+        # by AG-2, not by AG-1.  LR-2 refuses START while *any* foreground reference is still held
+        # (activity_continuity.py:1911-1922) and LR-4 refuses RESUME of another Activity under the
+        # same condition (activity_continuity.py:2144-2157); AG-2 re-checks the ACTIVE case before
+        # adoption (life_integration_ag2.py:2637-2641).  Offering those enums would be offering a
+        # decision that is certain to be refused, so they are withheld here instead.
+        # The reference is only "free" for START/RESUME when it is gone, or when it points at a
+        # WAITING Activity -- the single state both owners pass ``allow_background_waiting`` for
+        # (life_integration_ag2.py:3093-3096 and :3387-3390; activity_continuity.py:2144-2157).
+        # PAUSED does NOT release it: pausing leaves foreground_activity_ref pointing at the paused
+        # Activity (activity_continuity.py:2290-2293), so START/RESUME of another Activity is still
+        # refused there.  Only the ACTIVE case is additionally refused earlier, by AG-2.
+        foreground_holds_occupancy = bool(cur_act) and cur_status != STATUS_WAITING
+        # A sourced fact from the life cycle: the current Activity has no executable step left.
+        # It withdraws the current CONTINUE and nothing else -- no capacity change, no world fact,
+        # no new decision, and no other candidate's legality.
+        step_unavailable = observed_fact_is_true(
+            context_snapshot.observed_facts, OBSERVED_FACT_CURRENT_STEP_UNAVAILABLE
+        )
 
         legal: list[str] = [DECISION_DEFER]
 
@@ -2234,6 +2945,8 @@ class DecisionOutputValidator:
         # actionable new candidate in exactly the same sense as a world opportunity.  Before
         # this line existed the only legal decision for the subject's own work was DEFER, so
         # "continue my own booklet" could not be started at all -- see docs/v02-baseline.md.
+        # v0.4: START always opens a *new* Activity (AG-2 start_activity, life_integration_ag2.py
+        # :3098-3163), so while a foreground reference is held every START is a second foreground.
         if candidate.candidate_kind in {
             CANDIDATE_KIND_RESPOND_USER_REQUEST,
             CANDIDATE_KIND_CONSIDER_WORLD_OPPORTUNITY,
@@ -2241,8 +2954,34 @@ class DecisionOutputValidator:
             CANDIDATE_KIND_PURSUE_GOAL_STEP,
             CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY,
         }:
-            if intr != INTERRUPTIBILITY_ATOMIC and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}:
+            if (
+                not foreground_holds_occupancy
+                and intr != INTERRUPTIBILITY_ATOMIC
+                and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}
+            ):
                 legal.append(DECISION_START)
+
+        # v0.4 B: the one formal exception, and it is *narrow by vocabulary*, not by scenario.
+        #
+        # An explicit local co-presence invitation is a typed user request whose target refs live
+        # in the ``co_presence:`` namespace the protocol owns -- nothing else carries one.  Unlike
+        # every other candidate, accepting it does not open a *second* foreground: the adoption
+        # hands the running foreground over to the owner's own WAITING transition (LR-4, with a
+        # resume condition on the invitation's end) and only then starts the joint Activity, so
+        # the single-foreground rule is kept by the owner, not bypassed here.  That is why START
+        # is legal for *this* candidate while a pausable foreground runs.  An ATOMIC foreground
+        # still withdraws it, and so does a missing/foreign foreground.
+        invitation_refs = [str(ref) for ref in (getattr(candidate, "target_refs", None) or ())]
+        if (
+            candidate.candidate_kind == CANDIDATE_KIND_RESPOND_USER_REQUEST
+            and candidate.source_kind == SOURCE_USER_REQUEST
+            and any(ref.startswith("co_presence:") for ref in invitation_refs)
+            and cur_act is not None
+            and cur_status == STATUS_ACTIVE
+            and intr != INTERRUPTIBILITY_ATOMIC
+            and DECISION_START not in legal
+        ):
+            legal.append(DECISION_START)
 
         # Section 66: CONTINUE only for CURRENT_ACTIVITY candidate when Activity is ACTIVE
         if (
@@ -2250,17 +2989,26 @@ class DecisionOutputValidator:
             and candidate.source_kind == SOURCE_CURRENT_ACTIVITY
             and candidate.activity_ref == cur_act
             and cur_status == STATUS_ACTIVE
-            and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}
         ):
-            legal.append(DECISION_CONTINUE)
-            # Section 68: PAUSE only on current active Activity when interruptibility != ATOMIC
+            # CONTINUE keeps the execution gate: continuing a step that cannot run now is not a
+            # legal choice, and a sourced "no step left" fact withdraws it entirely.
+            if (
+                not step_unavailable
+                and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}
+            ):
+                legal.append(DECISION_CONTINUE)
+            # Section 69: WAIT only when known_waiting_basis_ref exists
+            if (
+                context_snapshot.known_waiting_basis_ref is not None
+                and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}
+            ):
+                legal.append(DECISION_WAIT)
+            # Sections 68 & 70: PAUSE/ABANDON are the exits from *this* Activity.  Their legality
+            # is the Activity's own identity (this candidate is the ACTIVE foreground Activity,
+            # checked above) plus interruptibility -- never body/resource executability, otherwise
+            # a spent budget would trap her inside an Activity she can no longer advance.
             if intr != INTERRUPTIBILITY_ATOMIC:
                 legal.append(DECISION_PAUSE)
-            # Section 69: WAIT only when known_waiting_basis_ref exists
-            if context_snapshot.known_waiting_basis_ref is not None:
-                legal.append(DECISION_WAIT)
-            # Section 70: ABANDON only on existing nonterminal Activity when interruptibility != ATOMIC
-            if intr != INTERRUPTIBILITY_ATOMIC:
                 legal.append(DECISION_ABANDON)
 
         # Section 67: RESUME only for RESUME_ELIGIBLE candidate with OPEN fresh eligibility
@@ -2270,10 +3018,30 @@ class DecisionOutputValidator:
             and candidate.availability_status == CANDIDATE_STATUS_OPEN
             and candidate.resume_eligibility_ref is not None
         ):
-            if intr != INTERRUPTIBILITY_ATOMIC and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}:
+            # v0.4: resuming *another* Activity while a foreground reference is held would be
+            # refused by LR-4 (activity_continuity.py:2144-2157) -- and AG-2 would first pause the
+            # ACTIVE foreground (life_integration_ag2.py:3391-3415), which is a real side effect for
+            # a command that still fails (the paused foreground keeps the reference, :2290-2293).
+            # So it is not offered at all.  Resuming the foreground Activity itself keeps its
+            # legality: LR-4 skips the foreground check when fg_id == act_id.
+            resumes_another_activity = (
+                foreground_holds_occupancy and candidate.activity_ref != cur_act
+            )
+            if (
+                not resumes_another_activity
+                and intr != INTERRUPTIBILITY_ATOMIC
+                and exec_now in {EXEC_NOW, EXEC_WITH_LIMITS, EXEC_UNKNOWN}
+            ):
                 legal.append(DECISION_RESUME)
-            # Existing nonterminal paused/waiting Activity can also be ABANDONed if not in ATOMIC
-            if intr != INTERRUPTIBILITY_ATOMIC:
+            # ABANDON of an Activity that is not the current foreground is refused by LR-2 unless it
+            # is WAITING *and* already released the foreground (activity_continuity.py:2158-2175).
+            # This snapshot carries no ``foreground_released`` fact, so only the matching foreground
+            # Activity keeps the offer -- never a decision the owner must refuse.
+            if (
+                intr != INTERRUPTIBILITY_ATOMIC
+                and cur_act is not None
+                and candidate.activity_ref == cur_act
+            ):
                 legal.append(DECISION_ABANDON)
 
         return legal
@@ -2288,12 +3056,19 @@ class DecisionOutputValidator:
         constraint_results_by_id: Mapping[str, CandidateConstraintResult],
         context_snapshot: DecisionContextSnapshot,
         capacity_snapshot: AgencyCapacitySnapshot,
+        #: v0.4 C: the practice handles *this* round offered (from the cycle's own bounded read of
+        #: her method drafts).  ``None`` means no practice workspace was consulted, so no handle is
+        #: legal at all -- an empty tuple means "consulted, nothing relevant", and both refuse a
+        #: handle the model invented.  This is an allow-list, not authority: it enables nothing.
+        allowed_method_refs: Optional[Sequence[str]] = None,
     ) -> dict[str, Any]:
         """Sections 55-60, 64-75: Validate raw model or rule decision output."""
         if not isinstance(raw_output, Mapping):
             raise DecisionValidationError(
                 "decision output must be a JSON object",
                 failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                schema_field=SCHEMA_FIELD_DECISION_OUTPUT, schema_rule=SCHEMA_RULE_NOT_AN_OBJECT,
+                schema_extra={"value_type": _json_type_name(raw_output)},
             )
         _reject_forbidden_dict_keys(raw_output, "DecisionOutput")
 
@@ -2307,12 +3082,30 @@ class DecisionOutputValidator:
             "deferred_candidate_refs",
             "target_activity_ref",
             "reevaluation_hint_ref",
+            # v0.4 stage A: her own "later" -- one proposal, and at most three decisions about
+            # items she already has.  Both are validated by the future-items domain itself
+            # (``life_future_items.validate_proposal`` / ``validate_actions``) so there is exactly
+            # one definition of what an item is, and neither can name another owner's object.
+            "later_item",
+            "future_item_actions",
+            # v0.4 C: the one practice she says she is following, and her own bounded verdict on
+            # it.  Both are checked against the allow-list this round offered (and a verdict may
+            # not name a different practice than the chosen one), so an invented handle is a
+            # refusal like an invented candidate -- never a silently dropped field.
+            "method_ref",
+            "method_trial",
+            "method_proposal",
+            "sharing",
         }
         unknown_keys = set(raw_output.keys()) - allowed_top_keys
         if unknown_keys:
             raise DecisionValidationError(
                 f"unknown keys in decision output: {sorted(unknown_keys)}",
                 failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                # The keys themselves are model output and may carry private words; only counts,
+                # syntactic shape and a hit against our own alias list are recorded.
+                schema_field=SCHEMA_FIELD_DECISION_OUTPUT, schema_rule=SCHEMA_RULE_UNKNOWN_KEYS,
+                schema_extra=_unknown_key_facts(unknown_keys),
             )
 
         decision = raw_output.get("decision")
@@ -2320,6 +3113,9 @@ class DecisionOutputValidator:
             raise DecisionValidationError(
                 "decision must be a non-empty string",
                 failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                schema_field=SCHEMA_FIELD_DECISION,
+                schema_rule=SCHEMA_RULE_MISSING_OR_WRONG_TYPE,
+                schema_extra={"value_type": _json_type_name(decision)},
             )
         decision = decision.strip()
         if decision in FORBIDDEN_DECISION_OUTPUTS:
@@ -2342,6 +3138,9 @@ class DecisionOutputValidator:
                 raise DecisionValidationError(
                     "selected_candidate_id must be a non-empty string or null",
                     failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                    schema_field=SCHEMA_FIELD_SELECTED_CANDIDATE_ID,
+                    schema_rule=SCHEMA_RULE_MISSING_OR_WRONG_TYPE,
+                    schema_extra={"value_type": _json_type_name(sel_id)},
                 )
             sel_id = sel_id.strip()
             # Section 55: Model cannot invent a Candidate
@@ -2365,6 +3164,9 @@ class DecisionOutputValidator:
             raise DecisionValidationError(
                 "deferred_candidate_ids must be a list",
                 failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                schema_field=SCHEMA_FIELD_DEFERRED_CANDIDATE_IDS,
+                schema_rule=SCHEMA_RULE_NOT_A_LIST,
+                schema_extra={"value_type": _json_type_name(raw_deferred)},
             )
         deferred_ids: list[str] = []
         for did in raw_deferred:
@@ -2526,6 +3328,87 @@ class DecisionOutputValidator:
                     and constraint_results_by_id[cid].status == CONSTRAINT_STATUS_ALLOWED
                 ]
 
+        # v0.4 stage A: her own "later".  One proposal and at most three actions on items she
+        # already has, both validated by the future-items domain (``life_future_items``) and both
+        # carried on the committed Decision so the round can record them honestly.  A proposal is
+        # *not* a write: the cycle records it in the store after the Decision commits, and a store
+        # refusal is reported as a refusal.
+        later_item = None
+        if raw_output.get("later_item") is not None:
+            try:
+                later_item = life_future_items.validate_proposal(raw_output.get("later_item"))
+            except life_future_items.FutureItemError as exc:
+                raise DecisionValidationError(
+                    f"later_item proposal refused by the future-items domain: {exc}",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                    schema_field=SCHEMA_FIELD_LATER_ITEM,
+                    schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+                ) from exc
+        future_item_actions: list[dict[str, Any]] = []
+        if raw_output.get("future_item_actions") is not None:
+            try:
+                future_item_actions = life_future_items.validate_actions(
+                    raw_output.get("future_item_actions"))
+            except life_future_items.FutureItemError as exc:
+                raise DecisionValidationError(
+                    f"future_item_actions refused by the future-items domain: {exc}",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                    schema_field=SCHEMA_FIELD_FUTURE_ITEM_ACTIONS,
+                    schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+                ) from exc
+
+        # v0.4 C: the practice this Decision follows (optional).  The handle must be one *this
+        # round* offered; with no practice workspace consulted, naming one at all is an invented
+        # identifier.  A trial verdict must name the same practice and a legal outcome.
+        method_ref: Optional[str] = None
+        if raw_output.get("method_ref") is not None:
+            raw_ref = raw_output.get("method_ref")
+            text = raw_ref.strip() if isinstance(raw_ref, str) else ""
+            allowed = {str(item) for item in (allowed_method_refs or ()) if str(item)}
+            if (not text or not text.startswith(METHOD_REF_PREFIX)
+                    or ":" in text[len(METHOD_REF_PREFIX):]):
+                raise DecisionValidationError(
+                    f"method_ref={raw_ref!r} is not a bounded practice handle",
+                    failure_class=FAILURE_CLASS_INVENTED_METHOD_REF,
+                )
+            if text not in allowed:
+                raise DecisionValidationError(
+                    f"method_ref={text!r} was not offered to this Decision"
+                    f" (offered: {sorted(allowed)})",
+                    failure_class=FAILURE_CLASS_INVENTED_METHOD_REF,
+                )
+            method_ref = text
+        method_trial = None
+        if raw_output.get("method_trial") is not None:
+            try:
+                method_trial = validate_method_trial(raw_output.get("method_trial"),
+                                                     method_ref=method_ref)
+            except DecisionValidationError as exc:
+                raise _annotate_schema_field(exc, SCHEMA_FIELD_METHOD_TRIAL)
+            if method_ref is None:
+                raise DecisionValidationError(
+                    "method_trial requires the Decision to name the method_ref it evaluates",
+                    failure_class=FAILURE_CLASS_INVALID_METHOD_TRIAL,
+                    schema_field=SCHEMA_FIELD_METHOD_TRIAL,
+                )
+        # v0.4 C: at most one bounded practice proposal ("one thing I want to try, under which
+        # conditions, with what is still unknown").  It is a *proposal*: nothing is saved here, and
+        # nothing about it becomes a preference, a belief or an executable program.
+        method_proposal = None
+        if raw_output.get("method_proposal") is not None:
+            try:
+                method_proposal = validate_method_proposal(raw_output.get("method_proposal"))
+            except DecisionValidationError as exc:
+                raise _annotate_schema_field(exc, SCHEMA_FIELD_METHOD_PROPOSAL)
+        # v0.4 sharing: at most one bounded request against a draft she may already have or a
+        # source artifact this round offered.  Shape only -- the owner refuses the rest.
+        sharing_action = None
+        if raw_output.get("sharing") is not None:
+            try:
+                sharing_action = validate_sharing_action(raw_output.get("sharing"))
+            except DecisionValidationError as exc:
+                raise _annotate_schema_field(exc, SCHEMA_FIELD_SHARING)
+
         return {
             "decision": decision,
             "selected_candidate_ref": sel_id,
@@ -2535,6 +3418,12 @@ class DecisionOutputValidator:
             "reason_codes": reason_codes,
             "short_rationale": short_rationale,
             "invalid_rationale_claim_dropped": dropped_claim,
+            "later_item": later_item,
+            "method_ref": method_ref,
+            "method_trial": method_trial,
+            "method_proposal": method_proposal,
+            "sharing_action": sharing_action,
+            "future_item_actions": future_item_actions,
         }
 
 
@@ -2669,6 +3558,13 @@ class CognitiveDecisionRequest:
     #: Memory boundary port and already governance-filtered.  It may inform a choice; it can never
     #: carry a command, and it never replaces the work's or the activity's real state.
     prior_experiences: tuple[dict[str, Any], ...] = ()
+    #: v0.4 stage A: the bounded, *present* situation the model needs in order to choose well --
+    #: what she is reading, the question she wrote, her own open "later" items (with their refs, so
+    #: it can reschedule/cancel one by name), the project options this round supports, and whether
+    #: parking the running Activity is on offer.  It is DATA: no authority field, no grant, and it
+    #: never replaces the owners' own state.  Free text is allowed but bounded (see the adapter);
+    #: it is never written to the run journal.
+    situation_context: dict[str, Any] = field(default_factory=dict)
     timeout_ms: int = DEFAULT_COGNITION_TIMEOUT_MS
     max_output_tokens: int = DEFAULT_COGNITION_MAX_TOKENS
 
@@ -2697,6 +3593,7 @@ class CognitiveDecisionRequest:
             "allowed_reason_codes": list(self.allowed_reason_codes),
             "observed_fact_keys": list(self.observed_fact_keys),
             "prior_experiences": copy.deepcopy(list(self.prior_experiences)),
+            "situation_context": copy.deepcopy(dict(self.situation_context)),
             "policy_version": self.policy_version,
             "timeout_ms": self.timeout_ms,
             "max_output_tokens": self.max_output_tokens,
@@ -3504,6 +4401,10 @@ class AgencyDecisionService:
         observed_facts: Optional[Mapping[str, Any]] = None,
         #: E07: the bounded, governance-filtered experience view from the Memory boundary port.
         prior_experiences: Optional[Sequence[Mapping[str, Any]]] = None,
+        #: v0.4 stage A: the bounded present situation (reading, her own question, her open "later"
+        #: items with their refs, the project options of this round, whether parking is on offer).
+        #: Passed straight to the cognition request as data; it authorizes nothing.
+        situation_context: Optional[Mapping[str, Any]] = None,
         current_atomic_boundary_ref: Optional[str] = None,
         known_waiting_basis_ref: Optional[str] = None,
         channel: Optional[str] = None,
@@ -3513,6 +4414,10 @@ class AgencyDecisionService:
         exploration_seed: Optional[int] = None,
         post_cognition_mutation_hook: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
         fault_hook: Optional[Callable[[str], None]] = None,
+        #: v0.4 C: the practice handles this round offered, as an allow-list for the optional
+        #: ``method_ref`` / ``method_trial`` the model may name.  ``None`` = no practice workspace
+        #: was consulted, so no handle is legal; it enables nothing and grants nothing.
+        allowed_method_refs: Optional[Sequence[str]] = None,
     ) -> dict[str, Any]:
         """Evaluate one DecisionOpportunity through the 3-layer AG-1 pipeline."""
         AgencyDecisionAuthority.verify_capability(self.lease, self.capability)
@@ -3658,6 +4563,7 @@ class AgencyDecisionService:
                 constraint_results_by_id=constraint_results_by_id,
                 context_snapshot=context_snapshot,
                 capacity_snapshot=capacity_snapshot,
+                allowed_method_refs=allowed_method_refs,
             )
             return self._finalize_and_commit_decision(
                 opportunity=opportunity,
@@ -3757,6 +4663,7 @@ class AgencyDecisionService:
             legal_decision_enums=tuple(sorted(union_legal_enums)),
             allowed_reason_codes=tuple(sorted(VALID_DECISION_REASON_CODES)),
             observed_fact_keys=tuple(sorted(str(k) for k in context_snapshot.observed_facts.keys())),
+            situation_context=dict(situation_context or {}),
             prior_experiences=tuple(dict(e) for e in (prior_experiences or ())),
             policy_version=opportunity.policy_version,
         )
@@ -3764,9 +4671,13 @@ class AgencyDecisionService:
         validated_output: Optional[dict[str, Any]] = None
         cog_response: Optional[CognitiveDecisionResponse] = None
         last_failure_class: str = FAILURE_CLASS_INVALID_SCHEMA
+        last_schema_detail: Optional[dict[str, Any]] = None
 
         for retry_idx in range(self.max_schema_retries + 1):
             attempt.retry_count = retry_idx
+            # One response, one refusal: a retry that ends in INVALID_JSON / an empty answer must
+            # not inherit the previous answer's schema detail as if it explained this one.
+            last_schema_detail = None
             try:
                 if fault_hook is not None:
                     fault_hook("during_cognition")
@@ -3814,11 +4725,17 @@ class AgencyDecisionService:
                     constraint_results_by_id=constraint_results_by_id,
                     context_snapshot=context_snapshot,
                     capacity_snapshot=capacity_snapshot,
+                    allowed_method_refs=allowed_method_refs,
                 )
                 self.valid_cognition_count += 1
                 break
             except (DecisionValidationError, HiddenReasoningForbiddenError, UniversalUtilityForbiddenError) as v_exc:
                 last_failure_class = getattr(v_exc, "failure_class", FAILURE_CLASS_INVALID_SCHEMA)
+                # *Why* it was refused, in the same value-free vocabulary the journal uses: the
+                # message itself may quote the model ("unknown keys: [...]"), so it is never the
+                # thing that gets recorded.  A later retry overwrites this with its own refusal --
+                # the last answer is the one the attempt failed on.
+                last_schema_detail = describe_schema_refusal(v_exc)
                 self.invalid_cognition_count += 1
                 # Section 60 & 61: Only retry on schema/JSON format errors; never retry on invented candidate or hard constraint violation
                 if last_failure_class in {
@@ -3841,6 +4758,7 @@ class AgencyDecisionService:
                 attempt=attempt,
                 failure_class=last_failure_class,
                 model_run_ref=cog_response.model_run_ref if cog_response else None,
+                schema_detail=last_schema_detail,
             )
 
         # Stage raw validated model response before freshness recheck when fault_hook is active (Section 119)
@@ -3962,8 +4880,15 @@ class AgencyDecisionService:
         attempt: DecisionAttempt,
         failure_class: str,
         model_run_ref: Optional[str],
+        schema_detail: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Sections 6-8, 62-63: Record DecisionAttempt = FAILED and NEVER fabricate a NO_ACTION or DEFER DecisionRecord."""
+        """Sections 6-8, 62-63: Record DecisionAttempt = FAILED and NEVER fabricate a NO_ACTION or DEFER DecisionRecord.
+
+        ``schema_detail`` (v0.4 schema-repair) is the value-free reason the answer was refused: a
+        field/rule pair from ``describe_schema_refusal``.  It rides in the journal payload and the
+        returned dict; the persisted ``DecisionAttempt`` schema itself is deliberately unchanged,
+        because an attempt record is a historical contract.
+        """
         comp_iso = _iso(now())
         attempt.status = ATTEMPT_STATUS_FAILED
         attempt.completed_at = comp_iso
@@ -3997,22 +4922,28 @@ class AgencyDecisionService:
             lease=self.lease,
             capability=self.capability,
             map_updates=map_updates,
-            journal_payload={
-                "event_type": "DECISION_ATTEMPT_FAILED",
-                "opportunity_id": opp_copy.opportunity_id,
-                "attempt_id": attempt.attempt_id,
-                "failure_class": failure_class,
-                "failure_ref": attempt.failure_ref,
-                "model_run_ref": model_run_ref,
-            },
+            journal_payload=failure_journal_payload(
+                opportunity_id=opp_copy.opportunity_id,
+                attempt_id=attempt.attempt_id,
+                failure_class=failure_class,
+                failure_ref=attempt.failure_ref,
+                model_run_ref=model_run_ref,
+                schema_detail=schema_detail,
+            ),
         )
-        return {
+        result = {
             "status": ATTEMPT_STATUS_FAILED,
             "opportunity": opp_copy.to_dict(),
             "decision_record": None,
             "attempt": copy.deepcopy(attempt),
             "failure_class": failure_class,
         }
+        clean_detail = sanitize_schema_refusal(schema_detail)
+        if clean_detail:
+            # Same value-free record as the journal entry, so a caller (the cycle's own step
+            # record, the co-presence contact) can report *why* without reading the journal.
+            result["schema_refusal"] = clean_detail
+        return result
 
     def _finalize_and_commit_decision(
         self,
@@ -4145,6 +5076,16 @@ class AgencyDecisionService:
             supersedes_ref=supersedes_decision_ref,
             exploration_seed=exploration_seed,
             created_at=created_iso,
+            # v0.4 stage A: carried through unchanged from the validated output, so the round can
+            # record "later" and never has to guess what she said.
+            later_item_proposal=validated_output.get("later_item"),
+            future_item_actions=tuple(validated_output.get("future_item_actions") or ()),
+            # v0.4 C: the practice this round chose to follow, and her own bounded verdict on it
+            # (validated above against what the round really offered).  A method is document
+            # context; the trial is an evaluation B's workspace records, never a success claim.
+            method_ref=validated_output.get("method_ref"),
+            method_trial=validated_output.get("method_trial"),
+            sharing_action=validated_output.get("sharing_action"),
         )
 
         # Build per-candidate disposition audit table (Section 89 & 144)
@@ -4742,6 +5683,8 @@ __all__ = [
     "EXEC_WITH_LIMITS",
     "FAILURE_CLASS_ATOMIC_VIOLATION",
     "FAILURE_CLASS_CANDIDATE_EXPLOSION",
+    "FAILURE_CLASS_FORBIDDEN_HIDDEN_REASONING",
+    "FAILURE_CLASS_FORBIDDEN_UNIVERSAL_UTILITY",
     "FAILURE_CLASS_HARD_CONSTRAINT_VIOLATION",
     "FAILURE_CLASS_ILLEGAL_DECISION_ENUM",
     "FAILURE_CLASS_ILLEGAL_DECISION_MATRIX",

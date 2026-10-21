@@ -53,23 +53,58 @@ import sys
 from typing import Any, Mapping, Optional
 
 import action_reality_ledger as ar0
+import life_body_action_targets as body_actions
+import life_daily_action_targets as daily_actions
 
 #: Where the World bridge modules live, when the tree layout is not discoverable.
 WORLD_BRIDGE_DIR_ENV = "NYAIRO_WORLD_BRIDGE_DIR"
 
-#: The verbs this adapter maps faithfully, i.e. the ones a single AR-0 ``target``
-#: string can express completely.  ``MOVE``'s target is the destination place and
-#: ``CONSUME``'s target is the World object instance id -- the Resolver's own
-#: single-parameter shapes (``destination_location_id`` / ``object_id``).  POSE is
-#: still refused as a pre-submission failure rather than guessed at: the Resolver
-#: requires ``pose`` *and* ``orientation``, and one target cannot supply both
-#: without inventing one of them.
-SUPPORTED_VERBS = ("MOVE", "CONSUME")
+#: The verbs this adapter maps faithfully.  ``MOVE``/``CONSUME`` carry one parameter
+#: each, so the AR-0 ``target`` *is* the parameter value.  ``POSE``/``REST`` need two
+#: parameters each and travel as one encoded ``bodyact:`` target
+#: (``life_body_action_targets``); ``PICK_UP``/``PLACE`` need two or three and travel as
+#: one encoded ``dailyact:`` target (``life_daily_action_targets``).  This adapter decodes
+#: both at submission time -- the AR-0 payload keeps its single-target shape, and no verb
+#: ever gains a free-form ``params`` mapping that the caller could fill in.
+SUPPORTED_VERBS = ("MOVE", "CONSUME", "POSE", "REST", "PICK_UP", "PLACE")
 
-#: Verb -> the Resolver's own parameter name (world_action_resolver._require_params).
+#: Verbs whose whole parameter set lives inside the encoded target.
+BODY_ACTION_VERBS = body_actions.BODY_ACTION_VERBS
+DAILY_ACTION_VERBS = daily_actions.DAILY_ACTION_VERBS
+
+#: Verb -> the Resolver's own single parameter name (world_action_resolver._require_params).
 #: Both entries are total: nothing here invents a second parameter, and the AR-0
 #: single target *is* the parameter value.
 VERB_PARAMETER = {"MOVE": "destination_location_id", "CONSUME": "object_id"}
+
+
+def resolver_params(verb: str, target: str) -> dict[str, Any]:
+    """The owner's own parameter mapping for one AR-0 target.
+
+    Single-parameter verbs map the target onto the Resolver's parameter name, exactly as
+    before.  A body verb is decoded from its encoded target, and a target that cannot be
+    decoded completely raises :class:`life_body_action_targets.BodyActionTargetError` -- a
+    half-specified posture is never guessed at, and it never reaches the owner.  A daily
+    verb is decoded the same way from its encoded ``dailyact:`` target
+    (:class:`life_daily_action_targets.DailyActionTargetError`): the object, the hand slot
+    and the placement destination are all read back from the ref, never re-derived here.
+    """
+
+    if verb in BODY_ACTION_VERBS:
+        parsed = body_actions.parse_body_action_target(target)
+        if parsed is None:
+            raise body_actions.BodyActionTargetError(
+                "verb %s needs a %s target, got %r"
+                % (verb, body_actions.BODY_ACTION_REF_PREFIX, target))
+        return dict(parsed["params"])
+    if verb in DAILY_ACTION_VERBS:
+        parsed = daily_actions.parse_daily_action_target(target)
+        if parsed is None:
+            raise daily_actions.DailyActionTargetError(
+                "verb %s needs a %s target, got %r"
+                % (verb, daily_actions.DAILY_ACTION_REF_PREFIX, target))
+        return dict(parsed["params"])
+    return {VERB_PARAMETER[verb]: target}
 
 
 class WorldBridgeUnavailable(RuntimeError):
@@ -198,7 +233,7 @@ class WorldBridgeResolver:
             "actor_id": "chiyo",
             "action": "SELECT",
             "verb": verb,
-            "params": {VERB_PARAMETER[verb]: target},
+            "params": resolver_params(verb, target),
             "target_summary": "%s -> %s" % (verb, target),
             "created_at": moment,
             "source_provenance": "ar0_world_bridge_adapter",
@@ -241,6 +276,37 @@ class WorldBridgeResolver:
                 "transport_result": ar0.TRANSPORT_ERR_DEFINITE_PRE_SUBMIT,
                 "detail": "verb %s cannot be expressed by a single AR-0 target" % verb,
             })
+
+        if verb in BODY_ACTION_VERBS:
+            # A body verb's parameters live inside the target.  An undecodable target is a
+            # definite pre-submission refusal: nothing was minted, nothing reached the
+            # owner, and AR-0 may retry under the same action id once the target is whole.
+            try:
+                resolver_params(verb, target)
+            except body_actions.BodyActionTargetError as error:
+                return self._record(idempotency_key, {
+                    "execution_id": execution_id,
+                    "status": "rejected",
+                    "code": "BODY_ACTION_TARGET_INVALID",
+                    "transport_result": ar0.TRANSPORT_ERR_DEFINITE_PRE_SUBMIT,
+                    "detail": str(error) or "body action target is incomplete",
+                })
+
+        if verb in DAILY_ACTION_VERBS:
+            # Same rule for the hand verbs: the object, the slot and the destination are all
+            # inside the target.  An undecodable one is a definite pre-submission refusal --
+            # nothing was minted, nothing reached the owner, and the same action id may be
+            # retried once the target is whole.
+            try:
+                resolver_params(verb, target)
+            except daily_actions.DailyActionTargetError as error:
+                return self._record(idempotency_key, {
+                    "execution_id": execution_id,
+                    "status": "rejected",
+                    "code": "DAILY_ACTION_TARGET_INVALID",
+                    "transport_result": ar0.TRANSPORT_ERR_DEFINITE_PRE_SUBMIT,
+                    "detail": str(error) or "daily action target is incomplete",
+                })
 
         intent = self.build_intent(execution_id=execution_id, verb=verb, target=target)
         self.last_intent = copy.deepcopy(intent)
@@ -329,12 +395,14 @@ class WorldBridgeResolver:
 
         revision = None
         place = None
+        snapshot: Optional[dict[str, Any]] = None
         try:
             _, _, wbc = self._bridge()
             probe = self.client.get_snapshot()
             if probe.outcome == wbc.OK and isinstance(probe.data, dict):
-                revision = probe.data.get("world_revision")
-                place = (probe.data.get("location") or {}).get("place_id")
+                snapshot = dict(probe.data)
+                revision = snapshot.get("world_revision")
+                place = (snapshot.get("location") or {}).get("place_id")
         except Exception:  # noqa: BLE001 - the commit already happened; the ref is extra
             revision = None
             place = None
@@ -358,6 +426,29 @@ class WorldBridgeResolver:
             # original execution id; a missing receipt is reported as missing rather
             # than inferred from "the object is gone" (the F contract).
             entry["details"] = self._consumption_details(execution_id)
+        if verb in BODY_ACTION_VERBS:
+            # What the World's own snapshot says *after* the commit -- the only body fact a
+            # committed command can carry.  A rest command's success is the session
+            # command's outcome, never a claim that the body recovered, so it is labelled
+            # as exactly that instead of being reported as a recovery.
+            details: dict[str, Any] = {
+                "body_observed": {
+                    "pose": (snapshot or {}).get("pose"),
+                    "orientation": (snapshot or {}).get("orientation"),
+                },
+                "observation_source": "world_gateway.get_snapshot",
+            }
+            if verb == body_actions.REST_VERB:
+                details["command_success_is_not_recovery"] = True
+            entry["details"] = details
+        if verb in DAILY_ACTION_VERBS:
+            # W-v04B: what the World's own snapshot says *after* a pick-up or a placement.
+            # It is a real, bounded read of the hands and the object's placement, and it is
+            # the material a completion criterion is checked against -- but it is *post*
+            # state: it can never prove that *this* execution produced it.  Attribution
+            # stays with AR-0's receipt and the World's execution record, and the flag below
+            # says so out loud so nothing downstream can quietly upgrade it.
+            entry["details"] = self._daily_placement_details(target)
         return entry
 
     def _consumption_details(self, execution_id: str) -> dict[str, Any]:
@@ -378,6 +469,99 @@ class WorldBridgeResolver:
             "consumption_receipt": data.get("consumption_receipt"),
             "world_verdict": data.get("verdict"),
         }
+
+    # ---- the hand verbs' post-state read ---------------------------------
+    def read_daily_placement(self, object_id: Any) -> dict[str, Any]:
+        """One fresh, read-only owner read of where an object is right now.
+
+        This is the query a completion check needs after a committed pick-up or
+        placement: it returns the World's own ``hands`` mapping and the object's own
+        placement entry from ``get_snapshot``.  It writes nothing, mints nothing and reads
+        no database of its own; an unreadable World answers ``observed: False`` with a
+        reason instead of a guessed placement.
+        """
+
+        name = str(object_id or "").strip()
+        if not name:
+            raise ValueError("read_daily_placement needs an object_id")
+        snapshot, reason = self._fresh_snapshot()
+        if snapshot is None:
+            return {"observed": False, "object_id": name, "reason": reason,
+                    "hands": None, "placement": None, "world_revision": None,
+                    "location": None}
+        return self._placement_view(snapshot, name)
+
+    def _fresh_snapshot(self) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+        """One ``get_snapshot`` read, or ``(None, reason)`` -- never a raise."""
+
+        try:
+            _, _, wbc = self._bridge()
+            probe = self.client.get_snapshot()
+        except Exception as error:  # noqa: BLE001 - unreachable World is not an observation
+            return None, "%s: %s" % (type(error).__name__, error)
+        if probe.outcome != wbc.OK or not isinstance(probe.data, dict):
+            return None, "outcome=%s" % probe.outcome
+        return dict(probe.data), None
+
+    @staticmethod
+    def _placement_view(snapshot: Mapping[str, Any], object_id: str) -> dict[str, Any]:
+        """The bounded placement view of one object, straight from one snapshot."""
+
+        entry: Optional[dict[str, Any]] = None
+        for item in snapshot.get("visible_objects") or []:
+            if isinstance(item, Mapping) and str(item.get("object_id")) == object_id:
+                entry = {
+                    "kind": item.get("kind"),
+                    "surface_id": item.get("surface_id"),
+                    "container_id": item.get("container_id"),
+                    "slot_id": item.get("slot_id"),
+                    "in_hand": bool(item.get("in_hand")),
+                }
+                break
+        return {
+            "observed": True,
+            "object_id": object_id,
+            "reason": None,
+            "hands": dict(snapshot.get("hands") or {}),
+            "placement": entry,
+            "world_revision": snapshot.get("world_revision"),
+            "location": dict(snapshot.get("location") or {}),
+        }
+
+    def _daily_placement_details(self, target: str) -> dict[str, Any]:
+        """The post-state block one committed hand action carries.
+
+        ``placement_fact`` is the same ``{fact_key, expected_value, value, satisfied}``
+        shape a completion criterion reads, computed from one read -- so a caller can see
+        the criterion's verdict next to the execution that answered it, and can also see
+        that the verdict is a *state* verdict (``post_state_only``) and not a proof of
+        attribution.
+        """
+
+        details: dict[str, Any] = {
+            "observation_source": daily_actions.SOURCE_SNAPSHOT,
+            "post_state_only": True,
+            "post_state_proves_this_execution": False,
+        }
+        parsed: Optional[dict[str, Any]] = None
+        try:
+            parsed = daily_actions.parse_daily_action_target(target)
+        except daily_actions.DailyActionTargetError as error:
+            details["target_decode_error"] = str(error)
+        if parsed is None:
+            details["daily_placement"] = {"observed": False,
+                                          "reason": "TARGET_NOT_A_DAILY_ACTION"}
+            return details
+        object_id = str(parsed["object_id"])
+        snapshot, reason = self._fresh_snapshot()
+        if snapshot is None:
+            details["daily_placement"] = {"observed": False, "object_id": object_id,
+                                          "reason": reason, "hands": None,
+                                          "placement": None}
+        else:
+            details["daily_placement"] = self._placement_view(snapshot, object_id)
+        details["placement_fact"] = daily_actions.daily_action_observed_fact(parsed, snapshot)
+        return details
 
     def _record(self, idempotency_key: str, entry: dict[str, Any]) -> dict[str, Any]:
         self.by_idem_key[idempotency_key] = copy.deepcopy(entry)
@@ -428,12 +612,45 @@ class WorldBridgeResolver:
 class RealWorldActionAdapter(ar0.WorldActionAdapter):
     """AR-0's World adapter, with reconciliation answered by the real World.
 
-    ``submit``/``validate_prepare``/capabilities are inherited unchanged: the
-    AR-0 contract is already correct, only the resolver behind it changes.  The
-    one override is reconciliation, because AR-0's sandbox version reads an
-    in-memory dict that a restart would lose, while the real execution id is
+    ``submit``/capabilities are inherited unchanged: the AR-0 contract is already correct,
+    only the resolver behind it changes.  ``validate_prepare`` is widened by exactly the two
+    hand verbs (below) and reconciliation is overridden, because AR-0's sandbox version
+    reads an in-memory dict that a restart would lose, while the real execution id is
     recomputable from the action's own frozen payload.
     """
+
+    #: The two verbs AR-0's own frozen set does not yet name, and which this adapter can
+    #: still carry faithfully: their whole parameter set is inside the single encoded
+    #: ``dailyact:`` target, so the payload shape AR-0 validates is unchanged.
+    EXTRA_VERBS = daily_actions.DAILY_ACTION_VERBS
+
+    def validate_prepare(
+        self, action: Mapping[str, Any], payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """AR-0's prepare contract, plus the two hand verbs.
+
+        Only admission changes: the three payload keys are the same three, the encoded
+        target is still the only place the parameters live, and the World's own
+        allowlist, mutation gate and Resolver still decide whether anything commits.
+        """
+
+        verb = payload.get("verb")
+        if verb in self.EXTRA_VERBS:
+            target = payload.get("target")
+            if not isinstance(target, str) or not target.strip():
+                raise ar0.ContractViolationError(
+                    "WORLD_ACTION requires non-empty 'target'")
+            parsed = daily_actions.parse_daily_action_target(target)
+            if parsed is None or str(parsed["verb"]) != verb:
+                raise ar0.ContractViolationError(
+                    "WORLD_ACTION verb=%r needs a %s target, got %r"
+                    % (verb, daily_actions.DAILY_ACTION_REF_PREFIX, target))
+            return {
+                "verb": verb,
+                "target": target.strip(),
+                "expected_dependencies": dict(payload.get("expected_dependencies", {})),
+            }
+        return super().validate_prepare(action, payload)
 
     def query_status_for_reconcile(
         self,
@@ -474,6 +691,8 @@ class RealWorldActionAdapter(ar0.WorldActionAdapter):
 
 
 __all__ = [
+    "BODY_ACTION_VERBS",
+    "DAILY_ACTION_VERBS",
     "RealWorldActionAdapter",
     "SUPPORTED_VERBS",
     "VERB_PARAMETER",
@@ -481,4 +700,5 @@ __all__ = [
     "WorldBridgeResolver",
     "WorldBridgeUnavailable",
     "discover_bridge_dir",
+    "resolver_params",
 ]

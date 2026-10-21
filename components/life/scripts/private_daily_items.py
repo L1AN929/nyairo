@@ -28,6 +28,16 @@
   ``PrivateItemsSourceUnavailable``）；文档本身**不缓存来源正文**，因此也没有缓存可以复活它。
 * **隐私**：``metadata_view`` / ``items`` 走字段**白名单**，默认不返回正文、摘要、未懂标记
   与 locator；要文本必须显式调 ``full_text`` / ``disclosure_excerpt``。
+* **段落锚点**：memo 可选 ``reading_anchor``（``source_id`` / ``source_revision`` / ``page``），
+  只说明"这条笔记写在哪一页"，不签发理解。旧 memo 没有锚点照旧可读可改；``revise_memo``
+  只换正文，绝不抹掉锚点；``reading_anchor`` 属于元数据白名单，正文仍只在 ``full_text`` 里。
+* **阅读操作归属**：一次阅读写把"这条 operation_key 属于哪个动作 / 哪一页 / 哪个版本 /
+  哪个条目"和它的效果写进**同一个版本**（``READING_OPERATIONS_FIELD``），只用于原键重放与
+  跨 kind 冲突判断；它不是第二本账，也不含任何正文。
+* **阅读批注计划**：``plan_page_annotation`` 是**纯计划**——在已经由 ``plan_page_read`` 取得
+  该页的文档上，最多加**一条**批注（带 ``reading_anchor`` 的 ``memo``，或 ``unclear_marker``）；
+  ``no_change`` 一条都不加，也绝不重写停点。它不读 socket、不提交，只把整条意图（同键 +
+  不含正文的摘要）与效果留在同一个版本里；同键异意图一律拒绝。
 
 写入语义（CAS / UNKNOWN / 撤权）
 --------------------------------
@@ -37,14 +47,16 @@
   「从未落地（可用同一个 operation_key 重试）」，两者都不是重发。
 * owner 拒绝（含 grant 撤权）抛 ``PrivateItemsOwnerRefused``，不改本地缓存。
 
-本模块只新增窄 API；``life_artifact_port.py`` 一字未改（现有 create_artifact /
-commit_markdown / read_artifact / read_head / resolve_operation 已足够）。
+本模块只新增窄 API；``life_artifact_port.py`` 只多了一个**只读**的 ``operation_row()``
+（转发既有 ``lookup_operation`` 读 op，供调用方核对"这个键到底在哪个 artifact 上落了什么"），
+现有 create_artifact / commit_markdown / read_artifact / read_head / resolve_operation 未改。
 """
 from __future__ import annotations
 
 import copy
 import json
 import sys
+from hashlib import sha256
 from collections.abc import Mapping as AbcMapping, Sequence as AbcSequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -107,11 +119,36 @@ REFERENCE_SAVED = "SAVED"
 #: silently truncated (a truncated excerpt would be a quiet lie about what was actually obtained).
 MAX_EXCERPT_CHARS = 480
 
+#: The fields an optional reading anchor may carry.  An anchor is structural metadata (which real
+#: page a note or a stop point belongs to), never private text and never a claim of understanding.
+READING_ANCHOR_FIELDS: tuple[str, ...] = ("source_id", "source_revision", "page")
+
+#: Where the minimal per-operation ownership of a reading write is kept: still this one typed
+#: document, still one version alongside the effect.  It answers "which action/target did this
+#: operation key belong to?" for a replay or a cross-kind reuse check -- it is not a second ledger
+#: and it holds no text.
+READING_OPERATIONS_FIELD = "reading_operations"
+#: Bound on that map.  Oldest entries are dropped: it is recovery evidence, not an archive.
+MAX_READING_OPERATIONS = 200
+
+#: 阅读响应批注的三种意图。``no_change`` 是合法结论：这一页什么都不记。
+ANNOTATION_NOTE = "note"
+ANNOTATION_UNCLEAR = "unclear"
+ANNOTATION_NO_CHANGE = "no_change"
+ANNOTATION_KINDS: tuple[str, ...] = (ANNOTATION_NOTE, ANNOTATION_UNCLEAR, ANNOTATION_NO_CHANGE)
+
+#: 一条私人笔记 / 一个疑问的上限。与 ``subject_reading_response`` 的解析边界同值（由
+#: ``tests/test_subject_reading_annotation_plan.py`` 钉住相等）：超长拒绝，绝不截断。
+MAX_ANNOTATION_TITLE_CHARS = 200
+MAX_ANNOTATION_TEXT_CHARS = 1200
+#: 响应对象允许的键（``self_note`` 只是容忍模型模板，直接丢弃）。
+_ANNOTATION_RESPONSE_FIELDS: tuple[str, ...] = ("kind", "title", "body", "note", "self_note")
+
 #: Which non-text fields each item type may expose through ``metadata_view``.  An allow-list, so a
 #: new private field cannot leak by accident.
 _METADATA_FIELDS: dict[str, tuple[str, ...]] = {
     ITEM_MEMO: ("title", "created_at", "updated_at", "revisions",
-                "observed_object_ref", "observed_at"),
+                "observed_object_ref", "observed_at", "reading_anchor"),
     ITEM_SAVED_REFERENCE: ("source_id", "source_revision", "label", "receipt_ref", "saved_at",
                            "state", "read", "content_fetched",
                            "observed_object_ref", "observed_at"),
@@ -207,6 +244,22 @@ def _require_position(value: Any) -> Any:
     if isinstance(value, str) and not value.strip():
         raise PrivateItemsContractRefused("POSITION_REQUIRED")
     return value
+
+
+def _clean_reading_anchor(value: Any) -> Optional[dict[str, Any]]:
+    """Validate one optional memo anchor.  Unknown fields are refused, never quietly dropped."""
+    if value is None:
+        return None
+    if not isinstance(value, AbcMapping):
+        raise PrivateItemsContractRefused("READING_ANCHOR_INVALID")
+    unknown = sorted(str(key) for key in value if str(key) not in READING_ANCHOR_FIELDS)
+    if unknown:
+        raise PrivateItemsContractRefused("READING_ANCHOR_UNKNOWN_FIELD:%s" % ",".join(unknown))
+    return {
+        "source_id": _require_text(value.get("source_id"), "source_id"),
+        "source_revision": _require_text(value.get("source_revision"), "source_revision"),
+        "page": _require_position(value.get("page")),
+    }
 
 
 def _empty_document(subject_id: str, artifact_id: Optional[str],
@@ -337,6 +390,311 @@ def plan_page_read(
             "owner_version_number": doc["owner_version_number"]}
 
 
+# ---------------------------------------------------------------------------------------------
+# reader-response annotation: one pure plan, at most one item
+# ---------------------------------------------------------------------------------------------
+
+
+def _annotation_intent_digest(action: str, *parts: Any) -> str:
+    """One annotation's stable request binding: action + target + parameters + version.
+
+    The digest carries **no text** (text only feeds the hash), so it can sit in the same version as
+    the effect inside ``reading_operations``.  The shape is the one the phone reading facade already
+    writes (``reading-intent:<32 hex>``): one kind of record means one kind of check.
+    """
+    payload = json.dumps([str(action)] + ["" if part is None else str(part) for part in parts],
+                         ensure_ascii=False, separators=(",", ":"))
+    return "reading-intent:" + sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def _cap_annotation_text(value: Any, name: str, limit: int) -> Optional[str]:
+    """Strip one optional annotation text; refuse what is not text or is too long."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise PrivateItemsContractRefused("ANNOTATION_FIELD_INVALID:%s" % name)
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) > int(limit):
+        raise PrivateItemsContractRefused(
+            "ANNOTATION_%s_TOO_LONG:%d>%d" % (name.upper(), len(text), int(limit)))
+    return text
+
+
+def _clean_annotation_response(response: Any
+                               ) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
+    """Validate one reader-response intent into ``(kind, title, body, note)``.
+
+    This module keeps its own copy of the three-kind rule and the two length bounds on purpose: a
+    typed-document writer must not import the model-facing parser (no model client in this import
+    graph), and a plan that trusted an unvalidated mapping would be a back door for "pseudo text"
+    on ``no_change``.  The two copies are pinned equal by
+    ``tests/test_subject_reading_annotation_plan.py``.
+    """
+    if not isinstance(response, AbcMapping):
+        raise PrivateItemsContractRefused("ANNOTATION_RESPONSE_REQUIRED")
+    unknown = sorted(str(key) for key in response if str(key) not in _ANNOTATION_RESPONSE_FIELDS)
+    if unknown:
+        raise PrivateItemsContractRefused(
+            "ANNOTATION_RESPONSE_UNKNOWN_FIELD:%s" % ",".join(unknown))
+    raw_kind = response.get("kind")
+    kind = raw_kind.strip().lower() if isinstance(raw_kind, str) else ""
+    if kind not in ANNOTATION_KINDS:
+        raise PrivateItemsContractRefused("ANNOTATION_KIND_INVALID:%s" % str(raw_kind)[:24])
+    title = _cap_annotation_text(response.get("title"), "title", MAX_ANNOTATION_TITLE_CHARS)
+    body = _cap_annotation_text(response.get("body"), "body", MAX_ANNOTATION_TEXT_CHARS)
+    note = _cap_annotation_text(response.get("note"), "note", MAX_ANNOTATION_TEXT_CHARS)
+
+    if kind == ANNOTATION_NOTE:
+        if note is not None:
+            raise PrivateItemsContractRefused("ANNOTATION_FIELD_NOT_ALLOWED:%s:note" % kind)
+        for name, value in (("title", title), ("body", body)):
+            if value is None:
+                raise PrivateItemsContractRefused("ANNOTATION_FIELD_MISSING:%s" % name)
+        return kind, title, body, None
+
+    if kind == ANNOTATION_UNCLEAR:
+        for name, value in (("title", title), ("body", body)):
+            if value is not None:
+                raise PrivateItemsContractRefused(
+                    "ANNOTATION_FIELD_NOT_ALLOWED:%s:%s" % (kind, name))
+        if note is None:
+            raise PrivateItemsContractRefused("ANNOTATION_FIELD_MISSING:note")
+        return kind, None, None, note
+
+    # no_change: no text at all.  A "pseudo body" is refused, never quietly dropped.
+    for name, value in (("title", title), ("body", body), ("note", note)):
+        if value is not None:
+            raise PrivateItemsContractRefused(
+                "ANNOTATION_FIELD_NOT_ALLOWED:%s:%s" % (kind, name))
+    return kind, None, None, None
+
+
+def _same_position(left: Any, right: Any) -> bool:
+    """Whether two recorded positions are the **same** page.  A bool is never a page."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return False
+    if not isinstance(left, (int, str)) or not isinstance(right, (int, str)):
+        return False
+    return left == right
+
+
+def _page_obtained(acquisition: Mapping[str, Any], page: Any) -> bool:
+    """Whether that acquisition's own evidence really covers **this** page.
+
+    Only the ``obtained["pages"]`` list the writer recorded counts (``plan_page_read`` and the
+    phone path both write ``{"pages": [N], "chars": L}``); a missing or differently shaped evidence
+    mapping is not proof, so it answers ``False`` instead of assuming the whole revision was read.
+    """
+    obtained = acquisition.get("obtained")
+    pages = obtained.get("pages") if isinstance(obtained, AbcMapping) else None
+    return isinstance(pages, list) and any(_same_position(value, page) for value in pages)
+
+
+def _annotation_acquisition(doc: Mapping[str, Any], source_id: str, source_revision: str,
+                            page: Any) -> dict[str, Any]:
+    """The one acquisition that really covers **this** page on **this** revision.
+
+    The shared ``_available_acquisition`` answers a different question ("may I point a stop point at
+    this revision at all?") and hands back the revision's *first* candidate.  That is wrong for a
+    page annotation as soon as one revision is read page by page -- page 1 and page 2 are two
+    acquisitions, and the first one does not cover page 2 -- or when only part of them is revoked
+    (the first candidate may be the revoked one).  So this planner selects its own candidate: right
+    item type, right source and revision, really available, and its own ``obtained["pages"]`` really
+    covering this page.  The shared helper keeps its old meaning for stop points.
+    """
+    candidates = [a for a in _acquisitions_for(doc, source_id)
+                  if str(a.get("source_revision")) == str(source_revision)]
+    if not candidates:
+        raise PrivateItemsContractRefused(
+            "SOURCE_NOT_ACQUIRED:%s@%s" % (source_id, source_revision))
+    available = [a for a in candidates if a.get("available", True)]
+    if not available:
+        raise PrivateItemsSourceUnavailable(
+            "SOURCE_UNAVAILABLE:%s@%s:%s" % (source_id, source_revision,
+                                             candidates[0].get("unavailable_reason") or ""))
+    # The most recent acquisition that really covers this page wins (document order = write order).
+    for acquisition in reversed(available):
+        if _page_obtained(acquisition, page):
+            return acquisition
+    revoked = [a for a in candidates
+               if not a.get("available", True) and _page_obtained(a, page)]
+    if revoked:
+        # This page's own material was revoked: a source problem, not a page-number typo.
+        raise PrivateItemsSourceUnavailable(
+            "SOURCE_UNAVAILABLE:%s@%s:%s" % (source_id, source_revision,
+                                             revoked[0].get("unavailable_reason") or ""))
+    raise PrivateItemsContractRefused("PAGE_NOT_ACQUIRED:%r" % (page,))
+
+
+def _annotation_item_id(kind: str, operation_key: str) -> str:
+    """Stable item id from the key **alone**: a retry lands on the same row, never a duplicate."""
+    prefix = _ID_PREFIX[ITEM_MEMO] if kind == ANNOTATION_NOTE else _ID_PREFIX[ITEM_UNCLEAR_MARKER]
+    digest = sha256(("reading-response|%s|%s" % (kind, operation_key)).encode("utf-8")).hexdigest()
+    return "%s:%s" % (prefix, digest[:16])
+
+
+def _annotation_record_matches(record: Mapping[str, Any], *, intent: str) -> bool:
+    """Whether that already-recorded operation is the **same** whole intent.
+
+    A record without an ``intent`` proves nothing, so it refuses: a borrowed key (one the phone
+    facade or another writer landed) must never look like this intent.
+    """
+    recorded = str(record.get("intent") or "")
+    return bool(recorded) and recorded == str(intent)
+
+
+def _annotation_item_matches(item: Mapping[str, Any], *, kind: str, source_id: str,
+                             source_revision: str, page: Any, title: Optional[str],
+                             body: Optional[str], note: Optional[str]) -> bool:
+    """Whether the item this key already minted really holds *this* intent's content."""
+    item_type = str(item.get("item_type") or "")
+    if kind == ANNOTATION_NOTE:
+        anchor = item.get("reading_anchor")
+        if item_type != ITEM_MEMO or not isinstance(anchor, AbcMapping):
+            return False
+        return (str(item.get("title") or "") == str(title or "")
+                and str(item.get("body") or "") == str(body or "")
+                and str(anchor.get("source_id") or "") == str(source_id)
+                and str(anchor.get("source_revision") or "") == str(source_revision)
+                and _same_position(anchor.get("page"), page))
+    if item_type != ITEM_UNCLEAR_MARKER:
+        return False
+    return (str(item.get("note") or "") == str(note or "")
+            and str(item.get("source_id") or "") == str(source_id)
+            and str(item.get("source_revision") or "") == str(source_revision)
+            and _same_position(item.get("position"), page))
+
+
+def plan_page_annotation(
+    document: Mapping[str, Any],
+    *,
+    artifact_id: str,
+    source_id: str,
+    source_revision: str,
+    page: Any,
+    response: Mapping[str, Any],
+    operation_key: str,
+    now: str,
+) -> dict[str, Any]:
+    """Pure: the encoded next document for **one** annotation, or the same document for a replay.
+
+    Input side.  ``document`` must already carry the real page read (``plan_page_read`` wrote it).
+    Against that document this plan re-selects the acquisition **for this page**: right item type,
+    right source and revision, really available, and its own ``obtained["pages"]`` really covering
+    *this* page (see ``_annotation_acquisition``; the shared ``_available_acquisition`` answers a
+    different question -- "may I point a stop point at this revision at all?").  A missing
+    acquisition, a foreign revision, a revoked source/page or a page that was never obtained all
+    refuse -- nothing is planned, and no note is invented to fill the gap.
+
+    What it may produce.  At most **one** item: a ``memo`` (note, with ``reading_anchor``) or an
+    ``unclear_marker``.  ``no_change`` produces zero items and returns the document **byte-identical**
+    (``changed`` False, ``item_id`` None).  A stop point is never touched: this plan writes no
+    ``reading_position`` and invents no page, and ``understanding`` stays ``UNKNOWN``.
+
+    Idempotency.  ``operation_key`` is the caller's whole-intent key.  The intent digest covers
+    action + artifact + source + revision + page + kind + title/body/note and is stored with the
+    effect in ``reading_operations`` (hash only, no text).  Re-planning the same key with the same
+    intent returns ``changed`` False and the item that already exists; the same key with **any**
+    different intent is refused (``READING_OPERATION_KEY_REUSED``), so one key can neither mint a
+    second note nor rewrite the first.  ``no_change`` writes no effect at all, so it is accepted
+    only under a **brand-new** key: a key that already landed a note or a question is refused,
+    because "record nothing" under someone else's key is exactly the intent swap the record forbids.
+    The item id is derived from the key alone, so a retry lands on the same row instead of a duplicate.
+
+    No owner call, no socket, no write: the caller hands ``content`` to the owner with its own
+    compare-and-swap.  ``owner_version_number``/``doc_revision`` are bumped from the document's own
+    field (the bound reader already pins that field to the owner head), like ``plan_page_read``.
+    """
+    doc = copy.deepcopy(dict(document))
+    if not isinstance(doc.get("items"), dict):
+        raise PrivateItemsContractRefused("DOCUMENT_ITEMS_INVALID")
+    if not isinstance(doc.get("order") if doc.get("order") is not None else [], list):
+        raise PrivateItemsContractRefused("DOCUMENT_ORDER_INVALID")
+    if doc.get("doc_type") not in (None, DOC_TYPE):
+        raise PrivateItemsContractRefused(
+            "NOT_A_PRIVATE_DAILY_ITEMS_DOCUMENT:%r" % (doc.get("doc_type"),))
+    clean_artifact = _require_text(artifact_id, "artifact_id")
+    bound = str(doc.get("artifact_id") or "")
+    if bound and bound != clean_artifact:
+        raise PrivateItemsContractRefused("DOCUMENT_BOUND_TO_ANOTHER_ARTIFACT")
+    clean_source = _require_text(source_id, "source_id")
+    clean_revision = _require_text(source_revision, "source_revision")
+    clean_page = _require_position(page)
+    clean_key = _require_text(operation_key, "operation_key")
+    stamp = _require_text(now, "now")
+    kind, title, body, note = _clean_annotation_response(response)
+
+    intent: Optional[str] = None
+    recorded = reading_operation(doc, clean_key)
+    if kind == ANNOTATION_NO_CHANGE:
+        # no_change 是"这一页什么都不记"，因此只接受**全新键**：这把键已经落过别人的效果
+        # （note/unclear 的意图），再拿它来说"不记录"就是换意图复用，直接拒绝。
+        if recorded is not None:
+            raise PrivateItemsContractRefused("READING_OPERATION_KEY_REUSED:%s" % clean_key)
+    else:
+        intent = _annotation_intent_digest(
+            "annotation", clean_artifact, clean_source, clean_revision, str(clean_page), kind,
+            title, body, note)
+        # 1) 原键先回读：已经落过的同一条意图是 no-change，不是重写（也不因后来被撤权而翻脸）。
+        if recorded is not None:
+            if not _annotation_record_matches(recorded, intent=intent):
+                raise PrivateItemsContractRefused("READING_OPERATION_KEY_REUSED:%s" % clean_key)
+            item_id = recorded.get("item_id")
+            return {"content": encode_document(doc), "changed": False,
+                    "item_id": None if item_id is None else str(item_id),
+                    "kind": kind, "operation_key": clean_key}
+
+    # 2) 真实取得校验：这一版、这一页真的取得过，而且没有被撤权。
+    acquisition = _annotation_acquisition(doc, clean_source, clean_revision, clean_page)
+
+    if kind == ANNOTATION_NO_CHANGE:
+        # 什么都不记：文档一字节都不变（不偷偷加批注，也不改停点）。
+        return {"content": encode_document(doc), "changed": False, "item_id": None,
+                "kind": kind, "operation_key": clean_key}
+
+    item_id = _annotation_item_id(kind, clean_key)
+    existing = doc["items"].get(item_id)
+    if existing is not None:
+        # 归属掉出 200 条窗口时仍能从条目本身认出同一条意图；认不出就是借键。
+        if not _annotation_item_matches(existing, kind=kind, source_id=clean_source,
+                                        source_revision=clean_revision, page=clean_page,
+                                        title=title, body=body, note=note):
+            raise PrivateItemsContractRefused("READING_OPERATION_KEY_REUSED:%s" % clean_key)
+        return {"content": encode_document(doc), "changed": False, "item_id": item_id,
+                "kind": kind, "operation_key": clean_key}
+
+    if kind == ANNOTATION_NOTE:
+        _insert(doc, item_id, {
+            "item_id": item_id, "item_type": ITEM_MEMO, "memo_id": item_id,
+            "title": str(title), "body": str(body), "created_at": stamp, "updated_at": stamp,
+            "revisions": 1,
+            "reading_anchor": {"source_id": clean_source,
+                               "source_revision": clean_revision, "page": clean_page},
+        })
+    else:
+        _insert(doc, item_id, {
+            "item_id": item_id, "item_type": ITEM_UNCLEAR_MARKER, "marker_id": item_id,
+            "source_id": clean_source, "source_revision": clean_revision,
+            "position": clean_page, "note": str(note), "marked_at": stamp,
+        })
+    if not doc.get("artifact_id"):
+        doc["artifact_id"] = clean_artifact
+    next_number = int(doc.get("owner_version_number") or 0) + 1
+    doc["owner_version_number"] = next_number
+    doc["doc_revision"] = next_number
+    doc["updated_at"] = stamp
+    _remember_operation(doc, clean_key, {
+        "operation_key": clean_key, "action": "annotation", "kind": kind,
+        "source_id": clean_source, "source_revision": clean_revision, "page": clean_page,
+        "intent": intent, "acquisition_id": acquisition.get("acquisition_id"),
+        "at": stamp, "item_id": item_id,
+    })
+    return {"content": encode_document(doc), "changed": True, "item_id": item_id,
+            "kind": kind, "operation_key": clean_key}
+
+
 def reading_position_page(document: Mapping[str, Any], *, source_id: str) -> Optional[int]:
     """The highest page number this document records for one source, or ``None``.
 
@@ -353,6 +711,34 @@ def reading_position_page(document: Mapping[str, Any], *, source_id: str) -> Opt
         if isinstance(position, int) and not isinstance(position, bool):
             pages.append(position)
     return max(pages) if pages else None
+
+
+def reading_operation(document: Mapping[str, Any],
+                      operation_key: str) -> Optional[dict[str, Any]]:
+    """The minimal record of one reading write kept in this document, or ``None``.
+
+    It says which action/target an operation key belonged to.  It is recovery evidence for a
+    replay (and the reason a reused key can be refused instead of quietly applied); it holds no
+    page text and is not exposed by ``metadata_view``.
+    """
+    ledger = document.get(READING_OPERATIONS_FIELD) if isinstance(document, AbcMapping) else None
+    if not isinstance(ledger, AbcMapping):
+        return None
+    record = ledger.get(str(operation_key))
+    return dict(record) if isinstance(record, AbcMapping) else None
+
+
+def _remember_operation(document: dict[str, Any], key: str,
+                        record: Mapping[str, Any]) -> None:
+    """Attach one operation record to the document version that carries the effect."""
+    ledger = document.get(READING_OPERATIONS_FIELD)
+    if not isinstance(ledger, dict):
+        ledger = {}
+        document[READING_OPERATIONS_FIELD] = ledger
+    ledger[str(key)] = {str(name): value for name, value in dict(record).items()
+                        if value is not None}
+    while len(ledger) > MAX_READING_OPERATIONS:
+        ledger.pop(next(iter(ledger)), None)
 
 
 def _insert(doc: dict[str, Any], item_id: str, item: dict[str, Any]) -> None:
@@ -903,7 +1289,9 @@ class PrivateDailyItems:
     # -- the write core ------------------------------------------------------------------
 
     def _commit(self, item_type: str, intent_parts: Sequence[Any], mutator: Callable[..., Any],
-                *, operation_key: Optional[str] = None) -> WriteResult:
+                *, operation_key: Optional[str] = None,
+                record: Optional[Mapping[str, Any]] = None,
+                expected_head: Optional[str] = None) -> WriteResult:
         """Read head, apply the mutation in memory, then commit it with a CAS precondition.
 
         The operation key is derived from the *intent* (kind + payload + the head it was planned
@@ -912,10 +1300,23 @@ class PrivateDailyItems:
         payload under the same key is refused with CONFLICT -- either way one intended edit cannot
         mint a second version.  A caller retrying a ``retryable`` result must therefore pass the
         same content (including the same ``now``) or the same explicit ``operation_key``.
+
+        ``record`` is optional minimal operation ownership (which action/target a key belonged to).
+        It is written into the **same version** as the effect, because a second version for the
+        bookkeeping would be exactly the half-success this module refuses to fake.
+
+        ``expected_head`` is the caller's own compare-and-swap precondition.  When it is given it
+        is what the **owner** checks (and it is also checked locally first), so a head that moves
+        between a caller's pre-read and this commit is refused instead of being silently accepted
+        against the newer head.  ``None`` keeps the historical behaviour: CAS against the head
+        read right here.
         """
         if self.grant_id is None:
             raise PrivateItemsContractRefused("GRANT_ID_REQUIRED_FOR_WRITES")
         document, _artifact, head_version_id, head_number = self._read_document()
+        if expected_head is not None and str(expected_head) != str(head_version_id or ""):
+            raise PrivateItemsConflict(
+                "CAS_CONFLICT:stale expected_head:%s" % str(operation_key or ""))
         # Empty parts only ever come from an *absent* optional id; dropping them keeps the same
         # intent mapped to the same key while never producing an empty key part.
         parts = [str(part) for part in intent_parts if str(part) != ""]
@@ -936,8 +1337,11 @@ class PrivateDailyItems:
         new_document["owner_version_number"] = int(head_number or 0) + 1
         new_document["doc_revision"] = int(head_number or 0) + 1
         new_document["updated_at"] = self._now()
+        if record:
+            _remember_operation(new_document, key, record)
         outcome = self.port.commit_version(
-            artifact_id=self.artifact_id, expected_head=head_version_id,
+            artifact_id=self.artifact_id,
+            expected_head=head_version_id if expected_head is None else str(expected_head),
             content=encode_document(new_document), grant_id=self.grant_id, operation_key=key)
         return self._settle(outcome, key, new_document, result_item_id or auto_id)
 
@@ -983,23 +1387,37 @@ class PrivateDailyItems:
     # -- memos ---------------------------------------------------------------------------
 
     def add_memo(self, *, title: str, body: str, memo_id: Optional[str] = None,
-                 operation_key: Optional[str] = None, now: Optional[str] = None) -> WriteResult:
+                 operation_key: Optional[str] = None, now: Optional[str] = None,
+                 reading_anchor: Optional[Mapping[str, Any]] = None,
+                 record: Optional[Mapping[str, Any]] = None,
+                 expected_head: Optional[str] = None) -> WriteResult:
+        """Write a private memo.  ``reading_anchor`` names the real page it was written about.
+
+        The anchor is optional and structural (source id, revision, page): it says *where* the note
+        was made, never what was understood, and it is metadata -- ``revise_memo`` only rewrites the
+        body, so editing an old note cannot erase its anchor.
+        """
         stamp = now or self._now()
         clean_title, clean_body = _require_text(title, "title"), _require_text(body, "body")
+        clean_anchor = _clean_reading_anchor(reading_anchor)
 
         def mutate(document: dict[str, Any], auto_id: str) -> tuple[dict[str, Any], bool, str]:
             item_id = memo_id or auto_id
             if item_id in document["items"]:
                 return document, False, item_id
-            _insert(document, item_id, {
+            item: dict[str, Any] = {
                 "item_id": item_id, "item_type": ITEM_MEMO, "memo_id": item_id,
                 "title": clean_title, "body": clean_body, "created_at": stamp,
                 "updated_at": stamp, "revisions": 1,
-            })
+            }
+            if clean_anchor is not None:
+                item["reading_anchor"] = clean_anchor
+            _insert(document, item_id, item)
             return document, True, item_id
 
         return self._commit(ITEM_MEMO, ("add", memo_id or "", clean_title, clean_body), mutate,
-                            operation_key=operation_key)
+                            operation_key=operation_key, record=record,
+                            expected_head=expected_head)
 
     def revise_memo(self, memo_id: str, *, body: str, operation_key: Optional[str] = None,
                     now: Optional[str] = None) -> WriteResult:
@@ -1152,20 +1570,81 @@ class PrivateDailyItems:
                             ("position", clean_source, clean_revision, str(clean_position)),
                             mutate, operation_key=operation_key)
 
+    def record_page_read(self, *, source_id: str, source_revision: str, receipt_ref: str,
+                         obtained: Mapping[str, Any], position: Any, excerpt: Optional[str] = None,
+                         grant_ref: Optional[str] = None, operation_key: Optional[str] = None,
+                         now: Optional[str] = None,
+                         record: Optional[Mapping[str, Any]] = None,
+                         expected_head: Optional[str] = None) -> dict[str, Any]:
+        """One page read = **one** version: the acquisition and the position land together.
+
+        Planning is ``plan_page_read`` (the same pure plan the file-action path uses), so the
+        acquisition id, the position id and the "one intent, one version" rule cannot drift
+        between the two callers.  ``record`` is the minimal operation ownership this facade keeps
+        next to the effect (still inside this document, still one version); it never carries text.
+
+        Returns ``{"write": WriteResult, "acquisition_id", "position_id"}``.  A half-success is not
+        representable: either the version holds both items, or it does not hold them at all.
+        """
+
+        stamp = now or self._now()
+        clean_source = _require_text(source_id, "source_id")
+        clean_revision = _require_text(source_revision, "source_revision")
+        clean_receipt = _require_text(receipt_ref, "receipt_ref")
+        clean_obtained = _require_mapping(obtained, "obtained")
+        clean_position = _require_position(position)
+        planned_ids: dict[str, Any] = {}
+        # 这份 record 会写进**同一个版本**，所以它在这里被补上这次真正用到的条目 id：
+        # 重放时"这个键属于哪一条取得/位置"有据可查，而不是靠再算一次。
+        stored_record = dict(record) if record else None
+
+        def mutate(document: dict[str, Any], auto_id: str) -> tuple[dict[str, Any], bool, str]:
+            plan = plan_page_read(
+                document, artifact_id=self.artifact_id, source_id=clean_source,
+                source_revision=clean_revision, receipt_ref=clean_receipt,
+                obtained=clean_obtained, excerpt=excerpt, page=clean_position,
+                grant_ref=grant_ref, now=stamp)
+            planned_ids["acquisition_id"] = plan["acquisition_id"]
+            planned_ids["position_id"] = plan["position_id"]
+            if stored_record is not None:
+                stored_record["acquisition_id"] = plan["acquisition_id"]
+                stored_record["position_id"] = plan["position_id"]
+            if not plan["changed"]:
+                return document, False, str(plan["position_id"])
+            return decode_document(plan["content"]), True, str(plan["position_id"])
+
+        write = self._commit(ITEM_READING_POSITION,
+                            ("page_read", clean_source, clean_revision, clean_receipt,
+                             str(clean_position)),
+                            mutate, operation_key=operation_key, record=stored_record,
+                            expected_head=expected_head)
+        return {"write": write, "acquisition_id": planned_ids.get("acquisition_id"),
+                "position_id": planned_ids.get("position_id")}
+
     # -- unclear marker (subjective, separate from the position) --------------------------
 
     def mark_unclear(self, *, source_id: str, source_revision: str, note: str,
                      position: Any = None, operation_key: Optional[str] = None,
-                     now: Optional[str] = None) -> WriteResult:
-        """Record "I read this and did not understand it".  A different item from the position."""
+                     now: Optional[str] = None,
+                     record: Optional[Mapping[str, Any]] = None,
+                     marker_id: Optional[str] = None,
+                     expected_head: Optional[str] = None) -> WriteResult:
+        """Record "I read this and did not understand it".  A different item from the position.
+
+        ``marker_id`` is optional: a caller that keys its own idempotency (the phone facade keys it
+        by operation key) passes the id it derived, so the *same* sentence marked on two different
+        pages stays two records instead of collapsing into one.  Without it the historical
+        intent-derived id is used, so every existing caller keeps its current behaviour.
+        """
         stamp = now or self._now()
         clean_source = _require_text(source_id, "source_id")
         clean_revision = _require_text(source_revision, "source_revision")
         clean_note = _require_text(note, "note")
         clean_position = None if position is None else _require_position(position)
+        clean_marker = None if marker_id is None else _require_text(marker_id, "marker_id")
 
         def mutate(document: dict[str, Any], auto_id: str) -> tuple[dict[str, Any], bool, str]:
-            item_id = auto_id
+            item_id = clean_marker or auto_id
             if item_id in document["items"]:
                 return document, False, item_id
             _insert(document, item_id, {
@@ -1176,8 +1655,10 @@ class PrivateDailyItems:
             return document, True, item_id
 
         return self._commit(ITEM_UNCLEAR_MARKER,
-                            ("unclear", clean_source, clean_revision, clean_note), mutate,
-                            operation_key=operation_key)
+                            ("unclear", clean_marker or "", clean_source, clean_revision,
+                             clean_note), mutate,
+                            operation_key=operation_key, record=record,
+                            expected_head=expected_head)
 
     # -- inbox (explicit receipts only) ---------------------------------------------------
 
@@ -1277,6 +1758,9 @@ __all__ = [
     "UNDERSTANDING_UNKNOWN",
     "REFERENCE_SAVED",
     "MAX_EXCERPT_CHARS",
+    "MAX_READING_OPERATIONS",
+    "READING_ANCHOR_FIELDS",
+    "READING_OPERATIONS_FIELD",
     "PrivateDailyItemsError",
     "PrivateItemsContractRefused",
     "PrivateItemsOwnerRefused",
@@ -1297,4 +1781,12 @@ __all__ = [
     "room_object_refs",
     "encode_document",
     "decode_document",
+    "reading_operation",
+    "ANNOTATION_KINDS",
+    "ANNOTATION_NO_CHANGE",
+    "ANNOTATION_NOTE",
+    "ANNOTATION_UNCLEAR",
+    "MAX_ANNOTATION_TEXT_CHARS",
+    "MAX_ANNOTATION_TITLE_CHARS",
+    "plan_page_annotation",
 ]

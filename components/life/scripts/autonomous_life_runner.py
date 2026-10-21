@@ -83,6 +83,12 @@ WAKE_ACTED = "ACTED"
 WAKE_UNKNOWN = "UNKNOWN"
 WAKE_UNSETTLED = "UNSETTLED"
 WAKE_ERROR = "ERROR"
+#: v0.4 day-life: a Decision was legally committed but the foreground Activity had no executable
+#: step.  Unavailable, not her choice -- so it is a ``blocked`` class, never ``NO_ACTION``.
+WAKE_NO_STEP = "NO_STEP_AVAILABLE"
+#: v0.4 day-life: this exact state (target + revision + no-step reason) was already considered and
+#: she did not move it, so no request was spent.  Silence -- not a choice, not a refusal.
+WAKE_QUIET = "QUIET"
 #: W05: a real departure was committed by the owner; the arrival is settled later by real time.
 WAKE_IN_TRANSIT = "IN_TRANSIT"
 #: W05: the life-side persistent pause held the window before anything was considered.
@@ -110,6 +116,11 @@ OUTCOME_CLASS = {
     #: W05: the life-side persistent pause held this window.  Nothing was considered, so this
     #: is silence, not a choice she made and not a technical refusal.
     alc.OUTCOME_PAUSED_BY_OPERATOR: (WAKE_HELD, "silence"),
+    #: v0.4 day-life: a committed Decision with no executable step.  ``blocked``: nothing ran, and
+    #: it is not a choice she made, so it can never be counted as ``NO_ACTION``.
+    alc.OUTCOME_NO_STEP_AVAILABLE: (WAKE_NO_STEP, "blocked"),
+    #: v0.4 day-life: the same state was already considered; no request was spent.  Silence.
+    alc.OUTCOME_QUIET: (WAKE_QUIET, "silence"),
 }
 
 #: A repeated identical event inside this window does not re-trigger the decision.
@@ -223,6 +234,9 @@ class AutonomousLifeRunner:
         self.last_wake: Optional[WakeRecord] = None
         self.last_error: Optional[str] = None
         self.wakes_run = 0
+        #: v0.4 day-life: was the last *journalled* record a quiet one (NOT_DUE/QUIET)?  Used only to
+        #: stop a poll loop from writing one identical line per interval.
+        self._journal_quiet = False
 
     # -- identity / switch -----------------------------------------------------
 
@@ -324,8 +338,18 @@ class AutonomousLifeRunner:
 
     def wake(self, *, kind: str, reason: str, trigger_ref: str,
              trigger_kind: str = alc.TRIGGER_IDLE_WINDOW, act: bool = True,
-             dedupe: bool = False, now: Optional[datetime] = None) -> WakeRecord:
-        """One consideration window, in the mandated order."""
+             dedupe: bool = False, now: Optional[datetime] = None,
+             extra: Optional[Mapping[str, Any]] = None,
+             maintain: bool = True,
+             maintained: Optional[Mapping[str, Any]] = None) -> WakeRecord:
+        """One consideration window, in the mandated order.
+
+        ``maintain`` / ``maintained`` are the **explicit seam** for the bounded upkeep.  A caller
+        that already ran it for this tick (``assembly.runner_tick``) passes ``maintain=False`` and
+        hands back the report it got (``maintained=...``), so the same tick maintains exactly once
+        while the wake record still carries the facts.  The default keeps every other caller
+        self-maintaining, exactly as before.
+        """
 
         moment = now or self._clock()
         # 1. identity / switch
@@ -339,13 +363,27 @@ class AutonomousLifeRunner:
             return self._record(kind, reason, WAKE_BLOCKED, "blocked", moment,
                                 trigger_ref=trigger_ref, trigger_kind=trigger_kind,
                                 detail="budget refused the wake: %s" % why,
-                                extra={"budget": self.cycle.budget.snapshot()})
+                                extra=dict(extra or {}, budget=self.cycle.budget.snapshot()))
         # 3. the same real event twice is not two decisions
         if dedupe and not self._event_is_fresh(reason, trigger_ref, moment):
             return self._record(kind, reason, WAKE_DUPLICATE_EVENT, "silence", moment,
                                 trigger_ref=trigger_ref, trigger_kind=trigger_kind,
                                 detail="this event was already considered inside the "
                                        "dedupe window")
+        # 3b. v0.4 C: bounded, zero-model upkeep -- the owner's due scan plus a re-check of the
+        #     dependency conditions this instance is waiting on.  It runs inside this existing
+        #     wake (there is no timer of its own) and it can only ever *emit an eligibility*:
+        #     nothing here resumes, replays a Decision or spends a request.  A tick that already
+        #     ran it hands the report back instead of running it twice.
+        if maintain:
+            upkeep = self.maintain(now=moment)
+        elif maintained is not None:
+            upkeep = dict(maintained)
+        else:
+            upkeep = None
+        merged_extra = dict(extra or {})
+        if upkeep is not None:
+            merged_extra["waiting"] = upkeep
         # 4. the cycle: zero-model precheck, then AG-1 -> AG-2 -> Action only if there
         #    is something legal to consider.
         self._mark_checked(moment)
@@ -368,25 +406,97 @@ class AutonomousLifeRunner:
             activity_ref=out.get("activity_ref"),
             action_id=out.get("action_id"),
             action_status=out.get("action_status"),
-            extra={"budget": out.get("budget") or self.cycle.budget.snapshot()},
+            extra=self._extra_for(out, merged_extra),
         )
 
-    def run_due(self, *, act: bool = True, now: Optional[datetime] = None) -> WakeRecord:
-        """The low-frequency window.  Not due means nothing at all happens."""
+    def maintain(self, *, now: Optional[datetime] = None) -> Optional[dict[str, Any]]:
+        """v0.4 C: run the cycle's bounded waiting upkeep once, inside this wake.
+
+        Zero model calls, never fatal (a broken owner read is reported, not raised), and the
+        result is a *report*: the only thing it may change is what LR-4 itself writes when a real
+        observation satisfies a condition.  Returns ``None`` when the cycle has no such step.
+        """
+
+        maintain = getattr(self.cycle, "maintain_waiting", None)
+        if not callable(maintain):
+            return None
+        try:
+            report = maintain(observed_at=_iso(now or self._clock())) or {}
+        except Exception as exc:  # reported as one, never as silence
+            self.last_error = "%s: %s" % (type(exc).__name__, exc)
+            return {"state": "ERROR", "detail": self.last_error[:300]}
+        # v0.4 A (pacing): the body breakpoints are counted apart from the artifact-head ones, so
+        # the wake record must carry them apart too -- otherwise a product report cannot tell a
+        # body re-check from a work-head re-check, and cannot show that the upkeep spent no model
+        # call and resumed nothing.
+        return {key: report.get(key) for key in (
+            "state", "checked", "unchanged", "changed", "evaluated", "satisfied",
+            "emitted_eligibilities", "errors",
+            "body_checked", "body_changed", "auto_resumed", "llm_calls")}
+
+    def _extra_for(self, out: Mapping[str, Any],
+                   extra: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        """The wake's extra block: the budget, plus R's owner-evidence passthrough.
+
+        ``owner_version_created`` / ``owner_version_id`` / ``step_path`` come from the cycle's own
+        result and nowhere else.  With no evidence they are ``None`` (unknown) -- this runner never
+        infers a version from ``ACTED``, and it never manufactures an owner ref to fill a count.
+        """
+
+        block: dict[str, Any] = {"budget": out.get("budget") or self.cycle.budget.snapshot()}
+        if isinstance(extra, Mapping):
+            block.update({str(key): value for key, value in extra.items()})
+        evidence = out.get("owner_evidence")
+        evidence = evidence if isinstance(evidence, Mapping) else {}
+        created = evidence.get("owner_version_created")
+        block["owner_version_created"] = (None if created is None else bool(created))
+        version_id = evidence.get("owner_version_id")
+        block["owner_version_id"] = str(version_id) if version_id else None
+        step_path = evidence.get("step_path")
+        block["step_path"] = str(step_path) if step_path else None
+        # v0.4 day-life: the round's own readiness/suppression verdicts travel with the wake, so an
+        # operator report can tell "no step" and "already considered" apart from "she chose".
+        if isinstance(out.get("step_readiness"), Mapping):
+            block["step_readiness"] = dict(out["step_readiness"])
+        if isinstance(out.get("reconsideration"), Mapping):
+            block["reconsideration"] = dict(out["reconsideration"])
+        return block
+
+    def run_due(self, *, act: bool = True, now: Optional[datetime] = None,
+                maintain: bool = True,
+                maintained: Optional[Mapping[str, Any]] = None) -> WakeRecord:
+        """The low-frequency window.  Not due means no *request* -- but still the bounded upkeep.
+
+        v0.4 C: the upkeep runs **before** the due gate, so a closed window still re-checks the
+        dependency conditions and lets LR-4 reach its own due/expired verdicts.  That costs no
+        request and no round; when the window is closed the record is still ``NOT_DUE`` (silence)
+        and carries the upkeep facts.  A caller that already maintained this tick passes
+        ``maintain=False, maintained=...`` so the tick maintains exactly once.
+        """
 
         moment = now or self._clock()
+        if maintain:
+            upkeep = self.maintain(now=moment)
+        elif maintained is not None:
+            upkeep = dict(maintained)
+        else:
+            upkeep = None
         is_due, why = self.due(now=moment)
         if not is_due:
             return self._record(WAKE_KIND_CHECK_WINDOW, "check-window", WAKE_NOT_DUE,
                                 "silence", moment,
                                 trigger_ref="evt:autonomous:check",
                                 trigger_kind=alc.TRIGGER_IDLE_WINDOW,
-                                detail="the check window is not open yet: %s" % why)
+                                detail="the check window is not open yet: %s" % why,
+                                extra=({"waiting": upkeep} if upkeep is not None else None))
         return self.wake(kind=WAKE_KIND_CHECK_WINDOW, reason="check-window",
-                         trigger_ref="evt:autonomous:check", act=act, now=moment)
+                         trigger_ref="evt:autonomous:check", act=act, now=moment,
+                         maintain=False, maintained=upkeep)
 
     def wake_on_event(self, event: Mapping[str, Any], *, act: bool = True,
-                      now: Optional[datetime] = None) -> WakeRecord:
+                      now: Optional[datetime] = None,
+                      maintain: bool = True,
+                      maintained: Optional[Mapping[str, Any]] = None) -> WakeRecord:
         """An event wake: only a real, fresh event about this individual gets here."""
 
         moment = now or self._clock()
@@ -400,8 +510,27 @@ class AutonomousLifeRunner:
                                 trigger_kind=alc.TRIGGER_IDLE_WINDOW,
                                 detail="the same event was already considered")
         trigger_kind = self._trigger_kind_for_event(kind)
+        # v0.4 day-life: a real event *about the object the cycle is quiet about* is exactly what
+        # lifts the reconsideration suppression.  Only a matching ref does: an unrelated event
+        # cannot turn a quiet state back into a paid request.
+        released = self._release_on_event(kind, ref)
         return self.wake(kind=WAKE_KIND_EVENT, reason=kind, trigger_ref=ref,
-                         trigger_kind=trigger_kind, act=act, now=moment)
+                         trigger_kind=trigger_kind, act=act, now=moment,
+                         maintain=maintain, maintained=maintained,
+                         extra={"reconsideration_released": released} if released else None)
+
+    def _release_on_event(self, kind: str, ref: str) -> list[str]:
+        """Ask the cycle to lift any suppression this event's own ref really names."""
+
+        release = getattr(self.cycle, "release_reconsideration", None)
+        if not callable(release) or str(kind) not in KNOWN_EVENT_KINDS or not ref:
+            return []
+        try:
+            result = release(refs=[ref], reason="EVENT:%s" % kind)
+        except Exception as exc:  # a failed release is reported, never fatal
+            self.last_error = "%s: %s" % (type(exc).__name__, exc)
+            return []
+        return [str(item) for item in (result.get("released") or [])]
 
     @staticmethod
     def _trigger_kind_for_event(kind: str) -> str:
@@ -469,9 +598,19 @@ class AutonomousLifeRunner:
             activity_ref=activity_ref, action_id=action_id, action_status=action_status,
             extra=dict(extra or {}))
         self.last_wake = record
-        if status != WAKE_NOT_DUE:
+        # v0.4 day-life: only a window that really considered something counts as a wake.  ``NOT_DUE``
+        # (the window is not open) and ``QUIET`` (this exact state was already considered) both
+        # considered nothing, so counting them would inflate "wakes" into "polls".
+        if status not in {WAKE_NOT_DUE, WAKE_QUIET}:
             self.wakes_run += 1
-        self._journal(record)
+        # A long poll loop produces one NOT_DUE line per interval and nothing else; journalling every
+        # one of them buries the real records.  Only a *change* is written: the first NOT_DUE of a
+        # streak, and the first wake of any other kind after it.  ``last_wake`` is always updated,
+        # so nothing is lost from the in-process view.
+        quiet = status in {WAKE_NOT_DUE, WAKE_QUIET}
+        if not (quiet and self._journal_quiet):
+            self._journal(record)
+            self._journal_quiet = quiet
         return record
 
     def _journal(self, record: WakeRecord) -> None:
@@ -546,6 +685,8 @@ __all__ = [
     "WAKE_KIND_EVENT",
     "WAKE_NOT_DUE",
     "WAKE_NO_ACTION",
+    "WAKE_NO_STEP",
+    "WAKE_QUIET",
     "WAKE_UNKNOWN",
     "WakeRecord",
 ]

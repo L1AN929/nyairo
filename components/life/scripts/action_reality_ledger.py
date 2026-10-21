@@ -1759,7 +1759,16 @@ class WorldActionAdapter(ActionAdapterProtocol):
         # resolver takes it) -- and the World's own allowlist/gateway still decide
         # whether the verb may commit.  Without this line a real CONSUME decision
         # would be refused by AR-0's own contract, before it ever reached the owner.
-        if verb not in {"MOVE", "POSE", "CONSUME"}:
+        # W: REST joins them on the same terms.  It is *only* an admission -- the two
+        # parameters (start|stop, mode) travel inside the encoded ``bodyact:`` target
+        # (``life_body_action_targets``), so the single-target contract below is
+        # untouched and no verb here gains a free-form ``params`` mapping.
+        # v0.4 lived day: PICK_UP / PLACE join on exactly the same terms -- admission only.  The
+        # object (and, for a placement, the surface) travels inside B's one encoded ``dailyact:``
+        # target (``life_daily_action_targets``), so the single-target contract above is untouched
+        # and no verb here gains a free-form ``params`` mapping.  The World's own allowlist, the
+        # gateway's exposure and the Resolver still decide whether the verb may commit.
+        if verb not in {"MOVE", "POSE", "CONSUME", "REST", "PICK_UP", "PLACE"}:
             raise ContractViolationError(f"unsupported WORLD_ACTION verb={verb!r}")
         if not isinstance(target, str) or not target.strip():
             raise ContractViolationError("WORLD_ACTION requires non-empty 'target'")

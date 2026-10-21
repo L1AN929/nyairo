@@ -72,7 +72,13 @@ def memory_tool_gate(tool_name,args,**kwargs):
         return {'action':'block','message':'Personal memory configuration is unavailable; historical memory tools are blocked.'}
     # This bounded World tool cannot read transcripts or personal memory.
     # Allow world movement and Hermes progressive disclosure bridge tools
-    if tool_name in ('world_move', 'tool_search', 'tool_describe', 'tool_call'):
+    # v0.4: the phone tool does not read the memory DB or transcripts, but that alone is NOT a
+    # reason to wave it through: her private notes can hold her own past.  The tool therefore
+    # carries its own stricter gate -- under a restricted memory profile it only allows
+    # wallet/shop/inventory/operation, and notes/references/reading need the profile's explicit
+    # `phone.private_artifacts` permit.  This allowlist entry only stops the blanket block from
+    # hiding the economy views; it does not widen what a restricted profile may read.
+    if tool_name in ('world_move', 'chiyo_phone', 'tool_search', 'tool_describe', 'tool_call'):
         return None
     if cfg.get('memory') and (cfg.get('memory_tool_policy') != 'unrestricted' or tool_name in ('memory','session_search')):
         return {'action':'block','message':'Personal memory mode blocks model tools that could read forgotten history. Use /chiyo_memory; unrestricted tools require an explicit profile setting and remove this protection.'}

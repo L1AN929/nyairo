@@ -550,7 +550,12 @@ class ProductionLifeRuntime:
         self.ag2_waiting_port = ag2.build_ag2_port(self.waiting_coordinator, {
             "enter_waiting_with_condition", "explicit_resume_from_eligibility",
             "reconcile_with_canonical_activities", "evaluate_event", "recover_cold_start",
-            "list_agenda_items", "list_eligibilities", "get_eligibility"})
+            "list_agenda_items", "list_eligibilities", "get_eligibility",
+            # v0.4 C: the one narrow addition.  The cycle's *bounded* tick upkeep needs the
+            # owner's own due scan while the process is running; before this, ``scan_due_agenda``
+            # was reachable only from ``recover_cold_start``, so a condition could never come due
+            # without a restart.  It is the existing LR-4 method -- not a new one, and not a timer.
+            "scan_due_agenda"})
         self.ag2_progress_port = ag2.build_ag2_port(self.progress_coordinator, {
             "register_result_binding", "register_progress_contract", "register_completion_contract",
             "ingest_progress_evidence", "recover", "auto_apply_natural_completion", "read_service"})

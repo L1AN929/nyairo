@@ -46,6 +46,17 @@ PROVIDER_MALFORMED_RESPONSE = "PROVIDER_MALFORMED_RESPONSE"
 PROVIDER_AUTH_ERROR = "PROVIDER_AUTH_ERROR"
 PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
 CONFIG_MISSING = "CONFIG_MISSING"
+#: LPC0B-R3: a 200 response that carried no answer text, split out of
+#: ``PROVIDER_MALFORMED_RESPONSE``.  "The answer was cut off", "the model only spent its budget
+#: reasoning" and "the body was not JSON" are three different facts, and folding the first two
+#: into the third made every thinking-model truncation surface as ``INVALID_JSON`` -- the model
+#: was blamed for emitting bad JSON when nothing had in fact been emitted.
+PROVIDER_OUTPUT_TRUNCATED = "PROVIDER_OUTPUT_TRUNCATED"        # finish_reason == "length"
+PROVIDER_REASONING_ONLY = "PROVIDER_REASONING_ONLY"            # reasoning_content only, no content
+PROVIDER_EMPTY_CONTENT = "PROVIDER_EMPTY_CONTENT"              # neither content nor reasoning
+#: A 4xx that is neither auth, rate limit nor an unavailable provider: the request itself was
+#: refused (e.g. an unsupported parameter), which is not a statement about the model's output.
+PROVIDER_REQUEST_REJECTED = "PROVIDER_REQUEST_REJECTED"
 
 PURPOSE_AGENCY_COGNITION = "agency_cognition"
 PURPOSE_CHAT = "chat"

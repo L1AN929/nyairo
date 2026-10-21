@@ -83,6 +83,13 @@ DEFAULT_DATA_ROOT = "./data/supply"
 DEFAULT_SOCKET_MODE = 0o600
 DEFAULT_MAX_PAYLOAD_BYTES = 1_000_000
 
+#: v0.4 work-revisit history bounds: how many version rows one page may carry, and how much of a
+#: historical version's body this service will hand out in one answer.  Both are enforced here (the
+#: owner), not only by the caller, so a bigger request cannot pull a whole work out of the store.
+DEFAULT_VERSION_PAGE = 20
+MAX_VERSION_PAGE = 50
+MAX_VERSION_CONTENT_CHARS = 20000
+
 WORKSPACE_CAPABILITY = "PROVISION_PERSONAL_WORKSPACE"
 INQUIRY_CAPABILITY = "WRITE_OPEN_INQUIRY"
 ARTIFACT_CAPABILITY = "COMMIT_MANAGED_ARTIFACT"
@@ -225,6 +232,9 @@ READ_OPS: frozenset[str] = frozenset({
     "read_artifact", "read_head", "lookup_operation", "read_effect_receipt",
     "list_personal_opportunities", "list_active_grants", "get_grant",
     "list_unresolved_operations",
+    # v0.4 work-revisit: the two history reads.  Both are pure reads of immutable version rows:
+    # no head moves, no operation row and no Activity is written, and nothing is restored.
+    "list_versions", "read_version",
 })
 
 COMMAND_OPS: frozenset[str] = frozenset({
@@ -273,6 +283,10 @@ FIELD_TYPES: dict[str, dict[str, Any]] = {
     "list_active_grants": {"subject": (str, type(None))},
     "get_grant": {"grant_id": str},
     "list_unresolved_operations": {},
+    "list_versions": {"subject": str, "artifact_id": str, "limit": (int, type(None)),
+                      "before_version_number": (int, type(None))},
+    "read_version": {"subject": str, "artifact_id": str, "version_id": str,
+                     "max_chars": (int, type(None))},
     "issue_grant": {"grant": dict},
     "revoke_grant": {"grant_id": str, "expected_revision": int, "operation_id": str},
     "provision_workspace": {"grant_id": str, "operation_key": str, "workspace": dict},
@@ -290,6 +304,8 @@ REQUIRED_FIELDS: dict[str, frozenset[str]] = {
     "read_artifact": frozenset({"subject", "artifact_id"}),
     "read_head": frozenset({"artifact_id"}),
     "lookup_operation": frozenset({"owner", "operation_id"}),
+    "list_versions": frozenset({"subject", "artifact_id"}),
+    "read_version": frozenset({"subject", "artifact_id", "version_id"}),
     "read_effect_receipt": frozenset({"operation_key"}),
     "list_personal_opportunities": frozenset({"subject"}),
     "get_grant": frozenset({"grant_id"}),
@@ -767,6 +783,89 @@ class LifeSupplyService:
         if head is None:
             return refusal("NOT_FOUND", "ARTIFACT_HEAD_NOT_FOUND", "no committed head")
         return {"status": "OK", "head": head}
+
+    # -- v0.4 work-revisit: bounded history reads (pure reads, no write, no restore) ------
+
+    def _history_subject_artifact(self, req: dict[str, Any]) -> dict[str, Any]:
+        """The artifact a history read is about, after the current-access checks.
+
+        A history query is *not* exempt from the artifact's current state: the artifact must
+        belong to the asking subject (owner binding), and a tombstoned artifact serves no history
+        at all -- its content is withheld, so its old versions are withheld too.  An ``ARCHIVED``
+        artifact stays readable (archiving is a close, not a delete); the answer carries the
+        lifecycle so the caller can name what it got.
+        """
+        subject, artifact_id = req["subject"], req["artifact_id"]
+        self.subject_identity(subject)
+        artifact = self.artifact_store.get_artifact_for_subject(artifact_id, subject)
+        if artifact is None:
+            raise RequestRefused(refusal("NOT_FOUND", "ARTIFACT_NOT_FOUND",
+                                         "artifact/subject mismatch"))
+        if artifact["lifecycle"] == "TOMBSTONED":
+            raise RequestRefused(refusal("NOT_FOUND", "ARTIFACT_TOMBSTONED",
+                                         "the artifact was tombstoned; its history is not served"))
+        return artifact
+
+    def _op_list_versions(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        artifact = self._history_subject_artifact(req)
+        limit = req.get("limit")
+        limit = DEFAULT_VERSION_PAGE if limit is None else limit
+        if isinstance(limit, bool) or not isinstance(limit, int) \
+                or limit < 1 or limit > MAX_VERSION_PAGE:
+            return refusal("DENY", "LIMIT_OUT_OF_RANGE",
+                           f"limit must be an integer 1..{MAX_VERSION_PAGE}")
+        before = req.get("before_version_number")
+        if before is not None and (isinstance(before, bool) or not isinstance(before, int)
+                                   or before < 1):
+            return refusal("DENY", "CURSOR_INVALID",
+                           "before_version_number must be a version number >= 1")
+        view = self.artifact_store.list_versions(
+            req["artifact_id"], limit=limit, before_version_number=before)
+        if view is None:
+            return refusal("UNKNOWN", "OWNER_READ_UNAVAILABLE",
+                           "ManagedArtifact owner read unavailable")
+        answer = {"status": "OK", "subject": req["subject"],
+                  "artifact_id": req["artifact_id"], "lifecycle": artifact["lifecycle"]}
+        answer.update(view)
+        return answer
+
+    def _op_read_version(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        artifact = self._history_subject_artifact(req)
+        max_chars = req.get("max_chars")
+        max_chars = MAX_VERSION_CONTENT_CHARS if max_chars is None else max_chars
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int) \
+                or max_chars < 1 or max_chars > MAX_VERSION_CONTENT_CHARS:
+            return refusal("DENY", "MAX_CHARS_OUT_OF_RANGE",
+                           f"max_chars must be an integer 1..{MAX_VERSION_CONTENT_CHARS}",
+                           limit=MAX_VERSION_CONTENT_CHARS)
+        version_id = req["version_id"]
+        row = self.artifact_store.read_version(version_id)
+        if row is None:
+            return refusal("NOT_FOUND", "VERSION_NOT_FOUND",
+                           "no such version of a living artifact")
+        if str(row["artifact_id"]) != str(req["artifact_id"]):
+            # A version of *another* artifact is never served through this artifact's name.
+            return refusal("NOT_FOUND", "VERSION_NOT_IN_ARTIFACT",
+                           "that version belongs to a different artifact")
+        content = row.get("content")
+        content = content if isinstance(content, str) else ""
+        truncated = len(content) > max_chars
+        return {
+            "status": "OK",
+            "subject": req["subject"],
+            "artifact_id": row["artifact_id"],
+            "version_id": row["version_id"],
+            "version_number": row.get("version_number"),
+            "parent_version_id": row.get("parent_version_id"),
+            "created_at": row.get("created_at"),
+            "operation_key": row.get("operation_key"),
+            "content": content[:max_chars],
+            "content_chars": len(content),
+            "returned_chars": min(len(content), max_chars),
+            "content_sha256": row.get("content_sha256"),
+            "content_truncated": truncated,
+            "lifecycle": artifact["lifecycle"],
+        }
 
     def _op_lookup_operation(self, req, *, caller, peer_uid) -> dict[str, Any]:
         owner, operation_id = req["owner"], req["operation_id"]

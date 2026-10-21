@@ -639,6 +639,21 @@ class AdoptionIllegalError(LifeIntegrationError):
     """Raised when a DecisionRecord or ActivityAdoptionSpec violates adoption legality."""
 
 
+class ForegroundHandoffStranded(AdoptionIllegalError):
+    """The foreground was handed over, and the joint Activity could not be started.
+
+    The handoff is the adoption's *first* command and it is a real owner transition, so a failed
+    start after it means the running work is already WAITING.  The caller gets the handoff facts
+    (the Activity ref and the resume condition it is waiting on) so it can let the owner release
+    them through the condition's own event instead of inventing a second writer.
+    """
+
+    def __init__(self, handoff, cause) -> None:
+        super().__init__("joint start failed after the foreground handoff: %s" % cause)
+        self.handoff = dict(handoff or {})
+        self.cause = str(cause)
+
+
 class PlannerInventionForbiddenError(LifeIntegrationError):
     """Raised when an ExecutableStepSpec attempts multi-step task-tree planning in AG-2."""
 
@@ -1722,6 +1737,54 @@ class ExecutableStepSpec:
         return cls(**copy.deepcopy(dict(data)))
 
 
+#: The complete set of keys C's optional confirmed-result mapping may carry.  Anything else is a
+#: programming error at the boundary, not something to copy silently into a handoff.
+OWNER_CONFIRMED_CONTEXT_KEYS = ("artifact_id", "version_ref", "title", "result_description",
+                               "outcome_confirmed")
+
+
+def validate_owner_confirmed_context(raw: Any) -> dict[str, Any]:
+    """v0.4 C's optional handoff field, checked structurally **before** it is stored.
+
+    C sets this only after it has really read that artifact and that version back from the owner,
+    and the description it carries is a bounded, readable statement about what the owner holds --
+    never the writer's own ``self_note``.  The Memory consumer re-checks every reference against
+    the delivered event (and its own governing rules); this function only makes sure the envelope
+    handed to AG-2 is the documented shape, so a malformed mapping fails here instead of being
+    written into an event that later looks confirmed.
+    """
+
+    if not isinstance(raw, Mapping):
+        raise LifeIntegrationError("owner_confirmed_context must be a mapping")
+    unknown = {str(key) for key in raw} - set(OWNER_CONFIRMED_CONTEXT_KEYS)
+    if unknown:
+        raise LifeIntegrationError(
+            f"owner_confirmed_context carries unknown keys: {sorted(unknown)}")
+    if raw.get("outcome_confirmed") is not True:
+        raise LifeIntegrationError(
+            "owner_confirmed_context requires outcome_confirmed: true -- an unsettled outcome is "
+            "carried by the event's own refs, never dressed as a confirmed result")
+    description = raw.get("result_description")
+    artifact_id = raw.get("artifact_id")
+    version_ref = raw.get("version_ref")
+    title = raw.get("title")
+    if not isinstance(description, str) or not description.strip():
+        raise LifeIntegrationError("owner_confirmed_context.result_description must be text")
+    if not isinstance(artifact_id, str) or not artifact_id.strip():
+        raise LifeIntegrationError("owner_confirmed_context.artifact_id must be text")
+    if not isinstance(version_ref, str) or not version_ref.strip():
+        raise LifeIntegrationError("owner_confirmed_context.version_ref must be text")
+    if title is not None and not isinstance(title, str):
+        raise LifeIntegrationError("owner_confirmed_context.title must be text or null")
+    return {
+        "artifact_id": artifact_id.strip(),
+        "version_ref": version_ref.strip(),
+        "title": title.strip() if isinstance(title, str) else None,
+        "result_description": description.strip(),
+        "outcome_confirmed": True,
+    }
+
+
 @dataclass
 class LifeExperienceHandoffEvent:
     """Section 107: Canonical handoff event from Life runtime to Experience consumer (NOT a Memory write)."""
@@ -1746,6 +1809,13 @@ class LifeExperienceHandoffEvent:
     recorded_at: str
     causal_parent_refs: list[str]
     subject_id: str = GLOBAL_SUBJECT_ID
+    #: v0.4 C: what the owner *confirmed* about the changed work, in C's own bounded words
+    #: (``artifact_id``, ``version_ref``, ``title``, ``result_description``,
+    #: ``outcome_confirmed: true``).  It is optional, and it is only ever set by the round that
+    #: really read that version back from the owner; Memory's consumer re-checks every reference
+    #: against this event and ignores anything that does not line up.  A model's ``self_note`` is
+    #: never carried here.
+    owner_confirmed_context: Optional[dict[str, Any]] = None
     policy_version: str = POLICY_VERSION_AG2_V1
     schema_version: str = SCHEMA_EXPERIENCE_HANDOFF
 
@@ -1758,6 +1828,9 @@ class LifeExperienceHandoffEvent:
         _require_iso(self.occurred_at, "occurred_at")
         _require_iso(self.observed_at, "observed_at")
         _require_iso(self.recorded_at, "recorded_at")
+        if self.owner_confirmed_context is not None:
+            object.__setattr__(self, "owner_confirmed_context",
+                               validate_owner_confirmed_context(self.owner_confirmed_context))
 
     def to_dict(self) -> dict[str, Any]:
         return copy.deepcopy(dataclasses.asdict(self))
@@ -2559,6 +2632,7 @@ class DecisionAdoptionCoordinator:
         *,
         check_at: Optional[str] = None,
         live_capacity_override: Optional[Mapping[str, Any]] = None,
+        allow_foreground_handoff: bool = False,
     ) -> tuple[bool, Optional[str]]:
         """Section 41: Final Freshness Check immediately before adoption."""
         chk_iso = _require_iso(check_at or _iso(now()), "check_at")
@@ -2635,9 +2709,15 @@ class DecisionAdoptionCoordinator:
                     return False, f"RESUME_ELIGIBILITY_NOT_OPEN:{elig_ref}"
 
         # 6. Check START legality against active foreground activity
+        #
+        # v0.4 B: the one formal exception.  When *this adoption* carries an explicit foreground
+        # handoff (``handoff_spec``), the running Activity is not "still there" at the moment the
+        # joint Activity starts: the adoption hands the pointer over first, through LR-4's own
+        # WAITING transition with the caller's resume condition, and its own CAS/ATOMIC checks.
+        # Without a handoff the rule is unchanged.
         if decision.decision == DECISION_START and fg_ref is not None:
             fg_act = (act_state.get("activities") or {}).get(fg_ref)
-            if fg_act and fg_act.get("status") == STATUS_ACTIVE:
+            if fg_act and fg_act.get("status") == STATUS_ACTIVE and not allow_foreground_handoff:
                 return False, f"CANNOT_START_WHILE_FOREGROUND_ACTIVE:{fg_ref}"
 
         return True, None
@@ -2890,12 +2970,86 @@ class DecisionAdoptionCoordinator:
             finalized.append(adoption_id)
         return {"finalized": finalized, "skipped": skipped}
 
+    def _handoff_foreground(self, *, decision_ref: str, adoption_id: str,
+                            spec: Mapping[str, Any],
+                            occurred_at: str) -> dict[str, Any]:
+        """Hand the running foreground to LR-4's own WAITING transition, with CAS.
+
+        This is deliberately *not* "clear the foreground": the pointer moves because the owner's
+        transition moves it, under the revision the reader just saw, with a resume condition the
+        caller names.  Nothing here writes an Activity field directly, and a refusal is an
+        ``AdoptionIllegalError`` raised before the START command -- so a declined handoff leaves
+        the running work exactly as it was.
+        """
+
+        activity_ref = str(spec.get("activity_ref") or "")
+        expected_revision = spec.get("expected_revision")
+        if not activity_ref or expected_revision is None:
+            raise AdoptionIllegalError(
+                "foreground handoff needs activity_ref and expected_revision")
+        waiting_on_ref = str(spec.get("waiting_on_ref") or "")
+        condition_kind = str(spec.get("condition_kind") or "")
+        idempotency_key = str(spec.get("idempotency_key") or "")
+        if not (waiting_on_ref and condition_kind and idempotency_key):
+            raise AdoptionIllegalError(
+                "foreground handoff needs waiting_on_ref, condition_kind and idempotency_key")
+        row = self.activity_read.get_activity(activity_ref) or {}
+        if str(row.get("status") or "") != STATUS_ACTIVE:
+            raise AdoptionIllegalError(
+                "foreground handoff refused: %r is not ACTIVE" % activity_ref)
+        if int(row.get("revision") or 0) != int(expected_revision):
+            raise AdoptionIllegalError(
+                "foreground handoff refused: revision moved (%s != %s)"
+                % (row.get("revision"), expected_revision))
+        _, live_intr, _ = self.interruption_coordinator.get_effective_attention(row)
+        if str(live_intr) == INTERRUPTIBILITY_ATOMIC:
+            raise AdoptionIllegalError(
+                "foreground handoff refused: the Activity is in an ATOMIC region")
+        source_refs = [str(ref) for ref in (spec.get("source_refs") or [])]
+        try:
+            result = self.waiting_coordinator.enter_waiting_with_condition(
+                activity_id=activity_ref,
+                expected_revision=int(expected_revision),
+                waiting_on_ref=waiting_on_ref,
+                condition_kind=condition_kind,
+                parameters=dict(spec.get("parameters") or {}),
+                source_refs=source_refs or [decision_ref, adoption_id],
+                idempotency_key=idempotency_key,
+                condition_expires_at=spec.get("condition_expires_at"),
+                release_foreground=True,
+                occurred_at=occurred_at,
+                observed_at=occurred_at,
+            )
+        except Exception as exc:
+            raise AdoptionIllegalError(
+                "foreground handoff refused: %s: %s" % (type(exc).__name__, exc)) from exc
+        payload = result if isinstance(result, Mapping) else {}
+        activity = dict(payload.get("activity") or {})
+        if str(activity.get("status") or "") != STATUS_WAITING:
+            raise AdoptionIllegalError(
+                "foreground handoff did not reach WAITING (status=%s)"
+                % activity.get("status"))
+        condition = dict(payload.get("resume_condition") or {})
+        condition_ref = (condition.get("condition_id")
+                         or condition.get("resume_condition_ref"))
+        handoff_fact = {"activity_ref": activity_ref,
+                "status": str(activity.get("status")),
+                "revision": activity.get("revision"),
+                "checkpoint_ref": activity.get("checkpoint_ref"),
+                "resume_condition_ref": condition_ref,
+                "waiting_on_ref": waiting_on_ref,
+                "condition_expires_at": spec.get("condition_expires_at"),
+                "decision_ref": decision_ref}
+        self.last_handoff = dict(handoff_fact)
+        return handoff_fact
+
     def adopt_decision(
         self,
         decision_input: DecisionRecord | Mapping[str, Any] | str,
         *,
         adoption_spec: Optional[ActivityAdoptionSpec | Mapping[str, Any]] = None,
         waiting_spec: Optional[Mapping[str, Any]] = None,
+        handoff_spec: Any = None,
         pause_mode_override: Optional[str] = None,
         occurred_at: Optional[str] = None,
         live_capacity_override: Optional[Mapping[str, Any]] = None,
@@ -2950,6 +3104,9 @@ class DecisionAdoptionCoordinator:
 
         occ_iso = _require_iso(occurred_at or _iso(now()), "occurred_at")
         adoption_id = existing_adp_id or f"adp:{sha256_hex(f'{decision.decision_id}:{idem}')[:16]}"
+        #: v0.4 B: what this adoption's foreground handoff really did (``None`` when it made none).
+        #: The coordinator inside ``run_decision_and_adoption_cycle`` reads it back for the caller.
+        self.last_handoff = None
 
         if fault_hook is not None:
             fault_hook("after_decision_commit_before_adoption")
@@ -2959,6 +3116,7 @@ class DecisionAdoptionCoordinator:
             decision,
             check_at=occ_iso,
             live_capacity_override=live_capacity_override,
+            allow_foreground_handoff=handoff_spec is not None,
         )
 
         act_state, _ = self.activity_read.read_canonical_state(include_journal=False)
@@ -3095,6 +3253,31 @@ class DecisionAdoptionCoordinator:
             fg_act = (act_state.get("activities") or {}).get(fg_ref) if fg_ref else None
             allow_bg_wait = bool(fg_act and fg_act.get("status") == STATUS_WAITING)
 
+            # v0.4 B: the explicit, bounded foreground handoff.  A joint Activity must not open
+            # on top of a running one, and the single-foreground rule belongs to the *owner*:
+            # this adoption hands the foreground to LR-4's own WAITING transition (with the
+            # resume condition the caller supplies) and only then starts the Activity.  It runs
+            # after the freshness check on purpose -- that check is about the Decision's own
+            # snapshot, while this command is part of the adoption, not a mutation behind it.
+            # A refused handoff raises *before* anything is written.
+            handoff_result: Optional[dict[str, Any]] = None
+            if handoff_spec is not None:
+                handoff_source = (handoff_spec(decision) if callable(handoff_spec)
+                                  else handoff_spec)
+                handoff_result = self._handoff_foreground(
+                    decision_ref=decision.decision_id,
+                    adoption_id=adoption_id,
+                    spec=dict(handoff_source or {}),
+                    occurred_at=occ_iso,
+                )
+                # The handoff is a real Activity transition, so the START below must CAS the
+                # revision the owner now holds -- re-read it, never reuse the snapshot's value.
+                live_state, _ = self.activity_read.read_canonical_state(include_journal=False)
+                expected_act_rev = int(live_state.get("revision", expected_act_rev))
+                fg_ref = live_state.get("foreground_activity_ref")
+                fg_act = ((live_state.get("activities") or {}).get(fg_ref) if fg_ref else None)
+                allow_bg_wait = bool(fg_act and fg_act.get("status") == STATUS_WAITING)
+
             cmd_idem = f"lr2_start:{decision.decision_id}:{adoption_id}"
             authorized_activity_id = f"actv_{sha256_hex(f'{decision.decision_id}:{adoption_id}:{cmd_idem}')[:16]}"
             authorized_rec = self._issue_precommit_authorization(
@@ -3142,8 +3325,9 @@ class DecisionAdoptionCoordinator:
             elif lr3_intr == INTERRUPTIBILITY_ATOMIC:
                 lr2_occ = OCCUPANCY_ATOMIC
 
-            cmd_res = self.activity_command.start_activity(
-                activity_kind=spec_obj.activity_kind,
+            try:
+                cmd_res = self.activity_command.start_activity(
+                    activity_kind=spec_obj.activity_kind,
                 title=spec_obj.title,
                 origin_ref=spec_obj.origin_ref,
                 source_refs=[decision.decision_id, adoption_id, sel_cid, *cand_dict.get("source_refs", [])],
@@ -3157,10 +3341,14 @@ class DecisionAdoptionCoordinator:
                 checkpoint_ref=spec_obj.initial_checkpoint_ref,
                 causal_parent_refs=[decision.decision_id, adoption_id, sel_cid],
                 reason_code="ADOPTED_DECISION",
-                occurred_at=occ_iso,
-                observed_at=occ_iso,
-                allow_background_waiting=allow_bg_wait,
-            )
+                    occurred_at=occ_iso,
+                    observed_at=occ_iso,
+                    allow_background_waiting=allow_bg_wait,
+                )
+            except Exception as exc:
+                if handoff_result is not None:
+                    raise ForegroundHandoffStranded(handoff_result, exc) from exc
+                raise
             resulting_activity = cmd_res.activity
             assert resulting_activity is not None
             created_act_ref = str(resulting_activity["activity_id"])
@@ -3324,7 +3512,17 @@ class DecisionAdoptionCoordinator:
             if not fg_ref:
                 raise AdoptionIllegalError("Cannot adopt WAIT_CURRENT_ACTIVITY without an active Activity")
             target_act_ref = fg_ref
-            w_spec = dict(waiting_spec or {})
+            # v0.4 stage A: the wait may depend on the *committed Decision* (a self-chosen park time
+            # lives in the Decision's own ``later_item`` proposal), so a callable is accepted here
+            # exactly like ``adoption_spec``/``step_spec_override`` above.  A WAIT whose spec
+            # cannot be produced is refused by name -- never given an invented deadline.
+            try:
+                _spec_source = waiting_spec(decision) if callable(waiting_spec) else waiting_spec
+            except Exception as exc:
+                raise AdoptionIllegalError(
+                    "WAIT waiting_spec could not be produced from the committed Decision: %s"
+                    % (str(exc)[:200],)) from exc
+            w_spec = dict(_spec_source or {})
             waiting_on_ref = str(
                 w_spec.get("waiting_on_ref")
                 or decision.reevaluation_hint_ref
@@ -4327,6 +4525,9 @@ class LifeIntegrationCoordinator:
         fact_refs: Optional[Sequence[str]] = None,
         artifact_refs: Optional[Sequence[str]] = None,
         world_refs: Optional[Sequence[str]] = None,
+        #: v0.4 C: the optional, already-owner-verified confirmation of what changed.  AG-2 stores
+        #: and delivers it with the event; it grants nothing and it is never derived here.
+        owner_confirmed_context: Optional[Mapping[str, Any]] = None,
         fault_hook: Optional[Callable[[str], None]] = None,
     ) -> dict[str, Any]:
         """Emit a canonical `LifeExperienceHandoffEvent` into the AG-2 Outbox and dispatch to consumer."""
@@ -4405,6 +4606,8 @@ class LifeIntegrationCoordinator:
             world_refs=resolved_worlds,
             occurred_at=occ_iso,
             observed_at=occ_iso,
+            owner_confirmed_context=(dict(owner_confirmed_context)
+                                     if owner_confirmed_context is not None else None),
             recorded_at=occ_iso,
             causal_parent_refs=causal_parents,
         )
@@ -4538,7 +4741,12 @@ class LifeIntegrationCoordinator:
         correlation_id: Optional[str] = None,
         valid_until: Optional[str] = None,
         adoption_spec: Optional[ActivityAdoptionSpec | Mapping[str, Any]] = None,
-        waiting_spec: Optional[Mapping[str, Any]] = None,
+        #: v0.4 stage A: a Mapping *or* a callable of the committed Decision.  A self-chosen park
+        #: time only exists in the Decision's own proposal, so the spec has to be built after it.
+        waiting_spec: Any = None,
+        #: v0.4 B: a Mapping *or* a callable of the committed Decision, describing an explicit,
+        #: bounded *foreground handoff* this adoption performs before it starts its Activity.
+        handoff_spec: Any = None,
         pause_mode_override: Optional[str] = None,
         step_spec_override: Optional[Mapping[str, Any]] = None,
         execute_initial_step: bool = True,
@@ -4683,11 +4891,13 @@ class LifeIntegrationCoordinator:
             decision_record,
             adoption_spec=adoption_spec,
             waiting_spec=waiting_spec,
+            handoff_spec=handoff_spec,
             pause_mode_override=pause_mode_override,
             occurred_at=obs_iso,
             live_capacity_override=live_cap_at_adoption,
             fault_hook=fault_hook,
         )
+        adp_res["handoff_result"] = getattr(self.adoption_coordinator, "last_handoff", None)
         adp_rec: DecisionAdoptionRecord = adp_res["adoption_record"]
         activity_after_adp = adp_res.get("activity")
 

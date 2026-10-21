@@ -49,6 +49,11 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 import action_reality_ledger as ar0
+import life_body_action_targets as body_actions
+#: v0.4 lived day: B owns which everyday hand verbs exist (``PICK_UP`` / ``PLACE``) and their
+#: one-target encoding.  This module imports the *constant*, never a copy of the vocabulary, so a
+#: verb B adds or renames cannot silently stop being delegated here.
+import life_daily_action_targets as daily_actions
 
 #: The world home this resolver reads and the journey writes.  ``CHIYO_WORLD_HOME`` is the
 #: World service's own name; ``HERMES_HOME`` is the name the World *owner* functions read,
@@ -56,9 +61,9 @@ import action_reality_ledger as ar0
 WORLD_HOME_ENV = "CHIYO_WORLD_HOME"
 HERMES_HOME_ENV = "HERMES_HOME"
 
-#: The verbs this resolver *itself* commits: a timed journey.  POSE is refused before
-#: submission rather than guessed at (same rule as the bridge adapter): one AR-0
-#: ``target`` cannot express its second parameter.
+#: The verbs this resolver *itself* commits: a timed journey.  Everything else is either
+#: delegated to the World's formal entry or refused before submission -- nothing here
+#: guesses a parameter.
 SUPPORTED_VERBS = ("MOVE",)
 
 #: Verbs that are not a journey at all but must still reach the same formal owner chain.
@@ -66,7 +71,11 @@ SUPPORTED_VERBS = ("MOVE",)
 #: verbatim to the World's own authorization entry (``WorldBridgeResolver``: Intent
 #: Executor -> gateway.sock -> Resolver).  Without this the Life core could only ever
 #: *move*, and the owner's consumption receipt would be unreachable from the loop.
-DELEGATED_VERBS = ("CONSUME",)
+#: W adds the two *body* verbs to the same delegation: a posture change and a rest
+#: command are instant owner mutations, not journeys, and they reach the Resolver only
+#: through that formal chain (the bridge decodes their encoded ``bodyact:`` target).
+DELEGATED_VERBS = ("CONSUME", body_actions.POSE_VERB, body_actions.REST_VERB,
+                   *daily_actions.DAILY_ACTION_VERBS)
 
 DEPARTED_REF = "world:journey:%s:departed"
 ARRIVED_REF = "world:journey:%s:arrived:r%s"

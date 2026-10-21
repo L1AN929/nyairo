@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'none'">
+<title>NyAiro 手机</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stage">
+
+  <div class="phone-frame">
+    <div class="phone" id="phone" role="application" aria-label="NyAiro 虚拟手机">
+      <div class="phone-notch" aria-hidden="true"></div>
+      <div class="screen">
+
+        <div class="statusbar">
+          <time class="statusbar-clock" id="clock">--:--</time>
+          <span class="statusbar-mid">
+            <span class="conn-dot is-loading" id="conn-dot" title="正在读取服务状态" aria-label="正在读取服务状态"></span>
+          </span>
+          <span class="statusbar-caption">NyAiro</span>
+        </div>
+
+        <header class="screen-head" id="screen-head"></header>
+        <div class="screen-body" id="screen-body" tabindex="-1"></div>
+
+        <nav class="dock" aria-label="手机导航">
+          <button class="dock-btn" id="btn-home" type="button" aria-label="回到主屏">
+            <span class="dock-label">主屏</span>
+          </button>
+          <button class="dock-btn" id="btn-back" type="button" aria-label="返回上一屏">
+            <span class="dock-label">返回</span>
+          </button>
+          <span class="dock-caption" id="nav-caption"></span>
+        </nav>
+
+        <div class="sheet-host" id="sheet-host"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="sidebar" id="sidebar" aria-label="实例与连接信息">
+    <header class="sidebar-head">
+      <p class="sidebar-kicker">NyAiro · v0.4 虚拟手机</p>
+      <h1 class="sidebar-title">她自己的手机</h1>
+      <p class="sidebar-lead">这一屏只消费同源 <code>/api/phone</code>。没有连接就不显示示例数据，余额、价格和回执都只能来自后端。</p>
+    </header>
+
+    <section class="sidebar-block">
+      <h2>实例</h2>
+      <div class="facts" id="instance-facts"></div>
+    </section>
+
+    <section class="sidebar-block">
+      <h2>连接</h2>
+      <p class="conn-line" id="conn-line">正在读取服务状态…</p>
+      <p class="conn-detail" id="conn-detail"></p>
+      <button class="btn btn-ghost btn-sm" id="btn-refresh" type="button">重新读取状态</button>
+    </section>
+
+    <section class="sidebar-block">
+      <h2>未确认的操作</h2>
+      <p class="sidebar-hint">结果未知的操作会留在这里。查询用的是同一个操作键，不会重新发送购买或使用请求。</p>
+      <ul class="ops" id="unresolved-list"></ul>
+    </section>
+
+    <section class="sidebar-block">
+      <h2>请求记录</h2>
+      <ol class="reqlog" id="request-log"></ol>
+    </section>
+
+    <footer class="sidebar-foot">
+      <p>界面不写 localStorage，也不缓存业务数据；刷新后一切以服务为准。</p>
+    </footer>
+  </aside>
+
+</div>
+<noscript><p class="noscript">这部手机需要 JavaScript 才能读取服务状态；没有脚本时不显示任何内容。</p></noscript>
+<script src="app.js" defer></script>
+</body>
+</html>

@@ -1260,6 +1260,13 @@ class SettlementPolicyRegistry:
                 supported_predicates=(
                     "artifact_written_verified",
                     "artifact_deleted_verified",
+                    # v0.4 work closeout: the attestation the Supply managed-artifact adapter forms
+                    # from the owner's own operation row + effect receipt + read-back
+                    # (``managed_artifact_action_adapter._observed_archive_result``).  Declared here
+                    # so the FILE_ACTION vocabulary has one home for it; the evaluator below is
+                    # unchanged and still emits ``artifact_written_verified`` for an observed
+                    # artifact effect, which is what LR-5's ACTION_RESULT_MATCH actually matches.
+                    "artifact_archived_verified",
                 ),
             ),
             ACTION_KIND_TOOL: ActionKindSettlementPolicy(

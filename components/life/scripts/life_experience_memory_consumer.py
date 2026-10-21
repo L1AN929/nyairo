@@ -8,12 +8,21 @@ What it keeps honest
 * The M0 ``source_ref`` is the handoff's own ``lexp:`` id, which AG-2 derives from
   ``(activity, kind, revision)``.  M0 dedupes on that identity, so the same outcome delivered
   twice is a ``duplicate``, never a second experience.
+* The **owner is the bound port's own subject**.  It is never taken from ``subject_id``: a handoff
+  spelling such as ``chiyo.global`` (or any other instance's id) must not decide whose memory this
+  row belongs to, or one instance's outcome lands in another owner's stream.
 * The text is built only from the event's structured fields.  A conflict is written as a conflict;
   nothing is described as a success that the owning service did not confirm.
 * A handoff that carries World facts and **no** artifact ref is a World consequence, not a work
   modification: it is written with a neutral sentence and the owner's own ``world`` / ``action``
   / ``owner_result`` refs.  It never claims a modified work or a new version, and an event that
   arrives carrying an unresolved outcome is never upgraded to a success.
+* C may attach an optional ``owner_confirmed_context`` mapping
+  ``{artifact_id, version_ref, title, result_description, outcome_confirmed: true}``.  Only those
+  five keys are ever read, only when every type is right and every reference is a real one carried
+  by the same event; anything else is dropped and the generic sentence is used instead.  A model's
+  own note is not a fact and is never promoted to one.  C owns the owner check for that mapping --
+  this consumer only checks structure and references.
 * A Memory failure returns ``DEFER``, which AG-2 keeps in ``pending_handoff_ids`` for a later
   retry, and which never rolls back the artifact or the settlement.
 """
@@ -62,9 +71,42 @@ _WORLD_UNSETTLED = "在真实世界里做过一件事，结果还没有确定"
 #: for a handoff that *does* arrive carrying its own unsettled verdict.
 _UNSETTLED_OUTCOMES = frozenset({"UNKNOWN_EFFECT", "UNKNOWN", "PENDING", "OPEN"})
 
+#: The complete set of keys C's optional confirmed-result mapping may carry.  Anything else -- a
+#: model's ``self_note``, a reflection paragraph, a free-form summary -- is not read at all.
+OWNER_CONFIRMED_KEYS = ("artifact_id", "version_ref", "title", "result_description",
+                        "outcome_confirmed")
+#: Any event field that can carry a real reference; a version ref must appear in one of these.
+_REF_FIELDS = ("artifact_refs", "fact_refs", "settlement_refs", "progress_refs", "action_refs",
+               "world_refs", "decision_refs", "adoption_refs", "causal_parent_refs")
+
+
+class _OwnerUnresolved(RuntimeError):
+    """The bound port cannot name a Memory owner, so nothing may be written."""
+
+
+def _real_refs(event: Mapping[str, Any]) -> set[str]:
+    """Every reference the event itself really carries (no invention, no inference)."""
+
+    refs: set[str] = set()
+    for field in _REF_FIELDS:
+        for value in (event.get(field) or []):
+            if value:
+                refs.add(str(value))
+    completion = event.get("completion_evidence_ref")
+    if completion:
+        refs.add(str(completion))
+    activity = event.get("activity_ref")
+    if activity:
+        refs.add(str(activity))
+    return refs
+
 
 class MemoryAdmissionExperienceConsumer:
     """Delivers AG-2 experience handoffs into Memory through the one legal writer."""
+
+    #: How much of a confirmed description may reach a memory row (a bounded sentence, not a
+    #: document).  Long text is truncated here, not quoted whole.
+    MAX_DESCRIPTION_CHARS = 320
 
     def __init__(
         self,
@@ -81,6 +123,8 @@ class MemoryAdmissionExperienceConsumer:
         self.deferred = 0
         self.ignored = 0
         self.last_error: Optional[str] = None
+        #: How the optional confirmed-result mapping was treated: counted, never quoted.
+        self.owner_context: dict[str, int] = {}
 
     # -- the protocol ------------------------------------------------------------------
 
@@ -97,12 +141,22 @@ class MemoryAdmissionExperienceConsumer:
 
         occurred_at = str(event.get("occurred_at") or event.get("observed_at") or "")
         kind = str(event.get("terminal_or_milestone_kind") or "")
-        refs = self._refs(event, kind)
-        text = self._text(event, kind, refs)
+        try:
+            owner = self._owner(event)
+        except _OwnerUnresolved as exc:
+            self.deferred += 1
+            self.last_error = f"_OwnerUnresolved: {exc}"
+            return {"disposition": DISPOSITION_DEFER, "reason": "MEMORY_OWNER_UNRESOLVED",
+                    "detail": str(exc)[:200]}
+        confirmed, confirmed_note = self.confirmed_context(event)
+        self.owner_context[confirmed_note] = self.owner_context.get(confirmed_note, 0) + 1
+        refs = self._refs(event, kind, confirmed)
+        text = self._text(event, kind, refs, confirmed)
 
+        receipt = {"owner_confirmed_context": confirmed_note}
         try:
             outcome_event = build_outcome_event(
-                subject=str(event.get("subject_id") or "chiyo").split(".")[0],
+                subject=owner,
                 source_ref=handoff_id,
                 text=text,
                 occurred_at=occurred_at,
@@ -112,26 +166,93 @@ class MemoryAdmissionExperienceConsumer:
         except Exception as exc:  # a Memory failure must never roll back the work
             self.last_error = f"{type(exc).__name__}: {exc}"
             self.deferred += 1
-            return {"disposition": DISPOSITION_DEFER, "reason": "MEMORY_WRITE_FAILED",
-                    "detail": self.last_error[:200]}
+            return dict(receipt, disposition=DISPOSITION_DEFER, reason="MEMORY_WRITE_FAILED",
+                        detail=self.last_error[:200])
 
         status = str(result.get("status") or "")
         if status == "inserted":
             self.accepted += 1
-            return {"disposition": DISPOSITION_ACCEPT, "event_id": result.get("event_id"),
-                    "source_ref": handoff_id}
+            return dict(receipt, disposition=DISPOSITION_ACCEPT, event_id=result.get("event_id"),
+                        source_ref=handoff_id, owner=owner)
         if status == "duplicate":
             self.duplicates += 1
-            return {"disposition": DISPOSITION_DUPLICATE, "event_id": result.get("event_id"),
-                    "source_ref": handoff_id}
+            return dict(receipt, disposition=DISPOSITION_DUPLICATE,
+                        event_id=result.get("event_id"), source_ref=handoff_id, owner=owner)
         # queued / failed: the memory owner did not take it yet.
         self.deferred += 1
-        return {"disposition": DISPOSITION_DEFER, "reason": f"MEMORY_{status.upper() or 'UNKNOWN'}"}
+        return dict(receipt, disposition=DISPOSITION_DEFER,
+                    reason=f"MEMORY_{status.upper() or 'UNKNOWN'}")
+
+    # -- owner -------------------------------------------------------------------------
+
+    def _owner(self, event: Mapping[str, Any]) -> str:
+        """The Memory owner is the *bound port's own subject*, never a handoff's spelling.
+
+        The old code took ``subject_id.split(".")[0]``, which quietly accepted any domain that
+        arrived in the payload and could file this instance's outcome under another owner (the
+        Supply/host subject, a ``.global`` variant, or a foreign instance's id).  A Memory row's
+        owner is a binding fact: it comes from the port that was built for this instance.
+        """
+
+        owner = str(getattr(self.port, "subject", "") or "").strip()
+        if not owner:
+            raise _OwnerUnresolved("the bound Memory port exposes no owner")
+        return owner
+
+    # -- the optional confirmed-result mapping (C's handoff boundary) --------------------
+
+    def confirmed_context(self, event: Mapping[str, Any]) -> tuple[Optional[dict[str, Any]],
+                                                                  str]:
+        """Accept C's ``owner_confirmed_context`` only when it is type-correct and anchored.
+
+        Returns ``(mapping, note)``.  ``note`` is a stable, content-free code for the receipt:
+        ``USED``, ``USED_WITH_IGNORED_KEYS``, or one of ``ABSENT`` / ``NOT_A_MAPPING`` /
+        ``NOT_CONFIRMED`` / ``DESCRIPTION_MISSING`` / ``ARTIFACT_MISSING`` /
+        ``ARTIFACT_NOT_REFERENCED`` / ``VERSION_MISSING`` / ``VERSION_NOT_REFERENCED`` /
+        ``TITLE_NOT_TEXT`` / ``UNSETTLED``.  Anything rejected falls back to the generic
+        sentence: a rejected description is never written as fact.
+        """
+
+        raw = event.get("owner_confirmed_context")
+        if raw is None:
+            return None, "ABSENT"
+        if not isinstance(raw, Mapping):
+            return None, "NOT_A_MAPPING"
+        if raw.get("outcome_confirmed") is not True:
+            return None, "NOT_CONFIRMED"
+        description = raw.get("result_description")
+        artifact_id = raw.get("artifact_id")
+        version_ref = raw.get("version_ref")
+        title = raw.get("title")
+        if not isinstance(description, str) or not description.strip():
+            return None, "DESCRIPTION_MISSING"
+        if not isinstance(artifact_id, str) or not artifact_id.strip():
+            return None, "ARTIFACT_MISSING"
+        if not isinstance(version_ref, str) or not version_ref.strip():
+            return None, "VERSION_MISSING"
+        if title is not None and not isinstance(title, str):
+            return None, "TITLE_NOT_TEXT"
+        artifacts = {str(item) for item in (event.get("artifact_refs") or []) if item}
+        if artifact_id.strip() not in artifacts:
+            return None, "ARTIFACT_NOT_REFERENCED"
+        if version_ref.strip() not in _real_refs(event):
+            return None, "VERSION_NOT_REFERENCED"
+        worlds = [str(item) for item in (event.get("world_refs") or []) if item]
+        if self._unsettled(event, worlds):
+            # A confirmed description may not overturn an explicitly unresolved outcome.
+            return None, "UNSETTLED"
+        ignored = [str(key) for key in raw if str(key) not in OWNER_CONFIRMED_KEYS]
+        return ({"artifact_id": artifact_id.strip(),
+                 "version_ref": version_ref.strip(),
+                 "title": str(title).strip() if isinstance(title, str) else None,
+                 "result_description": description.strip()[: self.MAX_DESCRIPTION_CHARS]},
+                "USED_WITH_IGNORED_KEYS" if ignored else "USED")
 
     # -- shaping -----------------------------------------------------------------------
 
     @staticmethod
-    def _refs(event: Mapping[str, Any], kind: str) -> list[tuple[str, str]]:
+    def _refs(event: Mapping[str, Any], kind: str,
+              confirmed: Optional[Mapping[str, Any]] = None) -> list[tuple[str, str]]:
         refs: list[tuple[str, str]] = [("outcome_kind", kind or "UNKNOWN")]
         activity = event.get("activity_ref")
         if activity:
@@ -146,10 +267,15 @@ class MemoryAdmissionExperienceConsumer:
             refs.append(("world", str(world_ref)))
         for settlement_ref in (event.get("settlement_refs") or [])[:1]:
             refs.append(("owner_result", str(settlement_ref)))
+        if confirmed:
+            # Last one wins in the row's ref map: the *confirmed* artifact/version is the one the
+            # sentence is about, and it was already proven to be a real reference of this event.
+            refs.append(("artifact", str(confirmed["artifact_id"])))
+            refs.append(("artifactversion", str(confirmed["version_ref"])))
         return refs
 
-    def _text(self, event: Mapping[str, Any], kind: str,
-              refs: list[tuple[str, str]]) -> str:
+    def _text(self, event: Mapping[str, Any], kind: str, refs: list[tuple[str, str]],
+              confirmed: Optional[Mapping[str, Any]] = None) -> str:
         by_kind = {k: v for k, v in refs}
         worlds = [str(ref) for ref in (event.get("world_refs") or []) if ref]
         if worlds and not by_kind.get("artifact"):
@@ -158,6 +284,8 @@ class MemoryAdmissionExperienceConsumer:
             # exists, because no artifact ref says so -- and nothing describes *what* she did
             # beyond the owner's own fact tokens.
             return self._trim(self._world_text(event, by_kind, worlds))
+        if confirmed:
+            return self._trim(self._confirmed_text(event, by_kind, confirmed))
         phrase = _KIND_PHRASES.get(kind, f"发生了一件与作品有关的事（{kind or 'UNKNOWN'}）")
         parts = [phrase]
         if by_kind.get("artifact"):
@@ -167,6 +295,23 @@ class MemoryAdmissionExperienceConsumer:
         if event.get("occurred_at"):
             parts.append(f"发生在 {event['occurred_at']}")
         return self._trim("；".join(parts) + "。")
+
+    @staticmethod
+    def _confirmed_text(event: Mapping[str, Any], by_kind: dict[str, str],
+                        confirmed: Mapping[str, Any]) -> str:
+        """A bounded sentence about what the owner actually confirmed -- nothing more."""
+
+        parts: list[str] = []
+        if confirmed.get("title"):
+            parts.append(str(confirmed["title"]))
+        parts.append(str(confirmed["result_description"]))
+        parts.append(f"作品 {confirmed['artifact_id']}")
+        parts.append(f"版本 {confirmed['version_ref']}")
+        if by_kind.get("owner_result"):
+            parts.append(f"所有者回执 {by_kind['owner_result']}")
+        if event.get("occurred_at"):
+            parts.append(f"发生在 {event['occurred_at']}")
+        return "；".join(parts) + "。"
 
     def _world_text(self, event: Mapping[str, Any], by_kind: dict[str, str],
                     worlds: list[str]) -> str:
@@ -198,7 +343,8 @@ class MemoryAdmissionExperienceConsumer:
         return {"kind": "memory_admission_experience_consumer", "enabled": self.enabled,
                 "accepted": self.accepted, "duplicates": self.duplicates,
                 "deferred": self.deferred, "ignored": self.ignored,
-                "last_error": self.last_error}
+                "last_error": self.last_error,
+                "owner_confirmed_context": dict(self.owner_context)}
 
 
 __all__ = [
@@ -207,4 +353,5 @@ __all__ = [
     "DISPOSITION_DUPLICATE",
     "DISPOSITION_IGNORE",
     "MemoryAdmissionExperienceConsumer",
+    "OWNER_CONFIRMED_KEYS",
 ]

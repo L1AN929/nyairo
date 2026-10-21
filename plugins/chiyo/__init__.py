@@ -52,6 +52,18 @@ def register(ctx):
     except Exception:
         import logging
         logging.getLogger('chiyo.hermes').warning('chiyo.world_move.registration.unavailable', exc_info=True)
+    try:
+        # v0.4: her own phone.  The tool is a thin loopback client of the local phone service and
+        # is gated by the profile's own explicit `phone` section (off by default).
+        from chiyo_bundle.phone_tool import PHONE_TOOL_SCHEMA, phone_handler
+        ctx.register_tool(name='chiyo_phone', toolset='chiyo_world',
+                          schema=PHONE_TOOL_SCHEMA, handler=phone_handler,
+                          description='Open her own local virtual phone: wallet, notes, references, '
+                                      'reading, virtual store, owned items and explicit actions',
+                          emoji='📱')
+    except Exception:
+        import logging
+        logging.getLogger('chiyo.hermes').warning('chiyo.phone.registration.unavailable', exc_info=True)
     ctx.register_command('chiyo_status',status_command,description='Read current life, world/body, resource and cognition status')
     ctx.register_command('chiyo_consider',consider_command,description='Submit an explicit request for cognition Shadow observation',args_hint='REQUEST')
     ctx.register_command('chiyo_note',note_command,description='Save or read a personal ManagedArtifact',args_hint='TITLE | CONTENT ; read ID')

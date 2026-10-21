@@ -19,3 +19,6 @@ __pycache__/
 .chiyo*/
 .hermes*/
 local-profile*/
+
+# 施工日志与改动前备份，不入库
+.agents/worker-runs/

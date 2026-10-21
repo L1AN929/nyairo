@@ -1,0 +1,110 @@
+# Agent Note: v0.4 C —— 确证经历 → 自主回顾 → 有范围做法 → 真实使用与有证据评价
+
+Status: implemented
+
+## Problem
+
+B 的实践工作台（`PersonalPracticeService`：review / method / trial）与 A 的记忆服务（`LifeMemoryService`：
+`status/list_experiences/read_experience/context`）都已经存在，但**主链一处都没接**：
+
+1. 她的经历只能通过 `experience_provider`（port 的 `prompt_view`）进决策/写作提示，没有"相关检索、可引用 id"
+   的入口；所以她根本无从"回顾某件确实发生过的事"。
+2. 候选集里没有"回顾"这种选项：`life_project_options` 只会从疑问、到期项、资料命中长选项。
+3. 决策模型即使想"照着自己写过的做法做"，也没有任何合法字段可写：DecisionRecord 里没有 `method_ref`，
+   AG-1 也不认识它；写进 prompt 的 `situation_context` 里更没有她的做法。
+4. 试用效果（HELPED/NOT_HELPED）没有真实入口：没有任何路径把"我用了这条做法 + 这次的结果 refs"关联起来，
+   于是唯一能反映"效果"的信号只剩"版本写成功了"——那正是设计 §4.5 明确禁止的自动晋升。
+5. AG-2 交给 Memory 的 handoff 只有 refs，没有"这次到底改了什么"的可读描述，经历行只能是"某个工件变了"。
+
+## Decision
+
+一句话：**C 只做接缝与主链编排——把 A/B 的既有 owner API 包成有界只读（+ 三个 owner 写）的 `PracticeSeam`，
+让它长出"回顾"选项、让决策能命名一条做法、让写作提示读到做法的做法/范围/未知、让真实结果带上后果 refs，
+并让评价只经 B 的证据校验；marker、记忆准入、owner 判定全部仍归 A/B。**
+
+1. **新接缝 `life_practice_context.PracticeSeam`**（C 独占，`components/life/scripts/life_practice_context.py`）：
+   `experiences/read_experience/methods/read_method/reviews/read_review/writing_context/decision_context/
+   create_review/create_method/record_trial/fingerprint_parts/facts_of`。envelope 以 `ok` 为准（B 的写成功是
+   `status="applied"`）；marker 只借 B 的 `parse_practice_content`；服务缺失 → `NOT_WIRED` + `last_error`，
+   绝不当"她没有实践"。检索至多两次有界查询（任务 query → 空 query），仍是 B 自己的检索，不建第二个索引。
+2. **回顾选项**（`life_project_options.review_seed` + `KIND_REVIEW`）：只有工作台真的接线、且 A 真的返回可读经历时，
+   才出现**一个**回顾选项；`experiences` 就是那些行（id + 时间 + 片段），身份含经历 id（换经历=换选项）。
+   没有经历就没有选项——"写一段读不回来的过去"不是选择。
+3. **选择即创建，复用既有法定路径**（`cycle._review_adoption_spec`）：候选仍是 `PERSONAL_OPPORTUNITY` 的
+   `popt:` ref，选中后 `create_review` 真建作品，随后 AR-0 写第 2 版；`operation_key` 由"选项 + 经历集"派生，
+   UNKNOWN 解析后重试不会多建一件。回顾是普通可续写作品。
+4. **做法提案合法化**（AG-1 `validate_method_proposal` + `DecisionRecord.method_proposal`）：一条有范围的做法
+   草案（title/instruction/scope/uncertainty + 可选 experience_ids/review_refs），提交后由 cycle 经
+   `create_method` 保存为 TENTATIVE，`operation_key` 由 decision_id 派生。它**不是**已验证 Skill、不是偏好、
+   不是信念、不是可执行程序。
+5. **`method_ref` 的校验/记录/使用全接通**：AG-1 `validate_decision_output(..., allowed_method_refs=…)` 只接受
+   **本轮真的给出去**的手柄（`method:<sha16>`，由 artifact id 派生、不含 owner id）；`DecisionRecord.method_ref`
+   落盘并往返；cycle 在 `_bind_method_usage` 用本轮读到的 head 解析它，在 `_finish`（`_settle_method_binding`）
+   把 owner 真实回执的 `consequence_refs` / `version_written` / `step_effect` 挂到同一个 `method_usage` 上。
+6. **有证据的评价**：`method_trial`（Decision 可选键：method_ref + outcome + detail + experience_ids）经 AG-1
+   校验后，由 cycle 调 B 的 `record_trial`（CAS 到本轮读到的 head）；seam 在写之前先用 A 的读复验证据，
+   `HELPED/NOT_HELPED` 无证据直接拒（只剩 `UNKNOWN`）。**版本写成功永远不会被当作 HELPED**。同一窄动作也可
+   作为显式的可选评价（不做每轮额外模型调用）。
+7. **提示真的看到做法**：`agency_cognition_adapter._bounded_situation` 增 `practice` 块（方法 3 条 + 经历 4 条，
+   全字段截断），`SYSTEM_PROMPT` 增 `method_ref/method_trial/method_proposal` 规则与"situation_context.practice"
+   说明；`model_continuation_writer._user_prompt` 把 `practice_context` 与 `research_context` **分两个键**送进
+   prompt（旧的裸 mapping 形态语义不变），并明确"做法只是参考、不能声称被执行"。
+8. **做法不是作品**：`cycle._non_work_artifact_ids()` 让方法文档退出续写/收尾候选（与研究资料同一机制），
+   回顾仍是普通作品；`life_step_readiness.SITUATION_KEYS` 增 `practice_experiences/practice_methods/practice_reviews`
+   （只有 id/头版本/状态词，没有文本、没有时间），一个 tick 不会变成新的回顾配额。
+9. **可读的确证结果进 Memory**：AG-2 handoff 增 optional `owner_confirmed_context`
+   `{artifact_id, version_ref, title, result_description, outcome_confirmed:true}`，由 cycle 在**真的读回该版本之后**
+   从 owner 的正文生成（tail 240 字，剥掉通用 Markdown 头），边界处 `validate_owner_confirmed_context` 只做结构
+   校验；A 的 consumer 再按它自己的规则核对引用。writer 的 `self_note` 从不进入这里。
+10. **生产接线在装配**（`autonomous_life_assembly.resolve_practice_service`）：用 B 的 `practice_from_env(port, env)`
+    在同一套 env/bindings 上建服务，`assemble_autonomous_life(practice_workspace=…)`；报告 `assembled["practice"]`。
+    resident 未改、未启用原实例、未改 env。
+
+## Alternatives considered
+
+* **让 C 自己按 B 的 marker 拼一份回顾/做法文档，只调 `create_project`。** 最强立论：不用等 B 的 envelope，立刻能跑。
+  否决原因：那就是**第二份 marker 定义**，B 一改字段两边立刻漂移；资料的"证据核对/治理撤回"也会变成 C 自己的
+  一套。阶段单明确 marker 由 B 唯一维护，C 只调 API。
+* **把回顾/做法写进 Memory，当成 experience 让"经验回用"更彻底。** 最强立论：她"写下过的东西"确实是一种经历，
+  而且 Memory 已有准入治理。否决原因：回顾是**派生文档**，做法是**暂定草案**；直接写进 Memory 就等于让模型文字
+  自我晋升为已准入经历，还会让"删除经历后不得再透出派生正文"这条治理失效（A/B 的 `read_review` 正因此会在证据
+  不可读时扣住正文）。
+* **给 AG-0 加一个 `REVIEW_PROJECT` source_kind。** 最强立论：候选一眼能分类。否决原因：`candidate_sources_ag0`
+  的禁列就是为了防止发明类别；回顾选项本来就是她的**个人机会**，`PERSONAL_OPPORTUNITY` + `popt:` ref 零新增类别，
+  且自动复用 AG-1 legality 与 AG-2 adoption。
+* **给 `method_ref` 单独一个 owner 句柄表/第二存储。** 最强立论：手柄可长期复用，不受"本轮读过"限制。否决原因：
+  那就是第二个索引/第二个库；`method:<sha16>` 只从 owner id 派生，本轮读到的集合就是唯一合法允许列表，
+  "模型不能发明标识符"这条继续成立。
+* **让 Decision 直接带 `HELPED` 而不校验证据，交给 B 拒。** 最强立论：少一次 A 的读。否决原因：那会让"无证据的
+  成功"变成一个可以在 AG-1 里合法落盘的 Decision，再由下游拒绝；seam 侧先复验能让失败发生在写之前，
+  并且 UNKNOWN 才是无证据时唯一诚实的词。
+* **把方法的正文也交给 AR-0 自动续写。** 最强立论：现有 AR-0 路径一条都不用改。否决原因：做法是参考文档，
+  自动续写会让"她的做法"被模型静默改写；改写必须走 B 的 `revise_method`/`update_document`（保留旧版本与反例）。
+
+## Consequences
+
+* 现在可以：一次真实确证的作品修改 → 经历进入 Memory（行文是"她写了什么"的有限描述，不是"某工件变了"）→ 下一轮
+  决策处境出现**一个**回顾选项和一个可命名的方法手柄 → 选中回顾 → B 真建作品 + AR-0 真写具体回顾 → 同一轮
+  Decision 可以提出一条有范围做法并被保存 → 再下一轮的真实写作提示带着 instruction/scope/uncertainty →
+  真实结果与"用了哪条做法、哪个版本、哪些后果 refs"绑定 → 有证据的 HELPED 让它到 TRIAL，反例让它到 CONTESTED。
+* 安静仍然安静：没有经历就没有回顾选项；同一处境指纹不变就不重问；`NO_ACTION`/`no_change` 依旧合法。
+* 已知代价与残留：
+  1. B 的 `create_review` 不返回 content，C 要"可读描述"就自己再读一次 owner（多一次只读）。
+  2. B 的 `record_trial.artifact_id` 是 keyword-only（阶段单写的位置参数），C 全按关键字调。
+  3. B 的检索是子串匹配，任务标题常常命中不到；seam 做一次空查询兜底，因此"最近的做法"总能看到。
+  4. 该 fixture 里第二个 Activity 结束后 CURRENT_ACTIVITY 候选不再 CONTINUE 合法，所以链测试的"反例评价"走
+     阶段单允许的**显式窄评价动作**（`PracticeSeam.record_trial`，真实 owner 写 + 真实证据校验），不是第三轮 Decision。
+  5. 没有 UI/手机面（B 的所有权）；没有真模型/密钥；fixtures 留在 `/tmp/nyairo-v04-practice-fixtures` 不清理。
+
+## Verification
+
+* 新增 `tests/test_v04_practice_life_stage.py`：19 条（13 纯逻辑 + 3 AG-1 契约 + 3 真实 owner 链）。
+  * Windows：`python -m unittest tests.test_v04_practice_life_stage` → `Ran 19 tests … OK (skipped=6)`，退出码 **0**
+    （AG-1 与真实链需要 `fcntl`）。
+  * WSL（Ubuntu 22.04 / Python 3.12）：同一命令 → `Ran 19 tests in 15.296s … OK`，退出码 **0**。
+* 直接受影响的既有链 60 条（`test_v04_research_life_stage`、`test_model_continuation_no_change`、
+  `test_day_life_quiet_runner`、`test_day_life_decision_legality`、`test_v04_autonomous_day_stage`）→
+  `Ran 60 tests in 11.347s … OK`，退出码 **0**。
+* 真实链证明的是：真 Supply（自带 Unix socket）+ 真 M0（EvidenceStore + `MemoryAdmissionExperienceConsumer`）+
+  AG-1 原始 JSON 校验 + AG-2 adoption + AR-0；决策回答与内容回答是**脚本替身**（文件里明示），不宣称真实模型自主。
+* 没有跑全库回归、没有跨进程 qualification、没有动原实例/配置/密钥、没有提交或部署。

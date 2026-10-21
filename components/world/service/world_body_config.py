@@ -41,6 +41,10 @@ SUBSTRATE_ENABLED_ENV = "CHIYO_WORLD_BODY_SUBSTRATE_ENABLED"
 #: The World engine's own gate.  The Resolver reports FEATURE_DISABLED while it
 #: is off, so canonical must open it too -- "World authority = ON".
 WORLD_ENABLED_ENV = "CHIYO_WORLD_LIVING_SKELETON_ENABLED"
+#: v0.4 room-living: the room-light -> Body environment channel.  **Deny by
+#: default** -- an existing instance keeps reporting its light but feeds no Body
+#: input until an operator enables it explicitly (never from a GET).
+ROOM_ENVIRONMENT_ENABLED_ENV = "CHIYO_WORLD_ROOM_ENVIRONMENT_ENABLED"
 
 DEFAULT_RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORLD_HOME = (Path(__file__).resolve().parents[2] / "data/world").resolve()
@@ -79,6 +83,7 @@ OWNED_ENV_KEYS = (
     RUNTIME_ENABLED_ENV,
     SUBSTRATE_ENABLED_ENV,
     WORLD_ENABLED_ENV,
+    ROOM_ENVIRONMENT_ENABLED_ENV,
 )
 
 
@@ -180,6 +185,17 @@ class ServiceConfig:
             RUNTIME_ENABLED_ENV: "1",
             SUBSTRATE_ENABLED_ENV: "1" if self.canonical else "0",
             WORLD_ENABLED_ENV: "1" if self.canonical else "0",
+            #: Echoed, never forced: the room-light channel stays off unless the
+            #: deployment asked for it explicitly (an existing instance must not
+            #: start feeding Body inputs just because it restarted).
+            ROOM_ENVIRONMENT_ENABLED_ENV: (
+                "1"
+                if str(
+                    self.environment.get(ROOM_ENVIRONMENT_ENABLED_ENV, "")
+                ).strip().lower()
+                in {"1", "true", "yes", "on"}
+                else "0"
+            ),
         }
 
     def as_dict(self) -> dict[str, Any]:

@@ -62,6 +62,34 @@ DELIVERY_STATUS_PENDING = "PENDING"
 DELIVERY_STATUS_DELIVERED = "DELIVERED"
 DELIVERY_PROVENANCE = "temporal_home_delivery"
 DELIVERY_DURATION_SECONDS = 2 * 60 * 60
+#: v0.4 phone shopping: an explicit *new* virtual online store.  It owns its own
+#: channel membership and its own declared opening rule (24h); the physical
+#: ``home_goods_store`` rules (location + ``world_daily_rhythm`` hours) are
+#: untouched and are never bypassed by the phone channel.
+CHANNEL_HOME_GOODS_STORE = "home_goods_store"
+CHANNEL_PHONE_VIRTUAL_STORE = "phone_virtual_store"
+PHONE_STORE_ID = CHANNEL_PHONE_VIRTUAL_STORE
+PHONE_STORE_SCHEME = "virtual_store_24h"
+PHONE_KIND = "shiomi_phone_virtual_store_projection"
+PHONE_PURCHASE_KIND = "shiomi_phone_item_purchase"
+LOCAL_OWNER_SOURCE = "local_owner_phone"
+PHONE_PURCHASE_SOURCE = "local_owner_phone_purchase"
+PHONE_DELIVERY_PROVENANCE = "phone_virtual_store_home_delivery"
+MAIN_SELF_PURCHASE_SOURCE = "verified_main_self_buy_item"
+MAIN_SELF_DELIVERY_PROVENANCE = "included_home_delivery"
+#: v0.4 room-living: the *physical* home-goods store's own purchase provenance.
+#: It is a distinct pair because the authority that bought is the local owner
+#: standing at the counter -- never a "verified main self" claim.
+STORE_PURCHASE_SOURCE = "local_owner_store_purchase"
+STORE_DELIVERY_PROVENANCE = "store_counter_home_delivery"
+STORE_PURCHASE_KIND = "shiomi_store_item_purchase"
+VALID_PURCHASE_PROVENANCES = frozenset(
+    {
+        (MAIN_SELF_PURCHASE_SOURCE, MAIN_SELF_DELIVERY_PROVENANCE),
+        (PHONE_PURCHASE_SOURCE, PHONE_DELIVERY_PROVENANCE),
+        (STORE_PURCHASE_SOURCE, STORE_DELIVERY_PROVENANCE),
+    }
+)
 SCHEMA_VERSION = "world.property.economy.v1"
 PROJECTION_KIND = "shiomi_property_economy_projection"
 WALLET_KIND = "shiomi_wallet_projection"
@@ -94,6 +122,7 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "description": "一张简单的床",
         "price": 5_800,
         "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
     },
     {
         "catalog_item_id": "simple_desk",
@@ -101,6 +130,7 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "description": "一张简单的书桌",
         "price": 4_200,
         "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
     },
     {
         "catalog_item_id": "simple_chair",
@@ -108,6 +138,7 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "description": "一把简单的椅子",
         "price": 1_800,
         "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
     },
     {
         "catalog_item_id": "bedside_lamp",
@@ -115,6 +146,7 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "description": "一盏放在床边的小灯",
         "price": 900,
         "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
     },
     {
         "catalog_item_id": "small_bookshelf",
@@ -122,6 +154,7 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "description": "一个小型书架",
         "price": 3_000,
         "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
     },
     {
         "catalog_item_id": "floor_cushion",
@@ -129,9 +162,82 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "description": "一个放在地上的坐垫",
         "price": 700,
         "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
+    },
+    # v0.4: the one carryable, single-portion **virtual snack** sold by the
+    # phone's own virtual online store.  Its price is fixed by this catalog (not
+    # by the caller) and it declares **no** nutrition: consuming it is the
+    # ordinary light manipulation consequence, nothing is restored.
+    {
+        "catalog_item_id": "virtual_snack_wafer",
+        "name": "虚拟小点心",
+        "description": "线上小店的一份小点心，可带到手边吃掉",
+        "price": 240,
+        "capability": _CAPABILITY_HANDHELD,
+        "channels": (CHANNEL_PHONE_VIRTUAL_STORE,),
     },
 )
 _CATALOG_BY_ID = {item["catalog_item_id"]: item for item in CATALOG}
+
+#: v0.4 room-living: what a catalog item can *really* do once it is owned and
+#: delivered.  Declared here (next to the price) and enforced by the substrate /
+#: Resolver; a piece of furniture that is not in this table declares nothing.
+#:
+#: ``surfaces``      surface kinds this furniture provides when it stands in a
+#:                   room (instance-scoped: ``desk_surface:<item_instance_id>``).
+#: ``relocatable``   may be ARRANGEd by its owner while it is at home.  This is a
+#:                   furniture capability, **not** takeability: the bed stays
+#:                   ``takeable=false`` and can never be picked up.
+#: ``usable_kind``   CARRY (goes to a hand) / FURNISH (fixed furniture).
+#: ``light_band``    only for a declared light fixture (mirrors
+#:                   ``world_room_environment.FIXTURE_DECLARATIONS``; that module
+#:                   remains the single light authority -- this key exists so a
+#:                   catalog listing never has to guess whether a thing is a lamp).
+_CATALOG_DECLARATIONS: dict[str, dict[str, Any]] = {
+    "basic_bed": {
+        "surfaces": ("bed_surface",),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+    },
+    "simple_desk": {
+        "surfaces": ("desk_surface",),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+    },
+    "simple_chair": {
+        "surfaces": ("chair_surface",),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+    },
+    "bedside_lamp": {
+        "surfaces": (),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+        "light_band": "dim",
+    },
+    "small_bookshelf": {
+        "surfaces": (),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+    },
+    "floor_cushion": {
+        "surfaces": (),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+    },
+    "virtual_snack_wafer": {
+        "surfaces": (),
+        "relocatable": False,
+        "usable_kind": "CARRY",
+    },
+}
+
+
+def catalog_declaration(catalog_item_id: Any) -> dict[str, Any]:
+    """The room-living declaration of one catalog item (``{}`` when none)."""
+
+    entry = _CATALOG_DECLARATIONS.get(str(catalog_item_id))
+    return dict(entry) if entry else {}
 
 
 def object_capability(catalog_item_id: Any) -> dict[str, Any]:
@@ -499,10 +605,11 @@ def _validate_provenance(value: Any, field: str) -> dict[str, str]:
     result: dict[str, str] = {}
     for key, item in value.items():
         result[key] = _text(item, f"{field}.{key}", MAX_ID_LENGTH)
-    if result.get("source") != "verified_main_self_buy_item":
+    if (result.get("source"), result.get("delivery")) not in VALID_PURCHASE_PROVENANCES:
+        # v0.4: two real purchase provenances only -- the legacy verified
+        # main-self purchase and the explicit local-owner phone purchase.  A
+        # phone purchase is never recorded as a main-self one.
         raise PropertyEconomyError(f"{field}.source is invalid")
-    if result.get("delivery") != "included_home_delivery":
-        raise PropertyEconomyError(f"{field}.delivery is invalid")
     _id(result.get("purchase_intent_id"), f"{field}.purchase_intent_id")
     _id(result.get("transaction_id"), f"{field}.transaction_id")
     return result
@@ -1328,6 +1435,7 @@ def _transaction_projection(transaction: Mapping[str, Any]) -> dict[str, Any]:
     if transaction["direction"] == "DEBIT":
         result["catalog_item_id"] = transaction["catalog_item_id"]
         result["delivery_location"] = transaction["delivery_location"]
+        result["purchase_intent_id"] = transaction["purchase_intent_id"]
     elif transaction["transaction_kind"] == OWNER_FUNDING_TRANSACTION_KIND:
         result["request_id"] = transaction["provenance"]["request_id"]
         result["owner_decision_id"] = transaction["provenance"]["owner_decision_id"]
@@ -1517,6 +1625,83 @@ def _realize_due_deliveries(
     return completed
 
 
+def realize_due_deliveries(
+    *,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+    now: Any = None,
+) -> dict[str, Any]:
+    """The **only** public arrival point, called by the owner tick.
+
+    Idempotent by construction: a delivery that is already ``DELIVERED`` is not
+    due any more, so a second call is a no-op (``realized: 0``) and never writes
+    a second time.  Nothing here is a read path: the World/Body service tick is
+    the single caller, so a GET can never deliver an item.
+    """
+
+    if not feature_enabled(environment):
+        return {"status": "disabled", "reason_code": "FEATURE_DISABLED", "realized": 0}
+    if not delivery_time_enabled(environment):
+        return {"status": "disabled", "reason_code": "DELIVERY_TIME_DISABLED", "realized": 0}
+    completed = _realize_due_deliveries(
+        hermes_home=hermes_home,
+        environment=environment,
+        now=now,
+    )
+    return {
+        "status": "applied" if completed else "noop",
+        "realized": len(completed),
+        "delivery_ids": [delivery["delivery_id"] for delivery in completed],
+        "deliveries": [_delivery_projection(delivery) for delivery in completed],
+    }
+
+
+def deliveries_projection(
+    *,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    """Read-only delivery view (never realizes).  ``mode`` tells the truth about
+    how this channel delivers: the phone channel is instant ownership, the
+    counter channel uses the existing 2h home delivery when it is enabled."""
+
+    if not feature_enabled(environment):
+        return {"status": "disabled", "reason_code": "FEATURE_DISABLED", "items": []}
+    try:
+        state = load_state(hermes_home)
+    except PropertyEconomyError:
+        return {"status": "unavailable", "reason_code": "ECONOMY_STATE_ERROR", "items": []}
+    if state is None:
+        return {
+            "status": "unavailable",
+            "reason_code": "GENESIS_NOT_INITIALIZED",
+            "items": [],
+        }
+    temporal = delivery_time_enabled(environment)
+    items = [
+        _delivery_projection(delivery) for delivery in state.get("deliveries", [])
+    ]
+    pending = [item for item in items if item["status"] == DELIVERY_STATUS_PENDING]
+    delivered = [item for item in items if item["status"] == DELIVERY_STATUS_DELIVERED]
+    return {
+        "status": "available",
+        "mode": (
+            "temporal_home_delivery"
+            if temporal
+            else "instant_home_delivery"
+        ),
+        "duration_seconds": DELIVERY_DURATION_SECONDS if temporal else 0,
+        "destination_location": HOME_ITEM_LOCATION,
+        "pending": pending[-MAX_RECENT_TRANSACTIONS:],
+        "delivered": delivered[-MAX_RECENT_TRANSACTIONS:],
+        "pending_count": len(pending),
+        "delivered_count": len(delivered),
+        "realized_by": "world_body_service.tick",
+        "read_delivers_items": False,
+        "items": items[-MAX_RECENT_TRANSACTIONS:],
+    }
+
+
 def wallet_projection(
     *,
     hermes_home: Optional[Path | str] = None,
@@ -1576,12 +1761,9 @@ def home_items_projection(
 ) -> dict[str, Any]:
     if not feature_enabled(environment):
         return {"kind": PROJECTION_KIND, "status": "disabled", "reason_code": "FEATURE_DISABLED"}
-    if delivery_time_enabled(environment):
-        _realize_due_deliveries(
-            hermes_home=hermes_home,
-            environment=environment,
-            now=now,
-        )
+    # v0.4 room-living: this is a *read*.  Arrival is realized by the owner tick
+    # (``realize_due_deliveries`` from the World/Body service) and by nothing
+    # else -- a GET must never deliver, materialize or move an item.
     state = load_state(hermes_home)
     if state is None:
         return {"kind": PROJECTION_KIND, "status": "unavailable", "reason_code": "GENESIS_NOT_INITIALIZED"}
@@ -1613,27 +1795,23 @@ def _current_world_location(
     environment: Optional[Mapping[str, str]],
     now: Any = None,
 ) -> Optional[str]:
+    """The **place** the body is really in -- read-only, place-level.
+
+    Deliberately not ``world_living_skeleton.read_move_state``: that path returns a
+    *navigation node* (``<place>/<area>``, ``<place>/entrance``) and pins one
+    hard-coded world id, so a packaged world such as ``coastal_town_929711`` --
+    or simply standing in the shop's entrance area -- would look like "not the
+    store" even while she is standing at the counter.  It would also realize a
+    due walk, which is an owner-tick write and must never happen in a read.
+
+    ``now`` is kept in the signature for callers that already pass a clock; the
+    location itself does not depend on it.
+    """
+
     if not _truthy((environment or os.environ).get(WORLD_FEATURE_ENV)):
         return None
-    try:
-        import sys
-
-        scripts_dir = str(_home(hermes_home) / "scripts")
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        import world_living_skeleton
-
-        snapshot = world_living_skeleton.read_move_state(
-            hermes_home=_home(hermes_home),
-            environment=environment,
-            now=now,
-        )
-    except Exception:
-        return None
-    if not isinstance(snapshot, Mapping) or snapshot.get("world_id") != WORLD_ID:
-        return None
-    location = snapshot.get("world_location_id")
-    return location if isinstance(location, str) else None
+    place, _area = _read_world_location(hermes_home=hermes_home)
+    return place
 
 
 def _store_check(
@@ -1710,6 +1888,7 @@ def shop_projection(
                 "currency": CURRENCY,
             }
             for item in CATALOG
+            if CHANNEL_HOME_GOODS_STORE in item.get("channels", (CHANNEL_HOME_GOODS_STORE,))
         ],
     }
 
@@ -1799,6 +1978,16 @@ def purchase_item(
     catalog_item = _CATALOG_BY_ID.get(item_id)
     if catalog_item is None:
         return {"kind": PURCHASE_KIND, "status": "rejected", "reason_code": "UNKNOWN_CATALOG_ITEM"}
+    if CHANNEL_HOME_GOODS_STORE not in catalog_item.get(
+        "channels", (CHANNEL_HOME_GOODS_STORE,)
+    ):
+        # v0.4: the physical store sells its own channel only.  The phone's
+        # virtual store is a *separate* declared channel, never a bypass.
+        return {
+            "kind": PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "ITEM_NOT_SOLD_AT_STORE",
+        }
 
     path = state_path(hermes_home)
     try:
@@ -1985,6 +2174,455 @@ def purchase_item(
             "reason_code": "ECONOMY_STATE_ERROR",
             "error_type": type(exc).__name__,
         }
+
+
+# ---------------------------------------------------------------------------
+# v0.4: the phone's own virtual online store (explicit local-owner channel)
+# ---------------------------------------------------------------------------
+
+
+def validate_local_owner(
+    local_owner: Any,
+    *,
+    hermes_home: Optional[Path | str] = None,
+) -> dict[str, Any]:
+    """Validate the *local owner* context of one phone command.
+
+    The context is assembled by the trusted local server process (``source``,
+    the real ``os.getuid()``, the bound subject and the home it serves).  A
+    request body's ``uid`` / ``authority`` / ``main_self_verified`` is never an
+    identity, so nothing from a client can arrive here as permission.  Returns
+    ``{"ok", "reason_code", "context"}``; never raises.
+    """
+
+    if not isinstance(local_owner, Mapping):
+        return {"ok": False, "reason_code": "LOCAL_OWNER_CONTEXT_INVALID", "context": None}
+    if local_owner.get("source") != LOCAL_OWNER_SOURCE:
+        return {"ok": False, "reason_code": "LOCAL_OWNER_CONTEXT_INVALID", "context": None}
+    uid = local_owner.get("uid")
+    if isinstance(uid, bool) or not isinstance(uid, int) or uid < 0:
+        return {"ok": False, "reason_code": "LOCAL_OWNER_CONTEXT_INVALID", "context": None}
+    if uid != os.getuid():
+        return {"ok": False, "reason_code": "LOCAL_OWNER_UID_MISMATCH", "context": None}
+    if local_owner.get("subject") != OWNER:
+        return {"ok": False, "reason_code": "LOCAL_OWNER_SUBJECT_MISMATCH", "context": None}
+    try:
+        home = _home(hermes_home)
+    except PropertyEconomyError:
+        return {"ok": False, "reason_code": "LOCAL_OWNER_HOME_MISMATCH", "context": None}
+    claimed = local_owner.get("home")
+    if claimed is not None:
+        try:
+            if Path(str(claimed)).expanduser().resolve() != home.resolve():
+                return {
+                    "ok": False,
+                    "reason_code": "LOCAL_OWNER_HOME_MISMATCH",
+                    "context": None,
+                }
+        except (OSError, RuntimeError):
+            return {"ok": False, "reason_code": "LOCAL_OWNER_HOME_MISMATCH", "context": None}
+    try:
+        if not home.is_dir():
+            return {
+                "ok": False,
+                "reason_code": "LOCAL_OWNER_HOME_MISMATCH",
+                "context": None,
+            }
+    except OSError:
+        return {"ok": False, "reason_code": "LOCAL_OWNER_HOME_MISMATCH", "context": None}
+    return {
+        "ok": True,
+        "reason_code": None,
+        "context": {
+            "source": LOCAL_OWNER_SOURCE,
+            "uid": uid,
+            "subject": OWNER,
+            "home": str(home),
+        },
+    }
+
+
+def phone_catalog_entries() -> list[dict[str, Any]]:
+    """The phone channel's catalog (only items this channel really sells)."""
+
+    return [
+        {
+            "catalog_item_id": item["catalog_item_id"],
+            "name": item["name"],
+            "description": item["description"],
+            "price": item["price"],
+            "currency": CURRENCY,
+            # The phone channel's own consumer kind is unchanged: its one verb is
+            # "use" (consume), and that is what this field has always meant to P.
+            # The *capability* of the instance is the accurate fact and is carried
+            # separately in ``declaration.usable_kind`` (CARRY for the wafer).
+            "usable_kind": "CONSUME",
+            "capability": dict(item.get("capability") or {}),
+            "declaration": catalog_declaration(item["catalog_item_id"]),
+        }
+        for item in CATALOG
+        if CHANNEL_PHONE_VIRTUAL_STORE in item.get("channels", ())
+    ]
+
+
+def phone_shop_projection(
+    *,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+    now: Any = None,
+) -> dict[str, Any]:
+    """The phone's virtual store: its own declared rule, its own catalog.
+
+    Read-only.  It never creates the economy, never grants money, and it never
+    consults the physical store's location/hours rule -- this channel declares
+    its own 24h virtual availability instead of bypassing that rule.
+    """
+
+    if not feature_enabled(environment):
+        return {"kind": PHONE_KIND, "status": "disabled", "reason_code": "FEATURE_DISABLED"}
+    purchase_available = True
+    reason_code: Optional[str] = None
+    try:
+        state = load_state(hermes_home)
+    except PropertyEconomyError:
+        state = None
+        purchase_available = False
+        reason_code = "ECONOMY_STATE_ERROR"
+    else:
+        if state is None:
+            purchase_available = False
+            reason_code = "GENESIS_NOT_INITIALIZED"
+        elif (
+            len(state["transactions"]) >= MAX_TRANSACTIONS
+            or len(state["items"]) >= MAX_ITEMS
+        ):
+            purchase_available = False
+            reason_code = "ECONOMY_CAPACITY_EXCEEDED"
+    result: dict[str, Any] = {
+        "kind": PHONE_KIND,
+        "status": "available",
+        "store_id": PHONE_STORE_ID,
+        "channel": CHANNEL_PHONE_VIRTUAL_STORE,
+        "store_kind": "virtual_online_store",
+        "availability": {
+            "status": "OPEN",
+            "scheme": PHONE_STORE_SCHEME,
+            "timezone": WORLD_TIMEZONE,
+        },
+        "currency": CURRENCY,
+        "catalog": phone_catalog_entries(),
+        "purchase_available": purchase_available,
+        "payment": {
+            "currency": CURRENCY,
+            "source": "world_wallet",
+            "cash": False,
+            "top_up": False,
+            "outbound": False,
+        },
+        "delivery": {
+            "destination_location": HOME_ITEM_LOCATION,
+            "mode": "instant_ownership_then_materialize",
+            "materialization_required": True,
+        },
+    }
+    if reason_code is not None:
+        result["reason_code"] = reason_code
+    return result
+
+
+def _phone_purchase_result(
+    *,
+    status: str,
+    transaction: Mapping[str, Any],
+    item: Mapping[str, Any],
+    balance: int,
+    reason_code: Optional[str] = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "kind": PHONE_PURCHASE_KIND,
+        "status": status,
+        "channel": CHANNEL_PHONE_VIRTUAL_STORE,
+        "transaction_id": transaction["transaction_id"],
+        "purchase_intent_id": transaction["purchase_intent_id"],
+        "catalog_item_id": transaction["catalog_item_id"],
+        "item_instance_id": item["item_instance_id"],
+        "price": transaction["amount"],
+        "currency": CURRENCY,
+        "occurred_at": transaction["occurred_at"],
+        "ownership": item["disposition"],
+        "delivery_location": HOME_ITEM_LOCATION,
+        "delivery_provenance": PHONE_DELIVERY_PROVENANCE,
+        "materialization": "pending",
+        "current_balance": balance,
+    }
+    if reason_code is not None:
+        result["reason_code"] = reason_code
+    return result
+
+
+def phone_purchase_item(
+    *,
+    catalog_item_id: Any,
+    operation_key: Any,
+    local_owner: Any,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+    now: Any = None,
+) -> dict[str, Any]:
+    """Buy one catalog item through the phone channel (explicit local owner).
+
+    One debit transaction **and** one OWNED item instance are written by one
+    atomic ``_save()``: the money and the ownership are a single economy-owner
+    fact.  ``operation_key`` is the economy's own idempotency key
+    (``purchase_intent_id``), so a replay cannot charge twice.
+
+    Materialization into the body substrate is a *different* owner's write and
+    is not attempted here: ``world_phone_shopping`` does it afterwards,
+    idempotently, and can always complete it later.
+    """
+
+    if not feature_enabled(environment):
+        return {"kind": PHONE_PURCHASE_KIND, "status": "disabled", "reason_code": "FEATURE_DISABLED"}
+    owner = validate_local_owner(local_owner, hermes_home=hermes_home)
+    if not owner["ok"]:
+        return {
+            "kind": PHONE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": owner["reason_code"],
+        }
+    try:
+        item_id = _id(catalog_item_id, "catalog_item_id")
+        intent_id = _id(operation_key, "operation_key")
+    except PropertyEconomyError:
+        return {
+            "kind": PHONE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "INVALID_PHONE_PURCHASE_INPUT",
+        }
+    catalog_item = _CATALOG_BY_ID.get(item_id)
+    if catalog_item is None:
+        return {
+            "kind": PHONE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "UNKNOWN_CATALOG_ITEM",
+        }
+    if CHANNEL_PHONE_VIRTUAL_STORE not in catalog_item.get("channels", ()):
+        return {
+            "kind": PHONE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "ITEM_NOT_SOLD_IN_PHONE_STORE",
+        }
+
+    path = state_path(hermes_home)
+    try:
+        with _lock(path):
+            state = _load(path)
+            if state is None:
+                return {
+                    "kind": PHONE_PURCHASE_KIND,
+                    "status": "unavailable",
+                    "reason_code": "GENESIS_NOT_INITIALIZED",
+                }
+            existing = next(
+                (
+                    transaction
+                    for transaction in state["transactions"]
+                    if transaction.get("purchase_intent_id") == intent_id
+                ),
+                None,
+            )
+            if existing is not None:
+                recorded_source = str(
+                    (existing.get("provenance") or {}).get("source") or ""
+                )
+                if recorded_source == STORE_PURCHASE_SOURCE:
+                    # v0.4 room-living: one key namespace across channels.  A key
+                    # already spent at the physical counter may not become a
+                    # phone-channel purchase (or the reverse).
+                    return {
+                        "kind": PHONE_PURCHASE_KIND,
+                        "status": "rejected",
+                        "reason_code": "OPERATION_KEY_CONFLICT",
+                        "purchase_intent_id": intent_id,
+                        "recorded_source": recorded_source,
+                    }
+                if existing.get("catalog_item_id") != item_id:
+                    return {
+                        "kind": PHONE_PURCHASE_KIND,
+                        "status": "rejected",
+                        "reason_code": "PHONE_PURCHASE_OPERATION_CONFLICT",
+                        "purchase_intent_id": intent_id,
+                    }
+                # Tolerant lookup: a replay must never raise.  A purchase
+                # transaction whose instance is missing is a broken document,
+                # not a crash -- and it must not charge again either.
+                existing_item = next(
+                    (
+                        item
+                        for item in state["items"]
+                        if item["item_instance_id"] == _stable_id("item", intent_id)
+                    ),
+                    None,
+                )
+                if existing_item is None:
+                    return {
+                        "kind": PHONE_PURCHASE_KIND,
+                        "status": "rejected",
+                        "reason_code": "PURCHASE_LEDGER_INCONSISTENT",
+                        "purchase_intent_id": intent_id,
+                        "transaction_id": existing["transaction_id"],
+                    }
+                return _phone_purchase_result(
+                    status="already_applied",
+                    transaction=existing,
+                    item=existing_item,
+                    balance=_balance(state),
+                    reason_code="IDEMPOTENT_REPLAY",
+                )
+
+            if (
+                len(state["transactions"]) >= MAX_TRANSACTIONS
+                or len(state["items"]) >= MAX_ITEMS
+            ):
+                # The existing 256-record bound is kept as-is: nothing is ever
+                # pruned to make room, the purchase is refused with a code.
+                return {
+                    "kind": PHONE_PURCHASE_KIND,
+                    "status": "rejected",
+                    "reason_code": "ECONOMY_CAPACITY_EXCEEDED",
+                    "max_transactions": MAX_TRANSACTIONS,
+                    "max_items": MAX_ITEMS,
+                }
+            amount = int(catalog_item["price"])
+            balance = _balance(state)
+            if balance < amount:
+                return {
+                    "kind": PHONE_PURCHASE_KIND,
+                    "status": "rejected",
+                    "reason_code": "INSUFFICIENT_FUNDS",
+                    "current_balance": balance,
+                    "price": amount,
+                    "currency": CURRENCY,
+                }
+            transaction_id = _stable_id("purchase", intent_id)
+            item_instance_id = _stable_id("item", intent_id)
+            provenance = {
+                "source": PHONE_PURCHASE_SOURCE,
+                "purchase_intent_id": intent_id,
+                "transaction_id": transaction_id,
+                "delivery": PHONE_DELIVERY_PROVENANCE,
+                "source_turn_id": "local-owner-uid-%04d" % owner["context"]["uid"],
+            }
+            occurred_at = _timestamp(now, "occurred_at")
+            transaction = {
+                "transaction_id": transaction_id,
+                "transaction_kind": "PURCHASE",
+                "direction": "DEBIT",
+                "amount": amount,
+                "currency": CURRENCY,
+                "occurred_at": occurred_at,
+                "catalog_item_id": item_id,
+                "purchase_intent_id": intent_id,
+                "delivery_location": HOME_ITEM_LOCATION,
+                "provenance": provenance,
+            }
+            item = {
+                "item_instance_id": item_instance_id,
+                "catalog_item_id": item_id,
+                "owner": OWNER,
+                "acquired_at": occurred_at,
+                "acquisition_kind": "PURCHASE",
+                "acquisition_provenance": provenance,
+                "acquisition_price": amount,
+                "currency": CURRENCY,
+                "current_location": HOME_ITEM_LOCATION,
+                "disposition": DISPOSITION_OWNED,
+            }
+            updated = dict(state)
+            updated["revision"] = state["revision"] + 1
+            updated["updated_at"] = occurred_at
+            updated["transactions"] = [*state["transactions"], transaction]
+            updated["items"] = [*state["items"], item]
+            saved = _save(path, updated)
+            verified = _load(path)
+            if verified != saved:
+                raise PropertyEconomyError("phone purchase postcondition failed")
+            return _phone_purchase_result(
+                status="applied",
+                transaction=verified["transactions"][-1],
+                item=verified["items"][-1],
+                balance=_balance(verified),
+            )
+    except PropertyEconomyError as exc:
+        return {
+            "kind": PHONE_PURCHASE_KIND,
+            "status": "failed",
+            "reason_code": "ECONOMY_STATE_ERROR",
+            "error_type": type(exc).__name__,
+        }
+
+
+def find_purchase_intent(
+    operation_key: Any,
+    *,
+    hermes_home: Optional[Path | str] = None,
+) -> Optional[dict[str, Any]]:
+    """The purchase recorded for one operation key, or ``None`` (read-only).
+
+    A corrupt economy raises instead of answering "no purchase": a caller must
+    never turn an unreadable document into a fresh purchase.
+    """
+
+    try:
+        intent_id = _id(operation_key, "operation_key")
+    except PropertyEconomyError:
+        return None
+    state = load_state(hermes_home)
+    if state is None:
+        return None
+    transaction = next(
+        (
+            item
+            for item in state["transactions"]
+            if item.get("purchase_intent_id") == intent_id
+        ),
+        None,
+    )
+    if transaction is None:
+        return None
+    item = next(
+        (
+            entry
+            for entry in state["items"]
+            if entry["item_instance_id"] == _stable_id("item", intent_id)
+        ),
+        None,
+    )
+    balance = _balance(state)
+    if item is None:
+        return {
+            "kind": PHONE_PURCHASE_KIND,
+            "status": "unknown",
+            "reason_code": "PURCHASE_LEDGER_INCONSISTENT",
+            "transaction_id": transaction["transaction_id"],
+            "purchase_intent_id": intent_id,
+            "current_balance": balance,
+        }
+    result = _phone_purchase_result(
+        status="applied",
+        transaction=transaction,
+        item=item,
+        balance=balance,
+    )
+    # v0.4 room-living: one key namespace, several channels.  A reconciler must
+    # be able to see *which* channel a purchase came from without guessing it
+    # from a free-text reason code.
+    source = str((transaction.get("provenance") or {}).get("source") or "")
+    result["channel"] = {
+        STORE_PURCHASE_SOURCE: CHANNEL_HOME_GOODS_STORE,
+        PHONE_PURCHASE_SOURCE: CHANNEL_PHONE_VIRTUAL_STORE,
+    }.get(source, CHANNEL_PHONE_VIRTUAL_STORE if not source else "unknown")
+    return result
 
 
 def find_owner_funding(
@@ -2530,6 +3168,700 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return 0 if result.get("status") in {"created", "already_initialized"} else 2
 
 
+
+# ---------------------------------------------------------------------------
+# v0.4 room-living: the physical home-goods store (counter channel)
+# ---------------------------------------------------------------------------
+
+
+def _read_world_location(
+    *, hermes_home: Optional[Path | str]
+) -> tuple[Optional[str], Optional[str]]:
+    """``(place_id, area_id)`` straight from the World state, read-only.
+
+    Deliberately does **not** go through the travel owner: realizing a due walk
+    is an owner write, and a GET may never perform one.  An in-progress walk
+    therefore still reads as "at the origin", which is where the body really is.
+    """
+
+    try:
+        raw = json.loads(
+            (_home(hermes_home) / "data" / "world" / "world_state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        return None, None
+    if not isinstance(raw, Mapping):
+        return None, None
+    location = raw.get("location")
+    if not isinstance(location, Mapping):
+        return None, None
+    place = location.get("place_id")
+    area = location.get("area_id")
+    return (
+        place if isinstance(place, str) else None,
+        area if isinstance(area, str) else None,
+    )
+
+
+def store_availability(
+    *,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+    now: Any = None,
+) -> dict[str, Any]:
+    """Read-only "is the counter really open for her right now" check."""
+
+    env = environment or os.environ
+    if not _truthy(env.get(WORLD_FEATURE_ENV)):
+        return {"status": "unavailable", "reason_code": "WORLD_FEATURE_REQUIRED"}
+    if not _truthy(env.get(DAILY_FEATURE_ENV)):
+        return {"status": "unavailable", "reason_code": "DAILY_RHYTHM_REQUIRED"}
+    place, area = _read_world_location(hermes_home=hermes_home)
+    if place is None:
+        return {"status": "unavailable", "reason_code": "WORLD_LOCATION_UNAVAILABLE"}
+    at_store = place == STORE_LOCATION_ID
+    try:
+        import sys
+
+        scripts_dir = str(_home(hermes_home) / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import world_daily_rhythm
+
+        availability = world_daily_rhythm.location_availability(
+            STORE_LOCATION_ID,
+            now,
+            timezone_name=WORLD_TIMEZONE,
+            environment=env,
+        )
+    except Exception:
+        return {
+            "status": "unavailable",
+            "reason_code": "DAILY_RHYTHM_UNAVAILABLE",
+            "current_location_id": place,
+            "area_id": area,
+        }
+    block: dict[str, Any] = {
+        "status": "available"
+        if (at_store and availability.get("status") == "OPEN")
+        else "rejected",
+        "availability": availability,
+        "current_location_id": place,
+        "area_id": area,
+        "at_store": at_store,
+        "reason_code": None,
+    }
+    if not at_store:
+        block["reason_code"] = "STORE_LOCATION_REQUIRED"
+    elif availability.get("status") != "OPEN":
+        block["reason_code"] = "STORE_CLOSED"
+    return block
+
+def store_catalog_entries() -> list[dict[str, Any]]:
+    """The counter's shelf: only items this channel really sells."""
+
+    entries: list[dict[str, Any]] = []
+    for item in CATALOG:
+        if CHANNEL_HOME_GOODS_STORE not in item.get("channels", ()):
+            continue
+        declaration = catalog_declaration(item["catalog_item_id"])
+        entries.append(
+            {
+                "catalog_item_id": item["catalog_item_id"],
+                "name": item["name"],
+                "description": item["description"],
+                "price": item["price"],
+                "currency": CURRENCY,
+                "usable_kind": declaration.get("usable_kind", "FURNISH"),
+                "capability": dict(item.get("capability") or {}),
+                "declaration": declaration,
+            }
+        )
+    return entries
+
+
+def store_shop_projection(
+    *,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+    now: Any = None,
+) -> dict[str, Any]:
+    """The counter shelf: read-only, no arrival, no materialization, no money.
+
+    ``purchase_available`` answers "could a purchase be attempted right now"
+    (open **and** she is really at the counter **and** the ledger has room);
+    ``affordable`` is the per-item budget fact.  Neither is a promise that a
+    later POST succeeds -- that re-reads every fact under the lock.
+    """
+
+    if not feature_enabled(environment):
+        return {
+            "kind": SHOP_KIND,
+            "status": "disabled",
+            "reason_code": "FEATURE_DISABLED",
+        }
+    checked = store_availability(
+        hermes_home=hermes_home, environment=environment, now=now
+    )
+    block: dict[str, Any] = {
+        "kind": SHOP_KIND,
+        "schema_version": SCHEMA_VERSION,
+        "store_id": STORE_LOCATION_ID,
+        "channel": CHANNEL_HOME_GOODS_STORE,
+        "store_kind": "physical_counter",
+        "currency": CURRENCY,
+        "catalog": store_catalog_entries(),
+        "location": {
+            "location_id": checked.get("current_location_id"),
+            "area_id": checked.get("area_id"),
+        },
+        "at_store": bool(checked.get("at_store")),
+        "availability": checked.get("availability"),
+        "status": checked["status"],
+        "purchase_available": False,
+        "payment": {
+            "currency": CURRENCY,
+            "source": "world_wallet",
+            "cash": False,
+            "top_up": False,
+            "outbound": False,
+        },
+        "delivery": {
+            "destination_location": HOME_ITEM_LOCATION,
+            "mode": (
+                "temporal_home_delivery"
+                if delivery_time_enabled(environment)
+                else "instant_home_delivery"
+            ),
+            "duration_seconds": (
+                DELIVERY_DURATION_SECONDS if delivery_time_enabled(environment) else 0
+            ),
+            "arrival_written_by": "world_body_service.tick",
+            "placement_requires": "ARRANGE",
+        },
+        "read_is_pure": True,
+        "paid_real_money": False,
+    }
+    if checked.get("reason_code"):
+        block["reason_code"] = checked["reason_code"]
+    try:
+        state = load_state(hermes_home)
+    except PropertyEconomyError:
+        block["status"] = "unavailable"
+        block["reason_code"] = "ECONOMY_STATE_ERROR"
+        block["balance"] = None
+        for entry in block["catalog"]:
+            entry["affordable"] = None
+        return block
+    if state is None:
+        block["status"] = "unavailable"
+        block["reason_code"] = "GENESIS_NOT_INITIALIZED"
+        block["balance"] = None
+        for entry in block["catalog"]:
+            entry["affordable"] = None
+        return block
+    balance = _balance(state)
+    block["balance"] = balance
+    block["owner"] = OWNER
+    for entry in block["catalog"]:
+        entry["affordable"] = balance >= int(entry["price"])
+    capacity = (
+        len(state["transactions"]) < MAX_TRANSACTIONS
+        and len(state["items"]) < MAX_ITEMS
+    )
+    block["capacity_available"] = capacity
+    block["purchase_available"] = bool(
+        checked["status"] == "available" and capacity
+    )
+    if not capacity and "reason_code" not in block:
+        block["reason_code"] = "ECONOMY_CAPACITY_EXCEEDED"
+    block["pending_delivery_count"] = len(
+        [
+            delivery
+            for delivery in state.get("deliveries", [])
+            if delivery["status"] == DELIVERY_STATUS_PENDING
+        ]
+    )
+    block["owned_furniture_count"] = len(
+        [item for item in state["items"] if item["disposition"] == DISPOSITION_OWNED]
+    )
+    return block
+
+def _store_purchase_result(
+    *,
+    status: str,
+    transaction: Mapping[str, Any],
+    item: Mapping[str, Any],
+    balance: int,
+    reason_code: Optional[str] = None,
+    delivery: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "kind": STORE_PURCHASE_KIND,
+        "status": status,
+        "channel": CHANNEL_HOME_GOODS_STORE,
+        "transaction_id": transaction["transaction_id"],
+        "purchase_intent_id": transaction["purchase_intent_id"],
+        "catalog_item_id": transaction["catalog_item_id"],
+        "item_instance_id": item["item_instance_id"],
+        "price": transaction["amount"],
+        "currency": CURRENCY,
+        "occurred_at": transaction["occurred_at"],
+        "ownership": item["disposition"],
+        "location": item["current_location"],
+        "delivery_location": HOME_ITEM_LOCATION,
+        "delivery_provenance": STORE_DELIVERY_PROVENANCE,
+        "delivery_status": (
+            delivery["status"]
+            if isinstance(delivery, Mapping)
+            else DELIVERY_STATUS_DELIVERED
+        ),
+        "expected_delivery_at": (
+            delivery["expected_delivery_at"] if isinstance(delivery, Mapping) else None
+        ),
+        "delivered_at": (
+            delivery["delivered_at"] if isinstance(delivery, Mapping) else None
+        ),
+        "materialization": "pending_arrange",
+        "current_balance": balance,
+    }
+    if reason_code is not None:
+        result["reason_code"] = reason_code
+    return result
+
+
+def store_purchase_item(
+    *,
+    catalog_item_id: Any,
+    operation_key: Any,
+    local_owner: Any,
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+    now: Any = None,
+) -> dict[str, Any]:
+    """Buy one item at the physical counter (explicit local owner).
+
+    Same discipline as the phone channel -- one atomic ``_save()`` writes the
+    debit **and** the OWNED instance, the operation key is the economy's own
+    purchase intent id, and a replay cannot charge twice -- plus the two facts
+    this channel is about: she must really be at the counter and it must really
+    be open.  The purchase never places the furniture: ownership arriving is not
+    a placement, and ``ARRANGE`` is the only thing that arranges a room.
+    """
+
+    if not feature_enabled(environment):
+        return {
+            "kind": STORE_PURCHASE_KIND,
+            "status": "disabled",
+            "reason_code": "FEATURE_DISABLED",
+        }
+    owner = validate_local_owner(local_owner, hermes_home=hermes_home)
+    if not owner["ok"]:
+        return {
+            "kind": STORE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": owner["reason_code"],
+        }
+    try:
+        item_id = _id(catalog_item_id, "catalog_item_id")
+        intent_id = _id(operation_key, "operation_key")
+    except PropertyEconomyError:
+        return {
+            "kind": STORE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "INVALID_STORE_PURCHASE_INPUT",
+        }
+    catalog_item = _CATALOG_BY_ID.get(item_id)
+    if catalog_item is None:
+        return {
+            "kind": STORE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "UNKNOWN_CATALOG_ITEM",
+        }
+    if CHANNEL_HOME_GOODS_STORE not in catalog_item.get("channels", ()):
+        return {
+            "kind": STORE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "ITEM_NOT_SOLD_AT_STORE",
+        }
+    if not catalog_declaration(item_id).get("relocatable"):
+        # A counter item with no legal next step (nothing could arrange it)
+        # would be sold into a dead end; refuse instead of selling it.
+        return {
+            "kind": STORE_PURCHASE_KIND,
+            "status": "rejected",
+            "reason_code": "ITEM_NOT_ARRANGEABLE",
+        }
+
+    path = state_path(hermes_home)
+    try:
+        with _lock(path):
+            state = _load(path)
+            if state is None:
+                return {
+                    "kind": STORE_PURCHASE_KIND,
+                    "status": "unavailable",
+                    "reason_code": "GENESIS_NOT_INITIALIZED",
+                }
+            existing = next(
+                (
+                    transaction
+                    for transaction in state["transactions"]
+                    if transaction.get("purchase_intent_id") == intent_id
+                ),
+                None,
+            )
+            if existing is not None:
+                source = str((existing.get("provenance") or {}).get("source") or "")
+                if source != STORE_PURCHASE_SOURCE:
+                    # One key names one operation across channels; a key already
+                    # spent on the phone channel may not become a counter sale.
+                    return {
+                        "kind": STORE_PURCHASE_KIND,
+                        "status": "rejected",
+                        "reason_code": "OPERATION_KEY_CONFLICT",
+                        "purchase_intent_id": intent_id,
+                        "recorded_source": source or None,
+                    }
+                if existing.get("catalog_item_id") != item_id:
+                    return {
+                        "kind": STORE_PURCHASE_KIND,
+                        "status": "rejected",
+                        "reason_code": "OPERATION_TARGET_CONFLICT",
+                        "purchase_intent_id": intent_id,
+                    }
+                existing_item = next(
+                    (
+                        item
+                        for item in state["items"]
+                        if item["item_instance_id"] == _stable_id("item", intent_id)
+                    ),
+                    None,
+                )
+                if existing_item is None:
+                    return {
+                        "kind": STORE_PURCHASE_KIND,
+                        "status": "rejected",
+                        "reason_code": "PURCHASE_LEDGER_INCONSISTENT",
+                        "purchase_intent_id": intent_id,
+                        "transaction_id": existing["transaction_id"],
+                    }
+                existing_delivery = next(
+                    (
+                        delivery
+                        for delivery in state.get("deliveries", [])
+                        if delivery["purchase_intent_id"] == intent_id
+                    ),
+                    None,
+                )
+                return _store_purchase_result(
+                    status="already_applied",
+                    transaction=existing,
+                    item=existing_item,
+                    balance=_balance(state),
+                    reason_code="IDEMPOTENT_REPLAY",
+                    delivery=existing_delivery,
+                )
+
+            checked = _store_check(
+                hermes_home=hermes_home, environment=environment, now=now
+            )
+            if checked["status"] != "available":
+                return {"kind": STORE_PURCHASE_KIND, **checked}
+            if (
+                len(state["transactions"]) >= MAX_TRANSACTIONS
+                or len(state["items"]) >= MAX_ITEMS
+            ):
+                return {
+                    "kind": STORE_PURCHASE_KIND,
+                    "status": "rejected",
+                    "reason_code": "ECONOMY_CAPACITY_EXCEEDED",
+                    "max_transactions": MAX_TRANSACTIONS,
+                    "max_items": MAX_ITEMS,
+                }
+            amount = int(catalog_item["price"])
+            balance = _balance(state)
+            if balance < amount:
+                return {
+                    "kind": STORE_PURCHASE_KIND,
+                    "status": "rejected",
+                    "reason_code": "INSUFFICIENT_FUNDS",
+                    "current_balance": balance,
+                    "price": amount,
+                    "currency": CURRENCY,
+                }
+            transaction_id = _stable_id("purchase", intent_id)
+            item_instance_id = _stable_id("item", intent_id)
+            provenance = {
+                "source": STORE_PURCHASE_SOURCE,
+                "purchase_intent_id": intent_id,
+                "transaction_id": transaction_id,
+                "delivery": STORE_DELIVERY_PROVENANCE,
+                "source_turn_id": "local-owner-uid-%04d" % owner["context"]["uid"],
+            }
+            occurred_at = _timestamp(now, "occurred_at")
+            temporal = delivery_time_enabled(environment)
+            transaction = {
+                "transaction_id": transaction_id,
+                "transaction_kind": "PURCHASE",
+                "direction": "DEBIT",
+                "amount": amount,
+                "currency": CURRENCY,
+                "occurred_at": occurred_at,
+                "catalog_item_id": item_id,
+                "purchase_intent_id": intent_id,
+                "delivery_location": HOME_ITEM_LOCATION,
+                "provenance": provenance,
+            }
+            delivery: Optional[dict[str, Any]] = None
+            if temporal:
+                purchased_instant = datetime.fromisoformat(
+                    occurred_at.replace("Z", "+00:00")
+                )
+                delivery = {
+                    "delivery_id": _stable_id("delivery", intent_id),
+                    "purchase_transaction_id": transaction_id,
+                    "purchase_intent_id": intent_id,
+                    "item_instance_id": item_instance_id,
+                    "destination_location": HOME_ITEM_LOCATION,
+                    "purchased_at": occurred_at,
+                    "expected_delivery_at": _timestamp(
+                        purchased_instant
+                        + timedelta(seconds=DELIVERY_DURATION_SECONDS),
+                        "expected_delivery_at",
+                    ),
+                    "delivered_at": None,
+                    "status": DELIVERY_STATUS_PENDING,
+                    # The delivery *mechanism* keeps its one existing name; the
+                    # sales channel is proven by the transaction provenance pair
+                    # registered in ``VALID_PURCHASE_PROVENANCES``.
+                    "delivery_provenance": DELIVERY_PROVENANCE,
+                }
+            item = {
+                "item_instance_id": item_instance_id,
+                "catalog_item_id": item_id,
+                "owner": OWNER,
+                "acquired_at": occurred_at,
+                "acquisition_kind": "PURCHASE",
+                "acquisition_provenance": provenance,
+                "acquisition_price": amount,
+                "currency": CURRENCY,
+                "current_location": (
+                    DELIVERY_PENDING_LOCATION if temporal else HOME_ITEM_LOCATION
+                ),
+                "disposition": DISPOSITION_OWNED,
+            }
+            updated = dict(state)
+            updated["revision"] = state["revision"] + 1
+            updated["updated_at"] = occurred_at
+            updated["transactions"] = [*state["transactions"], transaction]
+            updated["items"] = [*state["items"], item]
+            if temporal and delivery is not None:
+                updated["deliveries"] = [*state.get("deliveries", []), delivery]
+            saved = _save(path, updated)
+            verified = _load(path)
+            if verified != saved:
+                raise PropertyEconomyError("store purchase postcondition failed")
+            verified_delivery = (
+                next(
+                    entry
+                    for entry in verified.get("deliveries", [])
+                    if entry["purchase_intent_id"] == intent_id
+                )
+                if temporal
+                else None
+            )
+            result = _store_purchase_result(
+                status="applied",
+                transaction=verified["transactions"][-1],
+                item=verified["items"][-1],
+                balance=_balance(verified),
+                delivery=verified_delivery,
+            )
+            if verified_delivery is not None:
+                try:
+                    import sys
+
+                    scripts_dir = str(_home(hermes_home) / "scripts")
+                    if scripts_dir not in sys.path:
+                        sys.path.insert(0, scripts_dir)
+                    import world_travel_delivery
+
+                    timeline = world_travel_delivery.ensure_delivery_timeline_process(
+                        verified_delivery, hermes_home=hermes_home
+                    )
+                    result["delivery_timeline_status"] = timeline.get("status")
+                except Exception:
+                    result["delivery_timeline_status"] = "unavailable"
+            return result
+    except PropertyEconomyError as exc:
+        return {
+            "kind": STORE_PURCHASE_KIND,
+            "status": "failed",
+            "reason_code": "ECONOMY_STATE_ERROR",
+            "error_type": type(exc).__name__,
+        }
+
+# ---------------------------------------------------------------------------
+# v0.4 room-living: arranging owned furniture (authorization only)
+# ---------------------------------------------------------------------------
+
+
+def arrange_verdict(
+    *,
+    item_instance_id: Any,
+    target: Any,
+    placements: Mapping[str, Any],
+    world_location: Mapping[str, Any],
+    hermes_home: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    """May this owned instance be arranged to this target?  Pure, read-only.
+
+    It answers *permission and reality*, not the write: owned + delivered +
+    relocatable + the furniture really being at home + the destination being a
+    declared home area.  The physical placement belongs to the substrate and is
+    performed by the single Resolver commit.
+    """
+
+    try:
+        item_id = _id(item_instance_id, "item_instance_id")
+    except PropertyEconomyError:
+        return {"allowed": False, "reason_code": "INVALID_ITEM_INSTANCE_ID"}
+    if not isinstance(target, Mapping):
+        return {"allowed": False, "reason_code": "INVALID_TARGET"}
+    try:
+        state = load_state(hermes_home)
+    except PropertyEconomyError:
+        return {"allowed": False, "reason_code": "ECONOMY_STATE_ERROR"}
+    if state is None:
+        return {"allowed": False, "reason_code": "GENESIS_NOT_INITIALIZED"}
+    item = next(
+        (entry for entry in state["items"] if entry["item_instance_id"] == item_id),
+        None,
+    )
+    if item is None:
+        return {"allowed": False, "reason_code": "NOT_AN_ECONOMY_INSTANCE"}
+    if item["disposition"] != DISPOSITION_OWNED:
+        return {"allowed": False, "reason_code": "NOT_OWNED"}
+    declaration = catalog_declaration(item["catalog_item_id"])
+    if not declaration.get("relocatable"):
+        return {
+            "allowed": False,
+            "reason_code": "NOT_RELOCATABLE",
+            "catalog_item_id": item["catalog_item_id"],
+        }
+    if str(item["current_location"]).startswith("in_transit/"):
+        return {"allowed": False, "reason_code": "NOT_DELIVERED"}
+    if item["current_location"] != HOME_ITEM_LOCATION:
+        return {"allowed": False, "reason_code": "NOT_DELIVERED"}
+
+    location = world_location if isinstance(world_location, Mapping) else {}
+    place_id = location.get("place_id")
+    area_id = location.get("area_id")
+    if not place_id:
+        return {"allowed": False, "reason_code": "WORLD_LOCATION_UNAVAILABLE"}
+    home_place = HOME_ITEM_LOCATION.split("/", 1)[0]
+    if place_id != home_place:
+        return {
+            "allowed": False,
+            "reason_code": "NOT_HOME",
+            "current_location_id": place_id,
+        }
+    current = placements.get(item_id)
+    if current is None:
+        return {"allowed": False, "reason_code": "NOT_MATERIALIZED"}
+    if str(current.get("kind")) == "hand":
+        return {"allowed": False, "reason_code": "FURNITURE_IN_HAND"}
+    if str(current.get("location_id")) != home_place:
+        return {
+            "allowed": False,
+            "reason_code": "FURNITURE_NOT_HOME",
+            "placement": dict(current),
+        }
+
+    kind = str(target.get("kind") or "")
+    target_location = str(target.get("location_id") or "")
+    if target_location != home_place:
+        return {
+            "allowed": False,
+            "reason_code": "NOT_CURRENT_AREA",
+            "detail": "furniture can only be arranged inside the home",
+        }
+    if kind == "room":
+        target_area = str(target.get("area_id") or "")
+        declared = declared_home_areas(environment)
+        if declared:
+            if target_area not in declared:
+                return {
+                    "allowed": False,
+                    "reason_code": "UNKNOWN_DESTINATION",
+                    "detail": "area %r is not declared for the home" % target_area,
+                    "declared_areas": sorted(declared),
+                }
+        elif area_id and target_area != area_id:
+            return {
+                "allowed": False,
+                "reason_code": "NOT_CURRENT_AREA",
+                "detail": "this world declares no home areas; only the current one counts",
+            }
+        return {
+            "allowed": True,
+            "reason_code": None,
+            "item": dict(item),
+            "declaration": declaration,
+            "current_placement": dict(current),
+        }
+    if kind == "surface":
+        surface_id = str(target.get("surface_id") or "")
+        surface_kind, _, owner = surface_id.partition(":")
+        declared_surfaces = list(declaration.get("surfaces") or ())
+        if surface_kind not in declared_surfaces:
+            return {
+                "allowed": False,
+                "reason_code": "SURFACE_NOT_DECLARED_FOR_ITEM",
+                "declared_surfaces": declared_surfaces,
+            }
+        if owner and owner != item_id:
+            return {
+                "allowed": False,
+                "reason_code": "SURFACE_OWNER_MISMATCH",
+                "detail": "a surface is bound to the furniture it belongs to",
+            }
+        return {
+            "allowed": True,
+            "reason_code": None,
+            "item": dict(item),
+            "declaration": declaration,
+            "current_placement": dict(current),
+        }
+    return {"allowed": False, "reason_code": "DESTINATION_NOT_ALLOWED"}
+
+
+def declared_home_areas(
+    environment: Optional[Mapping[str, str]] = None,
+) -> set[str]:
+    """Areas the active world declares for the home place (empty = undeclared)."""
+
+    home_place = HOME_ITEM_LOCATION.split("/", 1)[0]
+    try:
+        import sys
+
+        scripts_dir = str(Path(__file__).resolve().parent)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import world_runtime_data as wrd
+
+        world = wrd.active_world(environment)
+        return {
+            str(area.get("area_id"))
+            for area in world.areas_of(home_place) or []
+            if isinstance(area, Mapping) and area.get("area_id")
+        }
+    except Exception:
+        return set()
 __all__ = [
     "CATALOG",
     "CURRENCY",
@@ -2583,6 +3915,20 @@ __all__ = [
     "state_path",
     "validate_state",
     "wallet_projection",
+    "STORE_PURCHASE_KIND",
+    "STORE_PURCHASE_SOURCE",
+    "STORE_DELIVERY_PROVENANCE",
+    "CHANNEL_HOME_GOODS_STORE",
+    "CHANNEL_PHONE_VIRTUAL_STORE",
+    "arrange_verdict",
+    "catalog_declaration",
+    "declared_home_areas",
+    "deliveries_projection",
+    "realize_due_deliveries",
+    "store_availability",
+    "store_catalog_entries",
+    "store_purchase_item",
+    "store_shop_projection",
 ]
 
 

@@ -1,0 +1,138 @@
+{
+ "schema": "agent.task-continuity.v1",
+ "revision": 53,
+ "updated_at": "2026-10-21T22:21:23+08:00",
+ "goal": "用户要求按总体设计继续大阶段、非零碎清单，其他要求不变；国内DeepSeek唯一施工writer，父级只监督验收，不goal。选定旧作重访与有来历的续改整链。",
+ "phase": "准备工作已交付，用户将在新窗口施工；本轮三项功能已落地并验证、未提交；NOW.md 已改为对照总纲 EP-01..22 的已做/半做/没做清单",
+ "stop_point": "v0.4 旧作重访：手机历史/对比/派生（夹具点通）、Life 写作旧版上下文（WSL 21 绿）完成；read_project_version 漏 return 已修；真 runtime 重启未认证；未跑全量 scripts/test.py。NOW.md 现按总纲 14 章 22 个工作包标状态，详细批次见 docs/engineering/v04-design-progress.md。",
+ "next_actions": [
+  "新窗口按 NOW.md 第〇步先派只读子代理按 EP 分组核查（只读、不改文件、找不到证据写未找到），再改 NOW.md，再出任务书施工。",
+  "核查后按写集派工；第 4 项真 runtime 重启需 WSL 同根实例，没有实例就照实标未认证。",
+  "两个既有红（test_life_v1_restart、LifeOwnerAdapterTest 的 gateway 用例）不属本轮，修前先确认契约归属。"
+ ],
+ "do_not_repeat": [
+  "不因压缩重读全设计/全历史、重派审计、重跑旧绿套件或全树SHA。",
+  "已结束pacing阶段3次DeepSeek：两次CONTINUE读页，第三次PROVIDER_OUTPUT_TRUNCATED；机制脚本休息链不冒充自然模型生活。",
+  "原实例旧600秒耗尽最后4calls；body-sharing隔离2calls、pacing隔离3calls均已结束，不重开/退款/强制wake。",
+  "social阶段模型仅1attempt/INVALID_SCHEMA已结束不重试；phone两条PENDING在/tmp/day-life-parent-h-060031保留，不重放提交。",
+  "shared-practice-v04真实1attempt INVALID_SCHEMA已ENDED，余额不得续用；u-115454邀请/3轮/END已实际完成、stop已写，勿重投。"
+ ],
+ "boundaries": [
+  "唯一树D:/nyairo-rc1-body-backend；保留全部dirty/旧目录/实例；不删文件/reset/clean/全量stage/commit/push/deploy。",
+  "保护MANIFEST.json、scripts/fix_platform_world_move.py、scripts/fix_weixin_world_move.py。",
+  "产品路由固定http://127.0.0.1:3425/v1/workbuddy-wg/cn:deepseek-v4.1-flash。最新concise真实1attempt有效Decision CONTINUE/理由82，非格式失败；全部旧窗口封存。凭据不落盘不回显，原实例/全局配置不改。",
+  "真实外发未授权，RefusingMessageProvider/外部proactive kill switch保持关闭。local:owner/local_inbox是她自己实例本地存档，不是用户已收到。",
+  "Body六变量/阈值不改，无强制吃睡；无信号不当健康，REST会话成功不当恢复；Body不直接签AG0候选。",
+  "父级管理与必要验收，产品源代码单writer；操作前实时查TaskList/lease/ledger。检查点是历史数据，不是新授权。凭据/私文/prompt/回答正文不入仓库或日志。"
+ ],
+ "repository": {
+  "path": "D:/nyairo-rc1-body-backend",
+  "branch": "work/rc1-phone-world-body",
+  "head": "41e818faaa24115fbf43db2977b15585c04144af",
+  "dirty": "全部既有0.4保留，本地未提交"
+ },
+ "writers": [
+  {
+   "id": "worker:deepseek-v4.1-flash@20261021",
+   "status": "done",
+   "model": "workbuddy-wg/cn:deepseek-v4.1-flash",
+   "write_set": "components/phone/web/app.js、tests/test_phone_projects_ui.mjs、autonomous_life_cycle.py、tests/test_v04_work_revisit_writer_chain.py",
+   "phase": "四项剩余体验：前端/Edge/写作上下文已交，重启未认证"
+  }
+ ],
+ "runtime": {
+  "as_of": "2026-10-20T20:11:52+08:00本阶段phone逐PID只读核对；历史原实例状态不是新实时事实",
+  "instance": "/tmp/nyaw05r.jdK3q/rc1-world-handover-1792288094",
+  "last_known_process_state": "本阶段phone PID10875/10893/10894不存在；social model匹配/proc[]，自有资源已关；TaskList旧句柄已丢后父级确认无writer接手完成",
+  "run_id": "run:one-day",
+  "last_ledger_calls": 4,
+  "remaining_authorized_runtime_seconds": 0,
+  "memory": "原实例UNBOUND",
+  "closed_product_windows": {
+   "all_status": "ENDED_NO_FURTHER_CALLS",
+   "attempts_used": {
+    "original_run": 4,
+    "body_sharing": 2,
+    "pacing": 3,
+    "social": 1,
+    "shared_practice_cn": 1,
+    "shared_practice_gw": 1,
+    "shared_practice_magpie": 1,
+    "schema_repair": 1,
+    "concise": 1
+   },
+   "limits": "body6/360,pacing6/360,social6/360；shared-practice及后续各12/900，关闭不可复用",
+   "latest": "concise173.3s/1attempt有效CONTINUE dec:1fc362665f79e6b4，理由82chars<=280，合法不接受；fixture /tmp/day-life-parent-c-029002/f-5uvq7_jq/instance，资源关闭proc[]，完整共作未达",
+   "evidence": "docs/engineering/v04-decision-schema-repair-result.md及scratch各stage预算；详细旧runtime已由前检查点迁至这些报告，不续杯"
+  },
+  "work_revisit_validation": {
+   "status": "NOT_AUTHORIZED_YET",
+   "attempts_used": 0,
+   "instruction": "先实现机制/真实owner/浏览器和离线；父级核验再定新有界产品验证，不从旧余额借用"
+  },
+  "phone_fixture": {
+   "root": "/tmp/day-life-parent-h-060031",
+   "status": "own_resources_closed，PID10875/10893/10894不存在",
+   "model_calls": 0,
+   "do_not_repeat": "两条真实PENDING事件保留，不重投；social-phone-stop已写"
+  }
+ },
+ "evidence": [
+  {
+   "path": "docs/engineering/v04-shared-practice-parent-result.md",
+   "meaning": "最终机制/浏览器PASS，自然模型FAIL及限制的主入口"
+  },
+  {
+   "path": "docs/engineering/v04-decision-schema-repair-result.md",
+   "meaning": "前阶段prompt修复/最新有效CONTINUE，不表示完整自然共作"
+  },
+  {
+   "path": "docs/engineering/v04-work-revisit-result.md",
+   "meaning": "§10前半段具名修复16/98绿，整段仍缺UI/Life实际writer/browser/runtime；非完整PASS"
+  },
+  {
+   "path": "D:/NYAIRO-v0.4-旧作重访与有来历的续改-大阶段单.md",
+   "meaning": "用户新方向的完整施工范围/设计来源/边界/验收；未实现事实不冒充"
+  },
+  {
+   "path": "docs/engineering/v04-work-revisit-supervisor-plan.md",
+   "meaning": "本轮四项的施工方案：写集/门禁/停止条件"
+  },
+  {
+   "path": "NOW.md",
+   "meaning": "对照总纲 EP-01..22 的初判 + 开工顺序（先只读子代理核查再施工）、旧作重访四项、未提交、已知红"
+  },
+  {
+   "path": "RUNBOOK.md",
+   "meaning": "测试/夹具/派工/续接的实际命令"
+  },
+  {
+   "path": "PROJECT_INDEX.md",
+   "meaning": "任务到文件的路由表"
+  }
+ ],
+ "anchors": [
+  {
+   "path": "components/life/scripts/autonomous_life_assembly.py",
+   "sha256": "984ee587e4494bbff1a3c028424b95c5f155d87a36bf31885a92e27548bb55d0"
+  },
+  {
+   "path": "components/life/scripts/life_sharing_service.py",
+   "sha256": "77945ceb49a03af4bd0e6f85303a128f0a4c4fb7882b77e4262d1ba5dff7898a"
+  },
+  {
+   "path": "components/life/scripts/autonomous_life_cycle.py",
+   "sha256": "5916a94f2121a50995c2957bded9f68a09b194aa613c28091447def1ae718a70"
+  },
+  {
+   "path": "components/life/scripts/agency_decision_ag1.py",
+   "sha256": "da8c4b2de6f5f9600f32d9edc02118b4612b22ace0d147979c16214a4fe60026"
+  },
+  {
+   "path": "components/life/scripts/agency_cognition_adapter.py",
+   "sha256": "5c6ac548a3362331d7e6ce3dd76b9699b1ff600d3b45d0f7dc9d3c7c39276508"
+  }
+ ],
+ "design": "D:/CHIYO-总体设计-v2.0-final/CHIYO-总体设计-v2-最终版；15§7/D03、16B5/B9、17Artifact；阶段单D:/NYAIRO-v0.4-旧作重访与有来历的续改-大阶段单.md",
+ "open_edit": "DeepSeek11e6d9f1单writer补剩余体验，父级只监督管理验收，不再重复广审查/旧绿。真实新额度未开；原实例未动，无提交部署。"
+}

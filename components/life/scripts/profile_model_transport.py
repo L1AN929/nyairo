@@ -11,6 +11,20 @@ has: same endpoint, same auth, same request shape, plus a normal user agent.
 It reads nothing from the model and holds no credentials of its own: the caller passes the
 already-resolved ``base_url``/``api_key`` from the profile.
 
+LPC0B-R3: a thinking provider's answer is not always in ``content``
+-------------------------------------------------------------------
+The configured ``cn:deepseek-v4.1-flash`` is a reasoning model: its thinking tokens are counted
+*inside* ``usage.completion_tokens`` (``completion_tokens_details.reasoning_tokens``), so they are
+charged against the same ``max_tokens`` as the answer.  Two facts follow, and this transport
+enforces both:
+
+* an answer that never started because the cap ran out arrives as ``content: ""`` with
+  ``finish_reason: "length"``.  That is a *truncated* answer, and it is reported as
+  ``PROVIDER_OUTPUT_TRUNCATED`` -- never as ``PROVIDER_MALFORMED_RESPONSE``, which the cognition
+  adapter turns into ``INVALID_JSON`` and which therefore blamed the model for a cap it was given;
+* ``message.reasoning_content`` is a derivation, not an answer.  It is measured (length only) for
+  telemetry and then dropped: it is never ``text``, never parsed, never a decision.
+
 W05R-R1c: the finite send phase and the response wait are separate
 ------------------------------------------------------------------
 The pause confirmation has to be coordinated with the **actual send**, not with a check that
@@ -33,7 +47,7 @@ import json
 import socket
 import time
 import urllib.parse
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 #: A plain, honest user agent.  Not a disguise -- just not the default library string that the
 #: front end blocks.
@@ -46,7 +60,9 @@ class TransportResult:
     """The shape ``AgencyModelClient`` and the adapters expect back."""
 
     def __init__(self, *, text: str, latency_ms: int, status: int,
-                 usage: Optional[dict[str, Any]] = None, model: str = "") -> None:
+                 usage: Optional[dict[str, Any]] = None, model: str = "",
+                 finish_reason: Optional[str] = None, reasoning_chars: int = 0,
+                 content_chars: int = 0) -> None:
         self.text = text
         self.latency_ms = latency_ms
         self.status = status
@@ -57,6 +73,13 @@ class TransportResult:
         self.reported_cost_usd = None
         self.usage_source = "provider" if self.usage else None
         self.model = model
+        #: LPC0B-R3: provider metadata about the *shape* of the answer -- never its text.
+        #: ``reasoning_chars`` is only ever a length: a thinking model's derivation is not an
+        #: answer and must never be promoted into ``text``.
+        self.finish_reason = finish_reason
+        self.reasoning_present = bool(reasoning_chars)
+        self.reasoning_chars = int(reasoning_chars or 0)
+        self.content_chars = int(content_chars or 0)
 
 
 class _PendingSend:
@@ -169,7 +192,9 @@ class OpenAICompatibleTransport:
         """Read and parse the response.  Never runs under a pause/shared/control lock."""
 
         from agency_model_client import (AgencyModelClientError, PROVIDER_AUTH_ERROR,
-                                         PROVIDER_MALFORMED_RESPONSE, PROVIDER_RATE_LIMITED,
+                                         PROVIDER_EMPTY_CONTENT, PROVIDER_MALFORMED_RESPONSE,
+                                         PROVIDER_OUTPUT_TRUNCATED, PROVIDER_RATE_LIMITED,
+                                         PROVIDER_REASONING_ONLY, PROVIDER_REQUEST_REJECTED,
                                          PROVIDER_SERVER_ERROR, TRANSPORT_CONNECTION,
                                          TRANSPORT_TIMEOUT)
 
@@ -199,7 +224,10 @@ class OpenAICompatibleTransport:
             if status >= 500:
                 raise AgencyModelClientError(PROVIDER_SERVER_ERROR,
                                              "http %d %s" % (status, detail))
-            raise AgencyModelClientError(PROVIDER_MALFORMED_RESPONSE,
+            # LPC0B-R3: a refused *request* (bad parameter, unsupported response_format, wrong
+            # body) is not a malformed *model response*; reporting it as one is how a payload
+            # problem used to masquerade as "the model emitted bad JSON".
+            raise AgencyModelClientError(PROVIDER_REQUEST_REJECTED,
                                          "http %d %s" % (status, detail))
 
         latency_ms = int((time.monotonic() - pending.started) * 1000)
@@ -207,14 +235,37 @@ class OpenAICompatibleTransport:
         try:
             parsed = json.loads(raw)
             choices = parsed.get("choices") or []
-            text = str((choices[0].get("message") or {}).get("content") or "") if choices else ""
-        except (ValueError, AttributeError, IndexError) as exc:
+            choice = choices[0] if choices else {}
+            message = (choice.get("message") or {}) if isinstance(choice, Mapping) else {}
+            content = message.get("content")
+            reasoning = message.get("reasoning_content")
+            finish_reason = choice.get("finish_reason") if isinstance(choice, Mapping) else None
+        except (ValueError, AttributeError, IndexError, TypeError) as exc:
             raise AgencyModelClientError(
                 PROVIDER_MALFORMED_RESPONSE, "unparsable body: %s" % raw[:200]) from exc
-        if not text.strip():
-            raise AgencyModelClientError(PROVIDER_MALFORMED_RESPONSE, "empty completion")
-        return TransportResult(text=text, latency_ms=latency_ms, status=status,
-                               usage=parsed.get("usage"), model=str(parsed.get("model") or ""))
+        if not isinstance(content, str):
+            content = "" if content is None else json.dumps(content, ensure_ascii=False)
+        # LPC0B-R3: ``reasoning_content`` is a thinking model's derivation.  It is measured for
+        # telemetry and then dropped: it is never text, never parsed, never a decision.  Reading
+        # a decision out of it would be exactly the free-text parse the order forbids.
+        reasoning_text = reasoning if isinstance(reasoning, str) else ""
+        content_chars = len(content.strip())
+        reasoning_chars = len(reasoning_text.strip())
+        finish = finish_reason if isinstance(finish_reason, str) else None
+        if not content_chars:
+            shape = ("finish_reason=%s content_chars=0 reasoning_chars=%d"
+                     % (finish, reasoning_chars))
+            if finish == "length":
+                # The token cap ran out before the answer started: a real, billed call whose
+                # answer was cut off -- not bad JSON.
+                raise AgencyModelClientError(PROVIDER_OUTPUT_TRUNCATED, shape)
+            if reasoning_chars:
+                raise AgencyModelClientError(PROVIDER_REASONING_ONLY, shape)
+            raise AgencyModelClientError(PROVIDER_EMPTY_CONTENT, shape)
+        return TransportResult(text=content, latency_ms=latency_ms, status=status,
+                               usage=parsed.get("usage"), model=str(parsed.get("model") or ""),
+                               finish_reason=finish, reasoning_chars=reasoning_chars,
+                               content_chars=content_chars)
 
     def complete(self, *, system_prompt: str, user_prompt: str,
                  timeout_s: Optional[float] = None,

@@ -278,6 +278,54 @@ class ManagedArtifactStore:
                 return dict(row) if row else None
         except sqlite3.Error:
             return None
+    #: Bounds on one page of version *metadata*.  A caller can page with the returned cursor; the
+    #: owner never returns an unbounded list and never returns version bodies here.
+    DEFAULT_VERSION_PAGE = 20
+    MAX_VERSION_PAGE = 50
+
+    def list_versions(self, artifact_id: str, *, limit: int = DEFAULT_VERSION_PAGE,
+                      before_version_number: int | None = None) -> dict[str, Any] | None:
+        """One page of this artifact's version metadata, newest first (no bodies).
+
+        ``None`` means the owner could not read (unavailable), never "no versions".  A known
+        artifact answers with an explicit ``total_versions`` plus a ``next_before_version_number``
+        cursor, so a caller can tell a short page from a whole history instead of guessing.  The
+        versions themselves are immutable rows (triggers below refuse UPDATE/DELETE), so a paged
+        read can never observe a rewritten history.
+        """
+        cap = max(1, min(int(limit), self.MAX_VERSION_PAGE))
+        try:
+            with self._connection() as con:
+                artifact = con.execute(
+                    "SELECT artifact_id,head_version_id,lifecycle FROM managed_artifacts"
+                    " WHERE artifact_id=?", (artifact_id,)).fetchone()
+                if artifact is None:
+                    return None
+                sql = ("SELECT version_id,artifact_id,version_number,parent_version_id,"
+                       "content_sha256,length(content) AS content_chars,created_at,operation_key"
+                       " FROM artifact_versions WHERE artifact_id=?")
+                params: list[Any] = [artifact_id]
+                if before_version_number is not None:
+                    sql += " AND version_number<?"
+                    params.append(int(before_version_number))
+                sql += " ORDER BY version_number DESC LIMIT ?"
+                params.append(cap)
+                rows = [dict(row) for row in con.execute(sql, tuple(params)).fetchall()]
+                total = int(con.execute(
+                    "SELECT count(*) FROM artifact_versions WHERE artifact_id=?",
+                    (artifact_id,)).fetchone()[0])
+                oldest = (int(rows[-1]["version_number"]) if rows else None)
+                has_older = oldest is not None and oldest > 1
+                return {
+                    "versions": rows,
+                    "total_versions": total,
+                    "returned": len(rows),
+                    "head_version_id": artifact["head_version_id"],
+                    "lifecycle": artifact["lifecycle"],
+                    "next_before_version_number": oldest if has_older else None,
+                }
+        except sqlite3.Error:
+            return None
 
     def read_effect_receipt(self, operation_key: str) -> dict[str, Any] | None:
         try:

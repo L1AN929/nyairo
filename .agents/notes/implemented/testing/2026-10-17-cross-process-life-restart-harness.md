@@ -40,9 +40,39 @@ worker 里的决策与内容仍是确定性替身（`StubCognition`/`StubWriter`
 更糟的是，一个都没匹配上时会**静默回落**到通用 `StubCognition`（它也取 START），把"没找到"变成一次伪选择。
 
 现在的规则：① 提到该产物且 `CONTINUE` 合法 → CONTINUE；② 否则 `START` 合法 → START；③ 两者都没有 →
-**抛错并 dump 全部候选**，不回落。同一窗口另加一条精确负控：强制 START → 必须被拒
-（`REJECTED_STALE` / `CANNOT_START_WHILE_FOREGROUND_ACTIVE`）且 head 与 Activity revision 不变。
-每次请求的真实候选与选择都写进 worker 报告（`cognition_seen` / `cognition_chosen`），复验者不必猜。
+**抛错并 dump 全部候选**，不回落。每次请求的真实候选与选择都写进 worker 报告
+（`cognition_seen` / `cognition_chosen`），复验者不必猜。
+
+## 负控按收紧后的矩阵改判（2026-10-26）
+
+AG-1 在 `foreground_holds_occupancy`（前台引用还在、且不是 WAITING）时**不再提供**必被拒的 START
+（`.agents/notes/implemented/architecture/2026-10-26-v04-day-life-decision-legality.md`）。于是本用例
+第二轮那个窗口的 offer 只剩一件能走下去的形状：工作产物的 `CONSIDER_PERSONAL_OPPORTUNITY` 只剩
+`DEFER`、阅读产物的 `CONSIDER_PERSONAL_OPPORTUNITY` 只剩 `DEFER`、地点的
+`CONSIDER_WORLD_OPPORTUNITY` 只剩 `DEFER`，只有当前活动的 `CONTINUE_CURRENT` 还有
+`DEFER/CONTINUE/PAUSE/ABANDON`。
+
+旧写法因此自己变红：父级 `scratch/day-life-final-exact-gen1.log`（`tests/test_life_v1_restart.py:388`）
+要求"窗口里仍有一个 START"，而该窗口四条候选里唯一带非 DEFER 的只有那条 CONTINUE_CURRENT；旧的
+`StartControlLoopback` 也过时——它只挑"AG-1 真的允许 START 的候选"，收紧后的窗口里根本不存在这种
+候选。两处都在测试侧改，产品源码未动：
+
+- 正文（父进程断言）：ACTIVE 同窗口**没有任何候选合法 START**（逐条断言，不是"某处有一个"），并单独
+  精确断言原 work 产物的 personal 候选 `legal` 里没有 START；合法续写的是**同一个 Activity 的新版本**
+  （CONTINUE → `owner committed`、head 出新版本、Activity 仍 ACTIVE）。
+- 负控（worker 里的 `StartControlLoopback`）：从本轮**真实候选**里取 `CONSIDER_PERSONAL_OPPORTUNITY`
+  且提到原 work 的那一条（按身份挑，不按顺序），先断言它的 `legal_decisions` 里**没有** START
+  （`start_offered=False`；若仍在提供就抛错并打印整份 window），再把 `decision=START` 强行塞进
+  `raw_output`。
+- 精确拒绝层级：现在拒它的是 **AG-1**，`outcome=DECISION_FAILED`、
+  `detail=INVALID_MODEL_OUTPUT:DECISION_CANDIDATE_INCOMPATIBLE`（`FAILURE_CLASS_ILLEGAL_DECISION_MATRIX`）、
+  `decision=None`、`adoption_status=None`、`llm_calls=1`。**不再**写死 AG-2 的
+  `REJECTED_STALE`/`CANNOT_START_WHILE_FOREGROUND_ACTIVE`——那是收紧前的层级，理由作为历史保留在上面。
+  断言只接受这一种具体失败类，不接受"任意失败"。
+- 硬断言逐条保留：跨进程同 run、预算 reserve 跨进程延续、暂停轮 0 calls、同一 Activity、新 head、
+  非法 START 之后 head 与 Activity revision 都不变、书签仍在、空档期 Memory 不写。
+- 挑不到原 work 的 personal 候选就抛错并 dump 全部候选，**不回落**到别的候选（回落会把"没找到"
+  变成一次伪选择，正是本笔记开头那类根因）。
 
 ## Alternatives considered
 
@@ -60,3 +90,15 @@ worker 里的决策与内容仍是确定性替身（`StubCognition`/`StubWriter`
   证据强度与原单第 6 条对齐；`close()` 必须真的释放 lease 这一点也被测试钉住。
 - **代价与已知上限**：一条用例多两个子进程（约 13 秒）；worker 不是 resident 循环，所以入口状态如实报
   `STOPPED` 而不是虚构 `IDLE`；父进程刻意不建 runtime，因此这条用例不能复用"父进程先跑一轮"的写法。
+
+## Verification
+
+- 唯一 exact ID：`tests.test_life_v1_restart.RealLifeRestartTest.test_a_real_restart_keeps_run_identity_and_continues_the_same_activity`。
+  单跑 `Ran 1 test ... OK`、`EXIT=0`（18.084s），日志 `scratch/day-life-final-restart-gen2.log`（末尾带真实
+  returncode）。按指示**只跑这一条**，没有重跑前三绿，也没有跑整组。
+- 红证保留：`scratch/day-life-final-exact-gen1.log`（旧断言在 `tests/test_life_v1_restart.py:388` 红）
+  原样未删未改；`day-life-final-consume-exact-gen1.log` 同样未动。
+- 产品源码零改动（只改 `tests/test_life_v1_restart.py` 与本笔记）；`PYTHONDONTWRITEBYTECODE=1`、
+  `TMPDIR=/tmp/nyaw05r.jdK3q`、`PYTHONPATH=.../v03-retain-hooks`（保留 fixture / 事务退役 rename / socket
+  保留）；无清理、无 `py_compile`、无全库或全树 SHA。
+- 未验证的部分（具名）：worker 仍不是 resident 循环；真实模型、24h、外网、发布/commit 都没有涉及。

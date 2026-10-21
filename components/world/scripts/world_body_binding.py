@@ -315,6 +315,26 @@ def object_capability(hermes_home: Optional[Path | str] = None,
     return substrate.declared_capability(name, hermes_home)
 
 
+def owned_catalog_map(hermes_home: Optional[Path | str] = None) -> dict[str, str]:
+    """``{item_instance_id: catalog_item_id}`` for every OWNED instance.
+
+    Read-only join used by the surface / fixture derivations.  Deliberately no
+    location filtering: *where* an instance is remains the placement's answer,
+    and this map must never become a second position truth.
+    """
+
+    economy = load_economy(hermes_home) or {}
+    mapping: dict[str, str] = {}
+    for item in _economy_items(economy):
+        if str(item.get("disposition")) != "OWNED":
+            continue
+        object_id = item.get("item_instance_id")
+        catalog_item = item.get("catalog_item_id")
+        if isinstance(object_id, str) and isinstance(catalog_item, str):
+            mapping[object_id] = catalog_item
+    return mapping
+
+
 def cross_authority_refs(
     substrate: Mapping[str, Any],
     economy: Optional[Mapping[str, Any]],

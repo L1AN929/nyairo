@@ -134,11 +134,17 @@ WORKER = textwrap.dedent(
                 latency_ms=1)
 
     class StartControlLoopback(StubCognition):
-        """负控：只挑 AG-1 真的允许 START 的候选，并优先挑**关于原 artifact** 的那个。
+        """负控：拿本轮真实施工里**原 work 的 personal 候选**，故意强塞一个 START。
 
-        候选 id 每次运行都不同、候选表顺序不稳定；靠“第一个非世界候选”会挑到只许
-        CONTINUE/PAUSE 的当前活动候选，AG-1 直接 DECISION_CANDIDATE_INCOMPATIBLE，
-        负控就测不到 AG-2 在同一窗口的拒绝。挑不到合法 START 就当场失败，不静默降级。
+        前台 Activity 还 ACTIVE 时，AG-1 已经按“必被拒就不提供”把 START 撤掉了：那条候选的
+        ``legal_decisions`` 只剩 DEFER 之类。负控证明的正是**撤掉是对的**——先在同一窗口精确断言
+        START 不合法，再把 START 强行塞进 raw_output，AG-1 必须用
+        ``INVALID_MODEL_OUTPUT:DECISION_CANDIDATE_INCOMPATIBLE`` 拒掉它，且什么都不变。
+
+        候选 id 每次运行都不同、候选表顺序不稳定；旧版“第一个 START-legal 候选”在收紧后的矩阵里
+        根本不存在（AG-1 已不再提供必被拒的 START），于是负控会退成“AG-1 拒绝了一条没人给过的
+        offer”。所以这里只认本轮真实的 personal 候选：挑不到就直接抛错并打印整份 offer，**不回落**
+        到别的候选（那会把“没找到”变成一次伪选择）。
         """
 
         def __init__(inner, work):
@@ -160,30 +166,43 @@ WORKER = textwrap.dedent(
                        "refs": [str(x) for x in (c.get("target_refs") or [])],
                        "source_ref": c.get("source_ref")}}
                       for c in candidates]
-            about_ids = {{str(c.get("candidate_id")) for c in candidates
-                         if any(inner.work in ref for ref in
-                                ([str(x) for x in (c.get("target_refs") or [])]
-                                 + [str(c.get("source_ref") or "")]))}}
-            start_legal = [c for c in candidates
-                           if "START" in [str(x) for x in (c.get("legal_decisions") or [])]]
-            chosen = (next((c for c in start_legal
-                            if str(c.get("candidate_id")) in about_ids), None)
-                      or (start_legal or [None])[0])
-            if chosen is None:
+
+            def about_work(candidate):
+                return any(inner.work in ref for ref in
+                           ([str(x) for x in (candidate.get("target_refs") or [])]
+                            + [str(candidate.get("source_ref") or "")]))
+
+            work_personal = [c for c in candidates
+                             if c.get("candidate_kind") == "CONSIDER_PERSONAL_OPPORTUNITY"
+                             and about_work(c)]
+            if not work_personal:
                 raise AssertionError(
-                    "no candidate is AG-1 legal for START in this window: %r" % (window,))
+                    "this window offers no PERSONAL_OPPORTUNITY candidate about the original "
+                    "work artifact %r, so the illegal START cannot be constructed; offered=%r"
+                    % (inner.work, window))
+            chosen = work_personal[0]
+            per = [str(x) for x in (chosen.get("legal_decisions") or [])]
             inner.control = {{"candidate_id": chosen.get("candidate_id"),
                               "kind": chosen.get("candidate_kind"),
-                              "legal": [str(x) for x in (chosen.get("legal_decisions") or [])],
-                              "about_work": str(chosen.get("candidate_id")) in about_ids,
+                              "source": chosen.get("source_kind"),
+                              "legal": per,
+                              "start_offered": "START" in per,
+                              "about_work": True,
+                              "work_personal_count": len(work_personal),
                               "window": window}}
+            if "START" in per:
+                # The offer regressed: AG-1 is again handing out a START that AG-2 is certain to
+                # refuse.  Fail loudly with the whole window instead of forcing it "successfully".
+                raise AssertionError(
+                    "AG-1 still offers START for a personal candidate whose Activity is in the "
+                    "foreground; %r" % (inner.control,))
             return ag1.CognitiveDecisionResponse(
                 model_run_ref="model_run:stub:start-control", model_id=inner.model_id,
                 model_version=inner.model_version,
                 raw_output={{"decision": "START",
                             "selected_candidate_id": chosen["candidate_id"],
                             "reason_codes": allowed[:1],
-                            "short_rationale": "deliberately re-start the running work",
+                            "short_rationale": "deliberately re-start work that is in the foreground",
                             "deferred_candidate_ids": []}},
                 latency_ms=1)
 
@@ -266,13 +285,13 @@ WORKER = textwrap.dedent(
         activity_ref = resumed.get("activity_ref")
         report["activity_after"] = (dict(runtime.activity_read.get_activity(activity_ref))
                                     if activity_ref else None)
-        # precise negative control for the root cause this harness hit: in the same window a
-        # branch that deliberately takes a START AG-1 really allows (about this very artifact
-        # when the window offers one) is refused by AG-2 while a foreground Activity is ACTIVE,
-        # and it changes nothing.  That is the failure mode the restart of an unfinished
-        # Activity must never regress into.  The branch is order-free on purpose: candidate ids
-        # change every run, so "the first non-world candidate" sometimes only allows
-        # CONTINUE/PAUSE and AG-1 then rejects the START before AG-2 can be exercised.
+        # precise negative control for the root cause this harness hit: in the same window, take
+        # the *real* personal-opportunity candidate about this very work artifact, prove AG-1 no
+        # longer offers a START for it (its reference is still in the foreground), then force the
+        # START anyway.  AG-1 must refuse it with its own exact failure class and change nothing;
+        # that is the failure mode the restart of an unfinished Activity must never regress into.
+        # Candidate ids and order change every run, so the branch picks by identity, never by
+        # position, and never falls back to a candidate that AG-1 would accept.
         report["head_before_start_control"] = head()
         control_cognition = StartControlLoopback(WORK)
         runtime.decision_service.cognition_adapter = control_cognition
@@ -380,31 +399,49 @@ class RealLifeRestartTest(DScenarioBase):
         self.assertEqual(second["round"]["activity_ref"], first["round"]["activity_ref"], second)
         self.assertEqual(second["cognition_calls"], 1, second)
         # the branch really *continued* the running work instead of re-starting it, and it chose
-        # from a legal set that also offered a START about the same artifact (which AG-2 refuses
-        # while a foreground Activity is ACTIVE) -- so this is not a generic stub's pick
+        # CONTINUE from a window in which AG-1 no longer offers the START that AG-2 is certain to
+        # refuse (a foreground Activity is ACTIVE, so any START there would be a second foreground)
         self.assertEqual(first["cognition_chosen"][-1]["decision"], "START", first)
         self.assertEqual(second["cognition_chosen"][-1]["decision"], "CONTINUE", second)
         self.assertIn("CONTINUE", second["cognition_chosen"][-1]["legal"], second)
-        self.assertTrue(any("START" in entry["legal"]
-                            for entry in second["cognition_seen"][-1]),
-                        second["cognition_seen"][-1])
+        window = second["cognition_seen"][-1]
+        self.assertTrue(window, second)
+        # exact, not "some candidate somewhere": in this window nothing at all is legal for START
+        self.assertEqual([entry for entry in window if "START" in entry["legal"]], [], window)
+        # ... and specifically not the personal opportunity about the original work artifact
+        # (whose Activity is still in the foreground), which is exactly the offer that was withdrawn
+        work_personal = [entry for entry in window
+                         if entry["kind"] == "CONSIDER_PERSONAL_OPPORTUNITY"
+                         and any(work in ref for ref in
+                                 (entry["refs"] + [entry["source_ref"] or ""]))]
+        self.assertTrue(work_personal, window)
+        for entry in work_personal:
+            self.assertNotIn("START", entry["legal"], entry)
         # no adoption rejection: the continuation was accepted, and the step really ran
         self.assertEqual(second["round"]["outcome"], "ACTED", second)
         self.assertNotIn("REJECTED", str(second["round"]["adoption_status"] or ""), second)
         self.assertTrue(str(second["round"]["detail"] or "").startswith("owner committed"),
                         second["round"])
-        # ... and the *same* window would have refused a START re-entry (the failure this harness
-        # was born from): an ACTIVE foreground refuses START, and nothing changes
+        # ... while the *same* window refuses a forced START re-entry of that very work: the control
+        # takes the real personal candidate about this artifact, proves START is not on offer for
+        # it, and submits START anyway.  AG-1 -- not AG-2 -- is the layer that refuses it now, and
+        # it refuses it with its own precise failure class (not "any failure", and no longer the
+        # hard-coded AG-2 adoption rejection this harness used to assert).
         control = second["start_control"]
-        self.assertEqual(control["outcome"], "ADOPTION_REJECTED", control)
-        self.assertEqual(control["adoption_status"], "REJECTED_STALE", control)
-        self.assertIn("CANNOT_START_WHILE_FOREGROUND_ACTIVE", str(control["detail"]), control)
-        # the control really chose from the AG-1 legal set instead of trusting candidate order:
-        # a START-legal candidate about this very artifact, so AG-2 (not AG-1) is what refuses
         control_candidate = second["start_control_candidate"]
-        self.assertIn("START", control_candidate["legal"], control_candidate)
+        self.assertEqual(control_candidate["kind"], "CONSIDER_PERSONAL_OPPORTUNITY",
+                         control_candidate)
+        self.assertEqual(control_candidate["source"], "PERSONAL_OPPORTUNITY", control_candidate)
         self.assertTrue(control_candidate["about_work"], control_candidate)
-        self.assertEqual(control["decision"], "START", control)
+        self.assertFalse(control_candidate["start_offered"], control_candidate)
+        self.assertNotIn("START", control_candidate["legal"], control_candidate)
+        self.assertEqual(control["outcome"], "DECISION_FAILED", control)
+        self.assertEqual(control["detail"],
+                         "INVALID_MODEL_OUTPUT:DECISION_CANDIDATE_INCOMPATIBLE", control)
+        self.assertIsNone(control["decision"], control)
+        self.assertIsNone(control["adoption_status"], control)
+        self.assertEqual(control["llm_calls"], 1, control)
+        # ... and the refused START changed nothing: same head, same Activity, same revision
         self.assertEqual(second["head_after_start_control"], second["head_after_round"], second)
         self.assertEqual(second["activity_after_control"]["status"], "ACTIVE", second)
         self.assertEqual(second["activity_after_control"]["revision"],

@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -64,20 +65,33 @@ class AbandonNowCognition(nb.ScriptedNeighborhoodCognition):
 
 
 class IllegalAbandonCognition(nb.ScriptedNeighborhoodCognition):
-    """An *illegal* exit: ``ABANDON`` attached to a candidate that only allows DEFER/START."""
+    """An *illegal* exit: ``ABANDON`` attached to a candidate that may not be abandoned.
+
+    The candidate is picked from this round's **real** AG-1 offer, deterministically: its own
+    ``legal_decisions`` must not contain ``ABANDON`` (so the Decision is illegal for *that*
+    candidate) and must not contain ``CONTINUE`` (that is the running stay's own candidate).
+    A ``DEFER``-only candidate qualifies, and so does one that may ``START``.  If this round
+    offers no such candidate the stand-in raises with the whole offer printed -- it never falls
+    back to an ``ABANDON`` that AG-1 would accept, because a legal abandon proves nothing.
+    """
 
     def _choose(self, candidates: list[dict], facts: dict, here: str) -> tuple:
-        running = next((candidate for candidate in candidates
-                        if "CONTINUE" in self._legal(candidate)), None)
-        if running is not None:
-            for candidate in candidates:
-                legal = self._legal(candidate)
-                if "CONTINUE" in legal or "ABANDON" in legal:
-                    continue
-                if "START" in legal:
-                    return (candidate, "ABANDON", "想用一个不允许 ABANDON 的候选结束它")
-            return (running, "ABANDON", "只有这一条候选可用")
-        return super()._choose(candidates, facts, here)
+        for candidate in candidates:
+            legal = self._legal(candidate)
+            if "ABANDON" in legal or "CONTINUE" in legal:
+                continue
+            if "DEFER" in legal or "START" in legal:
+                return (candidate, "ABANDON",
+                        "想用一个不允许 ABANDON 的候选结束它：%s"
+                        % ",".join(self._refs(candidate)))
+        offered = [{"candidate_id": candidate.get("candidate_id"),
+                    "kind": candidate.get("candidate_kind"),
+                    "targets": self._refs(candidate),
+                    "legal": self._legal(candidate)}
+                   for candidate in candidates]
+        raise AssertionError(
+            "no candidate in this round refuses ABANDON, so the illegal exit cannot be "
+            "constructed; offered=%s" % json.dumps(offered, ensure_ascii=False, sort_keys=True))
 
 
 class StubbornContinueCognition(nb.ScriptedNeighborhoodCognition):

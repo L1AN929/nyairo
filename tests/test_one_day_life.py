@@ -891,6 +891,37 @@ class ReportTest(OneDayTestCase):
             "counters": dict(counters or {}),
             "soak_24h": "SOAK_RUNNING_24H"}), encoding="utf-8")
 
+    def _write_coverage(self, windows, *, pid=9100):
+        """The per-process coverage ledger the report reads, built the way a resident builds it.
+
+        每行都由 ``life_runtime_coverage`` 自己的构造器产出（``new_process_record`` +
+        ``close_process_record``）：带本进程量到的 ``online_seconds``、带真 ``STOP`` 闭合。
+        journal-only 的记录在新规则下永远不能 PASS，所以想验一个「真实一天」的夹具必须
+        把 resident 会写的那本账写出来，而不是让报告从 journal 首末瞬时推断在线。
+        """
+
+        from datetime import datetime
+
+        import life_runtime_coverage as coverage
+
+        state_root = odl.life_state_root(self.instance)
+        state_root.mkdir(parents=True, exist_ok=True)
+        rows = []
+        for index, (started_at, stopped_at) in enumerate(windows):
+            started = datetime.fromisoformat(started_at)
+            stopped = datetime.fromisoformat(stopped_at)
+            row = coverage.new_process_record(
+                process_id=coverage.process_identity(pid=pid + index, started_at=started_at,
+                                                     host="report-fixture"),
+                pid=pid + index, started_at=started_at, monotonic_started=10.0 + index)
+            rows.append(coverage.close_process_record(
+                row, closed_at=stopped_at,
+                online_seconds=max(0, int((stopped - started).total_seconds()))))
+        (state_root / odl.resident_module.RESIDENT_COVERAGE_FILENAME).write_text(
+            json.dumps({"kind": coverage.KIND, "schema_version": coverage.SCHEMA_VERSION,
+                        "state_root": str(state_root), "processes": rows},
+                       ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
+
     def test_report_never_passes_prematurely_and_counts_downtime(self):
         self.prepare_instance()
         self._write_records([{"at": "2026-10-14T00:00:00+00:00", "tick": 1},
@@ -918,14 +949,20 @@ class ReportTest(OneDayTestCase):
         self.prepare_instance()
         rows = _every_30_minutes(51)
         self._write_records(rows, counters={"owner_confirmed_versions": 2, "actions": 2})
-        self.assertEqual(odl.build_report(self.instance,
-                                          target_seconds=86400)["verdict"],
-                         odl.VERDICT_PASS)
-        # 同一份日志，但中间有 7 小时停机：覆盖仍超过 24h，却不算一天的生活
+        # 一天要有本账：journal 的 25 小时跨度本身不算覆盖，账本里那行已闭合进程才是。
+        self._write_coverage([(rows[0]["at"], rows[-1]["at"])])
+        report = odl.build_report(self.instance, target_seconds=86400)
+        self.assertEqual(report["window"]["coverage_basis"], odl.COVERAGE_BASIS_LEDGER)
+        self.assertEqual(report["verdict"], odl.VERDICT_PASS)
+        # 同一份日志，但中间有 7 小时停机：两段已闭合进程 + 中间实测的 offline gap，
+        # 覆盖仍超过 24h，却不算一天的生活
         base_rows = _every_30_minutes(64)
         gapped = base_rows[:20] + base_rows[33:]
         self._write_records(gapped, counters={"owner_confirmed_versions": 2, "actions": 2})
+        self._write_coverage([(gapped[0]["at"], gapped[19]["at"]),
+                              (gapped[20]["at"], gapped[-1]["at"])])
         interrupted = odl.build_report(self.instance, target_seconds=86400)
+        self.assertEqual(interrupted["window"]["coverage_basis"], odl.COVERAGE_BASIS_LEDGER)
         self.assertGreater(interrupted["window"]["coverage_seconds"], 86400)
         self.assertGreater(interrupted["window"]["downtime_seconds"], 0)
         self.assertEqual(interrupted["verdict"], odl.VERDICT_INTERRUPTED)

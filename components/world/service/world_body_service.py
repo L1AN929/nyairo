@@ -142,10 +142,32 @@ class WorldBodyService:
 
         self.gateway_socket_path = config.run_dir / GATEWAY_SOCKET_NAME
         self.request_timeout_seconds = 5.0
+        # v0.4: the explicit local-owner (phone) binding.  Server-side only: the
+        # subject is read from this process's own environment, and the uid from
+        # this process's real identity.  Unset (or a malformed value) leaves the
+        # surface unbound, so local-owner commands are refused.
+        _local_owner_subject = str(
+            os.environ.get("CHIYO_WORLD_LOCAL_OWNER_PHONE") or ""
+        ).strip()
+        self.local_owner_phone_binding = (
+            {
+                "source": "local_owner_phone",
+                "uid": os.getuid(),
+                "subject": _local_owner_subject,
+                "world_home": str(config.world_home),
+            }
+            if _local_owner_subject
+            else None
+        )
         self.gateway_surface = GatewaySurface(
-            self, include_test_objects=bool(getattr(config, "include_test_objects", False))
+            self,
+            include_test_objects=bool(getattr(config, "include_test_objects", False)),
+            local_owner_binding=self.local_owner_phone_binding,
         )
         self.ready = False
+        #: Set by ``shutdown()`` so a serve loop actually stops (a graceful stop
+        #: must not leave a ticking thread behind).
+        self._stop_requested = False
         self.started_at: Optional[str] = None
         self.shutdown_at: Optional[str] = None
         self.body_bootstrapped = False
@@ -376,46 +398,218 @@ class WorldBodyService:
         self.counters["writes"] += 1
         return state
 
+    # -- v0.4: REST is gated by the Body owner, before the Resolver ---------
+    def _rest_body_gate(self, proposal: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+        """Refuse a REST command the Body itself says is impossible.
+
+        The Body owns its thresholds (``RECOVERY_OPEN_FATIGUE``, one session at a
+        time, "stop only what is open").  Those are *not* World facts, so they are
+        decided here, before the Resolver is contacted: no ledger entry, no world
+        write, no body write -- and no raw fatigue value is returned.
+        """
+
+        if not isinstance(proposal, Mapping):
+            return None
+        if str(proposal.get("action") or "").strip().upper() != "REST":
+            return None
+        params = proposal.get("params") or {}
+        desired = str((params or {}).get("state") or "").strip().lower()
+        recovery = (self.body_state or {}).get("recovery") or {}
+        current = str(recovery.get("state") or "inactive")
+        reason = None
+        detail = None
+        if desired == "start":
+            if current == "active":
+                reason = "RECOVERY_ALREADY_ACTIVE"
+                detail = "a recovery session is already open; stop it instead"
+            else:
+                try:
+                    fatigue = float(((self.body_state or {}).get("somatic") or {})["fatigue"])
+                except (KeyError, TypeError, ValueError):
+                    fatigue = None
+                if fatigue is None:
+                    reason = "BODY_STATE_UNAVAILABLE"
+                    detail = "the runtime state cannot answer whether rest is needed"
+                elif fatigue < self.br.RECOVERY_OPEN_FATIGUE:
+                    reason = "RECOVERY_NOT_NEEDED"
+                    detail = "rest is not needed right now (below the recovery threshold)"
+        elif desired == "stop":
+            if current != "active":
+                reason = "NO_OPEN_RECOVERY"
+                detail = "no recovery session is open, so there is nothing to stop"
+        if reason is None:
+            return None
+        self.counters["preflight_rejections"] = self.counters.get("preflight_rejections", 0) + 1
+        return {
+            "execution_id": proposal.get("execution_id"),
+            "action": "REST",
+            "status": "rejected",
+            "reason_code": reason,
+            "detail": detail,
+            "applied_to_body": False,
+            "world_unchanged": True,
+            "body_unchanged": True,
+            "source": "body_preflight",
+        }
+
+    def _route_seconds(self, result: Mapping[str, Any]) -> Optional[int]:
+        """The World topology's own duration for the hop this MOVE just took."""
+
+        before = result.get("before")
+        after = result.get("after")
+        if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+            return None
+        origin = before.get("world_location_id")
+        destination = after.get("world_location_id")
+        if not origin or not destination or str(origin) == str(destination):
+            return None
+        try:
+            import world_travel_delivery as wtd
+
+            seconds = wtd.route_duration_seconds(
+                origin, destination, getattr(self.config, "environment", None)
+            )
+        except Exception:  # noqa: BLE001 - no route authority, no estimate
+            return None
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds <= 0:
+            return None
+        return seconds
+
+    #: v0.4 A (pacing): the one boundary that reconciles the two owner rules for REST.
+    def _owner_rest_params(self, proposal: Mapping[str, Any]) -> dict[str, Any]:
+        """Hand the Resolver only the REST parameters its own contract accepts.
+
+        Two rules are the owner's and neither is changed here:
+
+        * the bridge's *admission* vocabulary is ``state in {start, stop}`` **plus**
+          ``mode = rest`` (``action_intent.REST_PARAMS``), and the intent/lifecycle evidence keeps
+          that full parameter set;
+        * the Resolver accepts ``mode`` **only** with ``state=start``
+          (``world_action_resolver.py:1656``: "mode is only accepted with state=start").
+
+        Measured on the real chain: a stop that spells ``mode`` was therefore refused by the
+        Resolver, so a legal ``REST`` stop could never commit.  The service is the boundary that
+        keeps the two consistent -- it forwards ``state`` alone for a stop, and touches nothing
+        else about the proposal (no other verb, no other field, no widening of either rule).
+        """
+
+        if not isinstance(proposal, Mapping):
+            return dict(proposal or {})
+        if str(proposal.get("action") or "").strip().upper() != "REST":
+            return dict(proposal)
+        params = proposal.get("params")
+        if not isinstance(params, Mapping):
+            return dict(proposal)
+        state = str(params.get("state") or "").strip().lower()
+        if state == "start" or "mode" not in params:
+            return dict(proposal)
+        bounded = dict(proposal)
+        bounded["params"] = {key: value for key, value in params.items() if key != "mode"}
+        return bounded
+
     def act(self, proposal: Mapping[str, Any]) -> dict[str, Any]:
         """Resolve one proposal and apply its body consequence, in-process.
 
         This is the only mutation path, and it is the Resolver's path.  The
         service is the single writer, so actions are submitted to it rather than
         written alongside it.
+
+        v0.4 adds exactly two honest behaviours, both of them about *time*:
+
+        * a timed MOVE departure does **not** charge the walk yet -- the walk has
+          not happened.  A ``pending`` consequence is recorded and the owner tick
+          settles the real, measured load on arrival;
+        * an instant MOVE charges the World topology's own route duration instead
+          of the old fixed 600 s assumption.
         """
 
+        proposal = self._owner_rest_params(proposal)
         now = self._moment()
+        preflight = self._rest_body_gate(proposal)
+        if preflight is not None:
+            return preflight
         result = self.resolver.resolve(proposal)
         payload: dict[str, Any] = {
             "execution_id": result.get("execution_id"),
             "action": result.get("action") or result.get("action_type"),
             "status": result.get("status"),
             "reason_code": result.get("reason_code"),
+            "legacy_reason_code": result.get("legacy_reason_code"),
             "applied_to_body": False,
         }
+        action = str(result.get("action") or result.get("action_type") or "")
         if result.get("status") == "applied":
-            outcome = self.bcon.apply_for_execution(
-                result,
-                body_id=self.body_state["body_id"],
-                ledger=self.consequence_ledger,
-                runtime_state=self.body_state,
-                at=now,
-                world_facts={
-                    "world_id": (self.world_state or {}).get("world_id"),
-                    "world_revision": (self.world_state or {}).get("revision"),
-                },
-                pose=result.get("pose"),
-                # CONSUME results name the instance they consumed; the body
-                # records the resource reference only (no intake semantics).
-                object_id=result.get("object_id"),
+            world_facts: dict[str, Any] = {
+                "world_id": (self.world_state or {}).get("world_id"),
+                "world_revision": (self.world_state or {}).get("revision"),
+            }
+            departed = (
+                result.get("legacy_reason_code") == "move_departed"
+                or result.get("reason_code") == "move_departed"
             )
-            payload["applied_to_body"] = bool(outcome["applied"])
-            payload["consequence_reason"] = outcome.get("reason")
-            payload["consequence_id"] = (outcome.get("consequence") or {}).get(
-                "consequence_id"
-            )
-            if outcome["applied"]:
-                self.body_state = self._persist_consequence(outcome)
+            if action == "MOVE" and departed:
+                # The walk started; the load is owed, not paid.
+                deferred = self.bcon.defer_for_execution(
+                    result,
+                    body_id=self.body_state["body_id"],
+                    ledger=self.consequence_ledger,
+                    at=now,
+                    world_facts=world_facts,
+                    pose=result.get("pose"),
+                )
+                payload["consequence_reason"] = "deferred:movement_load_pending"
+                payload["consequence_id"] = (deferred.get("consequence") or {}).get(
+                    "consequence_id"
+                )
+                payload["movement_settlement"] = "pending"
+            else:
+                if action == "MOVE":
+                    seconds = self._route_seconds(result)
+                    if seconds is not None:
+                        world_facts["movement_seconds"] = float(seconds)
+                        world_facts["movement_source"] = (
+                            self.bcon.MEASUREMENT_ROUTE_ESTIMATE
+                        )
+                outcome = self.bcon.apply_for_execution(
+                    result,
+                    body_id=self.body_state["body_id"],
+                    ledger=self.consequence_ledger,
+                    runtime_state=self.body_state,
+                    at=now,
+                    world_facts=world_facts,
+                    pose=result.get("pose"),
+                    # CONSUME results name the instance they consumed; the body
+                    # records the resource reference only (no intake semantics).
+                    object_id=result.get("object_id"),
+                )
+                payload["applied_to_body"] = bool(outcome["applied"])
+                payload["consequence_reason"] = outcome.get("reason")
+                payload["consequence_id"] = (outcome.get("consequence") or {}).get(
+                    "consequence_id"
+                )
+                if outcome["applied"]:
+                    self.body_state = self._persist_consequence(outcome)
+                if action == "MOVE":
+                    payload["movement_settlement"] = (
+                        "settled" if outcome["applied"] else "unsettled"
+                    )
+        if action == "REST":
+            payload["recovery_state"] = (
+                (self.body_state or {}).get("recovery") or {}
+            ).get("state")
+        # v0.4: the owner's own evidence travels with the result.  It is read
+        # from the resolver's payload, never re-derived here: a receipt is the
+        # only proof of a consumption, so a caller must not have to guess it.
+        for _key in (
+            "object_id",
+            "consumption_receipt",
+            "purchase_voucher",
+            "fixture",
+            "arranged",
+            "rest_surface_id",
+        ):
+            if result.get(_key) is not None:
+                payload[_key] = result[_key]
         return payload
 
     def apply_result(self, result: Mapping[str, Any]) -> dict[str, Any]:
@@ -509,14 +703,411 @@ class WorldBodyService:
             "catch_up": result.get("catch_up"),
         }
 
+    # -- v0.4: the owner tick is the only arrival writer --------------------
+    def _travel_module(self):
+        try:
+            import world_travel_delivery as wtd
+
+            return wtd
+        except Exception:  # noqa: BLE001 - no travel owner, no arrivals
+            return None
+
+    def _travel_state(self) -> Optional[dict[str, Any]]:
+        wtd = self._travel_module()
+        if wtd is None:
+            return None
+        try:
+            if not wtd.travel_enabled(getattr(self.config, "environment", None)):
+                return None
+            state = wtd.load_state(
+                self.config.world_home, getattr(self.config, "environment", None)
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        return state if isinstance(state, Mapping) else None
+
+    def _travel_record(self, execution_id: Any) -> Optional[dict[str, Any]]:
+        state = self._travel_state()
+        if state is None:
+            return None
+        for item in state.get("travels") or []:
+            if isinstance(item, Mapping) and str(item.get("execution_id")) == str(execution_id):
+                return dict(item)
+        return None
+
+    @staticmethod
+    def _measured_seconds(record: Mapping[str, Any], now: Any) -> Optional[float]:
+        """``min(actually elapsed, the owner's own route duration)``.
+
+        Never the full route *before* it is walked, and never more than the route
+        the World declared.  When neither number is readable there is no
+        measurement (and the adapter falls back to an explicit assumption).
+        """
+
+        def _instant(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                text = str(value).replace("Z", "+00:00")
+                return datetime.fromisoformat(text).timestamp()
+            except (TypeError, ValueError):
+                return None
+
+        started = _instant(record.get("started_at"))
+        arrived = _instant(record.get("arrived_at")) or _instant(now)
+        candidates: list[float] = []
+        if started is not None and arrived is not None and arrived > started:
+            candidates.append(arrived - started)
+        declared = record.get("route_duration_seconds")
+        if isinstance(declared, (int, float)) and not isinstance(declared, bool) and declared > 0:
+            candidates.append(float(declared))
+        return round(min(candidates), 3) if candidates else None
+
+    def _apply_arrival(
+        self, execution_id: str, record: Mapping[str, Any], *, source: str
+    ) -> dict[str, Any]:
+        """Settle the walk's real load, exactly once, for one execution."""
+
+        now = self._moment()
+        seconds = self._measured_seconds(record, now)
+        world_facts: dict[str, Any] = {
+            "world_id": (self.world_state or {}).get("world_id"),
+            "world_revision": (self.world_state or {}).get("revision"),
+        }
+        if seconds is not None:
+            world_facts["movement_seconds"] = seconds
+            world_facts["movement_source"] = source
+        result = {
+            "kind": "world_action_result",
+            "schema_version": getattr(self.war, "SCHEMA_VERSION", "world.action.resolver.v1"),
+            "execution_id": execution_id,
+            "action": "MOVE",
+            "status": "applied",
+            "reason_code": "move_arrived",
+            "legacy_reason_code": "move_arrived",
+            "occurred_at": _iso(now),
+        }
+        outcome = self.bcon.apply_for_execution(
+            result,
+            body_id=self.body_state["body_id"],
+            ledger=self.consequence_ledger,
+            runtime_state=self.body_state,
+            at=now,
+            world_facts=world_facts,
+            pose=None,
+        )
+        if outcome["applied"]:
+            self.body_state = self._persist_consequence(outcome)
+        return {
+            "execution_id": execution_id,
+            "applied": bool(outcome["applied"]),
+            "reason": outcome.get("reason"),
+            "movement_seconds": seconds,
+            "movement_source": source if seconds is not None else "assumed_default",
+            "consequence_id": (outcome.get("consequence") or {}).get("consequence_id"),
+        }
+
+    def _settle_arrivals(self) -> Optional[dict[str, Any]]:
+        """Realize one due arrival (the only writer) and settle its load."""
+
+        wtd = self._travel_module()
+        if wtd is None:
+            return None
+        try:
+            arrived = wtd.realize_due_travel(
+                hermes_home=self.config.world_home,
+                environment=getattr(self.config, "environment", None),
+                now=self._moment(),
+            )
+        except Exception:  # noqa: BLE001 - a broken travel owner is not an arrival
+            return None
+        if not isinstance(arrived, Mapping) or arrived.get("status") != "arrived":
+            return None
+        execution_id = str(arrived.get("execution_id") or "")
+        if not execution_id:
+            return None
+        settlement = self._apply_arrival(
+            execution_id, arrived, source=self.bcon.MEASUREMENT_MEASURED_TRAVEL
+        )
+        return {
+            "travel_id": arrived.get("travel_id"),
+            "destination_location_id": arrived.get("destination_location_id"),
+            "world_changed": arrived.get("world_changed"),
+            "settlement": settlement,
+        }
+
+    def _settle_pending_movements(self) -> Optional[dict[str, Any]]:
+        """Settle walks whose arrival landed but whose load never did.
+
+        The crash window between "the World moved" and "the body was charged" is
+        real: the departure record is still ``pending`` and the travel record is
+        already ``ARRIVED``.  Settling is idempotent (one consequence id per
+        execution), so replaying it is safe.
+        """
+
+        wtd = self._travel_module()
+        if wtd is None:
+            return None
+        try:
+            pending = self.bcon.pending_movements(self.consequence_ledger)
+        except Exception:  # noqa: BLE001
+            return None
+        if not pending:
+            return None
+        settled: list[dict[str, Any]] = []
+        for record in pending:
+            execution_id = str(record.get("execution_id") or "")
+            if not execution_id:
+                continue
+            travel = self._travel_record(execution_id)
+            if travel is None:
+                continue
+            if str(travel.get("status")) != wtd.TRAVEL_STATUS_ARRIVED:
+                continue
+            settled.append(
+                self._apply_arrival(
+                    execution_id,
+                    travel,
+                    source=self.bcon.MEASUREMENT_MEASURED_TRAVEL_RECOVERED,
+                )
+            )
+        return {"settled": settled} if settled else None
+
     def tick(self) -> Optional[dict[str, Any]]:
-        """One bounded wake.  Returns None when there was nothing to do."""
+        """One bounded wake.  Returns None when there was nothing to do.
+
+        Order matters: an arrival is realized first (the single World writer),
+        its walk's load is settled second, any leftover pending settlement is
+        retried third, then a due home delivery is realized, and only then does
+        the Body advance -- so a walk that interrupts a rest is charged before
+        the rest is advanced.
+
+        v0.4 room-living adds exactly one rule on top: **at most one Body time
+        advance per tick**.  If the recovery advance already ran, the room-light
+        input waits for the next wake instead of double-counting the same
+        interval.
+        """
 
         self.counters["ticks"] += 1
+        arrival = self._settle_arrivals()
+        pending = self._settle_pending_movements()
+        deliveries = self._settle_deliveries()
         work = self._advance_due()
-        if work is None:
+        environment = None
+        if not (work and work.get("wrote")):
+            environment = self._settle_environment()
+        report: dict[str, Any] = {}
+        if arrival:
+            report["arrival"] = arrival
+        if pending:
+            report["pending_settlement"] = pending
+        if deliveries:
+            report["deliveries"] = deliveries
+        if work:
+            report["advance"] = work
+        if environment:
+            report["environment"] = environment
+        if not report:
             self.counters["idle_ticks"] += 1
-        return work
+            return None
+        return report
+
+    # -- v0.4 room-living: the owner tick also delivers and feeds the light ----
+
+    def _economy_module(self):
+        try:
+            import world_property_economy as economy
+
+            return economy
+        except Exception:  # noqa: BLE001 - no economy owner, no deliveries
+            return None
+
+    def _room_environment_module(self):
+        try:
+            import world_room_environment as room
+
+            return room
+        except Exception:  # noqa: BLE001 - no declarations, no light input
+            return None
+
+    def _materialize_module(self):
+        """The one substrate materialization seam (shared with the phone path).
+
+        Imported lazily so a service that never bought anything pays nothing,
+        and so the seam stays a single implementation instead of a second copy
+        in the service.
+        """
+
+        try:
+            import world_phone_shopping as shopping
+
+            return shopping.materialize_owned_item
+        except Exception:  # noqa: BLE001 - no seam, no materialization
+            return None
+
+    def _delivered_unplaced(self) -> list[str]:
+        """Owned + delivered + **not placed** instances (read-only).
+
+        That is exactly "it arrived home but nothing has arranged it yet": the
+        economy's coarse location says ``home/bedroom`` and the placement map has
+        no entry.  A consumed instance has no placement either, but it is not a
+        candidate here only if the economy still says delivered -- the seam
+        refuses it as a terminal state anyway, so this set can never resurrect
+        one.
+        """
+
+        economy = self._economy_module()
+        if economy is None:
+            return []
+        try:
+            state = economy.load_state(self.config.world_home)
+        except Exception:  # noqa: BLE001
+            return []
+        if not isinstance(state, Mapping):
+            return []
+        try:
+            substrate = self.wbs.SubstrateStore(
+                self.wbs.substrate_path(self.config.world_home)
+            ).load()
+        except Exception:  # noqa: BLE001
+            return []
+        if substrate is None:
+            return []
+        placements = substrate.get("placements") or {}
+        return [
+            str(item["item_instance_id"])
+            for item in state.get("items") or []
+            if isinstance(item, Mapping)
+            and str(item.get("disposition")) == economy.DISPOSITION_OWNED
+            and item.get("current_location") == economy.HOME_ITEM_LOCATION
+            and str(item.get("item_instance_id")) not in placements
+        ]
+
+    def _materialize_delivered(self) -> list[dict[str, Any]]:
+        materialize = self._materialize_module()
+        if materialize is None:
+            return []
+        environment = getattr(self.config, "environment", None)
+        outcomes: list[dict[str, Any]] = []
+        for item_id in self._delivered_unplaced():
+            try:
+                outcome = materialize(
+                    hermes_home=self.config.world_home,
+                    item_instance_id=item_id,
+                    environment=environment,
+                )
+            except Exception:  # noqa: BLE001 - a failure is not a placement
+                continue
+            status = str(outcome.get("status") or "")
+            if status == "already_materialized":
+                continue
+            outcomes.append(
+                {
+                    "item_instance_id": item_id,
+                    "status": status,
+                    "reason_code": outcome.get("reason_code"),
+                    "placement": outcome.get("placement"),
+                }
+            )
+        return outcomes
+
+    def _settle_deliveries(self) -> Optional[dict[str, Any]]:
+        """Realize due deliveries **and** put the arrived instance home.
+
+        Two owner writes, both idempotent, both only from the tick:
+
+        1. ``economy.realize_due_deliveries`` moves a due delivery to DELIVERED
+           and its instance's coarse location to ``home/bedroom``;
+        2. the one materialization seam gives every owned, delivered, unplaced
+           instance its legal ``home/bedroom`` placement -- otherwise a counter
+           purchase would be "delivered" and still impossible to arrange, which
+           is exactly the dead end this step closes.
+
+        A read path never calls either of them.
+        """
+
+        report: dict[str, Any] = {}
+        economy = self._economy_module()
+        if economy is not None:
+            try:
+                realized = economy.realize_due_deliveries(
+                    hermes_home=self.config.world_home,
+                    environment=getattr(self.config, "environment", None),
+                    now=self._moment(),
+                )
+            except Exception:  # noqa: BLE001 - a failed realization is not an arrival
+                realized = None
+            if isinstance(realized, Mapping) and realized.get("status") == "applied":
+                report["realized"] = realized
+        # A tick runs several times a second: scanning both owner documents on
+        # every wake would be pure overhead.  The scan only re-runs when one of
+        # them actually changed since the last look (or when this tick realized
+        # something), which is exactly when a new arrival could exist.
+        signature = self._delivery_scan_signature()
+        if report or signature != getattr(self, "_delivery_scan_signature_last", None):
+            materialized = self._materialize_delivered()
+            if materialized:
+                report["materialized"] = materialized
+            self._delivery_scan_signature_last = self._delivery_scan_signature()
+        if not report:
+            return None
+        return report
+
+    def _delivery_scan_signature(self):
+        """Cheap ``(economy mtime, substrate mtime)`` fingerprint, or ``None``."""
+
+        economy = self._economy_module()
+        wbs = getattr(self, "wbs", None)
+        if economy is None or wbs is None:
+            return None
+        try:
+            return (
+                economy.state_path(self.config.world_home).stat().st_mtime_ns,
+                wbs.substrate_path(self.config.world_home).stat().st_mtime_ns,
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _settle_environment(self) -> Optional[dict[str, Any]]:
+        """Feed the declared room light to the Body -- at most once per tick.
+
+        The flag is deny-by-default (``CHIYO_WORLD_ROOM_ENVIRONMENT_ENABLED``), so
+        an existing instance keeps its behaviour until it is enabled explicitly.
+        ``None`` input (no declared light / lamp off / unknown power) writes
+        nothing at all, and a gap longer than the bound is reported as
+        ``environment_gap_unknown`` instead of fabricating a whole night.
+        """
+
+        room = self._room_environment_module()
+        if room is None:
+            return None
+        environment = getattr(self.config, "environment", None)
+        if not room.feature_enabled(environment):
+            return None
+        if self.body_state is None:
+            return None
+        now = self._moment()
+        try:
+            light = room.light_for_home(self.config.world_home, now=now)
+        except Exception:  # noqa: BLE001 - unknown light is not an input
+            return {"advanced": False, "reason": "light_unavailable", "wrote": False}
+        outcome = self.bcon.advance_environment(
+            runtime_state=self.body_state, light=light, at=now.isoformat()
+        )
+        if outcome.get("wrote") and outcome.get("state") is not None:
+            self.body_state = outcome["state"]
+            if outcome.get("transition") is not None:
+                self.body_store.append_transition(outcome["transition"])
+            self.body_store.save_runtime(self.body_state)
+            self.counters["writes"] += 1
+        outcome["light"] = {
+            "status": light.get("status"),
+            "power": light.get("power"),
+            "band": light.get("band"),
+            "since": light.get("since"),
+            "reason_code": light.get("reason_code"),
+        }
+        return outcome
 
     # ------------------------------------------------------------------
     # reporting
@@ -751,6 +1342,7 @@ class WorldBodyService:
         """Stop accepting work, flush, release authority, exit cleanly."""
 
         self.ready = False
+        self._stop_requested = True
         self.shutdown_at = _iso(self._moment())
         reports: dict[str, Any] = {"shutdown_at": self.shutdown_at}
         if self.body_state is not None:
@@ -792,7 +1384,7 @@ class WorldBodyService:
         started = time.monotonic()
         ticks = 0
         try:
-            while not stopping["flag"]:
+            while not stopping["flag"] and not self._stop_requested:
                 if max_seconds is not None and time.monotonic() - started >= max_seconds:
                     break
                 for key, _events in selector.select(timeout=self.tick_seconds):

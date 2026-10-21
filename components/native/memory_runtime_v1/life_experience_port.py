@@ -24,6 +24,9 @@ a disabled old experience is prevented from creeping back in through a summary.
 from __future__ import annotations
 
 import sys
+import json
+import sqlite3
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -51,6 +54,31 @@ LIFE_CONVERSATION_PREFIX = "life:"
 #: Default bound on how much experience text may reach a model.
 DEFAULT_MAX_CHARS = 1200
 DEFAULT_LIMIT = 5
+#: Readiness vocabulary shared with ``components/phone/life.py``'s ``check_memory``: "the path is
+#: configured" is never reported as "this can recall".
+READINESS_READY = "READY"
+READINESS_BLOCKED = "BLOCKED"
+READINESS_UNAVAILABLE = "UNAVAILABLE"
+#: How many terms of a query are ever honoured (a bounded query, not a search language).
+MAX_QUERY_TERMS = 8
+
+
+class MemoryReadUnavailable(RuntimeError):
+    """A named reason the read side cannot answer.  It is never turned into an empty library."""
+
+    def __init__(self, code: str, detail: Optional[str] = None) -> None:
+        super().__init__(str(code))
+        self.code = str(code)
+        self.detail = detail
+
+
+def _query_terms(query: str) -> list[str]:
+    """Deterministic, bounded terms: whitespace-split, case-folded, no search language."""
+    return [term for term in str(query or "").lower().split()][:MAX_QUERY_TERMS]
+
+
+def _like_literal(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def life_conversation_id(subject: str) -> str:
@@ -205,7 +233,206 @@ class LifeExperiencePort:
                                            "text": record.text[: self.max_chars].rstrip() + "…"})
         return record
 
-    # -- model-facing view -------------------------------------------------------------
+    # -- read-only recall (never a store constructor) ------------------------------------
+
+    @staticmethod
+    def _readonly(path: Path | str) -> sqlite3.Connection:
+        """An already existing SQLite file, opened ``mode=ro``: it can neither create nor migrate."""
+        connection = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True,
+                                    timeout=2)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    @staticmethod
+    def _as_dict(row: Any) -> dict[str, Any]:
+        data = dict(row)
+        refs = data.pop("source_refs_json", None)
+        data["source_refs"] = json.loads(refs) if refs else []
+        return data
+
+    @staticmethod
+    def _not_ready(out: dict[str, Any], reason: str, detail: Optional[str],
+                   status: str = READINESS_BLOCKED) -> dict[str, Any]:
+        out.update({"binding_status": status, "recall_ready": False,
+                    "reason": reason, "detail": detail})
+        return out
+
+    def readiness(self) -> dict[str, Any]:
+        """Can this binding actually recall anything?  Pure read, zero write.
+
+        The M0 file and the control ledger are only ever opened ``mode=ro``.  No
+        ``EvidenceStore`` is constructed -- its ``__init__`` would ``mkdir`` the parent, run
+        migrations and ``chmod`` the file -- and no ledger is initialized.  A read path that can
+        create a database is not a read path.
+        """
+        evidence, controls = Path(self.evidence_db), Path(self.controls_db)
+        out: dict[str, Any] = {
+            "binding_status": READINESS_BLOCKED,
+            "recall_ready": False,
+            "reason": None,
+            "detail": None,
+            "owner": self.subject,
+            "database": str(evidence),
+            "controls_database": str(controls),
+            "controls_defaulted": controls == evidence,
+            "database_exists": False,
+            "database_is_file": False,
+            "controls_exists": False,
+            "controls_is_file": False,
+            "integrity": None,
+            "evidence_table": False,
+            "governance_healthy": None,
+            "controls": None,
+        }
+        for key, path in (("database", evidence), ("controls", controls)):
+            try:
+                info = path.lstat()
+            except OSError:
+                continue
+            out[key + "_exists"] = True
+            out[key + "_is_file"] = stat.S_ISREG(info.st_mode)
+        if not out["database_exists"]:
+            return self._not_ready(
+                out, "MEMORY_DB_MISSING",
+                "the configured Memory database does not exist: %s" % (evidence,))
+        if not out["database_is_file"]:
+            return self._not_ready(
+                out, "MEMORY_DB_NOT_A_FILE",
+                "the configured Memory database is not a regular file: %s" % (evidence,))
+        if not out["controls_exists"]:
+            return self._not_ready(
+                out, "MEMORY_CONTROLS_DB_MISSING",
+                "the configured control ledger does not exist: %s" % (controls,))
+        if not out["controls_is_file"]:
+            return self._not_ready(
+                out, "MEMORY_CONTROLS_DB_NOT_A_FILE",
+                "the configured control ledger is not a regular file: %s" % (controls,))
+        try:
+            connection = self._readonly(evidence)
+        except Exception as exc:
+            return self._not_ready(out, "MEMORY_DB_UNREADABLE",
+                                   "%s: %s" % (type(exc).__name__, exc))
+        try:
+            out["integrity"] = str(connection.execute("PRAGMA quick_check").fetchone()[0])
+            out["evidence_table"] = bool(connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence_events'"
+            ).fetchone())
+        except Exception as exc:
+            return self._not_ready(out, "MEMORY_DB_UNREADABLE",
+                                   "%s: %s" % (type(exc).__name__, exc))
+        finally:
+            connection.close()
+        if str(out["integrity"] or "").lower() != "ok":
+            return self._not_ready(
+                out, "MEMORY_DB_INTEGRITY_FAILURE",
+                "PRAGMA quick_check on the Memory database did not return ok (%r)"
+                % (out["integrity"],))
+        if not out["evidence_table"]:
+            return self._not_ready(
+                out, "MEMORY_DB_SCHEMA_MISMATCH",
+                "the configured database has no evidence_events table, so it is not M0")
+        try:
+            projection = self._projection()
+        except Exception as exc:
+            out.update({"binding_status": READINESS_UNAVAILABLE,
+                        "reason": "MEMORY_GOVERNANCE_PROBE_FAILED",
+                        "detail": "%s: %s" % (type(exc).__name__, exc)})
+            return out
+        out["governance_healthy"] = bool(getattr(projection, "healthy", False))
+        out["controls"] = int(getattr(projection, "controls", 0) or 0)
+        if not out["governance_healthy"]:
+            detail = ("the control ledger projection is unhealthy, so nothing at all would be "
+                      "recalled from this Memory")
+            if out["controls_defaulted"]:
+                detail += (" — no separate control ledger is configured, so the M0 database "
+                           "itself is used as the ledger and has no memory_controls table")
+            return self._not_ready(out, "MEMORY_CONTROLS_UNHEALTHY", detail)
+        out.update({"binding_status": READINESS_READY, "reason": None, "detail": None,
+                    "recall_ready": True})
+        return out
+
+    def search(self, *, query: str = "", limit: Optional[int] = None,
+               since: Optional[str] = None) -> list[LifeExperienceRecord]:
+        """Relevant experiences for this owner, governance applied, newest first.
+
+        Unlike :meth:`recent`, an empty query is not the only question: every whitespace-separated
+        term must appear in the experience's text or in its own refs, so a genuinely *older*
+        relevant experience is found even when the newest five are unrelated.  Reading is done
+        ``mode=ro``; the failure of a binding is raised as a named :class:`MemoryReadUnavailable`,
+        never returned as an empty list.
+        """
+        want = self.limit if limit is None else max(0, int(limit))
+        if want == 0:
+            return []
+        readiness = self.readiness()
+        if not readiness.get("recall_ready"):
+            raise MemoryReadUnavailable(str(readiness.get("reason") or "MEMORY_BINDING_UNUSABLE"),
+                                        readiness.get("detail"))
+        rows = self._select_rows(_query_terms(query), want=want, since=since)
+        records = [self._to_record(row) for row in rows]
+        if not records:
+            return []
+        projection = self._projection()
+        if not getattr(projection, "healthy", False):
+            raise MemoryReadUnavailable("MEMORY_CONTROLS_UNHEALTHY")
+        kept, _corrections = projection.recalls(records)
+        return [self._trim(record) for record in kept]
+
+    def read(self, experience_id: str) -> Optional[LifeExperienceRecord]:
+        """One experience by id, same owner and same governance as :meth:`search`.
+
+        ``None`` means *not recallable* — absent, another owner's, corrected away or deleted.
+        The three are deliberately indistinguishable so that a governance decision cannot be
+        probed, and a stale body is never returned for any of them.
+        """
+        key = str(experience_id or "").strip()
+        if not key:
+            raise ValueError("experience_id is required")
+        readiness = self.readiness()
+        if not readiness.get("recall_ready"):
+            raise MemoryReadUnavailable(str(readiness.get("reason") or "MEMORY_BINDING_UNUSABLE"),
+                                        readiness.get("detail"))
+        connection = self._readonly(self.evidence_db)
+        try:
+            row = connection.execute(
+                "SELECT * FROM evidence_events WHERE event_id=? AND memory_owner=? "
+                "AND source_origin=?", (key, self.subject, LIFE_ORIGIN)).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            return None
+        record = self._to_record(self._as_dict(row))
+        projection = self._projection()
+        if not getattr(projection, "healthy", False):
+            raise MemoryReadUnavailable("MEMORY_CONTROLS_UNHEALTHY")
+        kept, _corrections = projection.recalls([record])
+        return self._trim(kept[0]) if kept else None
+
+    def _select_rows(self, terms: list[str], *, want: int,
+                     since: Optional[str] = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM evidence_events WHERE memory_owner=? AND source_origin=?"
+        params: list[Any] = [self.subject, LIFE_ORIGIN]
+        if since:
+            sql += " AND occurred_at > ?"
+            params.append(str(since))
+        for term in terms:
+            sql += (" AND (lower(content) LIKE ? ESCAPE '\\' "
+                    "OR lower(source_refs_json) LIKE ? ESCAPE '\\')")
+            pattern = "%" + _like_literal(term) + "%"
+            params.extend([pattern, pattern])
+        sql += " ORDER BY occurred_at DESC, created_at DESC, event_id DESC LIMIT ?"
+        params.append(int(want))
+        connection = self._readonly(self.evidence_db)
+        try:
+            rows = connection.execute(sql, params).fetchall()
+        except sqlite3.Error as exc:
+            raise MemoryReadUnavailable("MEMORY_DB_UNREADABLE",
+                                        "%s: %s" % (type(exc).__name__, exc)) from exc
+        finally:
+            connection.close()
+        return [self._as_dict(row) for row in rows]
+
+    # -- model-facing view ---------------------------------------------------------------
 
     def prompt_view(self, records: Optional[list[LifeExperienceRecord]] = None) -> list[dict[str, Any]]:
         """The bounded, attributable view handed to a model.  Never the whole memory."""
@@ -230,6 +457,11 @@ __all__ = [
     "LIFE_CONVERSATION_PREFIX",
     "LifeExperiencePort",
     "LifeExperienceRecord",
+    "MAX_QUERY_TERMS",
+    "MemoryReadUnavailable",
+    "READINESS_BLOCKED",
+    "READINESS_READY",
+    "READINESS_UNAVAILABLE",
     "build_outcome_event",
     "life_conversation_id",
 ]

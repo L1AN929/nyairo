@@ -30,7 +30,7 @@ What each feed watches
                                and revision is not.
 """
 from __future__ import annotations
-
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -206,7 +206,14 @@ class WorldOpportunityFeed:
         self.memory.save({"signature": signature})
         if previous is None or list(previous) == signature:
             return []
-        return [{"kind": EVENT_WORLD_OPPORTUNITY, "ref": "world:%s" % (signature[0] if signature else "empty"),
+        # The event's ``ref`` becomes AG-1's ``trigger_ref``, which must be a structured
+        # reference (``<prefix>:<id>``, ``agency_decision_ag1._STRUCTURED_REF_RE``).  The old
+        # spelling pasted the first ``wrev:...|place:...`` signature straight in, so every
+        # reachable-set change was refused as free text and recorded as ``DECISION_FAILED`` --
+        # a permanent "blocked" that was really an encoding bug in this feed.  The digest keeps
+        # the identity (a different reachable set is a different event) and stays structured.
+        digest = hashlib.sha256("\n".join(signature).encode("utf-8")).hexdigest()[:16]
+        return [{"kind": EVENT_WORLD_OPPORTUNITY, "ref": "world:reachable:%s" % digest,
                  "detail": "reachable set changed"}]
 
 
