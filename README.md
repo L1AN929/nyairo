@@ -1,13 +1,5 @@
 # nyairo · 以虚拟世界为核心的数字个体框架
 
-> **v0.4.0 连续生活闭环版 · GitHub prerelease 预发布**
->
-> 多段旅程每段独立消费、多件挂起但同一时刻只执行一件、跨段许可、跨天世界事件，把「一天连着过」接了起来；同批交付中还有手机端的项目版本历史/对比/派生与 Life 写作时的旧版摘录。
->
-> [v0.4.0 发行页](https://github.com/L1AN929/nyairo/releases/tag/v0.4.0) · [版本动态](https://nyairo.com/#changelog)
->
-> **这是预发布，不是稳定版。** 一键安装与可校验发行包现指向 **v0.4.0**（GitHub prerelease，发行附件是 `nyairo-v0.4.0.zip` 与同名 `.sha256`）；世界与身体相关套件 263 项全绿，另有两处本轮之前即存在的红未修（`test_life_v1_restart`、`LifeOwnerAdapterTest` 的 gateway 用例）。未对现有实例/生产升级，也没有真实模型跑满一天或 24 小时长测；不包含 Web 配置台、Agenda 生活接线或完整 CHIYO 设计。旧 **v0.3.0**、**v0.2.0-rc3** 标签与 ZIP 保留原处，要固定旧版可用 `nyairo update --version v0.3.0`。
-
 <p align="center">
   <img src="website/assets/nyairo-horizontal.png" alt="nyairo banner" width="600" />
 </p>
