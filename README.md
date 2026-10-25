@@ -1,19 +1,19 @@
 # nyairo · 以虚拟世界为核心的数字个体框架
 
-> **v0.3.0 后端连续生活版 · GitHub prerelease 预发布**
+> **v0.4.0 连续生活闭环版 · GitHub prerelease 预发布**
 >
-> 动态/室内导航、持久多段行程、安全暂停与请求预算、私人事项、合法中断恢复、街区消费与停留、真实经历进入后续选择，已完成本地隔离机制/集成验收。最终选定 51 项检查通过，零跳过；新增链使用确定性替身/本地 loopback，尚未验证真实模型一天或 24 小时稳定性。
+> 多段旅程每段独立消费、多件挂起但同一时刻只执行一件、跨段许可、跨天世界事件，把「一天连着过」接了起来；同批交付中还有手机端的项目版本历史/对比/派生与 Life 写作时的旧版摘录。
 >
-> [相比 v0.2 更新了什么](docs/engineering/v03-vs-v02.md) · [最终验收与已知限制](docs/engineering/v03-final-acceptance.md)
+> [v0.4.0 发行页](https://github.com/L1AN929/nyairo/releases/tag/v0.4.0) · [版本动态](https://nyairo.com/#changelog)
 >
-> **这是预发布，不是稳定版。** 一键安装与可校验发行包现指向 **v0.3.0**（GitHub prerelease，发行附件是 `nyairo-v0.3.0.zip` 与同名 `.sha256`）；隔离新装与 rc3 升级/回滚链已有验证，未对现有实例/生产升级或真实模型一天/24h 验收；本次未切换任何现有实例，不包含 Web 配置台、Agenda 生活接线或完整 CHIYO 设计。旧 **v0.2.0-rc3** 标签与 ZIP 保留原处，要固定旧版可用 `nyairo update --version v0.2.0-rc3`。
+> **这是预发布，不是稳定版。** 一键安装与可校验发行包现指向 **v0.4.0**（GitHub prerelease，发行附件是 `nyairo-v0.4.0.zip` 与同名 `.sha256`）；世界与身体相关套件 263 项全绿，另有两处本轮之前即存在的红未修（`test_life_v1_restart`、`LifeOwnerAdapterTest` 的 gateway 用例）。未对现有实例/生产升级，也没有真实模型跑满一天或 24 小时长测；不包含 Web 配置台、Agenda 生活接线或完整 CHIYO 设计。旧 **v0.3.0**、**v0.2.0-rc3** 标签与 ZIP 保留原处，要固定旧版可用 `nyairo update --version v0.3.0`。
 
 <p align="center">
   <img src="website/assets/nyairo-horizontal.png" alt="nyairo banner" width="600" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.3.0"><img src="https://img.shields.io/badge/release-v0.3.0-e11d48" alt="v0.3.0"></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.4.0"><img src="https://img.shields.io/badge/release-v0.4.0-e11d48" alt="v0.4.0"></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -25,7 +25,7 @@
 >
 > nyairo 是一个开源的数字个体框架，让 AI 拥有本地长期记忆、可编辑的虚拟小房间，以及按真实时间流动的日常。你们的每一次对话，不再是一次性客套的问答，而是发生在一个看得见房间、走得出门的日常场景里。
 >
-> **当前可下载安装包：v0.3.0（GitHub prerelease 预发布）** — 上方说明的源码就是这一版。它不是稳定版，隔离新装与 rc3 升级/回滚链已有验证，未对现有实例/生产升级或真实模型一天/24h 验收；升级个人实例前请先备份 `~/.nyairo`。旧的 v0.2.0-rc3 安装包与标签保持原样，仍可下载。
+> **当前可下载安装包：v0.4.0（GitHub prerelease 预发布）** — 上方说明的源码就是这一版。它不是稳定版，世界与身体相关套件已全绿，但未对现有实例/生产升级，也没有真实模型跑满一天或 24h 长测；升级个人实例前请先备份 `~/.nyairo`。旧的 v0.3.0、v0.2.0-rc3 安装包与标签保持原样，仍可下载。
 >
 > 在 Linux 或 Windows 的 WSL 终端里，输入这一行就能装好：
 > `curl -fsSL https://nyairo.com/install.sh | bash`
@@ -41,7 +41,7 @@ NyAiro is an open-source (Apache-2.0) digital life framework that provides an AI
 Install via Linux or WSL:
 `curl -fsSL https://nyairo.com/install.sh | bash`
 
-*Note: This is an open test version (v0.3.0), not a stable release.*
+*Note: This is an open test version (v0.4.0), not a stable release.*
 
 If you find this journey of giving AI a continuous life interesting, starring the repo is the best support for us.
 
@@ -126,7 +126,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 nyairo 把软件本身和属于你的生活数据分得很清楚：
 
-- **程序文件**：`~/.local/share/nyairo/releases/v0.3.0`（运行程序的地方，更新时会整体替换）
+- **程序文件**：`~/.local/share/nyairo/releases/v0.4.0`（运行程序的地方，更新时会整体替换）
 - **你的数据**：`~/.nyairo`（存放人设、日常数据库、记忆与配置文件）
 - **启动入口**：`~/.local/bin/nyairo`（在终端里随时唤起对话的快捷入口）
 
@@ -153,7 +153,7 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 - **Telegram 官方频道**：[https://t.me/nyairoai](https://t.me/nyairoai)
 - **快速起步上手指南**：[https://nyairo.com/#quickstart](https://nyairo.com/#quickstart)
 - **版本更新动态与说明**：[https://nyairo.com/#changelog](https://nyairo.com/#changelog)
-- **最新 Release 下载与校验包**：[GitHub Releases v0.3.0](https://github.com/L1AN929/nyairo/releases/tag/v0.3.0)（旧 v0.2.0-rc3 仍在 Releases 页面）
+- **最新 Release 下载与校验包**：[GitHub Releases v0.4.0](https://github.com/L1AN929/nyairo/releases/tag/v0.4.0)（旧 v0.3.0、v0.2.0-rc3 仍在 Releases 页面）
 
 ---
 

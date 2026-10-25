@@ -2,7 +2,7 @@
 
 本文帮助你在自己的电脑或服务器上安装 nyairo，开始聊天，再按需要连接机器人和额外功能。网页只放教程，聊天在实际程序里进行。
 
-当前公开发行版本是 v0.3.0（GitHub prerelease 预发布版，不是稳定版），使用配套的 Hermes 0.21.0；v0.2.0-rc3 以及更早的 rc9、rc8、rc7、rc6 是历史发行版，历史验收记录保持原样。本次发行的隔离新装与 v0.2.0-rc3 升级/回滚链已有验证，未对现有实例/生产升级或真实模型一天/24h 验收。已知问题与实际检查结果在后面的对应章节说明。
+当前公开发行版本是 v0.4.0（GitHub prerelease 预发布版，不是稳定版），使用配套的 Hermes 0.21.0；v0.4.0、v0.2.0-rc3 以及更早的 rc9、rc8、rc7、rc6 是历史发行版，历史验收记录保持原样。世界与身体相关套件已全绿，但这次没有单独跑隔离新装与升级/回滚实测，也未对现有实例/生产升级或真实模型一天/24h 验收。已知问题与实际检查结果在后面的对应章节说明。
 
 ## 00 第一次使用，从这里开始
 
@@ -22,7 +22,7 @@ Windows 用户先按 [Windows 安装](https://nyairo.com/#windows) 打开 WSL / 
 curl -fsSL https://www.nyairo.com/install.sh | bash
 ```
 
-不需要先下载 Git 仓库，也不用自己装 uv 或 Python。安装器会下载固定的 `v0.3.0`，核对文件，准备运行环境，再创建独立的个人配置，开启记忆与生活状态，并允许当前 Linux 账号通过本地命令行使用。
+不需要先下载 Git 仓库，也不用自己装 uv 或 Python。安装器会下载固定的 `v0.4.0`，核对文件，准备运行环境，再创建独立的个人配置，开启记忆与生活状态，并允许当前 Linux 账号通过本地命令行使用。
 
 看到 `[5/5] 程序安装完成` 后，会自动进入 Hermes 模型设置。选择自己的服务和模型，填写 API Key；自定义服务还要填写 Base URL。设置结束后进入聊天，先发一句话检查能否收到回复。账号与密钥仍需你自己提供。
 
@@ -30,7 +30,7 @@ curl -fsSL https://www.nyairo.com/install.sh | bash
 
 以后重新打开 Ubuntu / Linux 终端，输入 `nyairo` 就能继续；重新选择模型用 `nyairo setup model`。刚装完若当前窗口找不到命令，打开新终端，或直接运行 `~/.local/bin/nyairo`。
 
-程序保存在 `~/.local/share/nyairo/releases/v0.3.0`，个人数据保存在 `~/.nyairo`。名字与人格改 `~/.nyairo/SOUL.md`；聊天、记忆和模型配置也在这套个人目录里。重复运行安装命令会核对程序并保留已有个人数据，再打开模型向导；它不会自动升级到别的版本。
+程序保存在 `~/.local/share/nyairo/releases/v0.4.0`，个人数据保存在 `~/.nyairo`。名字与人格改 `~/.nyairo/SOUL.md`；聊天、记忆和模型配置也在这套个人目录里。重复运行安装命令会核对程序并保留已有个人数据，再打开模型向导；它不会自动升级到别的版本。
 
 这条路线已完成 Linux 和 Windows WSL / Ubuntu 的普通账号首次安装复核。Windows 用户仍需先装好 WSL。Telegram、认知、World/Body 和资源服务仍按对应章节另外配置。
 
@@ -38,7 +38,7 @@ curl -fsSL https://www.nyairo.com/install.sh | bash
 
 后面的 Git / ZIP 手动路线使用 `~/apps/chiyo-v0.1` 和 `~/.chiyo-v1`；一条命令安装使用上述新目录。已经完成引导安装，就跳过手动下载和创建配置，不要再建立第二套个人数据。
 
-阅读后面的模块、更新或备份示例时，将程序路径 `~/apps/chiyo-v0.1` 换成 `~/.local/share/nyairo/releases/v0.3.0`，将个人路径 `~/.chiyo-v1` 换成 `~/.nyairo`。`bash scripts/hermes.sh` 可直接换成 `nyairo`；需要在程序目录执行的其他脚本仍先进入实际程序目录。
+阅读后面的模块、更新或备份示例时，将程序路径 `~/apps/chiyo-v0.1` 换成 `~/.local/share/nyairo/releases/v0.4.0`，将个人路径 `~/.chiyo-v1` 换成 `~/.nyairo`。`bash scripts/hermes.sh` 可直接换成 `nyairo`；需要在程序目录执行的其他脚本仍先进入实际程序目录。
 
 ### 手动安装的路线（可选）
 
@@ -109,11 +109,11 @@ Native Runtime 也随包提供，用于独立运行及研发验证，但本手�
 
 **Git 下载**：复制教程中的命令，就能拿到指定的体验版本；适合第一次按命令安装，也便于以后查看改动。
 
-**ZIP 下载**：从 [GitHub Releases](https://github.com/L1AN929/nyairo/releases/tag/v0.3.0) 下载 `v0.3.0` 的源码 ZIP，检查文件后再解压；适合希望先把压缩包保存好的用户。旧的 `v0.2.0-rc3` 下载页仍然可用。
+**ZIP 下载**：从 [GitHub Releases](https://github.com/L1AN929/nyairo/releases/tag/v0.4.0) 下载 `v0.4.0` 的源码 ZIP，检查文件后再解压；适合希望先把压缩包保存好的用户。旧的 `v0.2.0-rc3` 下载页仍然可用。
 
 无论选哪种，都下载 nyairo 整套项目，随后运行 `bash scripts/install.sh`。请按下一章操作，不要只下载其中一个插件文件夹。
 
-程序 ZIP 是 `nyairo-v0.3.0.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用当前公开发行版 v0.3.0。
+程序 ZIP 是 `nyairo-v0.4.0.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用当前公开发行版 v0.4.0。
 
 ### 电脑和网络需要满足什么
 
@@ -618,12 +618,12 @@ rc5 没有这个入口。先退出聊天并停止自己的服务，确认原来�
 
 ```bash
 export HERMES_HOME="$HOME/.chiyo-v1"
-git clone --branch v0.3.0 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc1"
+git clone --branch v0.4.0 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc1"
 cd "$HOME/apps/nyairo-rc1"
 bash scripts/update.sh --migrate-from "$HOME/apps/chiyo-v0.1"
 ```
 
-新目录必须尚不存在。最后一条命令会检查两份程序、安装新依赖、备份个人目录、更新标准插件副本并切换入口。原来的程序目录保留，可用于回退。ZIP 用户也可以把 **Release 附件中的** `nyairo-v0.3.0.zip` 校验后解压到新目录，再执行同一条迁移命令。
+新目录必须尚不存在。最后一条命令会检查两份程序、安装新依赖、备份个人目录、更新标准插件副本并切换入口。原来的程序目录保留，可用于回退。ZIP 用户也可以把 **Release 附件中的** `nyairo-v0.4.0.zip` 校验后解压到新目录，再执行同一条迁移命令。
 
 如果用旧的引导安装器装过 rc5，个人目录改用 `$HOME/.nyairo`，旧程序路径改用 `$HOME/.local/share/nyairo/releases/v0.1.0-rc5`。迁移时明确使用这两个实际路径，别再创建第二份个人设置。
 
@@ -661,7 +661,7 @@ World / Supply 独立服务目录、个人目录里链接到外部的文件，�
 
 这条只恢复中断的插件切换，不下载新版、不恢复旧聊天数据库。
 
-需要指定一个已发布且带有完整附件的版本时，使用 `~/.local/bin/nyairo update --version v0.3.0`；要固定旧版可写 `--version v0.2.0-rc3`。
+需要指定一个已发布且带有完整附件的版本时，使用 `~/.local/bin/nyairo update --version v0.4.0`；要固定旧版可写 `--version v0.2.0-rc3`。
 
 ### 已经设置了开机启动
 
@@ -834,7 +834,7 @@ R16 的完整运行数字目前无法独立核验：旧证据条目复制了 R17
 
 ### 公开后仍需验证什么
 
-公开仓库为 https://github.com/L1AN929/nyairo ，当前公开发行标签 `v0.3.0`（更早的 v0.2.0-rc3 / rc9 / rc8 / rc7 / rc6 仍可下载）；源码与下载以仓库及 Releases 页面为准。作者于 2026-10-04 确认 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；Hermes 及第三方继续保留原许可证。公开不等于所有平台已验收；另一台电脑的完整安装、长期自然使用及尚未覆盖的平台仍需独立验证。
+公开仓库为 https://github.com/L1AN929/nyairo ，当前公开发行标签 `v0.4.0`（更早的 v0.2.0-rc3 / rc9 / rc8 / rc7 / rc6 仍可下载）；源码与下载以仓库及 Releases 页面为准。作者于 2026-10-04 确认 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；Hermes 及第三方继续保留原许可证。公开不等于所有平台已验收；另一台电脑的完整安装、长期自然使用及尚未覆盖的平台仍需独立验证。
 
 暂未完成的安装方式、自主活动或自助授权向导，应作为待办写入路线，而不是写成已有功能。本次网站维护同步了本页列出的定向复核结果；没有重新执行运行时全量测试，不把历史验收数字作为本次网站检查结果。
 
@@ -974,7 +974,7 @@ World/Body 的同账号 socket、Life Supply 的 operator/service 权限与有�
 
 ## 15 rc5 隐私修复与自定义
 
-首次安装请使用当前公开发行版（`v0.3.0`）。旧 rc4 标签和 ZIP 保持原样，不会因为网站更新而自动获得修复。
+首次安装请使用当前公开发行版（`v0.4.0`）。旧 rc4 标签和 ZIP 保持原样，不会因为网站更新而自动获得修复。
 
 新建实例使用中性人设，不带作者的私人身份、关系或历史。打开自己数据目录中的 `SOUL.md`，写入你希望的名字、说话方式和边界；程序不会替换已有的人设。
 
