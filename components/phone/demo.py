@@ -88,9 +88,55 @@ class PhoneDemoError(RuntimeError):
     """The demo command refused.  Nothing is faked and nothing is overwritten."""
 
 
+_SAFE_REASON_TOKEN = re.compile(r"[A-Z][A-Z0-9_]{1,48}")
+
+
+def safe_reason_codes(detail: Any, *, limit: int = 4) -> list[str]:
+    """Only the uppercase reason tokens of a message.
+
+    A startup message may contain a home path, a socket path or a command line.  None of that
+    belongs in the entry point's JSON output, so every caller that prints a failure passes the
+    exception through here first.  Order is preserved and duplicates are dropped.
+    """
+
+    found: list[str] = []
+    for token in _SAFE_REASON_TOKEN.findall(str(detail or "")):
+        if token not in found:
+            found.append(token)
+        if len(found) >= limit:
+            break
+    return found
+
+
+def _log_reason(log_path: Path, child_name: str) -> list[str]:
+    """The child's own last startup reason, as tokens only (never its command line)."""
+
+    try:
+        text = Path(log_path).read_bytes()[-8192:].decode("utf-8", "replace")
+    except OSError:
+        return []
+    marker = "=== %s start" % child_name
+    start = text.rfind(marker)
+    if start >= 0:
+        text = text[start:]
+    return safe_reason_codes(text, limit=4)
+
+
 # ---------------------------------------------------------------------------------------------
 # child processes (serve owns only what it started)
 # ---------------------------------------------------------------------------------------------
+
+
+def _set_parent_death_signal() -> None:
+    """``prctl(PR_SET_PDEATHSIG, SIGTERM)`` in the child, before it execs.  Best effort."""
+
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl(1, int(signal.SIGTERM))  # PR_SET_PDEATHSIG
+    except Exception:  # pragma: no cover - platform without prctl
+        pass
 
 
 class ChildService:
@@ -119,12 +165,41 @@ class ChildService:
             env=self.environment,
             cwd=str(REPO_ROOT),
             start_new_session=True,
+            # A killed serve must not leave its owners holding the World authority / Supply
+            # fence forever.  Linux delivers this signal to the child when this process dies.
+            preexec_fn=_set_parent_death_signal if sys.platform.startswith("linux") else None,
         )
         return self
 
     @property
     def pid(self) -> Optional[int]:
         return None if self.process is None else self.process.pid
+
+    def exited_code(self) -> Optional[int]:
+        return None if self.process is None else self.process.poll()
+
+    def wait_ready(self, socket_path: Path | str, *, timeout: float = CHILD_READY_TIMEOUT,
+                   probe: str = "supply") -> bool:
+        """Wait for readiness, but stop waiting the moment this child has exited.
+
+        The owners refuse *fast* when another live writer holds their authority (``FenceHeld``
+        / ``DUPLICATE_AUTHORITY``).  Waiting the whole ready timeout after that hides the reason
+        and makes every failed restart look like a one-minute timeout.
+        """
+
+        check = phone_service.supply_ready if probe == "supply" else phone_service.gateway_ready
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if check(socket_path):
+                return True
+            exit_code = self.exited_code()
+            if exit_code is not None:
+                reasons = _log_reason(self.log_path, self.name)
+                raise PhoneDemoError("CHILD_EXITED:%s:%s:%s"
+                                     % (self.name, exit_code,
+                                        ",".join(reasons) or "NO_REASON_LOGGED"))
+            time.sleep(0.05)
+        return False
 
     def stop(self, timeout: float = CHILD_STOP_TIMEOUT) -> dict[str, Any]:
         """SIGTERM the pid we started, then bounded wait, then SIGKILL.  Never touches sockets."""
@@ -235,9 +310,122 @@ def retire_socket(path: Path, generation: str) -> Optional[Path]:
     return target
 
 
+def _proc_argv(pid: Any) -> list[str]:
+    try:
+        raw = Path("/proc/%d/cmdline" % int(pid)).read_bytes()
+    except (OSError, TypeError, ValueError):
+        return []
+    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+
+
+def _proc_uid(pid: Any) -> Optional[int]:
+    try:
+        return int(Path("/proc/%d" % int(pid)).stat().st_uid)
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def _pid_alive(pid: Any) -> bool:
+    try:
+        value = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if value <= 0:
+        return False
+    try:
+        # A zombie still answers ``kill(pid, 0)`` but holds no lock and can do no work.
+        # ``/proc/<pid>/stat`` says so explicitly; the fallback below is for non-Linux.
+        state = Path("/proc/%d/stat" % value).read_text().rsplit(")", 1)[1].split()[0]
+        return state != "Z"
+    except (OSError, IndexError):
+        pass
+    try:
+        os.kill(value, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _argv_option(argv: list[str], option: str, value: str) -> bool:
+    if not value:
+        return False
+    return any(argv[index] == option and argv[index + 1] == value
+               for index in range(len(argv) - 1))
+
+
+def _pid_is_our_serve(pid: Any, root: Path) -> bool:
+    argv = _proc_argv(pid)
+    return (any(part.endswith("usable_day.py") for part in argv)
+            and "serve" in argv and _argv_option(argv, "--root", str(root)))
+
+
+def _reclaim_previous_generation(root: Path, instance: Mapping[str, Any]
+                                 ) -> list[dict[str, Any]]:
+    """Stop only the *recorded* children of a previous serve of this same root.
+
+    A serve that is killed hard (not via its own ``finally``) leaves its two owners holding
+    kernel locks: the Supply ``Governance`` writer fence and the World body authority lease.
+    A new serve then cannot start until those exact processes are gone.
+
+    Custody is proven before any signal: the marker was written by this entry, the recorded
+    serve pid must be dead, the child pid must be alive, owned by this uid, and its *own*
+    command line must name this instance's socket / world home.  Anything less is a refusal --
+    never a guess, never a kill.
+    """
+
+    marker_path = root / "run" / "phone.serve.json"
+    try:
+        record = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(record, Mapping) or str(record.get("instance") or "") != str(root):
+        return []
+    previous_pid = record.get("pid")
+    if _pid_alive(previous_pid) and _pid_is_our_serve(previous_pid, root):
+        raise PhoneDemoError("PREVIOUS_SERVE_STILL_RUNNING")
+
+    expected = {
+        "supply": ("owner-supply", "--socket", str(record.get("supply_socket") or "")),
+        "world": ("owner-world", "--world-home", str(instance.get("world_home") or "")),
+    }
+    children = record.get("children")
+    children = children if isinstance(children, Mapping) else {}
+    reclaimed: list[dict[str, Any]] = []
+    for name in ("supply", "world"):
+        pid = children.get(name)
+        if not _pid_alive(pid):
+            continue
+        kind, option, value = expected[name]
+        argv = _proc_argv(pid)
+        verified = (kind in argv and _argv_option(argv, option, value)
+                    and _proc_uid(pid) == os.geteuid())
+        if not verified:
+            raise PhoneDemoError("PREVIOUS_CHILD_OWNERSHIP_UNVERIFIED:%s" % name)
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except OSError as exc:
+            raise PhoneDemoError("PREVIOUS_CHILD_STOP_FAILED:%s" % name) from exc
+        deadline = time.monotonic() + CHILD_STOP_TIMEOUT
+        while time.monotonic() < deadline and _pid_alive(pid):
+            time.sleep(0.05)
+        if _pid_alive(pid):
+            # Never escalate to SIGKILL for a process this generation did not start.
+            raise PhoneDemoError("PREVIOUS_CHILD_STILL_ALIVE:%s" % name)
+        reclaimed.append({"child": name, "pid": int(pid),
+                          "how": "SIGTERM_VERIFIED_PREVIOUS_SERVE_GENERATION"})
+    return reclaimed
+
+
 def _world_child(root: Path, instance: Mapping[str, Any], *,
                  tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
-                 room_living: bool = False) -> ChildService:
+                 room_living: bool = False,
+                 business_clock: Optional[Path | str] = None,
+                 clock_domain: Optional[str] = None,
+                 clock_run_id: Optional[str] = None) -> ChildService:
     world_home = Path(str(instance["world_home"]))
     package = str(instance.get("world_package") or "")
     # The child reads the *same* effective switches the phone facade reads (instance ``features``
@@ -269,10 +457,38 @@ def _world_child(root: Path, instance: Mapping[str, Any], *,
     command = [sys.executable, str(CLI_SCRIPT), "owner-world",
                "--world-home", str(world_home), "--package", package,
                "--tick-seconds", ("%g" % float(tick_seconds))]
+    if str(business_clock or "").strip():
+        # 显式压缩演示模式：World/Body 的旅程/恢复/暴露读同一个业务域；真实安全时间
+        # （lease、receipt、权限）仍由那个进程自己读系统墙钟。
+        command += ["--business-clock", str(business_clock),
+                    "--clock-domain", str(clock_domain or ""),
+                    "--clock-run-id", str(clock_run_id or "")]
     child = ChildService("world", command, root / "logs" / "world.log", environment)
     child.socket_path = world_home / "run" / "gateway.sock"
     child.tick_seconds = float(tick_seconds)
     return child
+
+
+def owner_children(root: Path | str, *, generation: str, writer_instance: str,
+                   tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
+                   room_living: bool = False,
+                   business_clock: Optional[Path | str] = None,
+                   clock_domain: Optional[str] = None,
+                   clock_run_id: Optional[str] = None) -> dict[str, ChildService]:
+    """This root's own Supply + World children, **without** binding loopback HTTP.
+
+    ``serve_instance`` is the operator's entry and always binds a server; the explicit
+    compressed-day mode only needs the two local owners (same construction, same logs,
+    same custody rules).  Callers start/wait/stop exactly these objects.
+    """
+
+    root_path = Path(str(root)).expanduser().resolve()
+    instance = phone_service.load_instance(root_path)
+    supply = _supply_child(root_path, writer_instance=writer_instance, generation=generation)
+    world = _world_child(root_path, instance, tick_seconds=float(tick_seconds),
+                         room_living=bool(room_living), business_clock=business_clock,
+                         clock_domain=clock_domain, clock_run_id=clock_run_id)
+    return {"supply": supply, "world": world}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -535,8 +751,19 @@ def prepare_demo(
     reading_title: str = DEFAULT_READING_TITLE,
     reading_content: str = DEFAULT_READING_CONTENT,
     with_world: bool = False,
+    run_id: Optional[str] = None,
+    seed_work_artifact: bool = True,
+    request_utc_day_max: Optional[int] = None,
+    request_run_window_max: Optional[int] = None,
+    max_cognition_calls_per_day: Optional[int] = None,
 ) -> dict[str, Any]:
-    """Create one real phone instance in a brand-new root.  Never overwrites, never resets."""
+    """Create one real phone instance in a brand-new root.  Never overwrites, never resets.
+
+    ``run_id`` is the instance's own persisted ``CHIYO_AUTONOMOUS_RUN_ID``; ``None`` keeps the
+    existing convention (``run:<root name>``).  ``seed_work_artifact=False`` skips the demo's
+    placeholder work artifact, so an operator can prepare a real room + public-domain reading
+    without presenting synthetic seed text as her history.  Both default to the old behaviour.
+    """
 
     root_path = Path(str(root)).expanduser()
     _root_is_usable(root_path)
@@ -558,7 +785,12 @@ def prepare_demo(
             raise PhoneDemoError("SUPPLY_NOT_READY")
         prepared = _prepare_owners(root_path, socket_path, subject=subject, seed=seed,
                                    theme=theme, reading_title=reading_title,
-                                   reading_content=reading_content, with_world=with_world)
+                                   reading_content=reading_content, with_world=with_world,
+                                   run_id=run_id,
+                                   seed_work_artifact=seed_work_artifact,
+                                   request_utc_day_max=request_utc_day_max,
+                                   request_run_window_max=request_run_window_max,
+                                   max_cognition_calls_per_day=max_cognition_calls_per_day)
     finally:
         supply.stop()
 
@@ -576,6 +808,8 @@ def prepare_demo(
         "supply_socket": instance["supply_socket"],
         "supply_generation": instance["supply_generation"],
         "private_items_artifact_id": instance["private_items_artifact_id"],
+        "reading_artifact_id": instance.get("reading_artifact_id"),
+        "work_artifact_id": instance["work_artifact_id"],
         "workspace_id": instance["workspace_id"],
         "economy_state": instance["economy_state"],
         "genesis": prepared["genesis"],
@@ -586,7 +820,11 @@ def prepare_demo(
 
 def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, theme: str,
                     reading_title: str, reading_content: str,
-                    with_world: bool = False) -> dict[str, Any]:
+                    with_world: bool = False, run_id: Optional[str] = None,
+                    seed_work_artifact: bool = True,
+                    request_utc_day_max: Optional[int] = None,
+                    request_run_window_max: Optional[int] = None,
+                    max_cognition_calls_per_day: Optional[int] = None) -> dict[str, Any]:
     """The owners' own commands: Supply artifacts + a real generated World."""
 
     import importlib
@@ -597,6 +835,15 @@ def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, t
     odl = importlib.import_module("one_day_life")
 
     instance_dir = root / ONE_DAY_DIRNAME
+
+    # 显式额度只在本实例 `prepare` 时写入；None 保持 one_day_life 的 96/96/96 默认。
+    limits: dict[str, int] = {}
+    if request_utc_day_max is not None:
+        limits["request_utc_day_max"] = int(request_utc_day_max)
+    if request_run_window_max is not None:
+        limits["request_run_window_max"] = int(request_run_window_max)
+    if max_cognition_calls_per_day is not None:
+        limits["max_cognition_calls_per_day"] = int(max_cognition_calls_per_day)
 
     report = odl.prepare(
         instance=instance_dir,
@@ -611,6 +858,9 @@ def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, t
         reading_content=reading_content,
         private_items_title=PRIVATE_ITEMS_TITLE,
         create_private_items=True,
+        run_id=run_id,
+        create_work_artifact=seed_work_artifact,
+        **limits,
     )
     data = odl.read_instance(instance_dir)
     world_home = Path(str(data["world_home"]))
@@ -705,6 +955,7 @@ def serve_instance(
     room_living: bool = False,
     stop_event: Optional[threading.Event] = None,
     announce: bool = True,
+    supervisor: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Start the two child owners, bind loopback HTTP, serve until a stop signal.
 
@@ -719,6 +970,11 @@ def serve_instance(
     instance = phone_service.load_instance(root_path)
     if int(instance.get("local_owner_uid", -1)) != int(os.geteuid()):
         raise PhoneDemoError("LOCAL_OWNER_UID_MISMATCH")
+
+    # A previous serve that was killed hard can leave its two owners alive.  They hold the
+    # kernel locks the new generation needs, so they are reclaimed first -- but only the exact
+    # pids this root's own marker records, and only after their own argv proves custody.
+    reclaimed = _reclaim_previous_generation(root_path, instance)
 
     generation = "serve-%d-%d" % (int(time.time()), os.getpid())
     supply = _supply_child(root_path, writer_instance="phone-serve:%d" % os.getpid(),
@@ -743,10 +999,10 @@ def serve_instance(
         socket_path = Path(str(supply.socket_path))
         gateway = Path(str(instance.get("world_body_socket")
                            or world_home / "run" / "gateway.sock"))
-        if not phone_service.wait_for_socket(socket_path, timeout=ready_timeout, probe="supply"):
-            raise PhoneDemoError("CHILD_SERVICE_TIMEOUT:supply:%s" % (root_path / "logs" / "supply.log"))
-        if not phone_service.wait_for_socket(gateway, timeout=ready_timeout, probe="gateway"):
-            raise PhoneDemoError("CHILD_SERVICE_TIMEOUT:world:%s" % (root_path / "logs" / "world.log"))
+        if not supply.wait_ready(socket_path, timeout=ready_timeout, probe="supply"):
+            raise PhoneDemoError("CHILD_SERVICE_TIMEOUT:supply")
+        if not world.wait_ready(gateway, timeout=ready_timeout, probe="gateway"):
+            raise PhoneDemoError("CHILD_SERVICE_TIMEOUT:world")
 
         # The live binding is part of the instance file (data untouched): a restart changes only
         # which socket this generation answers on.  ``features`` are copied as recorded -- the
@@ -764,7 +1020,8 @@ def serve_instance(
         )
         csrf_token = secrets.token_hex(32)
         server = create_server(service, csrf_token=csrf_token, port=port,
-                               log_path=root_path / "logs" / "serve.log")
+                               log_path=root_path / "logs" / "serve.log",
+                               supervisor=supervisor)
         bound_port = int(server.server_address[1])
         announcement = {
             "ok": True,
@@ -782,6 +1039,8 @@ def serve_instance(
         }
         if retired:
             announcement["retired_sockets"] = retired
+        if reclaimed:
+            announcement["reclaimed_children"] = reclaimed
         _write_serve_marker(root_path, announcement)
         if announce:
             sys.stdout.write(json.dumps(announcement, ensure_ascii=False) + "\n")

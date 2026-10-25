@@ -617,6 +617,14 @@ class StubCognition:
         allowed = [str(code) for code in (getattr(request, "allowed_reason_codes", []) or [])]
         world = [c for c in candidates if c.get("candidate_kind") == "CONSIDER_WORLD_OPPORTUNITY"]
         others = [c for c in candidates if c not in world]
+        # v0.4 C 之后，同一件已绑定作品会同时给出「续写」与「收尾（closeout）」两个
+        # PERSONAL_OPPORTUNITY 候选。替身原来按列表首项挑，而候选顺序来自集合迭代，
+        # 会让同一个用例随进程哈希随机地落到收尾上。这里按语义挑续写候选：收尾候选的
+        # target_refs 带 ``closeout:`` 前缀，续写不带。原断言（真的走 Supply owner、
+        # 版本 +1）不变。
+        continuation = [c for c in others
+                        if not any(str(ref).startswith("closeout:")
+                                   for ref in (c.get("target_refs") or []))]
         if self.policy == "no_action":
             raw = {"decision": "NO_ACTION", "selected_candidate_id": None,
                    "reason_codes": allowed[:1],
@@ -626,7 +634,7 @@ class StubCognition:
                    "reason_codes": allowed[:1], "short_rationale": "later",
                    "deferred_candidate_ids": [c.get("candidate_id") for c in candidates]}
         else:
-            chosen = (world or candidates) if self.policy == "move" else (others or candidates)
+            chosen = (world or candidates) if self.policy == "move" else (continuation or others)
             if not chosen:
                 raw = {"decision": "NO_ACTION", "selected_candidate_id": None,
                        "reason_codes": allowed[:1], "short_rationale": "no candidate",

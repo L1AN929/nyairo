@@ -102,3 +102,31 @@ AG-1 在 `foreground_holds_occupancy`（前台引用还在、且不是 WAITING�
   `TMPDIR=/tmp/nyaw05r.jdK3q`、`PYTHONPATH=.../v03-retain-hooks`（保留 fixture / 事务退役 rename / socket
   保留）；无清理、无 `py_compile`、无全库或全树 SHA。
 - 未验证的部分（具名）：worker 仍不是 resident 循环；真实模型、24h、外网、发布/commit 都没有涉及。
+
+## 旧作重访写作链的两进程重启（2026-10-21）
+
+同一套“两个独立进程各装配真实 runtime、真的 `evaluate_once`”的验收，现在也覆盖 v0.4 旧作重访，
+落在 `tests/test_v04_work_revisit_runtime.py`。模块级 `load_tests` 只装载这一个新用例，裸跑模块不会
+把继承自 `DScenarioBase` 的 W05 用例一起收进来。
+
+1. 父进程用 `DScenarioBase.prepare_scenario()` 建真 owner 实例；作品由 owner 真落三版：旧版带
+   `SENTINEL-OLD-1`，head 不带；另经 `PrivateProjectService.create_derived_project` 建一件带来源的派生作品。
+2. worker A（PID A）：真实 `ProductionLifeRuntime` + assembly + AR-0；writer 是真实
+   `ModelContinuationWriter`，transport 是 `RecordingClient`。`earlier_versions` 由 cycle 自己的
+   `_next_content` 从 owner 读上一版后自动组装，测试没有手工传 context。断言真实请求体里的旧版
+   sentinel 只在 `earlier_versions`、不在 `tail_of_current_text`；owner 产生新版本后写 pause 并 close。
+3. worker B（PID B）：同根新 runtime/assembly/预算；暂停轮 `PAUSED_BY_OPERATOR`、0 请求 0 写入；
+   resume 后合法 CONTINUE 同一 Activity，owner 再产生新版本。跨进程 run identity 与预算上限延续，
+   两个 PID 都释放 lease。
+4. 重启后经真 phone HTTP 再读旧版并 compare；派生作品的来源仍可读，同一 operation key 重放仍是同一件，
+   版本数不增。
+5. 具名拒绝：用同一 subject 的另一个 artifact 去读该作品的版本，owner 以
+   `VERSION_NOT_IN_ARTIFACT` 拒绝。
+
+决策分支这次还排除了 `closeout:` 候选：同一 artifact 会同时提供“继续写”和“结项”两种
+`CONSIDER_PERSONAL_OPPORTUNITY`，按顺序取会把结项当写作。实测一次 `ABANDON_NONTERMINAL_CHOSEN`、
+无新版本；现在按非 closeout 的身份挑，并保持 CONTINUE 优先、否则 START、都没有就抛错不回落。
+
+边界：仍是单步 `evaluate_once`，不是 resident 循环；decision 与 content transport 都是确定性替身，
+产品真实 model calls 为 0；浏览器点验不由本用例完成。验证记录见
+`docs/engineering/v04-work-revisit-closeout-20261021.md`。

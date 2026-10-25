@@ -22,7 +22,7 @@ for _path in (str(REL), str(REL / "components/world/scripts")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from chiyo_bundle import world_journey, world_runner  # noqa: E402
+from chiyo_bundle import journey_authorization, world_journey, world_runner  # noqa: E402
 
 #: 环境装配（显式 world_home/profile 字段，不继承进程世界配置）
 build_environment = world_runner.build_environment
@@ -43,8 +43,14 @@ def advance_once(
     world_home, environment: Mapping[str, str], now: Optional[Any] = None
 ) -> dict:
     """W02 兼容别名：对已存在的旅程做一次显式推进（不创建任何东西）。"""
+    # 下一段是新的 Action：走 World 自己的正式授权入口；不可达时失败关闭。
+    try:
+        submit_port = journey_authorization.default_submit_port(environment=environment)
+    except Exception:
+        submit_port = None
     return world_journey.advance_journey(
-        hermes_home=world_home, environment=environment, now=now
+        hermes_home=world_home, environment=environment, now=now,
+        submit_port=submit_port,
     )
 
 

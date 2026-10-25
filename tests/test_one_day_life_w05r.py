@@ -127,7 +127,13 @@ class W05RTestCase(CycleTest):
             runtime, environment=env, state_root=odl.life_state_root(self.instance),
             world_provider=observation, writer=writer, enabled=True)
         self.assertEqual(assembled["state"], "READY", assembled)
-        return SimpleNamespace(runtime=runtime, cycle=assembled["cycle"], port=port,
+        cycle = assembled["cycle"]
+        # 本组夹具只验证「续写作品」与「去一个已观察地点」两条路的竞争。v0.4 C 之后，
+        # 已绑定作品还会合法地提供第三种动作（closeout，同一件作品的收尾）；它由
+        # test_life_closeout_cycle_v04 单独覆盖，这里显式关闭该缝，让 step_path 与候选
+        # 数量仍然表达原来的两步语义，不把预期改写成收尾。
+        cycle.closeout_plan = lambda: None
+        return SimpleNamespace(runtime=runtime, cycle=cycle, port=port,
                                cognition=cognition, env=env, data=data, writer=writer,
                                observation=observation)
 

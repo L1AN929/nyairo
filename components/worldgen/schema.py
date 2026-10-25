@@ -31,6 +31,11 @@ TOPOLOGY_SCHEMA = "worldgen.topology.v1"
 RULES_SCHEMA = "worldgen.rules.v1"
 NPCS_SCHEMA = "worldgen.npcs.v1"
 AMBIENT_SCHEMA = "worldgen.ambient.v1"
+#: v2 显式版本：条目必须带 kind（single_day / finite），有限跨天事件带固定
+#: 身份、明确起止与世界日期阶段。旧读端只认 v1，遇到 v2 明确拒绝。
+AMBIENT_SCHEMA_V2 = "worldgen.ambient.v2"
+MAX_AMBIENT_TEMPLATES_V1 = 16
+MAX_AMBIENT_TEMPLATES_V2 = 24
 OBJECTS_SCHEMA = "worldgen.objects.v1"
 CONTENT_SCHEMA = "worldgen.content.v1"
 SCENE_SCHEMA = "worldgen.scene.v1"
@@ -453,14 +458,43 @@ def validate_npcs_doc(doc: Any) -> dict[str, Any]:
     return {"schema_version": NPCS_SCHEMA, "npcs": npcs}
 
 
-def validate_ambient_doc(doc: Any) -> dict[str, Any]:
-    if not isinstance(doc, dict) or doc.get("schema_version") != AMBIENT_SCHEMA:
-        raise WorldPackageError(f"ambient.json schema_version 必须是 {AMBIENT_SCHEMA}")
+def _validate_iana_timezone(value: Any, field: str) -> str:
+    """IANA 时区名校验；与 world.json 的降级规则一致（无 tz 库时校验名字格式）。"""
+    timezone_name = _require_text(value, field, maximum=64)
+    try:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            try:
+                ZoneInfo("UTC")
+            except (ZoneInfoNotFoundError, ValueError):
+                if not re.fullmatch(
+                    r"[A-Za-z][A-Za-z0-9_+\-]*/[A-Za-z0-9_+\-/]+", timezone_name
+                ):
+                    raise WorldPackageError(
+                        f"{field} {timezone_name!r} 不是有效 IANA 时区名"
+                    ) from None
+            else:
+                raise WorldPackageError(
+                    f"{field} {timezone_name!r} 不是有效 IANA 时区"
+                ) from None
+        except ValueError as exc:
+            raise WorldPackageError(f"{field} {timezone_name!r} 不是有效 IANA 时区") from exc
+    except ImportError:  # pragma: no cover - 极老环境
+        pass
+    return timezone_name
+
+
+def _validate_ambient_v1(doc: dict[str, Any]) -> dict[str, Any]:
     templates_raw = doc.get("templates")
     if not isinstance(templates_raw, list) or not templates_raw:
         raise WorldPackageError("ambient.json 必须包含非空 templates 列表")
-    if len(templates_raw) > 16:
-        raise WorldPackageError("ambient.templates 数量不能超过 16")
+    if len(templates_raw) > MAX_AMBIENT_TEMPLATES_V1:
+        raise WorldPackageError(
+            f"ambient.templates 数量不能超过 {MAX_AMBIENT_TEMPLATES_V1}"
+        )
     templates = []
     for index, template in enumerate(templates_raw):
         where = f"ambient.templates[{index}]"
@@ -482,6 +516,204 @@ def validate_ambient_doc(doc: Any) -> dict[str, Any]:
             }
         )
     return {"schema_version": AMBIENT_SCHEMA, "templates": templates}
+
+
+def _validate_finite_spec(raw: Any, where: str) -> dict[str, Any]:
+    if not isinstance(raw, dict) or set(raw) != {
+        "identity",
+        "starts_on",
+        "ends_on",
+        "end_reason",
+        "phases",
+    }:
+        raise WorldPackageError(
+            f"{where}.finite 必须包含 identity/starts_on/ends_on/end_reason/phases"
+        )
+    identity = validate_id(raw["identity"], f"{where}.finite.identity", maximum=64)
+    try:
+        from datetime import date as _date
+
+        starts_on = _date.fromisoformat(raw["starts_on"])
+        ends_on = _date.fromisoformat(raw["ends_on"])
+    except (TypeError, ValueError) as exc:
+        raise WorldPackageError(f"{where}.finite 的日期范围无效") from exc
+    if starts_on > ends_on:
+        raise WorldPackageError(f"{where}.finite 的起始日期晚于结束日期")
+    end_reason = _require_text(
+        raw["end_reason"], f"{where}.finite.end_reason", maximum=120
+    )
+    phases_raw = raw["phases"]
+    if not isinstance(phases_raw, list) or not phases_raw:
+        raise WorldPackageError(f"{where}.finite.phases 必须是非空列表")
+    phases = []
+    previous = None
+    for index, phase in enumerate(phases_raw):
+        phase_where = f"{where}.finite.phases[{index}]"
+        if not isinstance(phase, dict) or set(phase) != {
+            "local_date",
+            "start_hour",
+            "end_hour",
+            "summary",
+        }:
+            raise WorldPackageError(
+                f"{phase_where} 必须包含 local_date/start_hour/end_hour/summary"
+            )
+        try:
+            from datetime import date as _date
+
+            local_date = _date.fromisoformat(phase["local_date"])
+        except (TypeError, ValueError) as exc:
+            raise WorldPackageError(f"{phase_where}.local_date 无效") from exc
+        if not starts_on <= local_date <= ends_on:
+            raise WorldPackageError(f"{phase_where}.local_date 超出事件起止范围")
+        if previous is not None and local_date <= previous:
+            raise WorldPackageError(f"{where}.finite.phases 必须按日期严格递增")
+        previous = local_date
+        start = _require_int(
+            phase["start_hour"], f"{phase_where}.start_hour", minimum=0, maximum=24
+        )
+        end = _require_int(
+            phase["end_hour"], f"{phase_where}.end_hour", minimum=0, maximum=24
+        )
+        if start == end:
+            raise WorldPackageError(f"{phase_where} 的事件窗口为空")
+        phases.append(
+            {
+                "local_date": local_date.isoformat(),
+                "start_hour": start,
+                "end_hour": end,
+                "summary": _require_text(
+                    phase["summary"], f"{phase_where}.summary", maximum=240
+                ),
+            }
+        )
+    return {
+        "identity": identity,
+        "starts_on": starts_on.isoformat(),
+        "ends_on": ends_on.isoformat(),
+        "end_reason": end_reason,
+        "phases": phases,
+    }
+
+
+def _validate_ambient_v2(doc: dict[str, Any]) -> dict[str, Any]:
+    unknown = set(doc) - {"schema_version", "templates", "timezone"}
+    if unknown:
+        raise WorldPackageError(f"ambient.json v2 包含未知字段: {sorted(unknown)}")
+    templates_raw = doc.get("templates")
+    if not isinstance(templates_raw, list) or not templates_raw:
+        raise WorldPackageError("ambient.json 必须包含非空 templates 列表")
+    if len(templates_raw) > MAX_AMBIENT_TEMPLATES_V2:
+        raise WorldPackageError(
+            f"ambient.templates 数量不能超过 {MAX_AMBIENT_TEMPLATES_V2}"
+        )
+    templates = []
+    event_types: set[str] = set()
+    identities: set[str] = set()
+    for index, template in enumerate(templates_raw):
+        where = f"ambient.templates[{index}]"
+        if not isinstance(template, dict):
+            raise WorldPackageError(f"{where} 必须是 JSON 对象")
+        kind = template.get("kind")
+        if kind == "single_day":
+            if set(template) != {
+                "kind",
+                "event_type",
+                "location_id",
+                "summary",
+                "start_hour",
+                "end_hour",
+            }:
+                raise WorldPackageError(
+                    f"{where} single_day 必须包含 kind/event_type/location_id/summary/start_hour/end_hour"
+                )
+            start = _require_int(
+                template["start_hour"], f"{where}.start_hour", minimum=0, maximum=24
+            )
+            end = _require_int(
+                template["end_hour"], f"{where}.end_hour", minimum=0, maximum=24
+            )
+            if end == start:
+                raise WorldPackageError(f"{where} 的事件窗口为空")
+            event_type = validate_id(
+                template["event_type"], f"{where}.event_type", maximum=64
+            )
+            normalized = {
+                "kind": "single_day",
+                "event_type": event_type,
+                "location_id": validate_id(
+                    template["location_id"], f"{where}.location_id", maximum=96
+                ),
+                "summary": _require_text(
+                    template["summary"], f"{where}.summary", maximum=240
+                ),
+                "start_hour": start,
+                "end_hour": end,
+            }
+        elif kind == "finite":
+            if set(template) != {
+                "kind",
+                "event_type",
+                "location_id",
+                "summary",
+                "finite",
+            }:
+                raise WorldPackageError(
+                    f"{where} finite 必须包含 kind/event_type/location_id/summary/finite"
+                )
+            event_type = validate_id(
+                template["event_type"], f"{where}.event_type", maximum=64
+            )
+            finite = _validate_finite_spec(template["finite"], where)
+            if finite["identity"] in identities:
+                raise WorldPackageError(
+                    f"{where}.finite.identity 重复: {finite['identity']}"
+                )
+            identities.add(finite["identity"])
+            normalized = {
+                "kind": "finite",
+                "event_type": event_type,
+                "location_id": validate_id(
+                    template["location_id"], f"{where}.location_id", maximum=96
+                ),
+                "summary": _require_text(
+                    template["summary"], f"{where}.summary", maximum=240
+                ),
+                "finite": finite,
+            }
+        else:
+            raise WorldPackageError(
+                f"{where}.kind 必须是 single_day 或 finite（v2 显式类型）"
+            )
+        if normalized["event_type"] in event_types:
+            raise WorldPackageError(
+                f"{where}.event_type 重复: {normalized['event_type']}"
+            )
+        event_types.add(normalized["event_type"])
+        templates.append(normalized)
+    result: dict[str, Any] = {
+        "schema_version": AMBIENT_SCHEMA_V2,
+        "templates": templates,
+    }
+    if "timezone" in doc:
+        result["timezone"] = _validate_iana_timezone(
+            doc["timezone"], "ambient.json.timezone"
+        )
+    return result
+
+
+def validate_ambient_doc(doc: Any) -> dict[str, Any]:
+    if not isinstance(doc, dict):
+        raise WorldPackageError("ambient.json 顶层必须是 JSON 对象")
+    version = doc.get("schema_version")
+    if version == AMBIENT_SCHEMA:
+        return _validate_ambient_v1(doc)
+    if version == AMBIENT_SCHEMA_V2:
+        return _validate_ambient_v2(doc)
+    raise WorldPackageError(
+        f"ambient.json schema_version 必须是 {AMBIENT_SCHEMA} 或 {AMBIENT_SCHEMA_V2}，"
+        f"实际是 {version!r}；未知版本拒绝加载，不自动降级"
+    )
 
 
 def validate_objects_doc(doc: Any) -> dict[str, Any]:
@@ -808,6 +1040,18 @@ def load_package(package_dir: Path, *, verify: bool = True) -> dict[str, Any]:
     scene_path = package_dir / SCENE_FILE
     if scene_path.exists():
         docs[SCENE_FILE] = validate_scene_doc(_read_json(scene_path))
+    # v2 环境事件可显式声明时区；不允许与 world.json 的权威时区混用。
+    ambient_doc = docs["ambient.json"]
+    if ambient_doc.get("schema_version") == AMBIENT_SCHEMA_V2:
+        declared_timezone = ambient_doc.get("timezone")
+        if (
+            declared_timezone is not None
+            and declared_timezone != docs["world.json"]["timezone"]
+        ):
+            raise WorldPackageError(
+                f"ambient.json.timezone {declared_timezone!r} 与 world.json 的时区 "
+                f"{docs['world.json']['timezone']!r} 不一致；事件时间只有一个权威时区"
+            )
     # 交叉校验：地点规则 / NPC / 环境事件 / 对象都必须引用真实地点。
     locations = {item["location_id"] for item in docs["topology.json"]["locations"]}
     for location_id in docs["rules.json"]["location_rules"]:
@@ -898,6 +1142,9 @@ def package_summary(docs: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "AMBIENT_SCHEMA",
+    "AMBIENT_SCHEMA_V2",
+    "MAX_AMBIENT_TEMPLATES_V1",
+    "MAX_AMBIENT_TEMPLATES_V2",
     "CONTENT_SCHEMA",
     "ID_RE",
     "MANIFEST_SCHEMA",

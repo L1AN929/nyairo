@@ -59,6 +59,12 @@ B 的实践工作台（`PersonalPracticeService`：review / method / trial）与
 10. **生产接线在装配**（`autonomous_life_assembly.resolve_practice_service`）：用 B 的 `practice_from_env(port, env)`
     在同一套 env/bindings 上建服务，`assemble_autonomous_life(practice_workspace=…)`；报告 `assembled["practice"]`。
     resident 未改、未启用原实例、未改 env。
+11. **2026-10-24 结果→做法→评价接缝修正（本树）**：`_bind_method_usage` 只在**本轮提供给
+    Decision 的那次读取**（`_round_methods`）里解析 `method_ref`，不再用会被写作提示的方法检索
+    覆盖、且可能已换 head 的 `PracticeSeam.last_methods`；`_settle_method_binding` 的
+    `consequence_refs` 只来自 owner 的 step receipt，无 step 的回合（NO_ACTION/WAIT/PAUSE）
+    保持空表，不再把做法文档自身当成结果。评价仍只经 B 的证据门；成功写版本仍不会自动
+    `HELPED`；没有新增状态、字段语义或评价类型。
 
 ## Alternatives considered
 
@@ -95,16 +101,37 @@ B 的实践工作台（`PersonalPracticeService`：review / method / trial）与
   4. 该 fixture 里第二个 Activity 结束后 CURRENT_ACTIVITY 候选不再 CONTINUE 合法，所以链测试的"反例评价"走
      阶段单允许的**显式窄评价动作**（`PracticeSeam.record_trial`，真实 owner 写 + 真实证据校验），不是第三轮 Decision。
   5. 没有 UI/手机面（B 的所有权）；没有真模型/密钥；fixtures 留在 `/tmp/nyairo-v04-practice-fixtures` 不清理。
+  6. **2026-10-24 提案链与确证描述断点已修（本树）**：
+     * AG-1 的 `validate_decision_output` 早已接受并校验 `method_proposal`，但 `DecisionRecord` 构造
+       漏传该字段，`record.method_proposal` 恒为 `None`，`_save_method_proposal` 永远没有输入。
+       现只在构造处补传同一份**已校验**结果（`validated_output.get("method_proposal")`），没有放宽
+       AG-1 合法集、字段、截断或预算，也没有把原始模型字典绕进 record。
+     * 回顾链的 `confirmed_used=False` 不是 Memory 或 handoff 的问题：AR-0 适配器持有自己的
+       `LifeArtifactPort`，写操作不经过 cycle 的 `RoundCachedArtifactPort`，所以本轮 memo 里仍是
+       **写前**的 head；`_owner_confirmed_context` 用它和本次新版本比对失败，返回 `None`。
+       现在该函数在刻意回读"owner 刚确认的这一版"之前先 `_invalidate_owner_reads()`，与模块既有
+       "显式复查先丢 memo"的约定一致；没有改缓存键、轮次边界、owner 契约或写入路径。
+  7. 以上是同一功能内的接线与缓存一致性修正，不是新增评价类型或自主规则；真模型的自然提案/采用、
+     个人方法"自然形成"、G1 与 24h 均未在此证明。
 
 ## Verification
 
-* 新增 `tests/test_v04_practice_life_stage.py`：19 条（13 纯逻辑 + 3 AG-1 契约 + 3 真实 owner 链）。
-  * Windows：`python -m unittest tests.test_v04_practice_life_stage` → `Ran 19 tests … OK (skipped=6)`，退出码 **0**
-    （AG-1 与真实链需要 `fcntl`）。
-  * WSL（Ubuntu 22.04 / Python 3.12）：同一命令 → `Ran 19 tests in 15.296s … OK`，退出码 **0**。
+* `tests/test_v04_practice_life_stage.py`：20 条（13 纯逻辑 + 4 AG-1 契约 + 3 真实 owner 链）。
+  * WSL（Python 3.12）：`python -m unittest -q tests.test_v04_practice_life_stage` →
+    `Ran 20 tests in 12.669s … OK`，退出码 **0**（本轮同一命令复跑）。
+  * 新增 2 条具名控制：未提案时 `DecisionRecord.method_proposal` 默认 `None` 且往返仍 `None`；
+    同一 Decision 的保存意图（同一 owner operation key）重放不会产生第二份草案。
+  * 方法链的提案现在来自正式 Decision 原始 JSON，经 AG-1 校验、DecisionRecord 提交、cycle
+    `_save_method_proposal` 保存；不再由测试预建草案或手调保存函数。
 * 直接受影响的既有链 60 条（`test_v04_research_life_stage`、`test_model_continuation_no_change`、
   `test_day_life_quiet_runner`、`test_day_life_decision_legality`、`test_v04_autonomous_day_stage`）→
   `Ran 60 tests in 11.347s … OK`，退出码 **0**。
 * 真实链证明的是：真 Supply（自带 Unix socket）+ 真 M0（EvidenceStore + `MemoryAdmissionExperienceConsumer`）+
   AG-1 原始 JSON 校验 + AG-2 adoption + AR-0；决策回答与内容回答是**脚本替身**（文件里明示），不宣称真实模型自主。
 * 没有跑全库回归、没有跨进程 qualification、没有动原实例/配置/密钥、没有提交或部署。
+* **2026-10-24 接缝修正验证**：`tests.test_result_method_behavior` 12 例 OK（offered head 绑定、
+  无 step 不冒结果、stale head 由 owner CAS 拒绝、无证据/证据撤回、反例 CONTESTED、下一轮
+  `decision_context` 可见、重复结算只写一次、成功写版本不自动 HELPED）；真实隔离
+  Supply socket + M0 + 正式 AG-0/AG-1/AG-2/AR-0 冒烟 27 项 check 全绿、`RESULT: PASS`，
+  含另一 owner 写者在决策读之后修订做法的 CAS 负控。冒烟的做法草案来自正式 Decision 的
+  `method_proposal`（经 AG-1 校验与 cycle 保存），不再预建。决策与内容是脚本替身，不称真实模型采用。

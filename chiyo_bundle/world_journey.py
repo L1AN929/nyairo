@@ -1015,6 +1015,26 @@ def _uncertain_submission(
     )
 
 
+def _default_submit_port(env: Mapping[str, str]) -> Any:
+    """World 自己的正式提交口；不可达时返回 ``None``（调用方必须失败关闭）。
+
+    正式口由 World 侧组装（``components/world/service/bridge/journey_submit_port.py``），
+    这里只负责按环境找到它。找不到就是找不到——绝不退回进程内直写。
+    """
+
+    try:
+        from chiyo_bundle import journey_authorization
+    except ImportError:  # 直接以 ``chiyo_bundle`` 目录为 sys.path 运行时
+        try:
+            import journey_authorization  # type: ignore
+        except ImportError:
+            return None
+    try:
+        return journey_authorization.default_submit_port(environment=env)
+    except Exception:
+        return None
+
+
 def _submit_segment(
     store: dict[str, Any],
     journey: dict[str, Any],
@@ -1043,29 +1063,24 @@ def _submit_segment(
     _commit(home, store, journey, updated_at=_timestamp(instant))  # ① 耐久意图
     journey = _copy_json(store["active"])
     segment = journey["segments"][index]
-    if submit_port is not None:
-        # W05R: the caller supplied the World's own *authorization* entry
-        # (intent gate -> fresh read -> one-shot authorization -> gateway ->
-        # Resolver) instead of this module reaching the Resolver's commit
-        # function directly.  The port returns the same owner-status shape
-        # ``apply_move_to`` does, so the evidence read-back below is unchanged:
-        # the position authority is still the Resolver, never this ledger.
-        moved = submit_port.submit_move(
-            destination=destination,
-            origin=origin,
-            execution_id=segment["execution_id"],
-            hermes_home=home,
-            environment=env,
-            now=instant,
+    # 每一段都是一次新的 Action：由 World 自己的授权入口（intent gate ->
+    # fresh read -> 一次性授权 -> gateway 消费 -> Resolver）提交。首段的票不会、
+    # 也不能被这一段复用。引擎**没有**直写 owner 的旁路参数；底层故障注入由测试
+    # 自己注入一个 submit_port 适配器完成（见 tests/test_world_journey.py）。
+    port = submit_port if submit_port is not None else _default_submit_port(env)
+    if port is None:
+        return _fail(
+            store, journey, home, STATUS_BLOCKED,
+            "SEGMENT_SUBMIT_PORT_UNAVAILABLE", instant,
         )
-    else:
-        moved = wls.apply_move_to(
-            destination,
-            hermes_home=home,
-            environment=env,
-            now=instant,
-            execution_id=segment["execution_id"],
-        )
+    moved = port.submit_move(
+        destination=destination,
+        origin=origin,
+        execution_id=segment["execution_id"],
+        hermes_home=home,
+        environment=env,
+        now=instant,
+    )
     if not isinstance(moved, Mapping):
         return _fail(
             store, journey, home, STATUS_BLOCKED, "SEGMENT_OWNER_UNAVAILABLE", instant

@@ -42,6 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LIFE_SCRIPTS = ROOT / "components" / "life" / "scripts"
 sys.path[:0] = [str(ROOT), str(LIFE_SCRIPTS)]
 
+import life_future_items as lfi  # noqa: E402
 import life_wait_basis as lwb  # noqa: E402
 import waiting_ref_vocab  # noqa: E402
 
@@ -342,7 +343,11 @@ class WaitBasisCycleTest(unittest.TestCase):
         self.assertIsNone(cycle.wait_basis(readiness=readiness))
 
     def test_a_paused_foreground_gets_no_fresh_wait_basis(self):
-        """PAUSED keeps the foreground and has its own RESUME question; never a new WAIT."""
+        """A legacy PAUSED pointer has its own RESUME question; never a new WAIT.
+
+        v0.4 background pause makes a *newly* paused Activity leave the foreground empty; this
+        fixture keeps a pointer on purpose to cover the old record that was not migrated.
+        """
 
         cycle, _runtime, _port = self._cycle(status="PAUSED", name="paused")
         readiness = cycle.step_readiness(act=True)
@@ -366,9 +371,19 @@ class WaitBasisCycleTest(unittest.TestCase):
         out = cycle.evaluate_once(trigger_ref="evt:test", observed_at=TS)
         sent = runtime.coordinator.kwargs
         self.assertIsNotNone(sent, out)
-        self.assertIsNone(sent["known_waiting_basis_ref"])
-        self.assertIsNone(sent["waiting_spec"])
-        self.assertIsNone(out["wait_basis"])
+        # The only basis this round may offer is the *self-chosen park*: a running Activity can
+        # be set down until a time the Decision itself names (``later_item``), and its
+        # waiting_spec is built from that committed Decision at adoption.  That is not a
+        # dependency, which is what this case forbids: no work-head/reading basis and no static
+        # dependency spec may be invented when the owner reported no dependency.
+        self.assertIsNotNone(out["wait_basis"], out)
+        self.assertEqual(out["wait_basis"]["source"], lfi.PARK_SOURCE)
+        self.assertEqual(sent["known_waiting_basis_ref"], out["wait_basis"]["basis_ref"])
+        self.assertTrue(sent["known_waiting_basis_ref"].startswith(
+            lfi.PARK_BASIS_PREFIX + ":"))
+        self.assertNotIn("waitbasis:", sent["known_waiting_basis_ref"])
+        self.assertTrue(callable(sent["waiting_spec"]))
+        self.assertNotIsInstance(sent["waiting_spec"], dict)
 
     def _waiting_cycle(self, head_after, *, refuse=False, name="maintain"):
         cycle, runtime, port = self._cycle(name=name)

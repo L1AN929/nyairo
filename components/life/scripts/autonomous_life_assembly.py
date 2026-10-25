@@ -32,7 +32,7 @@ import inspect
 import os
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 BLOCKED = "BLOCKED"
 READY = "READY"
@@ -406,7 +406,8 @@ def resolve_situation_source(environment: Mapping[str, str], *, home: Any = None
 
 
 def resolve_world_provider(environment: Mapping[str, str], *,
-                           bridge_dir: Optional[str] = None) -> dict[str, Any]:
+                           bridge_dir: Optional[str] = None,
+                           clock: Any = None) -> dict[str, Any]:
     """The World observation seam, or a named reason there is none.
 
     ``READY`` means a real provider was built *and* the World answered a bounded status read.
@@ -458,9 +459,14 @@ def resolve_world_provider(environment: Mapping[str, str], *,
         return {"provider": None, "status": "UNAVAILABLE", "reason": "WORLD_NOT_READY",
                 "detail": "status=%s" % (getattr(status, "outcome", None),),
                 "bridge_dir": text}
+    # ``clock`` is the round's own instant (the compressed-demo business clock, when one is
+    # active).  It anchors both the opportunity validity window and the place-schedule read to
+    # the same domain the Life round and the candidate set use; with ``None`` the provider keeps
+    # reading the real wall clock, exactly as before.
     provider = wmos.WorldMoveOpportunityProvider(
         client=client, action_intent=world_action_intent, bridge_dir=text,
-        environment=env, world_home=_first(env, WORLD_HOME_ENV))
+        environment=env, world_home=_first(env, WORLD_HOME_ENV),
+        now=clock, observed_now=clock)
     return {"provider": provider, "status": "READY", "reason": "", "bridge_dir": text}
 
 
@@ -610,13 +616,18 @@ def _model_reading_response(environment: Mapping[str, str], *, timeout_s: float 
 
 def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0,
                     requests: Any = None, admission: Any = None,
-                    pause_guard: Any = None) -> Any:
+                    pause_guard: Any = None, observer: Any = None) -> Any:
     """The real decision adapter over the same provider, or ``None``.
 
     The decision is the one place a model may speak, so it is built from the same profile
     resolution the content writer uses.  A profile with no usable provider yields ``None``
     and the caller blocks; nothing here substitutes a stand-in, because a fabricated
     decision is not a decision.
+
+    ``observer`` is the adapter's own bounded-telemetry callback.  The default (``None``)
+    keeps the previous behaviour exactly: the adapter emits nothing and the send boundary is
+    not gated.  A caller that supplies one -- the resident does -- receives the same
+    records the shadow worker sees, and its required send marker then faults closed.
     """
 
     try:
@@ -636,7 +647,7 @@ def model_cognition(environment: Mapping[str, str], *, timeout_s: float = 30.0,
                                purpose="agency_cognition", timeout_s=timeout_s,
                                max_output_tokens=512)
     adapter = ProductionAgencyCognitionAdapter(client=client, timeout_s=timeout_s,
-                                               max_output_tokens=512)
+                                               max_output_tokens=512, observer=observer)
     if requests is not None or admission is not None:
         # W05R: every cognition attempt -- the decision and each schema retry -- is
         # reserved against the persisted ledger before the HTTP request is made; W05R-R1b
@@ -795,6 +806,7 @@ def assemble_autonomous_life(
     continuity_source: Any = None,
     appraisal_source: Any = None,
     work_artifact_id: Optional[str] = None,
+    clock: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
     """Build the cycle, the runner and the feed poller on top of ``runtime``.
 
@@ -945,6 +957,16 @@ def assemble_autonomous_life(
         project_questions = None
         _seam_error = f"{type(exc).__name__}: {exc}"[:200]
 
+    # v0.4 candidate supply: the AG-0 RESUME_ELIGIBLE source must prove an Artifact-bound
+    # Activity's target is still readable before it offers the candidate.  That proof is the
+    # *same* Supply read port the cycle is about to hold -- the adapter's constructor predates
+    # this seam, so the assembled instance is given the existing port here.  A runtime without
+    # the source (a narrow test double) is left exactly as it was.
+    _resume_source = getattr(runtime, "resume_eligible_source", None)
+    _attach_target_read = getattr(_resume_source, "attach_target_read", None)
+    if callable(_attach_target_read):
+        _attach_target_read(port)
+
     cycle = alc.AutonomousLifeCycle(
         runtime,
         artifact_port=port,
@@ -986,6 +1008,9 @@ def assemble_autonomous_life(
         # open drafts and the sources she could share from, and one owner call settles the single
         # sharing request a Decision may make.  ``LOCAL_DELIVERED`` stays a local-inbox fact.
         sharing_service=sharing["service"],
+        # 显式压缩演示模式的业务时钟。``None`` 是普通真实时间路径，行为与以前一致；
+        # 传入后 cycle 的业务到期/事件时间与 runner 的自然窗口都读同一个域。
+        clock=clock,
     )
     # v0.4 B: the local-contact seam (A's inbox + the finite co-presence protocol).  It is built
     # on the *same* subject and home the cycle already uses, so an invitation that names another
@@ -1006,7 +1031,7 @@ def assemble_autonomous_life(
     # keeps -- and a profile with no World service must never be handed a guessed opportunity.
     world = ({"provider": world_provider, "status": "READY", "reason": "",
               "detail": "supplied by the caller"}
-             if world_provider is not None else resolve_world_provider(env))
+             if world_provider is not None else resolve_world_provider(env, clock=clock))
     world_provider = world["provider"]
 
     # The artifact feed is built before the poller so the cycle can be told about its own
@@ -1019,7 +1044,7 @@ def assemble_autonomous_life(
     world_record = {k: v for k, v in world.items() if k != "provider"}
 
     runner = alr.AutonomousLifeRunner(cycle, state_root=root, env=env,
-                                      enabled=bool(enabled))
+                                      enabled=bool(enabled), clock=clock)
     feeds = [
         events.ResumeEligibilityFeed(getattr(runtime, "waiting_coordinator", None), root)
         if getattr(runtime, "waiting_coordinator", None) is not None else None,

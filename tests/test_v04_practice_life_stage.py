@@ -445,6 +445,19 @@ class DecisionPracticeContractTest(unittest.TestCase):
         self.assertEqual(rebuilt.method_trial["outcome"], "UNKNOWN")
         self.assertEqual(rebuilt.method_proposal["instruction"], METHOD_INSTRUCTION)
 
+    def test_a_record_that_proposed_no_practice_keeps_none_after_round_trip(self):
+        record = self.ag1.DecisionRecord(
+            decision_id="dec:fedcba9876543210", revision=1, subject_id="chiyo.global",
+            decision_opportunity_ref="dopp:fedcba9876543210",
+            candidate_set_ref="cset:fedcba9876543210", candidate_refs=(),
+            context_snapshot_ref="dctx:fedcba9876543210", hard_constraint_result_refs=(),
+            decision="NO_ACTION", reason_codes=("NO_ACTION_CHOSEN",),
+            decision_route="COGNITIVE_REQUIRED", policy_version="v1",
+            snapshot_fingerprint="sfp:fedcba9876543210",
+            created_at="2026-11-10T00:00:00+00:00")
+        self.assertIsNone(record.method_proposal)
+        self.assertIsNone(self.ag1.DecisionRecord.from_dict(record.to_dict()).method_proposal)
+
 
 # ---------------------------------------------------------------------------------------------
 # the loop: real Supply + real M0 + AG-1 raw JSON + AG-2 + AR-0
@@ -766,7 +779,27 @@ class PracticeLifeChainTest(_WorldGenBase):
         method_ref = lpc.method_ref_for(method_id)
         self.assertEqual(ready["method_ref"], method_ref)
         self.assertEqual(ready["method_state"], "TENTATIVE")
+        self.assertTrue(ready.get("decision_id"), ready)
         experience_id = fixture.cycle.practice.experiences()[0]["experience_id"]
+
+        # Replaying the *same* Decision's save intent (the same owner operation key the cycle
+        # derived) must return that draft, never mint a second one.
+        import autonomous_life_cycle as alc
+
+        replay_key = alc.AutonomousLifeCycle._method_operation_key(
+            SimpleNamespace(decision_id=ready["decision_id"]),
+            {"title": "先写结论再补理由", "instruction": METHOD_INSTRUCTION})
+        try:
+            replay = fixture.cycle.practice.create_method(
+                title="先写结论再补理由", instruction=METHOD_INSTRUCTION, scope=METHOD_SCOPE,
+                uncertainty=METHOD_UNCERTAINTY, operation_key=replay_key)
+        except lpc.PracticeSeamError as exc:
+            # The owner's own answer to a replayed key: already committed, nothing new written.
+            self.assertIn("OPERATION_ALREADY_COMMITTED", str(exc))
+        else:
+            self.assertEqual(replay["artifact_id"], method_id, replay)
+        self.assertEqual([row["method_ref"] for row in fixture.cycle.practice.methods(query="")],
+                         [method_ref])
 
         # 2. Round two: the review round.  Its writing prompt really carries the saved practice
         #    (instruction / scope / uncertainty), and the Decision names the practice it follows --

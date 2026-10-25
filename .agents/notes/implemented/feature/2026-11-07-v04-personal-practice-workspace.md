@@ -129,3 +129,6 @@ Life 文件、父级阶段单与进度表。
   `practice_from_env(port, env)`（缺一件 env 返回 `None`）、`parse_practice_content` /
   `is_practice_content` / `practice_kind` / `build_practice_content`；详见
   `docs/engineering/v04-practice-workspace-result.md`。
+- 后续读侧（2026-10-24）：Life 的 `PracticeSeam` 已把 `RETIRED` 从下一轮可命名的做法中
+  移出，并在上下文里具名 `withheld_methods`；文档与版本仍保留，证据撤回合同不变。见
+  [[2026-10-24-loss-to-continuation-owner-bridge]]。

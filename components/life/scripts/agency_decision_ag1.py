@@ -680,11 +680,15 @@ SCHEMA_FIELD_METHOD_REF = "method_ref"
 SCHEMA_FIELD_METHOD_TRIAL = "method_trial"
 SCHEMA_FIELD_METHOD_PROPOSAL = "method_proposal"
 SCHEMA_FIELD_SHARING = "sharing"
+#: v0.4 explicit-condition PAUSE: the existing output field a PAUSE uses to quote the one condition
+#: this round offered.  A name, not a new key.
+SCHEMA_FIELD_REEVALUATION_HINT_REF = "reevaluation_hint_ref"
 SCHEMA_FIELDS = frozenset({
     SCHEMA_FIELD_DECISION_OUTPUT, SCHEMA_FIELD_DECISION, SCHEMA_FIELD_SELECTED_CANDIDATE_ID,
     SCHEMA_FIELD_DEFERRED_CANDIDATE_IDS, SCHEMA_FIELD_REASON_CODES, SCHEMA_FIELD_SHORT_RATIONALE,
     SCHEMA_FIELD_LATER_ITEM, SCHEMA_FIELD_FUTURE_ITEM_ACTIONS, SCHEMA_FIELD_METHOD_REF,
     SCHEMA_FIELD_METHOD_TRIAL, SCHEMA_FIELD_METHOD_PROPOSAL, SCHEMA_FIELD_SHARING,
+    SCHEMA_FIELD_REEVALUATION_HINT_REF,
 })
 
 #: The placeholder a refusal uses when it cannot name a field, and the word a bad value is replaced
@@ -2534,13 +2538,24 @@ class HardConstraintEvaluator:
                 if act_obj is not None:
                     act_status = act_obj.get("status")
                     act_rev = act_obj.get("revision")
+                    # v0.4 PAUSED exit: a PAUSED Activity is still the foreground Activity
+                    # (LR-2 keeps the reference, activity_continuity.py:2290-2293), so its
+                    # own projection stays fresh.  This is deliberately narrower than
+                    # "any non-terminal status": only the snapshot's *current* Activity,
+                    # while that snapshot also says PAUSED, passes.  START/RESUME/WAIT
+                    # legality is untouched elsewhere.
+                    paused_foreground_self = (
+                        act_status == STATUS_PAUSED
+                        and cand.activity_ref == context_snapshot.current_activity_ref
+                        and context_snapshot.current_activity_status == STATUS_PAUSED
+                    )
                     if act_status in TERMINAL_ACTIVITY_STATUSES:
                         if HARD_REJECT_STALE_SOURCE not in reject_codes:
                             reject_codes.append(HARD_REJECT_STALE_SOURCE)
                         if HARD_REJECT_TARGET_INVALID not in reject_codes:
                             reject_codes.append(HARD_REJECT_TARGET_INVALID)
                         constraint_refs.append(f"act_terminal:{cand.activity_ref}:{act_status}")
-                    elif act_status != STATUS_ACTIVE:
+                    elif act_status != STATUS_ACTIVE and not paused_foreground_self:
                         if HARD_REJECT_STALE_SOURCE not in reject_codes:
                             reject_codes.append(HARD_REJECT_STALE_SOURCE)
                         constraint_refs.append(f"act_not_active:{cand.activity_ref}:{act_status}")
@@ -2927,9 +2942,12 @@ class DecisionOutputValidator:
         # The reference is only "free" for START/RESUME when it is gone, or when it points at a
         # WAITING Activity -- the single state both owners pass ``allow_background_waiting`` for
         # (life_integration_ag2.py:3093-3096 and :3387-3390; activity_continuity.py:2144-2157).
-        # PAUSED does NOT release it: pausing leaves foreground_activity_ref pointing at the paused
-        # Activity (activity_continuity.py:2290-2293), so START/RESUME of another Activity is still
-        # refused there.  Only the ACTIVE case is additionally refused earlier, by AG-2.
+        # v0.4 background pause: a successful PAUSE now clears ``foreground_activity_ref`` and
+        # marks the PAUSED record ``foreground_released`` (activity_continuity.py PAUSE branch),
+        # so a suspended Activity is normally *absent* here and START/RESUME are offered.  A
+        # legacy PAUSED record still points at itself; it has no release marker and keeps the old
+        # occupancy reading until its own owner path changes it.  Nothing migrates it behind the
+        # scenes.  Only the ACTIVE case is additionally refused earlier, by AG-2.
         foreground_holds_occupancy = bool(cur_act) and cur_status != STATUS_WAITING
         # A sourced fact from the life cycle: the current Activity has no executable step left.
         # It withdraws the current CONTINUE and nothing else -- no capacity change, no world fact,
@@ -3011,6 +3029,16 @@ class DecisionOutputValidator:
                 legal.append(DECISION_PAUSE)
                 legal.append(DECISION_ABANDON)
 
+        # v0.4 PAUSED exit is WITHHELD, not offered.  SRC-0719:12-13 does let the owner judge
+        # a PAUSED Activity ABANDONED, but only when nothing unresolved depends on it.  This
+        # snapshot cannot prove that: Activity records carry no commitment binding, and AR-0's
+        # Action ledger uses ``actv_<id>`` while canonical Activities use ``actv:<id>``, so the
+        # two vocabularies do not meet.  "Cannot read" is not "none", and this layer may not
+        # widen an id vocabulary or delete references to make a decision look safe.  The exit
+        # therefore stays withheld here; AG-2 refuses the same target again before LR-2 sees a
+        # command.  CONTINUE / WAIT / PAUSE / RESUME already need an ACTIVE foreground and stay
+        # withheld as well, so a PAUSED foreground offers no execution-shaped choice.
+
         # Section 67: RESUME only for RESUME_ELIGIBLE candidate with OPEN fresh eligibility
         if (
             candidate.candidate_kind == CANDIDATE_KIND_RESUME_ACTIVITY
@@ -3018,12 +3046,14 @@ class DecisionOutputValidator:
             and candidate.availability_status == CANDIDATE_STATUS_OPEN
             and candidate.resume_eligibility_ref is not None
         ):
-            # v0.4: resuming *another* Activity while a foreground reference is held would be
-            # refused by LR-4 (activity_continuity.py:2144-2157) -- and AG-2 would first pause the
-            # ACTIVE foreground (life_integration_ag2.py:3391-3415), which is a real side effect for
-            # a command that still fails (the paused foreground keeps the reference, :2290-2293).
-            # So it is not offered at all.  Resuming the foreground Activity itself keeps its
-            # legality: LR-4 skips the foreground check when fg_id == act_id.
+            # v0.4 background pause: resuming *another* Activity while an execution foreground is
+            # held would be refused by LR-4/LR-2 (activity_continuity.py:2144-2157), and the
+            # adoption must never pause that other Activity to make room.  The background rule is
+            # therefore a refusal, not a handoff: with the slot free (a released PAUSED or WAITING
+            # Activity leaves it free) RESUME is offered; with a running Activity it is not.  The
+            # owner keeps the OPEN eligibility untouched -- a conflict consumes nothing.
+            # Resuming the foreground Activity itself keeps its old legality: LR-4 skips the
+            # foreground check when fg_id == act_id.
             resumes_another_activity = (
                 foreground_holds_occupancy and candidate.activity_ref != cur_act
             )
@@ -3037,8 +3067,13 @@ class DecisionOutputValidator:
             # is WAITING *and* already released the foreground (activity_continuity.py:2158-2175).
             # This snapshot carries no ``foreground_released`` fact, so only the matching foreground
             # Activity keeps the offer -- never a decision the owner must refuse.
+            # A legacy PAUSED foreground has no offered ABANDON through this door either: the
+            # same withheld-exit rule (PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE) applies to every
+            # candidate kind, not only CURRENT_ACTIVITY.  A newly paused Activity is no longer
+            # the foreground at all; its source is not even projected here.
             if (
                 intr != INTERRUPTIBILITY_ATOMIC
+                and cur_status != STATUS_PAUSED
                 and cur_act is not None
                 and candidate.activity_ref == cur_act
             ):
@@ -3284,6 +3319,34 @@ class DecisionOutputValidator:
                         "Section 68 violation: PAUSE can only target the current active Activity",
                         failure_class=FAILURE_CLASS_ILLEGAL_DECISION_MATRIX,
                     )
+            # v0.4 explicit-condition PAUSE: the Decision may name one condition out of the
+            # *bounded basis this round really offered* by copying it into the existing
+            # ``reevaluation_hint_ref`` field.  It is an allow-list, not a new authority: without
+            # an offered basis there is nothing to name, and a string this round did not offer is
+            # refused like an invented identifier.  Omitting it keeps the unconditional PAUSE
+            # exactly as before (no condition, therefore no resume eligibility later).
+            pause_hint_raw = raw_output.get("reevaluation_hint_ref")
+            if pause_hint_raw is not None:
+                offered_basis = context_snapshot.known_waiting_basis_ref
+                try:
+                    pause_hint = _validate_structured_ref(
+                        pause_hint_raw, "reevaluation_hint_ref")
+                except AgencyDecisionError as exc:
+                    raise DecisionValidationError(
+                        f"PAUSE_CONDITION_NOT_OFFERED: {exc}",
+                        failure_class=FAILURE_CLASS_ILLEGAL_DECISION_MATRIX,
+                        schema_field=SCHEMA_FIELD_REEVALUATION_HINT_REF,
+                        schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+                    ) from exc
+                if offered_basis is None or pause_hint != str(offered_basis):
+                    raise DecisionValidationError(
+                        "PAUSE_CONDITION_NOT_OFFERED: a conditional PAUSE may only name the "
+                        "condition this round offered (known_waiting_basis_ref); got "
+                        f"{pause_hint!r}, offered {offered_basis!r}",
+                        failure_class=FAILURE_CLASS_ILLEGAL_DECISION_MATRIX,
+                        schema_field=SCHEMA_FIELD_REEVALUATION_HINT_REF,
+                        schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+                    )
             target_activity_ref = cur_act
 
         elif decision == DECISION_WAIT:
@@ -3300,11 +3363,31 @@ class DecisionOutputValidator:
             target_activity_ref = cur_act or (candidates_by_id[sel_id].activity_ref if sel_id else None)
 
         elif decision == DECISION_ABANDON:
+            # v0.4: the PAUSED exit is withheld until "no unresolved side effect / commitment
+            # binding" can be proven from an existing owner fact.  This snapshot has no such
+            # fact, so a model that nonetheless emits ABANDON for a PAUSED foreground is
+            # refused here -- before AG-2 or LR-2 see a command.
+            if cur_status == STATUS_PAUSED:
+                raise DecisionValidationError(
+                    "PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE: a PAUSED foreground cannot be "
+                    "abandoned while unresolved side effects or commitment bindings cannot be "
+                    "proven absent",
+                    failure_class=FAILURE_CLASS_ILLEGAL_DECISION_MATRIX,
+                )
             if sel_id is not None:
                 sel_cand = candidates_by_id[sel_id]
                 if not sel_cand.activity_ref:
                     raise DecisionValidationError(
                         "Section 70 violation: cannot ABANDON an unstarted Candidate without an existing nonterminal Activity",
+                        failure_class=FAILURE_CLASS_ILLEGAL_DECISION_MATRIX,
+                    )
+                # v0.4 PAUSED exit: when the snapshot's foreground is PAUSED, the only
+                # Activity this exit may target is that foreground itself.  A projection
+                # of some other Activity (and a forged/hand-edited candidate) is refused
+                # here, before LR-2 sees a command.
+                if cur_status == STATUS_PAUSED and sel_cand.activity_ref != cur_act:
+                    raise DecisionValidationError(
+                        "Section 70 violation: ABANDON of a PAUSED foreground can only target the current Activity",
                         failure_class=FAILURE_CLASS_ILLEGAL_DECISION_MATRIX,
                     )
                 target_activity_ref = sel_cand.activity_ref
@@ -5085,6 +5168,10 @@ class AgencyDecisionService:
             # context; the trial is an evaluation B's workspace records, never a success claim.
             method_ref=validated_output.get("method_ref"),
             method_trial=validated_output.get("method_trial"),
+            # v0.4 C: the proposal the round made, carried through the same validated output so the
+            # cycle can ask B's workspace to save it as a TENTATIVE draft.  It travels *after*
+            # validation, never as a raw model mapping, and remains a proposal -- not a preference.
+            method_proposal=validated_output.get("method_proposal"),
             sharing_action=validated_output.get("sharing_action"),
         )
 

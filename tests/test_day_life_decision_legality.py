@@ -49,6 +49,8 @@ else:  # pragma: no cover - documented host limit, not a silent skip of a real f
     ag1 = None
     ag0 = None
 
+import life_step_readiness as lsr  # noqa: E402
+
 POSIX_ONLY = unittest.skipUnless(
     os.name == "posix", "agency_decision_ag1 needs a POSIX host (fcntl)"
 )
@@ -452,22 +454,73 @@ class DayLifeDecisionLegalityTest(DayLifeLegalityFixture):
             ag1.DECISION_START, self._legal(goal_cand, context, capacity)
         )
 
+    # -- 11. the readiness table itself feeds the fact (BODY = one action, no next step) --
+
+    def test_a_body_activitys_readiness_withdraws_only_the_current_continue(self):
+        """The fact comes from the real readiness table, not a hand-written dict."""
+
+        body = lsr.assess_step_readiness(
+            activity={"activity_ref": ACT_READING,
+                      "activity_kind": lsr.BODY_ACTIVITY_KIND, "status": "ACTIVE"},
+            target_ref="bodyact:pose:seated:north", source_revision="12")
+        self.assertIs(body.available, False, body.to_dict())
+        self.assertEqual(body.reason_code, lsr.REASON_BODY_SINGLE_ACTION, body.to_dict())
+        continue_cand = _continue_candidate()
+        context, capacity, _cs, _cr = self._fixture(
+            [continue_cand],
+            current_activity_ref=ACT_READING,
+            current_activity_status=ag1.STATUS_ACTIVE,
+            observed_facts=body.fact_keys(),
+        )
+
+        legal = self._legal(continue_cand, context, capacity)
+
+        self.assertNotIn(ag1.DECISION_CONTINUE, legal, legal)
+        # every existing exit survives, and nothing new is offered
+        self.assertIn(ag1.DECISION_PAUSE, legal, legal)
+        self.assertIn(ag1.DECISION_ABANDON, legal, legal)
+        self.assertIn(ag1.DECISION_DEFER, legal, legal)
+        self.assertNotIn(ag1.DECISION_WAIT, legal, legal)   # still no known waiting basis
+        self.assertNotIn(ag1.DECISION_START, legal, legal)
+        self.assertEqual(
+            capacity.candidate_executability[continue_cand.candidate_id]["executability"],
+            ag1.EXEC_NOW,
+        )
+
+        # positive control: the same channel, but a reading Activity with a page left, is not a
+        # no-step fact at all -- it emits no key and CONTINUE stays exactly as it was.
+        reading = lsr.assess_step_readiness(
+            activity={"activity_ref": ACT_READING,
+                      "activity_kind": "READ_PRIVATE_MATERIAL", "status": "ACTIVE"},
+            target_ref="artifact:abc123", source_revision="artifactversion:h1",
+            reading_state={"state": "IN_PROGRESS", "available": True})
+        self.assertEqual(reading.fact_keys(), {})
+        reading_context, reading_capacity, _c2, _r2 = self._fixture(
+            [continue_cand],
+            current_activity_ref=ACT_READING,
+            current_activity_status=ag1.STATUS_ACTIVE,
+            observed_facts=reading.fact_keys(),
+        )
+        self.assertIn(ag1.DECISION_CONTINUE,
+                      self._legal(continue_cand, reading_context, reading_capacity))
+
 
 # ---------------------------------------------------------------------------
 # Occupied-foreground counter-cases: the reference, not the ACTIVE status alone
 # ---------------------------------------------------------------------------
 @POSIX_ONLY
 class DayLifeOccupiedForegroundTest(DayLifeLegalityFixture):
-    """PAUSED keeps the foreground reference; only "gone" or WAITING frees START/RESUME.
-    Real owner conditions: LR-2 refuses START while any foreground ref is held
-    (activity_continuity.py:1911-1922) and lets it through only for a WAITING foreground with
-    ``allow_background_waiting`` (AG-2 passes exactly that, life_integration_ag2.py:3093-3096).
-    LR-4 refuses RESUME of another Activity under the same condition
-    (activity_continuity.py:2144-2157); AG-2's RESUME branch pre-pauses an ACTIVE foreground
-    (life_integration_ag2.py:3391-3415) and the paused foreground still holds the reference
-    (activity_continuity.py:2290-2293), so that command would leave a side effect and fail.
-    LR-2 refuses ABANDON of an Activity that is not the foreground unless it is WAITING and
-    already released the foreground (activity_continuity.py:2158-2175).
+    """A legacy PAUSED pointer still occupies the slot; only "gone" or WAITING frees START/RESUME.
+    v0.4 background pause: a *newly* paused Activity clears the pointer and is not represented
+    by these synthetic contexts; a PAUSED record written before that rule has no release marker
+    and still blocks the slot until its own owner path changes it.  LR-2 refuses START while
+    any foreground ref is held (activity_continuity.py:1911-1922) and lets it through only for
+    a WAITING foreground with ``allow_background_waiting`` (AG-2 passes exactly that,
+    life_integration_ag2.py:3093-3096).  LR-4/LR-2 refuse RESUME of another Activity under the
+    same condition, and the adopting owner no longer pauses the running Activity to make room.
+    LR-2 refuses ABANDON of an Activity that is not the foreground unless it is WAITING or a
+    released PAUSED Activity (activity_continuity.py terminal branch); AG-2 still withholds
+    PAUSED ABANDON by its own safety rule.
     """
     def test_start_is_withheld_while_a_paused_foreground_still_holds_the_reference(self):
         world_cand = _world_candidate()
@@ -520,9 +573,11 @@ class DayLifeOccupiedForegroundTest(DayLifeLegalityFixture):
         self.assertNotIn(ag1.DECISION_RESUME, other_legal, other_legal)
         self.assertNotIn(ag1.DECISION_ABANDON, other_legal, other_legal)
         self.assertIn(ag1.DECISION_DEFER, other_legal, other_legal)
-        # the matching foreground Activity keeps both exits
+        # the matching foreground Activity keeps RESUME, but not ABANDON: a PAUSED
+        # foreground's ABANDON exit is withheld until "no unresolved side effect" can be
+        # proven from an existing owner fact (PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE).
         self.assertIn(ag1.DECISION_RESUME, own_legal, own_legal)
-        self.assertIn(ag1.DECISION_ABANDON, own_legal, own_legal)
+        self.assertNotIn(ag1.DECISION_ABANDON, own_legal, own_legal)
     def test_start_is_offered_with_no_foreground_and_with_a_waiting_foreground(self):
         world_cand = _world_candidate()
         idle_context, idle_capacity, _c1, _r1 = self._fixture([world_cand])

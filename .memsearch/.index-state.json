@@ -1,11 +1,11 @@
 {
   "collection": "memsearch_global",
   "failed_files": [],
-  "indexed_chunks": 0,
-  "indexed_files": 0,
-  "last_completed_at": "2026-10-21T14:28:45.800396Z",
-  "last_started_at": "2026-10-21T14:28:43.340484Z",
-  "last_success_at": "2026-10-21T14:28:45.800396Z",
+  "indexed_chunks": 3,
+  "indexed_files": 5,
+  "last_completed_at": "2026-10-25T08:53:15.395184Z",
+  "last_started_at": "2026-10-25T08:53:12.281237Z",
+  "last_success_at": "2026-10-25T08:53:15.395184Z",
   "milvus_uri": "~/.memsearch/milvus.db",
   "operation": "index",
   "paths": [
@@ -13,6 +13,6 @@
   ],
   "schema_version": 1,
   "status": "ok",
-  "total_files": 0,
-  "updated_at": "2026-10-21T14:28:45.800396Z"
+  "total_files": 5,
+  "updated_at": "2026-10-25T08:53:15.395184Z"
 }

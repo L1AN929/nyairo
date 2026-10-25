@@ -5,7 +5,8 @@
 
 1. **``step_readiness``：当前前台 Activity 还有没有一步能真的执行？**
    「有材料」不等于「有可执行步骤」。材料读尽 / 来源被撤 / 作品 writer 在同一版本上明确
-   ``no_change`` / 前台的 target 是这个世界进程执行不了的动词 —— 这几种情况下 owner 里那条
+   ``no_change`` / 前台的 target 是这个世界进程执行不了的动词 / 前台本身就是只有一个动作、
+   一个完成条件的 BODY Activity（没有定义过的下一步） —— 这几种情况下 owner 里那条
    Activity 仍是 ``ACTIVE``，但这一轮没有任何一步可以落地。判定只读，且**必须绑定**：只有
    同时拿到 ``activity_ref`` 与它自己的 ``target_ref``（外加 source revision）时才算一条可
    对外陈述的事实；否则 ``available=None``（不知道），绝不冒充「做不下去了」。
@@ -55,6 +56,11 @@ REASON_NO_BOUND_TARGET = "NO_BOUND_TARGET"
 REASON_WORK_NO_CHANGE = "WORK_NO_CHANGE_CONFIRMED"
 REASON_WORLD_STEP_AVAILABLE = "WORLD_STEP_AVAILABLE"
 REASON_WORLD_STEP_NOT_WIRED = "WORLD_STEP_NOT_WIRED"
+#: A BODY Activity is one action with one completion condition.  No second step is defined for it
+#: anywhere in this tree: no same-id retry policy, no "repeat the same pose as progress", no
+#: staged REST protocol.  The name says only that, never that the action failed or succeeded --
+#: submission, settlement and LR-5 completion stay separate layers.
+REASON_BODY_SINGLE_ACTION = "BODY_SINGLE_ACTION_NO_FURTHER_STEP"
 REASON_ARTIFACT_STEP_AVAILABLE = "ARTIFACT_STEP_AVAILABLE"
 REASON_STAY_CHECKPOINT = "STAY_CHECKPOINT_STEP"
 REASON_READING_PREFIX = "READING_"
@@ -74,6 +80,10 @@ TARGET_ARTIFACT = "artifact:"
 
 #: Activity kinds that carry a Life-side internal checkpoint instead of an owner verb.
 STAY_ACTIVITY_KIND = "STAY_AT_OBSERVED_PLACE"
+#: The Activity shape of one body step (mirrors ``autonomous_life_cycle.BODY_ACTION_ACTIVITY_KIND``).
+#: One such Activity carries **one** body target -- one action with one completion condition -- so
+#: it is the one World-shaped Activity that has no follow-up step of its own.
+BODY_ACTIVITY_KIND = "BODY_ACTION_AT_OBSERVED_PLACE"
 
 
 def _token(value: Any) -> str:
@@ -239,6 +249,8 @@ def assess_step_readiness(
     * no foreground / not ACTIVE -> ``None`` (nothing to be ready for);
     * no bound target -> ``None`` (an unknown target is not "no step");
     * a stay -> its own internal checkpoint always exists;
+    * a BODY Activity (its formal kind, or a ``bodyact:`` target) -> ``False``: one body target is
+      one action with one completion condition, and no follow-up step exists in this tree;
     * the reading material -> its own situation's ``available`` (EXHAUSTED / REVOKED / ... is a
       *named* reason, and a page left is a real step);
     * a work whose writer already said ``no_change`` on this very revision -> ``False``;
@@ -273,6 +285,16 @@ def assess_step_readiness(
     if namespace is None:
         return build(None, REASON_UNKNOWN_TARGET,
                      "target %r is in no namespace this cycle executes" % (str(target_ref),))
+    if kind == BODY_ACTIVITY_KIND or namespace == TARGET_BODY_ACTION:
+        #: One body target == one action.  Its idempotency key already binds place + revision +
+        #: target, its completion criterion is a single ``WORLD_FACT_MATCH``, and neither a same-id
+        #: retry nor a repeated action is defined as progress -- so there is positively no next
+        #: step to execute.  This is a statement about step availability only: it does not settle
+        #: the Action, does not turn a pre-submission refusal into a terminal state, and does not
+        #: say whether the one action succeeded.
+        return build(False, REASON_BODY_SINGLE_ACTION,
+                     "a BODY Activity carries one action and one completion condition; this tree "
+                     "defines no further step for it")
     if namespace == TARGET_STAY or kind == STAY_ACTIVITY_KIND:
         return build(True, REASON_STAY_CHECKPOINT,
                      "a stay's step is its own internal checkpoint")
@@ -744,6 +766,7 @@ __all__ = [
     "RECONSIDERATION_SCHEMA",
     "RECORDED_OUTCOMES",
     "REASON_ARTIFACT_STEP_AVAILABLE",
+    "REASON_BODY_SINGLE_ACTION",
     "REASON_CALLER_CANNOT_ACT",
     "REASON_FOREGROUND_NOT_ACTIVE",
     "REASON_NO_BOUND_TARGET",
@@ -754,6 +777,7 @@ __all__ = [
     "REASON_WORK_NO_CHANGE",
     "REASON_WORLD_STEP_AVAILABLE",
     "REASON_WORLD_STEP_NOT_WIRED",
+    "BODY_ACTIVITY_KIND",
     "ReconsiderationLedger",
     "STEP_UNAVAILABLE_FACT_KEY",
     "STAY_ACTIVITY_KIND",

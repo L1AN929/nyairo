@@ -54,8 +54,12 @@ def declare_fixtures():
                                  "placeable": True, "fixed": False})
     wbs.declare_capability(BED, {"takeable": False, "portable": False,
                                  "placeable": True, "fixed": True})
+    # 裸表面 id（无 ":instance" 后缀）只有 legacy_bare 种类才被认作已声明；
+    # 该夹具用的是不带实例的 "table"，因此必须显式标记，否则 surface_declared
+    # 会把合法的放置目标判成 UNKNOWN_DESTINATION。只影响本测试进程的声明表。
     wbs.SURFACES.setdefault(TABLE_SURFACE, {"surface_id": TABLE_SURFACE,
-                                            "owner_catalog_item_id": ""})
+                                            "owner_catalog_item_id": "",
+                                            "legacy_bare": True})
 
 
 def clear_fixtures():

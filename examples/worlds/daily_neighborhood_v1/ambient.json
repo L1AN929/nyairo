@@ -1,7 +1,8 @@
 {
-  "schema_version": "worldgen.ambient.v1",
+  "schema_version": "worldgen.ambient.v2",
   "templates": [
     {
+      "kind": "single_day",
       "end_hour": 21,
       "event_type": "street_traffic",
       "location_id": "street_front",
@@ -9,11 +10,332 @@
       "summary": "门前街道上偶尔有车经过"
     },
     {
+      "kind": "single_day",
       "end_hour": 18,
       "event_type": "park_birds",
       "location_id": "park",
       "start_hour": 6,
       "summary": "公园的树上有鸟叫"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 11,
+      "event_type": "cafe_morning_grind",
+      "location_id": "cafe",
+      "start_hour": 8,
+      "summary": "咖啡店刚开门，磨豆机响了一会儿"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 17,
+      "event_type": "cafe_afternoon_seats",
+      "location_id": "cafe",
+      "start_hour": 13,
+      "summary": "午后靠窗的座位坐了人"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 13,
+      "event_type": "reading_point_shelf_cart",
+      "location_id": "reading_point",
+      "start_hour": 10,
+      "summary": "书架旁停着一辆待上架的书车"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 19,
+      "event_type": "reading_point_quiet",
+      "location_id": "reading_point",
+      "start_hour": 14,
+      "summary": "阅读角里只有翻书声"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 12,
+      "event_type": "park_bench_newspaper",
+      "location_id": "park",
+      "start_hour": 7,
+      "summary": "长椅上摊着一份别人留下的报纸"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 21,
+      "event_type": "park_evening_walkers",
+      "location_id": "park",
+      "start_hour": 17,
+      "summary": "傍晚有人绕着步道散步"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 9,
+      "event_type": "street_corner_crossing",
+      "location_id": "street_corner",
+      "start_hour": 7,
+      "summary": "早高峰时段路口等灯的人多了些"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 20,
+      "event_type": "street_corner_evening",
+      "location_id": "street_corner",
+      "start_hour": 17,
+      "summary": "放学后路口的声音比平时杂"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 8,
+      "event_type": "street_front_sweeper",
+      "location_id": "street_front",
+      "start_hour": 6,
+      "summary": "清晨有清洁工沿人行道扫过"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 18,
+      "event_type": "street_front_shadow",
+      "location_id": "street_front",
+      "start_hour": 15,
+      "summary": "楼影盖住了半条人行道"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 18,
+      "event_type": "cafe_closing_chairs",
+      "location_id": "cafe",
+      "start_hour": 17,
+      "summary": "店员开始把外面的椅子搬回店里"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 20,
+      "event_type": "reading_point_return_cart",
+      "location_id": "reading_point",
+      "start_hour": 19,
+      "summary": "闭馆前有人把翻过的书放回推车"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 8,
+      "event_type": "park_lawn_sprinkler",
+      "location_id": "park",
+      "start_hour": 6,
+      "summary": "草坪边的喷头在浇水"
+    },
+    {
+      "kind": "single_day",
+      "end_hour": 22,
+      "event_type": "park_lamp_on",
+      "location_id": "park",
+      "start_hour": 18,
+      "summary": "公园的灯亮起来"
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_street_drainage",
+      "location_id": "street_front",
+      "summary": "门前街道的排水管施工预告",
+      "finite": {
+        "identity": "street_front_drainage_20261024",
+        "starts_on": "2026-10-24",
+        "ends_on": "2026-10-25",
+        "end_reason": "施工结束，围挡撤除",
+        "phases": [
+          {
+            "local_date": "2026-10-24",
+            "start_hour": 7,
+            "end_hour": 21,
+            "summary": "门前街道贴出排水施工预告，写着明天开挖"
+          },
+          {
+            "local_date": "2026-10-25",
+            "start_hour": 7,
+            "end_hour": 18,
+            "summary": "排水施工开始了，门前留出一条窄道"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_park_lawn_rest",
+      "location_id": "park",
+      "summary": "公园草坪轮休养护",
+      "finite": {
+        "identity": "park_lawn_rest_20261025",
+        "starts_on": "2026-10-25",
+        "ends_on": "2026-10-26",
+        "end_reason": "轮休养护期满，围栏撤走",
+        "phases": [
+          {
+            "local_date": "2026-10-25",
+            "start_hour": 8,
+            "end_hour": 20,
+            "summary": "草坪边立起轮休养护的牌子"
+          },
+          {
+            "local_date": "2026-10-26",
+            "start_hour": 8,
+            "end_hour": 18,
+            "summary": "草坪的一半被围起来养护，另一半还能走"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_cafe_sidewalk",
+      "location_id": "cafe",
+      "summary": "咖啡店门前人行道翻修",
+      "finite": {
+        "identity": "cafe_sidewalk_20261026",
+        "starts_on": "2026-10-26",
+        "ends_on": "2026-10-27",
+        "end_reason": "人行道翻修结束，桌椅摆回",
+        "phases": [
+          {
+            "local_date": "2026-10-26",
+            "start_hour": 9,
+            "end_hour": 19,
+            "summary": "咖啡店门前的人行道画了翻修标记"
+          },
+          {
+            "local_date": "2026-10-27",
+            "start_hour": 8,
+            "end_hour": 17,
+            "summary": "门前路面被挖开一段，店员把外摆桌椅收了进去"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_reading_cart",
+      "location_id": "reading_point",
+      "summary": "阅读角整理旧书",
+      "finite": {
+        "identity": "reading_point_cart_20261027",
+        "starts_on": "2026-10-27",
+        "ends_on": "2026-10-28",
+        "end_reason": "旧书整理完毕，书车推走",
+        "phases": [
+          {
+            "local_date": "2026-10-27",
+            "start_hour": 10,
+            "end_hour": 18,
+            "summary": "阅读角门口停着一辆装满旧书的推车"
+          },
+          {
+            "local_date": "2026-10-28",
+            "start_hour": 9,
+            "end_hour": 17,
+            "summary": "有人把推车里的旧书按类别码回书架"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_street_corner_works",
+      "location_id": "street_corner",
+      "summary": "路口信号灯检修",
+      "finite": {
+        "identity": "street_corner_works_20261028",
+        "starts_on": "2026-10-28",
+        "ends_on": "2026-10-29",
+        "end_reason": "信号灯检修完成，恢复正常",
+        "phases": [
+          {
+            "local_date": "2026-10-28",
+            "start_hour": 8,
+            "end_hour": 20,
+            "summary": "路口立起信号灯检修的告示牌"
+          },
+          {
+            "local_date": "2026-10-29",
+            "start_hour": 7,
+            "end_hour": 16,
+            "summary": "路口的信号灯罩被拆下，过街的人放慢了脚步"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_park_stage",
+      "location_id": "park",
+      "summary": "公园搭周末活动棚",
+      "finite": {
+        "identity": "park_stage_20261029",
+        "starts_on": "2026-10-29",
+        "ends_on": "2026-10-30",
+        "end_reason": "活动结束，棚子拆走",
+        "phases": [
+          {
+            "local_date": "2026-10-29",
+            "start_hour": 9,
+            "end_hour": 19,
+            "summary": "公园空地上开始搭周末活动用的小棚子"
+          },
+          {
+            "local_date": "2026-10-30",
+            "start_hour": 8,
+            "end_hour": 20,
+            "summary": "棚子搭好了，有人在往里搬折叠椅"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_cafe_delivery",
+      "location_id": "cafe",
+      "summary": "咖啡店换新一批豆子",
+      "finite": {
+        "identity": "cafe_delivery_20261030",
+        "starts_on": "2026-10-30",
+        "ends_on": "2026-10-31",
+        "end_reason": "新豆子上架完毕，纸箱清走",
+        "phases": [
+          {
+            "local_date": "2026-10-30",
+            "start_hour": 10,
+            "end_hour": 18,
+            "summary": "咖啡店说新一批豆子明天到，今天先清出货架"
+          },
+          {
+            "local_date": "2026-10-31",
+            "start_hour": 9,
+            "end_hour": 17,
+            "summary": "新豆子到了，店员在拆箱分装"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "finite",
+      "event_type": "finite_home_water",
+      "location_id": "home",
+      "summary": "住处楼下的水管检修",
+      "finite": {
+        "identity": "home_water_20261031",
+        "starts_on": "2026-10-31",
+        "ends_on": "2026-11-01",
+        "end_reason": "水管检修完成，供水恢复正常",
+        "phases": [
+          {
+            "local_date": "2026-10-31",
+            "start_hour": 12,
+            "end_hour": 22,
+            "summary": "楼下的告示说明天上午要检修水管"
+          },
+          {
+            "local_date": "2026-11-01",
+            "start_hour": 9,
+            "end_hour": 15,
+            "summary": "上午水管检修，水龙头的水流变细了"
+          }
+        ]
+      }
     }
   ]
 }

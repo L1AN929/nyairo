@@ -431,5 +431,27 @@ class DailyNeighborhoodTest(unittest.TestCase):
         self.assertEqual(self.entry(catalog, "home")["reachability"]["status"], "here")
 
 
+    # -- 8. 环境事件目录扩充的兼容边界 ---------------------------------------
+
+    def test_ambient_template_expansion_does_not_change_opportunities(self) -> None:
+        """包内 v2 环境事件（16 单日 + 8 有限跨天）不改变只读机会目录。"""
+
+        import world_ambient_events as wae
+
+        now = self.at(2026, 10, 25, 12)
+        without_ambient = self.catalog(now)
+        with_ambient = self.catalog(
+            now,
+            env=dict(self.env, CHIYO_WORLD_AMBIENT_EVENTS_ENABLED="1"),
+        )
+        self.assertEqual(
+            without_ambient["opportunities"], with_ambient["opportunities"]
+        )
+        catalog = wae.ambient_template_catalog(self.env)
+        self.assertEqual(catalog["total"], 24)
+        self.assertEqual(catalog["categories"]["cross_day"], 8)
+        self.assertTrue(catalog["cross_day_supported"])
+
+
 if __name__ == "__main__":
     unittest.main()

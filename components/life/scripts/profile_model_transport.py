@@ -18,10 +18,13 @@ The configured ``cn:deepseek-v4.1-flash`` is a reasoning model: its thinking tok
 charged against the same ``max_tokens`` as the answer.  Two facts follow, and this transport
 enforces both:
 
-* an answer that never started because the cap ran out arrives as ``content: ""`` with
-  ``finish_reason: "length"``.  That is a *truncated* answer, and it is reported as
-  ``PROVIDER_OUTPUT_TRUNCATED`` -- never as ``PROVIDER_MALFORMED_RESPONSE``, which the cognition
-  adapter turns into ``INVALID_JSON`` and which therefore blamed the model for a cap it was given;
+* a response whose ``finish_reason`` is ``"length"`` was cut off by the cap -- whether it came
+  back with ``content: ""`` or with a partial (even accidentally parseable) body.  That is a
+  *truncated* answer, and it is reported as ``PROVIDER_OUTPUT_TRUNCATED`` -- never as
+  ``PROVIDER_MALFORMED_RESPONSE``, which the cognition adapter turns into ``INVALID_JSON`` and
+  which therefore blamed the model for a cap it was given.  The error carries shape-only
+  metadata (finish reason, character counts and integer token counts) so the failure path can
+  record why it happened without persisting any text;
 * ``message.reasoning_content`` is a derivation, not an answer.  It is measured (length only) for
   telemetry and then dropped: it is never ``text``, never parsed, never a decision.
 
@@ -54,6 +57,36 @@ from typing import Any, Mapping, Optional
 USER_AGENT = "nyairo-life/0.2 (+https://nyairo.com)"
 
 DEFAULT_PURPOSE = "agency_cognition"
+
+
+def _shape_metadata(*, finish_reason: Any, content_chars: int, reasoning_chars: int,
+                    usage: Mapping[str, Any]) -> dict[str, Any]:
+    """Shape-only facts about a response that could not be used.
+
+    Counts (characters and integer token counts) and the provider's finish reason, nothing
+    else.  A count that is missing or not a non-negative integer is *omitted*, never written
+    as ``0``: "the provider reported nothing" and "the provider reported zero" are different
+    facts, and the diagnosis depends on keeping them apart.  The response body, the model's
+    content and its reasoning text can never enter this mapping.
+    """
+
+    out: dict[str, Any] = {
+        "finish_reason": finish_reason if isinstance(finish_reason, str) else None,
+        "content_chars": int(content_chars),
+        "reasoning_chars": int(reasoning_chars),
+    }
+    for name, source in (("input_tokens", "prompt_tokens"),
+                         ("output_tokens", "completion_tokens"),
+                         ("total_tokens", "total_tokens")):
+        value = usage.get(source)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            out[name] = value
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, Mapping):
+        value = details.get("reasoning_tokens")
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            out["reasoning_tokens"] = value
+    return out
 
 
 class TransportResult:
@@ -215,20 +248,24 @@ class OpenAICompatibleTransport:
 
         if status >= 400:
             detail = raw[:200]
+            # 2026-10-24: the HTTP status was already observed here and then dropped, so the
+            # adapter's ``response_status`` field was always null and a 4xx refusal could not be
+            # told apart (400 vs 404 vs 422) after the fact.  Carry the number only -- the body
+            # stays in the exception text and is never persisted by the adapter.
             if status in (401, 403):
                 raise AgencyModelClientError(PROVIDER_AUTH_ERROR,
-                                             "http %d %s" % (status, detail))
+                                             "http %d %s" % (status, detail), status=status)
             if status == 429:
                 raise AgencyModelClientError(PROVIDER_RATE_LIMITED,
-                                             "http %d %s" % (status, detail))
+                                             "http %d %s" % (status, detail), status=status)
             if status >= 500:
                 raise AgencyModelClientError(PROVIDER_SERVER_ERROR,
-                                             "http %d %s" % (status, detail))
+                                             "http %d %s" % (status, detail), status=status)
             # LPC0B-R3: a refused *request* (bad parameter, unsupported response_format, wrong
             # body) is not a malformed *model response*; reporting it as one is how a payload
             # problem used to masquerade as "the model emitted bad JSON".
             raise AgencyModelClientError(PROVIDER_REQUEST_REJECTED,
-                                         "http %d %s" % (status, detail))
+                                         "http %d %s" % (status, detail), status=status)
 
         latency_ms = int((time.monotonic() - pending.started) * 1000)
         self.call_count += 1
@@ -240,6 +277,7 @@ class OpenAICompatibleTransport:
             content = message.get("content")
             reasoning = message.get("reasoning_content")
             finish_reason = choice.get("finish_reason") if isinstance(choice, Mapping) else None
+            usage = parsed.get("usage") if isinstance(parsed.get("usage"), Mapping) else {}
         except (ValueError, AttributeError, IndexError, TypeError) as exc:
             raise AgencyModelClientError(
                 PROVIDER_MALFORMED_RESPONSE, "unparsable body: %s" % raw[:200]) from exc
@@ -252,18 +290,23 @@ class OpenAICompatibleTransport:
         content_chars = len(content.strip())
         reasoning_chars = len(reasoning_text.strip())
         finish = finish_reason if isinstance(finish_reason, str) else None
+        shape = ("finish_reason=%s content_chars=%d reasoning_chars=%d"
+                 % (finish, content_chars, reasoning_chars))
+        # Shape-only metadata travels with the error so the failure path can record *why* the
+        # call was unusable without persisting any text or inventing a missing count.
+        metadata = _shape_metadata(finish_reason=finish, content_chars=content_chars,
+                                   reasoning_chars=reasoning_chars, usage=usage)
+        if finish == "length":
+            # The token cap ran out: a real, billed call whose answer was cut off -- not bad
+            # JSON.  This holds even when the truncated text happens to parse as JSON; a
+            # length finish is never promoted into a decision.
+            raise AgencyModelClientError(PROVIDER_OUTPUT_TRUNCATED, shape, metadata=metadata)
         if not content_chars:
-            shape = ("finish_reason=%s content_chars=0 reasoning_chars=%d"
-                     % (finish, reasoning_chars))
-            if finish == "length":
-                # The token cap ran out before the answer started: a real, billed call whose
-                # answer was cut off -- not bad JSON.
-                raise AgencyModelClientError(PROVIDER_OUTPUT_TRUNCATED, shape)
             if reasoning_chars:
-                raise AgencyModelClientError(PROVIDER_REASONING_ONLY, shape)
-            raise AgencyModelClientError(PROVIDER_EMPTY_CONTENT, shape)
+                raise AgencyModelClientError(PROVIDER_REASONING_ONLY, shape, metadata=metadata)
+            raise AgencyModelClientError(PROVIDER_EMPTY_CONTENT, shape, metadata=metadata)
         return TransportResult(text=content, latency_ms=latency_ms, status=status,
-                               usage=parsed.get("usage"), model=str(parsed.get("model") or ""),
+                               usage=usage, model=str(parsed.get("model") or ""),
                                finish_reason=finish, reasoning_chars=reasoning_chars,
                                content_chars=content_chars)
 

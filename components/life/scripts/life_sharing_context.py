@@ -131,10 +131,21 @@ def _share_detail(service: Any, share_id: str) -> dict[str, Any]:
     current = data.get("source_current") if isinstance(data.get("source_current"), Mapping) else {}
     deferred = share.get("deferred") if isinstance(share.get("deferred"), Mapping) else {}
     text = str(share.get("text") or "")
+    # The owner's own text-level withholding: a draft whose recorded source can no longer be
+    # read keeps its metadata but its words are withheld.  That is not an empty draft and this
+    # projection must not make it look like one.  Absent flags stay ``None`` (not guessed).
+    withheld_raw = share.get("text_withheld")
+    withheld = withheld_raw if isinstance(withheld_raw, bool) else None
+    available_raw = share.get("text_available")
+    available = available_raw if isinstance(available_raw, bool) else None
     return {
         "detail_readable": True,
         # Her own words, cut for the prompt.  Newlines collapse so one draft cannot add lines.
-        "text_excerpt": _text(text, MAX_PROMPT_SHARE_TEXT),
+        "text_excerpt": _text(text, MAX_PROMPT_SHARE_TEXT) if available is not False else "",
+        "text_withheld": withheld,
+        "text_available": available,
+        "withheld_reason_code": (_text(data.get("withheld_reason_code"), 64)
+                                 if withheld else ""),
         "text_chars": (share.get("text_chars") if isinstance(share.get("text_chars"), int)
                        else len(text)),
         "source": {
@@ -275,6 +286,10 @@ def read_draft(service: Any, share_id: str) -> dict[str, Any]:
         "state": _text(share.get("state"), 24),
         "head_version_id": _text(share.get("head_version_id"), 96),
         "delivered": bool(data.get("delivered")),
+        # Whether the owner's own source read allows this draft's words at all (this read does
+        # not request them).  False is a withheld source, never an empty draft.
+        "text_available": (share.get("text_available")
+                           if isinstance(share.get("text_available"), bool) else None),
         "source_current": {
             "readable": bool(source.get("readable")),
             "stale": bool(source.get("stale")),

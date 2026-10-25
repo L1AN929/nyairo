@@ -62,3 +62,6 @@ Status: implemented
   4xx 分类变化会让某些被测断言（原本断言 INVALID_JSON 的）需要跟着改；若网关真的不支持
   `response_format`，现在会明确报 `MODEL_REQUEST_REJECTED` 而不是假装是模型的问题——修复它需要另一次
   有界复验，不能靠放宽 JSON 入口来"变绿"。
+- **后续（2026-10-22，事实更新，不改变本篇当时的决定）**：同一真实链路在 2048 下仍出现两次
+  `OUTPUT_TRUNCATED`，因此下限又单一有界抬到 4096，并补齐失败行的形状元数据。理由、代价和
+  未验证边界见 [2026-10-22-cognition-output-truncation.md](2026-10-22-cognition-output-truncation.md)。

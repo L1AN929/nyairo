@@ -1296,7 +1296,12 @@ class CanonicalActivityStore:
             if status not in ALL_ACTIVITY_STATUSES:
                 raise RecoveryRequiredError("CORRUPTED_SNAPSHOT", f"activity {act_id!r} has invalid status={status!r}")
             if status in OPEN_ACTIVITY_STATUSES:
-                if status == STATUS_WAITING and act.get("foreground_released") is True:
+                # WAITING may release the slot explicitly.  v0.4 background pause: a PAUSED
+                # Activity released by a successful PAUSE carries the same marker, so more than
+                # one suspended Activity can coexist while at most one ACTIVE one holds the slot.
+                # A legacy PAUSED record has no marker and is still treated as foreground-bound.
+                if (status in (STATUS_WAITING, STATUS_PAUSED)
+                        and act.get("foreground_released") is True):
                     continue
                 fg_bound_open_ids.append(act_id)
 
@@ -2160,9 +2165,23 @@ class ActivityCommandService:
                     TRANSITION_ABANDON,
                     TRANSITION_CANCEL,
                     TRANSITION_EXPIRE,
-                    TRANSITION_CHECKPOINT,
-                    TRANSITION_PROGRESS,
                 ):
+                    # A released WAITING Activity keeps its old terminal exits.  v0.4 background
+                    # pause: a PAUSED Activity that really released the slot keeps the same
+                    # state-machine ability it had while it still held the pointer -- the
+                    # separate PAUSED-ABANDON safety rule lives in AG-2, not here, and is
+                    # unchanged.  Terminal transitions need no executing foreground.
+                    if not (
+                        from_status in (STATUS_WAITING, STATUS_PAUSED)
+                        and current_act.get("foreground_released") is True
+                    ):
+                        raise ForegroundConflictError(
+                            f"activity {act_id!r} is not the current foreground activity ({fg_id!r})"
+                        )
+                elif transition_type in (TRANSITION_CHECKPOINT, TRANSITION_PROGRESS):
+                    # A suspended PAUSED Activity is not executing, so it cannot advance its
+                    # own progress/checkpoint behind the foreground.  The WAITING allowance is
+                    # the existing one and stays byte-for-byte.
                     if not (
                         from_status == STATUS_WAITING
                         and current_act.get("foreground_released") is True
@@ -2217,7 +2236,12 @@ class ActivityCommandService:
                 updated_act["waiting_on_ref"] = None
                 updated_act["resume_condition_ref"] = None
                 updated_act.pop("waiting_episode_id", None)
-                updated_act.pop("foreground_released", None)
+                # v0.4 background pause: a successful PAUSE releases the single execution slot.
+                # ``foreground_released`` is the same field WAIT already uses; the canonical
+                # invariant and the deterministic replay use it to accept ``foreground=None``
+                # while the Activity stays OPEN (PAUSED) in its own record.  A legacy PAUSED
+                # record written before this rule has no marker and keeps its old pointer.
+                updated_act["foreground_released"] = True
             elif effective_to_status == STATUS_WAITING:
                 updated_act["waiting_since"] = occ_stamp
                 updated_act["waiting_on_ref"] = ext_refs["waiting_on_ref"]
@@ -2285,6 +2309,12 @@ class ActivityCommandService:
                 if fg_id == act_id:
                     new_state["foreground_activity_ref"] = None
             elif effective_to_status == STATUS_WAITING and release_foreground:
+                if fg_id == act_id:
+                    new_state["foreground_activity_ref"] = None
+            elif effective_to_status == STATUS_PAUSED:
+                # v0.4 background pause: the paused Activity keeps every field of its own record,
+                # but it no longer holds the one execution slot.  A later RESUME re-acquires it
+                # through the normal owner path (LR-4 eligibility, then LR-2 here).
                 if fg_id == act_id:
                     new_state["foreground_activity_ref"] = None
             else:
@@ -2743,7 +2773,11 @@ class ReplayRuntime:
             elif to_status in TERMINAL_ACTIVITY_STATUSES:
                 if prev_fg == act_id:
                     state["foreground_activity_ref"] = None
-            elif to_status == STATUS_WAITING and snap.get("foreground_released") is True:
+            elif (to_status in (STATUS_WAITING, STATUS_PAUSED)
+                  and snap.get("foreground_released") is True):
+                # v0.4 background pause: a released PAUSED Activity is OPEN in its own record
+                # but does not hold the foreground slot.  Legacy PAUSED transitions without the
+                # marker fall through to the old OPEN branch and keep their pointer.
                 if prev_fg == act_id:
                     state["foreground_activity_ref"] = None
             elif to_status in OPEN_ACTIVITY_STATUSES:

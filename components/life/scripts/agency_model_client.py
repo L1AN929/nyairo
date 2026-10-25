@@ -63,12 +63,20 @@ PURPOSE_CHAT = "chat"
 
 
 class AgencyModelClientError(RuntimeError):
-    """Transport-level failure.  Never represents a model choice."""
+    """Transport-level failure.  Never represents a model choice.
 
-    def __init__(self, failure_class: str, message: str, *, status: Optional[int] = None) -> None:
+    ``metadata`` carries *shape* facts about a 200 response that could not be used -- the
+    finish reason, character counts and integer token counts.  It is deliberately a small
+    allowlisted mapping, never the response body, the message or any model-written text; the
+    adapter and the resident's safe sink each rebuild it again value by value.
+    """
+
+    def __init__(self, failure_class: str, message: str, *, status: Optional[int] = None,
+                 metadata: Optional[Mapping[str, Any]] = None) -> None:
         super().__init__(f"{failure_class}: {message}")
         self.failure_class = failure_class
         self.status = status
+        self.metadata: dict[str, Any] = dict(metadata or {})
 
 
 @dataclass

@@ -189,6 +189,35 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+#: EP-16 album manifests are artifact *heads*, but they are media references, not text works.
+#: ``latest_resumable`` skips them so a picture can never become "the work she was writing".
+ALBUM_MARKER = "album.image.v1"
+
+
+def is_album_manifest(content: Any) -> bool:
+    """Classification only (never authentication): is this the owner's album manifest?"""
+    if not isinstance(content, str) or not content or len(content) > 4096:
+        return False
+    try:
+        doc = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(doc, dict) or doc.get("kind") != ALBUM_MARKER:
+        return False
+    media = doc.get("media")
+    source = doc.get("source")
+    return (
+        isinstance(doc.get("caption"), str)
+        and doc.get("content_type") in ("image/png", "image/jpeg")
+        and isinstance(media, dict)
+        and isinstance(media.get("name"), str)
+        and isinstance(media.get("sha256"), str)
+        and isinstance(source, dict)
+        and source.get("origin") == "user_import"
+        and source.get("declared") == "self_declared"
+    )
+
+
 def operation_key_for(*parts: str) -> str:
     """A deterministic operation key for one intended effect.
 
@@ -416,15 +445,19 @@ class LifeArtifactPort:
         "None" is a real answer: it means the owner holds no continuable work, and the caller
         must not manufacture one.
         """
-        best: Optional[dict[str, Any]] = None
-        for row in self.list_artifacts():
-            if str(row.get("lifecycle")) != "ACTIVE":
+        active = [row for row in self.list_artifacts()
+                  if str(row.get("lifecycle")) == "ACTIVE"]
+        active.sort(key=lambda row: -int(row.get("revision") or 0))
+        for row in active:
+            artifact_id = str(row.get("artifact_id") or "")
+            if not artifact_id:
                 continue
-            if best is None or int(row.get("revision") or 0) > int(best.get("revision") or 0):
-                best = row
-        if best is None:
-            return None
-        return self.resume_point(str(best["artifact_id"]))
+            point = self.resume_point(artifact_id)
+            if is_album_manifest(point.content):
+                # A picture is never the text work to continue; keep looking, honestly.
+                continue
+            return point
+        return None
 
     # -- writes (the narrow write port) ------------------------------------------------
 
@@ -666,6 +699,7 @@ __all__ = [
     "LifeArtifactPort",
     "LifeArtifactUnavailable",
     "operation_key_for",
+    "is_album_manifest",
     "parse_grant_ids",
     "COMMAND_OPS",
     "DEFAULT_VERSION_PAGE",

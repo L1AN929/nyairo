@@ -81,6 +81,15 @@ PARSE_HELPER = "parse_practice_content"
 KIND_REVIEW = "review"
 KIND_METHOD = "method"
 
+#: B's own method state that keeps the document but withdraws the practice.  This seam only
+#: compares against it; it does not define a second state machine.
+METHOD_STATE_RETIRED = "RETIRED"
+#: B's own refusal words, reused verbatim so a loss is never re-worded here.
+LOSS_METHOD_RETIRED = "PRACTICE_METHOD_RETIRED"
+#: B's own default list bound.  When only usable rows are wanted, ask for this many so a lost row
+#: at the top of the list cannot hide a usable one behind this seam's smaller cap.
+DEFAULT_METHOD_SCAN = 12
+
 #: Trial outcomes, spelled exactly as B spells them (this seam never re-words an evaluation).
 OUTCOME_HELPED = "HELPED"
 OUTCOME_NOT_HELPED = "NOT_HELPED"
@@ -120,6 +129,22 @@ def _one_line(value: Any, limit: int) -> str:
 def _bounded(value: Any, limit: int) -> str:
     text = str(value or "").strip()
     return text[:limit] if limit else text
+
+
+def method_availability(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Whether one *listed* method is still usable in the next round, and why not.
+
+    ``RETIRED`` is the one loss that withdraws the *offer*: B keeps the document as history but
+    refuses further trials and revisions, so a Decision may not name it as a usable practice.
+    ``TRIAL`` and ``CONTESTED`` stay usable (a counterexample is a recorded state, not a loss),
+    and evidence the owner can no longer read keeps its existing contract -- the row is still
+    read, with its prose already withheld by B.  This reads the owner's own row; it writes
+    nothing and defines no new state.
+    """
+
+    if str(row.get("method_state") or "").strip().upper() == METHOD_STATE_RETIRED:
+        return {"available": False, "loss_reason": LOSS_METHOD_RETIRED}
+    return {"available": True, "loss_reason": ""}
 
 
 def practice_module() -> Any:
@@ -167,6 +192,9 @@ class PracticeSeam:
         self.last_error: str = ""
         self.last_experiences: list[dict[str, Any]] = []
         self.last_methods: list[dict[str, Any]] = []
+        #: Methods the owner still holds but this round may not offer (retired / unreadable
+        #: evidence), each with its own reason.  Empty is *not* proof that she never had any.
+        self.last_withheld_methods: list[dict[str, Any]] = []
         self.last_reviews: list[dict[str, Any]] = []
         #: Per-artifact head version seen when this round read the method, so a trial write is a
         #: real compare-and-set against the version she actually looked at.
@@ -387,7 +415,7 @@ class PracticeSeam:
 
         artifact_id = str(row.get("artifact_id") or "")
         head = str(row.get("head_version_id") or "")
-        return {
+        item = {
             "method_ref": method_ref_for(artifact_id),
             "artifact_id": artifact_id,
             "title": _one_line(row.get("title"), 120),
@@ -399,11 +427,20 @@ class PracticeSeam:
             "version_number": row.get("version_number"),
             "counterexample_count": row.get("counterexample_count"),
             "trial_count": row.get("trial_count"),
+            # The owner's own governance answer for this list row (kept as metadata; a blocked
+            # row already carries no prose, and availability is decided only by retirement).
+            "governance_blocked": bool(row.get("governance_blocked")),
+            "governance_reason": str(row.get("governance_reason") or ""),
+            "status": row.get("status"),
+            "lifecycle": row.get("lifecycle"),
             "verified_skill": False,
         }
+        item.update(method_availability(item))
+        return item
 
     def methods(self, *, query: str = "",
-                limit: Optional[int] = None) -> list[dict[str, Any]]:
+                limit: Optional[int] = None,
+                available_only: bool = False) -> list[dict[str, Any]]:
         """The methods relevant to what she is doing, bounded, each with a stable handle.
 
         The match is B's own deterministic, bounded search over title/question/body; this seam adds
@@ -411,27 +448,38 @@ class PracticeSeam:
         and -- only when that matched nothing -- B's own recent list, so a practice written a moment
         ago is still reachable.  Every row carries the head version it was read at, so a Decision
         that names it is naming *that* version.
+
+        ``available_only`` is what the *offer* uses: a retired method stays in her archive (and in
+        ``last_withheld_methods`` with its named reason) but is not returned as something this
+        round may name.  With the default ``False`` the call is the full bounded read -- the
+        caller that only needs ids (to keep method documents out of work offers) still sees every
+        method, and an evidence-blocked method keeps its existing row-with-empty-prose contract.
         """
 
         self.last_error = ""
         cap = (self.max_methods if limit is None
                else max(0, min(int(limit), self.max_methods)))
         self.last_methods = []
+        self.last_withheld_methods = []
         if not cap:
             return []
         if not self.available():
             self.last_error = REASON_SERVICE_MISSING
             return []
+        # Ask for a little headroom only when lost rows must be filtered out: a retired row at
+        # the top of the owner's list must not hide a usable one behind the seam's cap.
+        ask = max(cap, DEFAULT_METHOD_SCAN) if available_only else cap
+        withheld: dict[str, dict[str, Any]] = {}
         rows: list[dict[str, Any]] = []
         needles = [str(query or ""), ""] if str(query or "").strip() else [""]
         for needle in needles:
             try:
-                data = self._call("list_methods", query=needle, limit=cap)
+                data = self._call("list_methods", query=needle, limit=ask)
             except PracticeSeamError as exc:
                 self.last_error = ("%s:%s" % (exc.reason_code, exc.detail)
                                    if exc.detail else exc.reason_code)
                 return []
-            rows = []
+            read_rows: list[dict[str, Any]] = []
             for row in data.get("projects") or ():
                 if not isinstance(row, Mapping):
                     continue
@@ -441,11 +489,19 @@ class PracticeSeam:
                 item["instruction"] = _bounded(item["instruction"], self.text_chars)
                 if item["head_version_id"]:
                     self.seen_heads[item["artifact_id"]] = item["head_version_id"]
-                rows.append(item)
-                if len(rows) >= cap:
+                read_rows.append(item)
+                if len(read_rows) >= ask:
                     break
+            for item in read_rows:
+                if not item.get("available", True):
+                    withheld[item["artifact_id"]] = dict(item)
+            rows = ([item for item in read_rows if item.get("available", True)]
+                    if available_only else read_rows)
+            if len(rows) > cap:
+                rows = rows[:cap]
             if rows:
                 break
+        self.last_withheld_methods = list(withheld.values())
         self.last_methods = rows
         return rows
 
@@ -477,16 +533,23 @@ class PracticeSeam:
         if not is_method_ref(wanted):
             return None
         for row in self.last_methods:
+            if not row.get("available", True):
+                continue
             if str(row.get("method_ref")) == wanted:
                 return dict(row)
         return None
 
     def method_refs(self) -> list[str]:
         return [str(row.get("method_ref")) for row in self.last_methods
-                if row.get("method_ref")]
+                if row.get("method_ref") and row.get("available", True)]
 
     def method_artifact_ids(self) -> list[str]:
-        """The bare ids the workspace calls *method*: reference documents, not works."""
+        """The bare ids the workspace calls *method*: reference documents, not works.
+
+        This deliberately uses the full read (``available_only=False``): a retired method is
+        still a method document, so it must stay out of the work / closeout offers even though
+        it is no longer a usable practice.
+        """
 
         if not self.available():
             return []
@@ -498,6 +561,25 @@ class PracticeSeam:
             if text and text not in ids:
                 ids.append(text)
         return ids
+
+    @staticmethod
+    def withheld_view(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        """One bounded, non-prose summary of methods the owner no longer lets this round offer.
+
+        Count, the owner's own reason words and titles only.  Instructions / scopes / trial
+        details never travel here: for a blocked row they are exactly what was withheld.
+        """
+
+        bounded = [row for row in rows if isinstance(row, Mapping)]
+        reasons = sorted({str(row.get("loss_reason") or "") for row in bounded
+                          if row.get("loss_reason")})
+        return {
+            "count": len(bounded),
+            "reason_codes": reasons,
+            "titles": [_one_line(row.get("title"), 80) for row in bounded][:3],
+            "note": ("这些做法仍留在她的档案里，但已退休或证据不再可读："
+                     "本轮不能命名、评价或当作可用做法。"),
+        }
 
     @staticmethod
     def _bounded_document(data: Mapping[str, Any], kind: str) -> Optional[dict[str, Any]]:
@@ -564,8 +646,9 @@ class PracticeSeam:
         availability = self.availability()
         experiences = self.experiences(query=query, limit=self.max_experiences)
         memory_error = self.last_error
-        methods = self.methods(query=query, limit=limit)
+        methods = self.methods(query=query, limit=limit, available_only=True)
         method_error = self.last_error
+        withheld = [dict(row) for row in self.last_withheld_methods]
         view: dict[str, Any] = {
             "status": availability["status"],
             "memory": availability.get("memory"),
@@ -579,6 +662,10 @@ class PracticeSeam:
             "note": ("方法是她自己写下的做法草案，只是文档参考，不是权限、可执行代码或人格信念；"
                      "引用 method_ref 必须来自这份列表。"),
         }
+        if withheld:
+            # The loss is named, not erased: these documents still exist, but this round may not
+            # name, evaluate or follow them.  Count / reason / title only -- never their prose.
+            view["withheld_methods"] = self.withheld_view(withheld)
         errors = [text for text in (memory_error, method_error) if text]
         if errors:
             view["last_error"] = ";".join(errors)[:160]
@@ -621,7 +708,7 @@ class PracticeSeam:
                     "experience_ids": list(own.get("experience_ids") or [])[:6],
                     "available": True,
                 }
-        methods = self.methods(query=query, limit=limit)
+        methods = self.methods(query=query, limit=limit, available_only=True)
         if methods:
             context["methods"] = [
                 {"method_ref": row["method_ref"], "artifact_id": row["artifact_id"],
@@ -805,8 +892,9 @@ class PracticeSeam:
 
         Two rounds share these only when the same experiences are recallable, the same reviews
         carry the same heads and the same methods are readable in the same states.  A new
-        experience, a withdrawn one, a new method head or a method moving to TRIAL/CONTESTED is
-        therefore a new situation, and a mere clock tick is not.
+        experience, a withdrawn one, a new method head, a method moving to TRIAL/CONTESTED or a
+        retirement (which changes its state, and so the offer) is therefore a new situation, and
+        a mere clock tick is not.
         """
 
         experiences = self.experiences(limit=self.max_experiences)
@@ -832,9 +920,12 @@ __all__ = [
     "DEFAULT_EXCERPT_CHARS",
     "DEFAULT_MAX_EXPERIENCES",
     "DEFAULT_MAX_METHODS",
+    "DEFAULT_METHOD_SCAN",
     "KIND_METHOD",
     "KIND_REVIEW",
+    "LOSS_METHOD_RETIRED",
     "METHOD_REF_PREFIX",
+    "METHOD_STATE_RETIRED",
     "OUTCOME_HELPED",
     "OUTCOME_NOT_HELPED",
     "OUTCOME_UNKNOWN",
@@ -853,6 +944,7 @@ __all__ = [
     "REQUIRED_METHODS",
     "VALID_OUTCOMES",
     "is_method_ref",
+    "method_availability",
     "method_ref_for",
     "practice_module",
 ]

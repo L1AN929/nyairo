@@ -555,7 +555,10 @@ class ProductionLifeRuntime:
             # owner's own due scan while the process is running; before this, ``scan_due_agenda``
             # was reachable only from ``recover_cold_start``, so a condition could never come due
             # without a restart.  It is the existing LR-4 method -- not a new one, and not a timer.
-            "scan_due_agenda"})
+            # v0.4 explicit-condition PAUSE: the adopting owner binds the one offered condition to
+            # the Activity its own PAUSE just produced.  Same LR-4 owner and same condition store;
+            # this is the narrow-port declaration, not a second path.
+            "scan_due_agenda", "bind_pause_condition"})
         self.ag2_progress_port = ag2.build_ag2_port(self.progress_coordinator, {
             "register_result_binding", "register_progress_contract", "register_completion_contract",
             "ingest_progress_evidence", "recover", "auto_apply_natural_completion", "read_service"})

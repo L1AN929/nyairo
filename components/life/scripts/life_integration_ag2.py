@@ -2626,6 +2626,50 @@ class DecisionAdoptionCoordinator:
             },
         )
 
+    def _pause_binding_recovery_pending(
+        self, decision: DecisionRecord, adoption_id: str
+    ) -> bool:
+        """True only when this very adoption committed its PAUSE but not its condition.
+
+        The two writes belong to different owners (LR-2 pause, LR-4 condition) and cannot be
+        one transaction.  A crash or a refused condition-store write between them leaves the
+        Activity PAUSED with an AUTHORIZED adoption record and no condition.  This helper
+        recognizes exactly that state from owner facts -- the adoption's own precommit grant,
+        the canonical Activity, and LR-2's transition history -- and nothing else.  It never
+        applies to an unconditional PAUSE, a different Decision, or an Activity that has moved
+        on since (ABANDON/RESUME/another pause).
+        """
+
+        if decision.decision != DECISION_PAUSE:
+            return False
+        if not str(decision.reevaluation_hint_ref or ""):
+            return False
+        state = self.integration_commit.read_state()
+        rec = (state.get("adoptions_by_id") or {}).get(adoption_id) or {}
+        if (
+            rec.get("adoption_status") != ADOPTION_STATUS_AUTHORIZED
+            or rec.get("decision_ref") != decision.decision_id
+            or rec.get("authorized_mutation_kind") != "PAUSE"
+        ):
+            return False
+        activity_ref = str(rec.get("authorized_activity_ref") or "")
+        command_id = str(rec.get("authorized_command_id") or "")
+        if not activity_ref or not command_id:
+            return False
+        canonical, _ = self.activity_read.read_canonical_state(include_journal=False)
+        act = (canonical.get("activities") or {}).get(activity_ref) or {}
+        if str(act.get("status") or "") != STATUS_PAUSED:
+            return False
+        for entry in self.activity_read.get_transition_history(activity_id=activity_ref) or []:
+            if (
+                entry.get("idempotency_key") == command_id
+                and entry.get("transition_type") == TRANSITION_PAUSE
+                and entry.get("decision_ref") == decision.decision_id
+                and entry.get("adoption_ref") == adoption_id
+            ):
+                return True
+        return False
+
     def validate_decision_for_adoption(
         self,
         decision: DecisionRecord,
@@ -3049,6 +3093,10 @@ class DecisionAdoptionCoordinator:
         *,
         adoption_spec: Optional[ActivityAdoptionSpec | Mapping[str, Any]] = None,
         waiting_spec: Optional[Mapping[str, Any]] = None,
+        #: v0.4 explicit-condition PAUSE: a Mapping *or* a callable of the committed Decision,
+        #: describing the one condition this round offered for a PAUSE.  ``None`` means this
+        #: round offered none, so a Decision that names one is refused by name.
+        pause_condition_spec: Any = None,
         handoff_spec: Any = None,
         pause_mode_override: Optional[str] = None,
         occurred_at: Optional[str] = None,
@@ -3104,20 +3152,37 @@ class DecisionAdoptionCoordinator:
 
         occ_iso = _require_iso(occurred_at or _iso(now()), "occurred_at")
         adoption_id = existing_adp_id or f"adp:{sha256_hex(f'{decision.decision_id}:{idem}')[:16]}"
+        # A conditional PAUSE is two owner facts: LR-2's pause and LR-4's condition binding.
+        # They cannot be one transaction across owners, so if the pause committed and the
+        # binding did not, the *same* committed Decision must be able to finish the one
+        # missing write on retry.  This is a read-only recognition of exactly that state:
+        # it does not replay the pause, does not invent an eligibility and does not apply
+        # to an unconditional PAUSE.
+        pause_binding_recovery = self._pause_binding_recovery_pending(decision, adoption_id)
         #: v0.4 B: what this adoption's foreground handoff really did (``None`` when it made none).
         #: The coordinator inside ``run_decision_and_adoption_cycle`` reads it back for the caller.
         self.last_handoff = None
+        #: v0.4 explicit-condition PAUSE: the condition this adoption bound, if any.  ``None``
+        #: means an unconditional PAUSE (or no PAUSE at all); nothing is inferred from it later.
+        self.last_pause_condition = None
 
         if fault_hook is not None:
             fault_hook("after_decision_commit_before_adoption")
 
         # Step 1: Final Freshness Validation before Adoption (Sections 41-44)
-        is_fresh, stale_reason = self.validate_decision_for_adoption(
-            decision,
-            check_at=occ_iso,
-            live_capacity_override=live_capacity_override,
-            allow_foreground_handoff=handoff_spec is not None,
-        )
+        if pause_binding_recovery:
+            # The snapshot revision is necessarily one behind: this adoption's own PAUSE
+            # already committed.  Refusing it as stale here would overwrite the recoverable
+            # AUTHORIZED record and lose the condition forever, so the freshness check is
+            # answered by the recognition above (same Decision, same grant, same Activity).
+            is_fresh, stale_reason = True, None
+        else:
+            is_fresh, stale_reason = self.validate_decision_for_adoption(
+                decision,
+                check_at=occ_iso,
+                live_capacity_override=live_capacity_override,
+                allow_foreground_handoff=handoff_spec is not None,
+            )
 
         act_state, _ = self.activity_read.read_canonical_state(include_journal=False)
         expected_act_rev = int(act_state.get("revision", 0))
@@ -3218,6 +3283,10 @@ class DecisionAdoptionCoordinator:
 
         applied_cmd_ref: Optional[str] = None
         applied_act_rev: Optional[int] = None
+        #: The revision the *executed* command started from.  Normally this is the live
+        #: store revision, but a recovered pause already advanced it and its own journal
+        #: entry carries the revision the transition really left behind.
+        applied_previous_rev: Optional[int] = None
         created_act_ref: Optional[str] = None
         target_act_ref: Optional[str] = decision.target_activity_ref
         adoption_status = ADOPTION_STATUS_APPLIED
@@ -3434,17 +3503,74 @@ class DecisionAdoptionCoordinator:
 
         elif dkind == DECISION_PAUSE:
             # Sections 52-55: PAUSE_CURRENT_ACTIVITY respecting IMMEDIATE vs SAFE_BOUNDARY vs ATOMIC
-            fg_ref = act_state.get("foreground_activity_ref") or decision.target_activity_ref
+            if pause_binding_recovery:
+                # v0.4 background pause: the PAUSE already committed and released the slot, so
+                # another Activity may have started since.  The recovery target is the Activity
+                # this *same* adoption was authorised to pause -- never the current foreground,
+                # which belongs to somebody else and must not be paused or bound here.
+                _auth = (
+                    (self.integration_commit.read_state().get("adoptions_by_id") or {})
+                    .get(adoption_id) or {}
+                )
+                fg_ref = str(
+                    _auth.get("authorized_activity_ref")
+                    or decision.target_activity_ref
+                    or ""
+                )
+            else:
+                fg_ref = act_state.get("foreground_activity_ref") or decision.target_activity_ref
             if not fg_ref:
                 raise AdoptionIllegalError("Cannot adopt PAUSE_CURRENT_ACTIVITY when no foreground Activity exists")
             fg_act = self.activity_read.get_activity(fg_ref)
-            if not fg_act or fg_act.get("status") != STATUS_ACTIVE:
+            if not fg_act:
+                raise AdoptionIllegalError(f"Cannot adopt PAUSE on unknown Activity {fg_ref!r}")
+            if fg_act.get("status") != STATUS_ACTIVE and not pause_binding_recovery:
                 raise AdoptionIllegalError(f"Cannot adopt PAUSE on non-ACTIVE Activity {fg_ref!r}")
             target_act_ref = fg_ref
             _, eff_intr, _ = self.interruption_coordinator.get_effective_attention(fg_act)
             mode = pause_mode_override or eff_intr
 
-            if mode == INTERRUPTIBILITY_SAFE_BOUNDARY:
+            # v0.4 explicit-condition PAUSE: resolve the one offered condition *before* any
+            # mutation.  The committed Decision names it through its existing
+            # ``reevaluation_hint_ref``; this owner re-asks for the spec and refuses by name when
+            # the round offered none or the spec is about a different condition.  Without a name
+            # the PAUSE is unconditional and no condition is bound.
+            pause_spec: Optional[dict[str, Any]] = None
+            pause_hint = str(decision.reevaluation_hint_ref or "")
+            if pause_hint:
+                if pause_condition_spec is None:
+                    raise AdoptionIllegalError(
+                        "PAUSE_CONDITION_NOT_OFFERED: the Decision named a pause condition but "
+                        "this round offered none")
+                try:
+                    _pause_source = (pause_condition_spec(decision)
+                                     if callable(pause_condition_spec)
+                                     else pause_condition_spec)
+                except Exception as exc:
+                    raise AdoptionIllegalError(
+                        "PAUSE_CONDITION_NOT_OFFERED: the pause condition spec could not be "
+                        "produced from the committed Decision: %s" % (str(exc)[:200],)) from exc
+                if not isinstance(_pause_source, Mapping) or not _pause_source:
+                    raise AdoptionIllegalError(
+                        "PAUSE_CONDITION_NOT_OFFERED: the pause condition spec is empty")
+                pause_spec = dict(_pause_source)
+                if str(pause_spec.get("basis_ref") or "") != pause_hint:
+                    raise AdoptionIllegalError(
+                        "PAUSE_CONDITION_NOT_OFFERED: the Decision named %r but this round "
+                        "offered %r" % (pause_hint, str(pause_spec.get("basis_ref") or "")))
+                if not str(pause_spec.get("condition_kind") or "").strip():
+                    raise AdoptionIllegalError(
+                        "PAUSE_CONDITION_NOT_OFFERED: the pause condition spec has no condition_kind")
+
+            if mode == INTERRUPTIBILITY_SAFE_BOUNDARY and not pause_binding_recovery:
+                if pause_spec is not None:
+                    # A safe-boundary PAUSE leaves the Activity ACTIVE until the boundary is
+                    # reached, so there is no PAUSED Activity to bind a condition to.  Refuse the
+                    # whole adoption before mutating anything rather than record a "conditional"
+                    # pause that silently has no condition.
+                    raise AdoptionIllegalError(
+                        "PAUSE_CONDITION_REQUIRES_IMMEDIATE_PAUSE: a conditional PAUSE cannot be "
+                        "adopted as a pending safe-boundary interruption")
                 # Section 54: Register pending interruption at safe boundary; Activity stays ACTIVE until BoundaryReachedEvent!
                 ev_list = self.interruption_coordinator.assess_events(
                     [
@@ -3470,41 +3596,109 @@ class DecisionAdoptionCoordinator:
             else:
                 # Section 53: Immediate pause through LR-2 ActivityCommandService
                 cmd_idem = f"lr2_pause:{decision.decision_id}:{adoption_id}"
-                _grant = self._issue_precommit_authorization(
-                    decision=decision,
-                    adoption_id=adoption_id,
-                    idem=idem,
-                    cmd_idem=cmd_idem,
-                    mutation_kind="PAUSE",
-                    activity_ref=fg_ref,
-                    expected_act_rev=expected_act_rev,
-                    occ_iso=occ_iso,
-                )
-                authorization_revision = int(_grant.revision)
-                authorized_cmd_id, authorized_kind, authorized_act_ref = (
-                    cmd_idem,
-                    "PAUSE",
-                    fg_ref,
-                )
-                cmd_res = self.activity_command.pause_activity(
-                    activity_id=fg_ref,
-                    expected_revision=expected_act_rev,
-                    idempotency_key=cmd_idem,
-                    source_refs=[decision.decision_id, adoption_id],
-                    decision_ref=decision.decision_id,
-                    adoption_ref=adoption_id,
-                    causal_parent_refs=[decision.decision_id, adoption_id],
-                    reason_code="VOLUNTARY_PAUSE",
-                    occurred_at=occ_iso,
-                    observed_at=occ_iso,
-                )
-                resulting_activity = cmd_res.activity
-                applied_act_rev = int(resulting_activity["revision"]) if resulting_activity else expected_act_rev
-                applied_cmd_ref = (
-                    str(cmd_res.transition["transition_id"])
-                    if cmd_res.transition
-                    else f"cmd:{cmd_idem}"
-                )
+                if pause_binding_recovery:
+                    # LR-2's own idempotency is the proof this pause is already this
+                    # Decision's: ask for the same command again and refuse if it is not a
+                    # replay.  Nothing is transitioned a second time.
+                    replay = self.activity_command.pause_activity(
+                        activity_id=fg_ref,
+                        expected_revision=expected_act_rev,
+                        idempotency_key=cmd_idem,
+                        source_refs=[decision.decision_id, adoption_id],
+                        decision_ref=decision.decision_id,
+                        adoption_ref=adoption_id,
+                        causal_parent_refs=[decision.decision_id, adoption_id],
+                        reason_code="VOLUNTARY_PAUSE",
+                        occurred_at=occ_iso,
+                        observed_at=occ_iso,
+                    )
+                    if not replay.idempotent_replay:
+                        raise AdoptionIllegalError(
+                            "PAUSE_CONDITION_RECOVERY_NOT_A_REPLAY: the Activity is already "
+                            "PAUSED but this Decision's pause command was not its transition")
+                    _auth = (
+                        (self.integration_commit.read_state().get("adoptions_by_id") or {})
+                        .get(adoption_id) or {}
+                    )
+                    authorization_revision = int(_auth.get("revision") or 0)
+                    authorized_cmd_id, authorized_kind, authorized_act_ref = (
+                        cmd_idem,
+                        "PAUSE",
+                        fg_ref,
+                    )
+                    resulting_activity = replay.activity
+                    applied_act_rev = (
+                        int(resulting_activity["revision"])
+                        if resulting_activity else expected_act_rev)
+                    applied_previous_rev = int(
+                        (replay.transition or {}).get("expected_revision", expected_act_rev))
+                    applied_cmd_ref = (
+                        str(replay.transition["transition_id"])
+                        if replay.transition
+                        else f"cmd:{cmd_idem}"
+                    )
+                else:
+                    _grant = self._issue_precommit_authorization(
+                        decision=decision,
+                        adoption_id=adoption_id,
+                        idem=idem,
+                        cmd_idem=cmd_idem,
+                        mutation_kind="PAUSE",
+                        activity_ref=fg_ref,
+                        expected_act_rev=expected_act_rev,
+                        occ_iso=occ_iso,
+                    )
+                    authorization_revision = int(_grant.revision)
+                    authorized_cmd_id, authorized_kind, authorized_act_ref = (
+                        cmd_idem,
+                        "PAUSE",
+                        fg_ref,
+                    )
+                    cmd_res = self.activity_command.pause_activity(
+                        activity_id=fg_ref,
+                        expected_revision=expected_act_rev,
+                        idempotency_key=cmd_idem,
+                        source_refs=[decision.decision_id, adoption_id],
+                        decision_ref=decision.decision_id,
+                        adoption_ref=adoption_id,
+                        causal_parent_refs=[decision.decision_id, adoption_id],
+                        reason_code="VOLUNTARY_PAUSE",
+                        occurred_at=occ_iso,
+                        observed_at=occ_iso,
+                    )
+                    resulting_activity = cmd_res.activity
+                    applied_act_rev = int(resulting_activity["revision"]) if resulting_activity else expected_act_rev
+                    applied_cmd_ref = (
+                        str(cmd_res.transition["transition_id"])
+                        if cmd_res.transition
+                        else f"cmd:{cmd_idem}"
+                    )
+                if pause_spec is not None:
+                    # The owner has just committed PAUSE.  Bind the one condition this round
+                    # offered at the revision that PAUSE really produced; LR-4 re-reads the
+                    # Activity and refuses unless it is PAUSED at that exact revision.  No
+                    # schedule/agenda item is created: a PAUSED Activity is not an agenda host,
+                    # and LR-4's due scan covers time conditions on their own.
+                    if str((resulting_activity or {}).get("status") or "") != STATUS_PAUSED:
+                        raise AdoptionIllegalError(
+                            "PAUSE_CONDITION_REQUIRES_PAUSED: the owner did not report the "
+                            "Activity as PAUSED after the pause command")
+                    self.last_pause_condition = self.waiting_coordinator.bind_pause_condition(
+                        activity_id=fg_ref,
+                        expected_revision=int(applied_act_rev),
+                        waiting_on_ref=pause_spec.get("waiting_on_ref"),
+                        condition_kind=str(pause_spec.get("condition_kind") or ""),
+                        parameters=dict(pause_spec.get("parameters") or {}),
+                        source_refs=[decision.decision_id, adoption_id],
+                        causal_parent_refs=[decision.decision_id, adoption_id],
+                        idempotency_key=f"lr4_pause_cond:{decision.decision_id}:{adoption_id}",
+                        condition_expires_at=pause_spec.get("condition_expires_at"),
+                        occurred_at=occ_iso,
+                        observed_at=occ_iso,
+                        decision_ref=decision.decision_id,
+                        adoption_ref=adoption_id,
+                        fault_hook=fault_hook,
+                    )
 
         elif dkind == DECISION_WAIT:
             # Sections 56-57: WAIT_CURRENT_ACTIVITY via LR-4 WaitingCoordinator
@@ -3584,33 +3778,19 @@ class DecisionAdoptionCoordinator:
             target_act_ref = str(cand_dict.get("activity_ref") or decision.target_activity_ref)
             fg_ref = act_state.get("foreground_activity_ref")
             fg_act = (act_state.get("activities") or {}).get(fg_ref) if fg_ref else None
-            # If another PAUSED or WAITING activity is currently foreground, pause/release or allow background waiting
+            # v0.4 background pause: resuming a suspended Activity never displaces another one.
+            # The old branch paused an ACTIVE foreground first, which was a real side effect for
+            # a command that still failed (the paused foreground kept the reference).  A WAITING
+            # foreground keeps its existing background-waiting exception; anything else that
+            # holds the slot is a zero-side-effect refusal here, before any grant or mutation.
+            # AG-1 already withholds this offer; this is the adopting owner's own backstop, and
+            # LR-4/LR-2 refuse again if the decision reaches them by another route.
             allow_bg_wait = bool(fg_act and fg_ref != target_act_ref and fg_act.get("status") == STATUS_WAITING)
-            if fg_act and fg_ref != target_act_ref and fg_act.get("status") == STATUS_ACTIVE:
-                _pre_cmd = f"lr2_pre_resume_pause:{decision.decision_id}:{fg_ref}"
-                self._issue_precommit_authorization(
-                    decision=decision,
-                    adoption_id=adoption_id,
-                    idem=idem,
-                    cmd_idem=_pre_cmd,
-                    mutation_kind="PAUSE",
-                    activity_ref=fg_ref,
-                    expected_act_rev=expected_act_rev,
-                    occ_iso=occ_iso,
-                )
-                self.activity_command.pause_activity(
-                    activity_id=fg_ref,
-                    expected_revision=expected_act_rev,
-                    idempotency_key=_pre_cmd,
-                    source_refs=[decision.decision_id, adoption_id],
-                    decision_ref=decision.decision_id,
-                    adoption_ref=adoption_id,
-                    reason_code="VOLUNTARY_PAUSE",
-                    occurred_at=occ_iso,
-                    observed_at=occ_iso,
-                )
-                act_state, _ = self.activity_read.read_canonical_state(include_journal=False)
-                expected_act_rev = int(act_state.get("revision", 0))
+            if fg_act and fg_ref != target_act_ref and fg_act.get("status") != STATUS_WAITING:
+                raise AdoptionIllegalError(
+                    "FOREGROUND_CONFLICT_ON_RESUME: another Activity (%s, status=%s) holds the "
+                    "execution foreground; a background resume never pauses or interrupts it"
+                    % (fg_ref, str(fg_act.get("status") or "")))
 
             cmd_idem = f"lr4_resume:{decision.decision_id}:{adoption_id}"
             _grant = self._issue_precommit_authorization(
@@ -3654,6 +3834,16 @@ class DecisionAdoptionCoordinator:
             target_id = decision.target_activity_ref or act_state.get("foreground_activity_ref")
             if not target_id:
                 raise AdoptionIllegalError("Cannot adopt ABANDON_CURRENT_ACTIVITY without a target Activity")
+            # v0.4: PAUSED-foreground ABANDON is withheld at the adopting owner too.  AG-1 no
+            # longer offers it, but a decision that reaches here by another route must not slip
+            # through: "no unresolved side effect / commitment binding" cannot be proven from an
+            # existing owner fact, so nothing is deleted or reinterpreted to make it look safe.
+            target_record = (act_state.get("activities") or {}).get(target_id) or {}
+            if str(target_record.get("status") or "") == STATUS_PAUSED:
+                raise AdoptionIllegalError(
+                    "PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE: refusing to abandon a PAUSED "
+                    "Activity while unresolved side effects or commitment bindings cannot be "
+                    "proven absent")
             target_act_ref = target_id
             cmd_idem = f"lr2_abandon:{decision.decision_id}:{adoption_id}"
             _grant = self._issue_precommit_authorization(
@@ -3721,7 +3911,9 @@ class DecisionAdoptionCoordinator:
                     "activity_id": str(target_act_ref),
                     "transition_id": str(applied_cmd_ref),
                     "transition_type": str(authorized_kind),
-                    "previous_revision": int(expected_act_rev),
+                    "previous_revision": int(
+                        applied_previous_rev
+                        if applied_previous_rev is not None else expected_act_rev),
                     "new_revision": int(applied_act_rev if applied_act_rev is not None else expected_act_rev + 1),
                     "authority_class": "AGENCY_AUTHORIZED",
                     "evidence_digest": "",
@@ -4744,6 +4936,10 @@ class LifeIntegrationCoordinator:
         #: v0.4 stage A: a Mapping *or* a callable of the committed Decision.  A self-chosen park
         #: time only exists in the Decision's own proposal, so the spec has to be built after it.
         waiting_spec: Any = None,
+        #: v0.4 explicit-condition PAUSE: a Mapping *or* a callable of the committed Decision,
+        #: bound to an already-PAUSED Activity when the Decision names the offered condition.
+        #: ``None`` when this round offered no pause condition.
+        pause_condition_spec: Any = None,
         #: v0.4 B: a Mapping *or* a callable of the committed Decision, describing an explicit,
         #: bounded *foreground handoff* this adoption performs before it starts its Activity.
         handoff_spec: Any = None,
@@ -4891,6 +5087,7 @@ class LifeIntegrationCoordinator:
             decision_record,
             adoption_spec=adoption_spec,
             waiting_spec=waiting_spec,
+            pause_condition_spec=pause_condition_spec,
             handoff_spec=handoff_spec,
             pause_mode_override=pause_mode_override,
             occurred_at=obs_iso,

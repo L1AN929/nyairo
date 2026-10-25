@@ -542,11 +542,20 @@ def tick(
 ) -> dict[str, Any]:
     """一次显式推进（有副作用；供 once 与常驻循环共用）。"""
     moment = now if now is not None else _utcnow()
+    # 每一段都是新的 Action：runner 的推进也必须经 World 自己的正式授权入口。
+    # 端口不可达时传 None，引擎会失败关闭而不是退回进程内直写。
+    try:
+        submit_port = importlib.import_module(
+            "chiyo_bundle.journey_authorization"
+        ).default_submit_port(environment=environment)
+    except Exception:
+        submit_port = None
     result = world_journey.advance_journey(
         hermes_home=home,
         environment=environment,
         now=moment,
         settle_only=settle_only,
+        submit_port=submit_port,
     )
     status, reason, severe = classify_journey_result(result)
     if status == TICK_IDLE:

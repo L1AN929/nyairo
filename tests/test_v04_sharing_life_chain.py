@@ -40,6 +40,7 @@ for entry in (str(ROOT),
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
+import agency_cognition_adapter as aa  # noqa: E402
 import agency_decision_ag1 as ag1  # noqa: E402
 import autonomous_life_assembly as assembly  # noqa: E402
 import life_sharing_context as lsc  # noqa: E402
@@ -68,6 +69,32 @@ needs_donor = unittest.skipIf(_IMPORT_ERROR is not None,
 
 BRIDGE_DIR = ROOT / "components" / "world" / "service" / "bridge"
 SHARE_TEXT = "今天把那页留白重排完了，第二段还是挤，但这样更像当天。"
+SECOND_SHARE_TEXT = "这句话先留在这里，等一个安静的时候再说。"
+
+
+class SourceRefusingPort:
+    """The real owner port, except one **source** artifact read is refused.
+
+    This is the documented governed-source shape (``ok=False`` + the owner's own reason
+    code).  Everything else -- the share artifact itself, listings -- goes to the real port
+    unchanged, so the formal round still runs against the real owner.
+    """
+
+    def __init__(self, inner, *, source_id, status: str = "rejected",
+                 reason_code: str = "SOURCE_GOVERNED") -> None:
+        self._inner = inner
+        self._source = str(source_id or "").replace("artifact:", "")
+        self._status = status
+        self._reason = reason_code
+
+    def read_project(self, artifact_id, **kwargs):
+        if str(artifact_id or "").replace("artifact:", "") == self._source:
+            return {"ok": False, "status": self._status, "reason_code": self._reason,
+                    "detail": "the owner refused this source read"}
+        return self._inner.read_project(artifact_id, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
 
 
 class SharingCognition:
@@ -95,10 +122,14 @@ class SharingCognition:
         raw: dict = {"decision": "NO_ACTION", "selected_candidate_id": None,
                      "reason_codes": allowed[:1] or ["NO_ACTION"],
                      "short_rationale": "quiet round", "deferred_candidate_ids": []}
-        if step == "prepare" and sources:
+        if step in ("prepare", "prepare_second") and sources:
+            # The owner's operation key covers source head + text + title, so a second draft
+            # needs its own words -- replaying the first one would be refused as the same op.
             raw["sharing"] = {"op": "prepare",
                               "source_artifact_id": sources[0]["artifact_id"],
-                              "share_text": SHARE_TEXT, "title": "留白重排"}
+                              "share_text": (SHARE_TEXT if step == "prepare"
+                                             else SECOND_SHARE_TEXT),
+                              "title": ("留白重排" if step == "prepare" else "再想一句")}
         elif step == "defer" and shares:
             share = shares[0]
             raw["sharing"] = {"op": "defer", "share_id": share["share_id"],
@@ -251,6 +282,57 @@ class SharingLifeChainTest(unittest.TestCase):
         self.assertNotIn(share_id.replace("artifact:", ""), flatten)
         self.assertNotEqual(third.get("step_work_target"), share_id)
         self.assertEqual(self.cycle.work_artifact_id, self.data["work_artifact_id"])
+
+    def test_a_governed_source_reaches_the_formal_round_and_the_owner_refuses_the_send(self):
+        """The withholding fact must travel through the *formal* round, not just a helper.
+
+        One draft is prepared while the source is readable.  Then the recorded source becomes
+        unreadable (source-only read refusal).  A full ``evaluate_once`` round then has to show
+        the decision the withheld words and the owner's own reason code, and when the scripted
+        decision still asks to send, the owner refuses and nothing is written.
+        """
+        service = self.cycle.sharing_service
+        first = self.turn("prepare", trigger="share:prepare")
+        share = first.get("sharing") or {}
+        self.assertTrue(share.get("ok"), share)
+        self.assertEqual(share.get("state"), lss.STATE_DRAFT, share)
+        share_id = share["share_id"]
+        head = lsc.read_draft(service, share_id)["head_version_id"]
+
+        governed = lss.LifeSharingService(
+            SourceRefusingPort(service.projects, source_id=self.data["work_artifact_id"]),
+            clock=service._clock)
+        self.cycle.sharing_service = governed
+
+        refused = self.turn("send_local", trigger="share:send-governed")
+        # The decision prompt itself carries the withholding (bounded, no invented excerpt).
+        block = self.cognition.reads[-1]["sharing"] or {}
+        row = [item for item in block.get("shares") or []
+               if item.get("share_id") == share_id][0]
+        self.assertIs(row.get("text_withheld"), True)
+        self.assertIs(row.get("text_available"), False)
+        self.assertTrue(row.get("withheld_reason_code"))
+        self.assertNotEqual(row.get("withheld_reason_code"), "SHARING_SOURCE_NOT_FOUND")
+        self.assertFalse(row.get("text_excerpt"))  # no words, and the flag says why
+        # The adapter's prompt whitelist, fed this round's own block, keeps the withholding and
+        # never turns it into an empty excerpt.
+        bounded = aa._bounded_sharing(block)
+        braw = [item for item in bounded.get("shares") or []
+                if item.get("share_id") == share_id][0]
+        self.assertIs(braw.get("text_withheld"), True)
+        self.assertIs(braw.get("text_available"), False)
+        self.assertNotIn("text_excerpt", braw)
+        self.assertTrue(self.cognition.reads[-1]["raw_sharing"], "the script really asked to send")
+
+        # The owner refuses; the round writes nothing and reports no delivery.
+        sent = refused.get("sharing") or {}
+        self.assertFalse(sent.get("ok"), sent)
+        self.assertFalse(sent.get("delivered"))
+        self.assertNotEqual(refused.get("outcome"), "SHARE_ACTED", refused)
+        after = lsc.read_draft(service, share_id)
+        self.assertEqual(after["head_version_id"], head)
+        self.assertEqual(after["state"], lss.STATE_DRAFT)
+        self.assertIsNone(after["receipt"])
 
     def test_a_refused_sharing_request_is_not_reported_as_a_side_effect(self):
         first = self.turn("prepare", trigger="share:prepare")

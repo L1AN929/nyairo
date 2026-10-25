@@ -339,6 +339,50 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+/* 「此刻」：只写服务真实状态；不是一个统计面板。 */
+.living {
+  padding: 16px 18px;
+  border-radius: 22px;
+  background:
+    radial-gradient(240px 150px at 0% 0%, rgba(179, 53, 84, 0.07) 0%, rgba(179, 53, 84, 0) 70%),
+    linear-gradient(160deg, #fffdf8 0%, #fbf1e4 100%);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.living-active { border-color: rgba(61, 143, 120, 0.36); }
+.living-paused, .living-blocked, .living-unknown { border-color: rgba(168, 118, 31, 0.36); }
+.living-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.living-kicker { margin: 0; font-size: 11.4px; letter-spacing: 0.08em; color: var(--berry); font-weight: 640; }
+.living-observed { margin-left: auto; font-size: 10.6px; color: var(--ink-3); }
+.living-sentence {
+  margin: 0;
+  font-size: 15.6px;
+  line-height: 1.52;
+  font-weight: 620;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+.living-where { margin: 0; font-size: 11.8px; color: var(--ink-2); overflow-wrap: anywhere; }
+.living-lines, .living-run {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  min-width: 0;
+}
+.living-run-title { margin: 0; font-size: 11px; letter-spacing: 0.07em; color: var(--ink-3); font-weight: 640; }
+.living-line { display: flex; gap: 10px; justify-content: space-between; font-size: 12px; min-width: 0; }
+.living-line-k { color: var(--ink-3); flex: 0 0 auto; }
+.living-line-v { color: var(--ink); text-align: right; word-break: break-word; overflow-wrap: anywhere; min-width: 0; }
+.living-line-v.is-mono { font-family: var(--font-mono); font-size: 11px; }
+.living-note { margin: 0; font-size: 10.8px; line-height: 1.55; color: var(--ink-3); overflow-wrap: anywhere; }
+.living-actions { margin-top: 2px; }
+
 .home-date { margin: 0; font-size: 11.4px; letter-spacing: 0.08em; color: var(--berry); font-weight: 640; }
 .home-greeting { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
 .home-instance { margin: 2px 0 0; font-size: 11.8px; color: var(--ink-2); }
@@ -960,6 +1004,10 @@ body {
   .room-fixture .row-actions { width: 100%; }
   .room-fixture .btn { flex: 1 1 auto; }
   .home-shortcuts .btn { flex: 1 1 auto; }
+  /* 「此刻」的控件在窄屏不挤成一条：按钮均分，长句允许换行。 */
+  .living { padding: 14px 14px; }
+  .living-actions .btn { flex: 1 1 auto; }
+  .living-observed { margin-left: 0; flex-basis: 100%; }
   /* rc1 阅读：390px 下翻页、跳页与导入按钮都不挤成窄条 */
   .reading-pager .btn { flex: 1 1 auto; }
   .reading-pager .field { flex: 1 1 100%; }
@@ -1086,4 +1134,112 @@ body {
   border: 1px dashed var(--line);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.6);
+}
+
+/* ---------------- 私人相册（EP-16；真实本地图片） ---------------- */
+/* 双列缩略图；窄屏也保持两列，图片各自裁切，不把整屏撑宽。 */
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.album-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.album-card:focus-visible {
+  outline: 2px solid var(--berry);
+  outline-offset: 2px;
+}
+
+.album-thumb,
+.album-broken {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--cream-screen-2);
+  object-fit: cover;
+}
+
+.album-broken {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.album-broken-text {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.album-caption {
+  display: block;
+  padding: 0 10px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 详情页：完整图片按比例显示，不裁切；深色底让透明 PNG 也看得清。 */
+.album-detail-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--cream-screen-2);
+}
+
+.album-detail-img {
+  display: block;
+  max-width: 100%;
+  max-height: 52vh;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.album-import-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--cream-screen-2);
+}
+
+.album-import-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 40vh;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.album-file-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
 }

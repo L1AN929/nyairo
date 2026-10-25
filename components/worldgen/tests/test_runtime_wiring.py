@@ -320,6 +320,28 @@ class CustomWorldRuntimeTest(WorldGenTestCase):
             self.assertEqual(event["world_id"], self.world_a.world_id)
             self.assertIn(event["location_id"], self.world_a.locations)
 
+    def test_shipped_v2_package_loads_finite_events(self) -> None:
+        """随仓 v2 包：24 条（16 单日 + 8 有限跨天），跨天同身份。"""
+        import world_ambient_events as wae
+
+        package = Path(__file__).resolve().parents[3] / "examples" / "worlds" / "daily_neighborhood_v1"
+        env = _clean_runtime_env(dict(os.environ))
+        env["CHIYO_WORLD_PACKAGE"] = str(package)
+        self.wrd.reset_cache()
+        catalog = wae.ambient_template_catalog(env)
+        self.assertEqual(catalog["total"], 24)
+        self.assertEqual(catalog["categories"]["cross_day"], 8)
+        day = datetime(2026, 10, 24, tzinfo=_tz("Asia/Tokyo")).date()
+        first = wae.materialize_ambient_events(day, environment=env)
+        finite_ids = {
+            event["event_id"]
+            for event in first
+            if event["provenance"] == wae.FINITE_PROVENANCE
+        }
+        self.assertTrue(finite_ids)
+        self.assertTrue(all(event_id.startswith("ambient-finite-") for event_id in finite_ids))
+        self.wrd.reset_cache()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -650,9 +650,9 @@ class DayLifeContinuityTest(unittest.TestCase):
         self.assertNotIn("recovered", json.dumps(done["body_action"], ensure_ascii=False))
 
     def test_a_body_act_adoption_names_w_fact_key_and_expected_value(self):
-        cycle = self._world_cycle(snapshot={"location": {"place_id": "home"},
-                                            "world_revision": 5,
-                                            "pose": "standing", "orientation": "north"})
+        cycle = self._world_cycle(observations=[{"location": {"place_id": "home"},
+                                                 "world_revision": 5,
+                                                 "pose": "standing", "orientation": "north"}])
         decision = SimpleNamespace(decision="START", selected_candidate_ref="cand:body")
         spec = cycle._world_adoption_spec(cycle.last_world_opportunities, decision=decision)
 

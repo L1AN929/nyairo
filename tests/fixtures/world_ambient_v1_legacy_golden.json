@@ -1,0 +1,170 @@
+{
+  "days": {
+    "2026-10-24": [
+      {
+        "event_id": "ambient-2026-10-24-street_corner_evening",
+        "event_type": "street_corner_evening",
+        "local_date": "2026-10-24",
+        "location_id": "street_corner",
+        "payload": {
+          "summary": "放学后路口的声音比平时杂"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-24T17:00:00+09:00",
+        "valid_until": "2026-10-24T20:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-24-street_front_sweeper",
+        "event_type": "street_front_sweeper",
+        "local_date": "2026-10-24",
+        "location_id": "street_front",
+        "payload": {
+          "summary": "清晨有清洁工沿人行道扫过"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-24T06:00:00+09:00",
+        "valid_until": "2026-10-24T08:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-24-street_front_shadow",
+        "event_type": "street_front_shadow",
+        "local_date": "2026-10-24",
+        "location_id": "street_front",
+        "payload": {
+          "summary": "楼影盖住了半条人行道"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-24T15:00:00+09:00",
+        "valid_until": "2026-10-24T18:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      }
+    ],
+    "2026-10-25": [
+      {
+        "event_id": "ambient-2026-10-25-street_front_sweeper",
+        "event_type": "street_front_sweeper",
+        "local_date": "2026-10-25",
+        "location_id": "street_front",
+        "payload": {
+          "summary": "清晨有清洁工沿人行道扫过"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-25T06:00:00+09:00",
+        "valid_until": "2026-10-25T08:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-25-street_front_shadow",
+        "event_type": "street_front_shadow",
+        "local_date": "2026-10-25",
+        "location_id": "street_front",
+        "payload": {
+          "summary": "楼影盖住了半条人行道"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-25T15:00:00+09:00",
+        "valid_until": "2026-10-25T18:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-25-cafe_closing_chairs",
+        "event_type": "cafe_closing_chairs",
+        "local_date": "2026-10-25",
+        "location_id": "cafe",
+        "payload": {
+          "summary": "店员开始把外面的椅子搬回店里"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-25T17:00:00+09:00",
+        "valid_until": "2026-10-25T18:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      }
+    ],
+    "2026-10-26": [
+      {
+        "event_id": "ambient-2026-10-26-street_front_shadow",
+        "event_type": "street_front_shadow",
+        "local_date": "2026-10-26",
+        "location_id": "street_front",
+        "payload": {
+          "summary": "楼影盖住了半条人行道"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-26T15:00:00+09:00",
+        "valid_until": "2026-10-26T18:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-26-cafe_closing_chairs",
+        "event_type": "cafe_closing_chairs",
+        "local_date": "2026-10-26",
+        "location_id": "cafe",
+        "payload": {
+          "summary": "店员开始把外面的椅子搬回店里"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-26T17:00:00+09:00",
+        "valid_until": "2026-10-26T18:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-26-reading_point_return_cart",
+        "event_type": "reading_point_return_cart",
+        "local_date": "2026-10-26",
+        "location_id": "reading_point",
+        "payload": {
+          "summary": "闭馆前有人把翻过的书放回推车"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-26T19:00:00+09:00",
+        "valid_until": "2026-10-26T20:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      }
+    ],
+    "2026-10-27": [
+      {
+        "event_id": "ambient-2026-10-27-cafe_closing_chairs",
+        "event_type": "cafe_closing_chairs",
+        "local_date": "2026-10-27",
+        "location_id": "cafe",
+        "payload": {
+          "summary": "店员开始把外面的椅子搬回店里"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-27T17:00:00+09:00",
+        "valid_until": "2026-10-27T18:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-27-reading_point_return_cart",
+        "event_type": "reading_point_return_cart",
+        "local_date": "2026-10-27",
+        "location_id": "reading_point",
+        "payload": {
+          "summary": "闭馆前有人把翻过的书放回推车"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-27T19:00:00+09:00",
+        "valid_until": "2026-10-27T20:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      },
+      {
+        "event_id": "ambient-2026-10-27-park_lawn_sprinkler",
+        "event_type": "park_lawn_sprinkler",
+        "local_date": "2026-10-27",
+        "location_id": "park",
+        "payload": {
+          "summary": "草坪边的喷头在浇水"
+        },
+        "provenance": "world_local_day_deterministic_v1",
+        "valid_from": "2026-10-27T06:00:00+09:00",
+        "valid_until": "2026-10-27T08:00:00+09:00",
+        "world_id": "daily_neighborhood_v1"
+      }
+    ]
+  },
+  "package": "daily_neighborhood_v1",
+  "schema_version": "worldgen.ambient.v1"
+}

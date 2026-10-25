@@ -46,7 +46,7 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 import action_reality_ledger as ar0
 import life_body_action_targets as body_actions
@@ -135,10 +135,15 @@ class JourneyWorldResolver:
         journey: Any = None,
         submit_port: Any = None,
         formal_submission: bool = True,
+        #: 业务时钟（无参 callable）。``None`` 是普通真实时间路径：旅程自己读系统墙钟。
+        #: 显式压缩演示模式传入同一个业务域，让出发/到达时间与 Life 的结算同域；
+        #: 安全面（一次性授权、gateway 消费）仍由 World 进程的真实墙钟判定。
+        now: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.environment: Mapping[str, str] = dict(
             environment if environment is not None else os.environ
         )
+        self._clock = now
         self._world_home = str(world_home).strip() if world_home else None
         self._journey = journey
         #: W05R: the World's formal authorization entry.  Built lazily on first real
@@ -211,10 +216,11 @@ class JourneyWorldResolver:
         """No secrets: names and shapes only."""
 
         # W05R: which authorization route the timed segment takes.  ``formal`` means the
-        # Intent Executor mints the one-shot authorization and the gateway consumes it;
-        # ``direct_owner`` is the W05 behaviour and is only reachable when a caller
-        # explicitly opted out.  This reports the *configured* route without building the
-        # bridge, so a read-only describe can never have a World side effect.
+        # caller injected a formal port; ``formal_auto`` means the engine will construct
+        # the World bridge port at submit time (``_default_submit_port``).  There is no
+        # direct-owner route any more: if the port cannot be constructed the segment
+        # fails closed with SEGMENT_SUBMIT_PORT_UNAVAILABLE.  This reports the configured
+        # route without building the bridge, so a read-only describe has no side effect.
         configured = self._explicit_submit_port
         formal = configured is not None or self._formal_submission
         return {
@@ -224,8 +230,9 @@ class JourneyWorldResolver:
             "delegated_verbs": list(DELEGATED_VERBS),
             "timed": True,
             "writes_world_state": False,
-            "submission_route": ("formal" if formal else "direct_owner"),
-            "submission_port_kind": ("formal_owner_move_submit_port" if formal else None),
+            "submission_route": ("formal" if formal else "formal_auto"),
+            "submission_port_kind": ("formal_owner_move_submit_port" if formal
+                                     else "formal_owner_move_submit_port (auto)"),
             "mints_authority": False,
         }
 
@@ -293,9 +300,12 @@ class JourneyWorldResolver:
             # was, the world revision the observation came from and where she is going.  Storing it
             # on the journey is what makes reconciliation exact instead of a guess -- a retry, or a
             # crash, can find the same request again by its own key.
+            # 出发时刻是业务时间：与 ``advance_journey`` 的结算用同一个域。没有注入时钟时
+            # 传 ``None``，journey 引擎保持原来的真实墙钟行为。
             outcome = self.journey.accept_journey(
                 target=target, hermes_home=home, environment=self.environment,
                 request_key=idempotency_key,
+                now=(self._clock() if self._clock is not None else None),
                 # W05R: the segment is submitted through the World's own authorization
                 # entry, never by reaching the Resolver's commit function directly.
                 submit_port=self.submit_port,
@@ -505,118 +515,52 @@ class JourneyWorldResolver:
                 "detail": "no journey carries this request key"}
 
 
+def _formal_port_class() -> Any:
+    """The World-side implementation of the formal segment submit port.
+
+    The class lives next to the World bridge (``components/world/service/bridge``)
+    because it is World authority, not Life policy: ``chiyo_bundle.world_journey``
+    and the World runners must reach it without importing this Life module.  This
+    name stays as a thin, lazily-resolved alias so existing Life callers and their
+    injected ``bridge`` objects keep working unchanged.
+    """
+
+    errors = []
+    candidates = []
+    try:
+        from world_action_bridge_adapter import discover_bridge_dir
+
+        directory = discover_bridge_dir()
+        if directory is not None:
+            candidates.append(directory)
+    except Exception as exc:  # pragma: no cover - adapter import failure
+        errors.append(str(exc))
+    for directory in candidates:
+        text = str(directory)
+        if text not in sys.path:
+            sys.path.insert(0, text)
+    try:
+        module = importlib.import_module("journey_submit_port")
+        return getattr(module, "FormalOwnerMoveSubmitPort")
+    except (ImportError, AttributeError) as exc:
+        errors.append(str(exc))
+    raise ImportError("the World journey submit port is not reachable: %s"
+                      % "; ".join(errors))
+
+
 class FormalOwnerMoveSubmitPort:
     """W05R: submit one journey segment through the World's **own** authorization entry.
 
-    The World's formal chain is:
-
-        Intent Executor   the ONLY place a one-shot authorization is minted
-        gateway.sock      consumes it; a caller-supplied authority is refused
-        Resolver          the sole committer of World position
-
-    ``world_action_bridge_adapter.WorldBridgeResolver`` already speaks exactly that
-    chain, so this port reimplements none of it: it builds the intent for *this
-    segment's own* execution id, submits it, and translates the answer back into the
-    owner-status shape ``world_living_skeleton.apply_move_to`` returns -- which is what
-    the journey ledger already reads back from the travel record.
-
-    What changes compared with reaching the Resolver's commit function directly:
-
-    * the mutation gate (``WORLD_BODY_INTENT_MUTATION_GATE``) is consulted **at submit
-      time**, by the executor, before anything is sent anywhere;
-    * the fresh snapshot read and the dependency evidence are produced by the authority
-      side, and the one-shot authorization is bound to them;
-    * the gateway consumes that authorization, so a stale or withdrawn one is refused
-      with no side effect on position, travel or journey.
-
-    It mints nothing, caches no action space, never writes World state and never claims
-    arrival.  ``expected_dependencies`` stays AR-0-side bookkeeping, exactly as the
-    bridge's frozen rule says: the authority side re-reads its own evidence.
+    The implementation is ``journey_submit_port.FormalOwnerMoveSubmitPort`` in the
+    World bridge directory; this class resolves it lazily so importing this module
+    still has no World-bridge side effect and no duplicated authority logic lives
+    here.  Each journey segment has its own execution id, so each one mints and
+    consumes its own one-shot authorization -- the first segment's ticket is never
+    reused for the next.
     """
 
-    def __init__(self, *, environment: Optional[Mapping[str, str]] = None,
-                 bridge_dir: Optional[Path | str] = None, bridge: Any = None) -> None:
-        self.environment: Mapping[str, str] = dict(
-            environment if environment is not None else os.environ)
-        self._bridge_dir = bridge_dir
-        self._bridge = bridge
-        self.last_intent: Optional[dict[str, Any]] = None
-        self.last_result: Optional[dict[str, Any]] = None
-        #: Real submissions made.  Never incremented for a refusal the executor made
-        #: before contacting the gateway -- that distinction is what the W05R
-        #: reconciliation-by-count evidence reads.
-        self.submissions = 0
-
-    def _resolver(self) -> Any:
-        if self._bridge is None:
-            from world_action_bridge_adapter import WorldBridgeResolver
-
-            self._bridge = WorldBridgeResolver(environment=self.environment,
-                                               bridge_dir=self._bridge_dir)
-        return self._bridge
-
-    def describe(self) -> dict[str, Any]:
-        info = dict(self._resolver().describe())
-        info.update({"kind": "formal_owner_move_submit_port",
-                     "mints_authority": False,
-                     "writes_world_state": False,
-                     "uses_expected_dependencies": False,
-                     "dependency_evidence_source": "authority_side_fresh_read"})
-        return info
-
-    def submit_move(self, *, destination: str, origin: str, execution_id: str,
-                    hermes_home: Any, environment: Mapping[str, str],
-                    now: Any = None) -> dict[str, Any]:
-        """One segment, through the formal chain.  Returns an owner-status mapping."""
-
-        bridge = self._resolver()
-        ai, executor, _wbc = bridge._bridge()
-        try:
-            intent = bridge.build_intent(execution_id=str(execution_id), verb="MOVE",
-                                         target=str(destination))
-        except Exception as exc:  # the formal shape could not even be built
-            return {"kind": "MOVE_TO", "status": "unavailable", "formal": True,
-                    "reason_code": "INTENT_BUILD_FAILED",
-                    "detail": "%s: %s" % (type(exc).__name__, exc)}
-        self.last_intent = copy.deepcopy(intent)
-        try:
-            result = dict(executor.execute_intent(intent, client=bridge.client) or {})
-        except Exception as exc:  # the executor could not be reached at all
-            return {"kind": "MOVE_TO", "status": "uncertain", "formal": True,
-                    "reason_code": "INTENT_SUBMIT_UNAVAILABLE",
-                    "detail": "%s: %s" % (type(exc).__name__, exc)}
-        self.last_result = copy.deepcopy(result)
-        mapped = self._as_owner_status(ai, result)
-        if str(mapped.get("reason_code") or "") not in {"GATE_OFF", "SHADOW_NO_COMMIT",
-                                                        "INVALID"}:
-            self.submissions += 1
-        return mapped
-
-    @staticmethod
-    def _as_owner_status(ai: Any, result: Mapping[str, Any]) -> dict[str, Any]:
-        status = str(result.get("intent_status") or "")
-        outcome = str(result.get("outcome") or "")
-        detail = str(result.get("detail") or "")[:200]
-        if status == ai.STATUS_APPLIED:
-            return {"kind": "MOVE_TO", "status": "applied", "formal": True,
-                    "reason_code": outcome or None, "detail": detail,
-                    "intent_status": status, "execution_id": result.get("execution_id")}
-        if status == ai.STATUS_STALE:
-            return {"kind": "MOVE_TO", "status": "rejected", "formal": True,
-                    "reason_code": "STALE_STATE", "detail": detail,
-                    "intent_status": status, "execution_id": result.get("execution_id")}
-        if status == ai.STATUS_REJECTED:
-            return {"kind": "MOVE_TO", "status": "rejected", "formal": True,
-                    "reason_code": outcome or "INTENT_REJECTED", "detail": detail,
-                    "intent_status": status, "execution_id": result.get("execution_id")}
-        if status == ai.STATUS_PROPOSED:
-            # shadow: everything up to Resolver-shape validation ran, nothing committed.
-            return {"kind": "MOVE_TO", "status": "rejected", "formal": True,
-                    "reason_code": "SHADOW_NO_COMMIT", "detail": detail,
-                    "intent_status": status, "execution_id": result.get("execution_id")}
-        return {"kind": "MOVE_TO", "status": "uncertain", "formal": True,
-                "reason_code": outcome or "INTENT_UNKNOWN", "detail": detail,
-                "intent_status": status, "execution_id": result.get("execution_id")}
+    def __new__(cls, *args: Any, **kwargs: Any) -> Any:
+        return _formal_port_class()(*args, **kwargs)
 
 class RealJourneyWorldActionAdapter(ar0.WorldActionAdapter):
     """AR-0's World adapter with a timed resolver and journey-aware reconciliation.

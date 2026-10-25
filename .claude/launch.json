@@ -5,6 +5,30 @@
       "name": "phone-edge",
       "url": "http://127.0.0.1:3816",
       "port": 3816
+    },
+    {
+      "name": "phone-work-revisit-owner",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": [
+        "-e", "bash", "-lc",
+        "cd /mnt/d/nyairo-rc1-body-backend && PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/phone_work_revisit_owner_fixture.py --port 3817"
+      ],
+      "port": 3817
+    },
+    {
+      "name": "phone-album-owner",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "bash", "-lc", "cd /mnt/d/nyairo-rc1-body-backend && PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/phone_album_owner_fixture.py --root /tmp/nya-album-parent-20261022-1525 --port 3818"],
+      "port": 3818
+    },
+    {
+      "name": "phone-usable",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": [
+        "-e", "bash", "-lc",
+        "cd /mnt/d/nyairo-rc1-body-backend && { set -a; [ -f /root/.nyairo-model.env ] && . /root/.nyairo-model.env; set +a; }; exec env PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/usable_day.py serve --root /root/nyairo-day-20261022 --port 3831"
+      ],
+      "port": 3831
     }
   ]
 }

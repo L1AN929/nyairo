@@ -46,11 +46,27 @@ python scripts/phone_edge_fixture.py --port 3816
 任务正文写进文件（不要放命令行参数，Windows 下中文会被截断）：
 
 ```bash
-python scripts/dispatch_worker.py --name <工单名> --task-file <任务文件>
+# 普通单（文档、窄改、单组件）
+python scripts/dispatch_worker.py --name <工单名> --task-file <任务文件> --timeout 3600 --max-turns 300
+
+# 大型跨组件、含长验收的单
+python scripts/dispatch_worker.py --name <工单名> --task-file <任务文件> --timeout 5400 --max-turns 300
 ```
 
 默认模型 `workbuddy-wg/cn:deepseek-v4.1-flash`，网关 `http://127.0.0.1:3425`。
-日志落在 `.agents/worker-runs/`。施工跑完监工必须自己复跑验收。
+日志落在 `.agents/worker-runs/`。施工跑完监工独立复跑任务书里写的那几条验收命令，
+不看施工自述；任务书之外的全量套件和浏览器点验不在监工会话里跑。
+
+监工直接跑这条命令，不要再套一层子代理转手（见 `AGENTS.md` 第 3 节第 7 条）。
+要并行就后台起多个 worker，写集必须互不相交，按日志和退出码跟踪进度。
+
+轮数按用途给，不要一套数字用到底：只读核查 20–30 轮，并写明最多读哪几份文件；
+施工一律 `--max-turns 300`。时间按单显式给：普通单 `--timeout 3600`，大型跨组件且含
+长验收的单 `--timeout 5400`。轮数与时间是两个独立约束，90 分钟不等于 450 轮，也不追加
+产品调用额度；`dispatch_worker.py` 的默认值不改。worker 用的是便宜的 DeepSeek，
+轮数给足比中途断线重派划算。任务书里写清“改完必须跑验收并汇报，不要磨到断线”。
+到点超时（退出 124）后先确认原 writer 已停、无残留，再按原任务验收盘上产物：
+有绿收绿、只返修缺口，不整单重派；不能单凭退出码判成果全败，也不能直接认完成。
 
 ## 接续压缩前的进度
 

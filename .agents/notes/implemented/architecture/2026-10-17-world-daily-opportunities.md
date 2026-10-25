@@ -65,3 +65,5 @@ Status: implemented
 - 同批回归：`tests.test_world_move_tool`、`tests.test_world_move_tool_navigation`、`components.worldgen.tests.test_v04_navigation`、`components.worldgen.tests.test_runtime_wiring`（50 用例）全绿；`tests.test_world_journey` 全绿。
 - 闭店门口语义的验收落在 `components/worldgen/tests/test_edited_world_runtime.py`：`test_edited_opening_hours_actually_govern` 保留 11/13/20 营业断言并改为可达性拒绝，新用例 `test_closed_bookstore_doorstep_is_reachable_but_store_affordances_are_empty` 用真实 `park↔bookstore` 验证门口可走、店内 affordance 为空；该模块 5 用例 exit 0，与 W 关联模块合跑 65 用例 exit 0。
 - 实例初始化命令：`python -m components.worldgen instance --package examples/worlds/daily_neighborhood_v1 --home <隔离实例目录>`；运行时用 `CHIYO_WORLD_PACKAGE=<那个包>` 指向它。
+
+- 后续（2026-10-25）：同一街区包的 `ambient.json` 扩到既有 schema 上限 16 条单日模板，默认汐见市目录扩到 24 条（日常/会变/跨天各 8）并加入有界跨天阶段；机会目录与“事实不是授权”的边界不变。包路径仍不支持跨天。见 [世界环境事件目录扩充](../feature/2026-10-25-world-ambient-event-expansion.md)。

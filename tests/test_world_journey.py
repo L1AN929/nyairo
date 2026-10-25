@@ -25,6 +25,7 @@ import os
 import subprocess
 import sys
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +46,29 @@ from chiyo_bundle import world_move_tool as tool
 posix_only = unittest.skipIf(
     os.name == "nt", "持久旅程链路需要 POSIX 文件锁（在 WSL/Linux 上运行）"
 )
+
+
+class DirectOwnerSubmitPort:
+    """测试专用 submit_port：直接调用 owner，保留 offline 故障窗口观测。
+
+    生产引擎已经没有 ``direct_owner`` 旁路参数。本文件要 patch
+    ``world_living_skeleton.apply_move_to`` 观测「意图已写、owner 未调」等窗口，
+    只能显式注入这个假端口；它不做授权、不铸票、不写世界状态以外的东西，
+    因此只存在于 tests 中，生产调用者无法选到它。
+    """
+
+    def __init__(self) -> None:
+        self.submissions = 0
+
+    def submit_move(self, *, destination: str, origin: str, execution_id: str,
+                    hermes_home, environment, now=None):
+        import world_living_skeleton as wls
+
+        self.submissions += 1
+        return wls.apply_move_to(
+            destination, hermes_home=hermes_home, environment=environment,
+            now=now, execution_id=execution_id,
+        )
 
 STATE_FILES = (
     "world_state.json",
@@ -232,17 +256,26 @@ class JourneyTestCase(WorldGenTestCase):
 
     # -- 引擎调用 -----------------------------------------------------------
 
+    #: 本文件是**底层旅程引擎**回归：owner 失败窗口、锁序与账本一致性要靠
+    #: patch ``world_living_skeleton.apply_move_to`` 来观测，所以这里显式注入
+    #: 测试专用的直连端口。生产入口一律走正式授权口，由
+    #: ``test_world_journey_authorization`` 与下面的工具/心跳集成用例覆盖。
+    def _direct_port(self) -> DirectOwnerSubmitPort:
+        return DirectOwnerSubmitPort()
+
     def accept(self, target, world=None, *, now=None, request_key=None) -> dict:
         world = world or self.world
         return journey.accept_journey(
             target=target, hermes_home=world.home, environment=world.env,
             now=now or self.now, request_key=request_key,
+            submit_port=self._direct_port(),
         )
 
     def advance(self, world=None, *, now=None) -> dict:
         world = world or self.world
         return journey.advance_journey(
-            hermes_home=world.home, environment=world.env, now=now or self.now
+            hermes_home=world.home, environment=world.env, now=now or self.now,
+            submit_port=self._direct_port(),
         )
 
     def observe(self, world=None, *, now=None) -> dict:
@@ -270,6 +303,11 @@ class JourneyTestCase(WorldGenTestCase):
             "import world_living_skeleton as wls\n"
             "real_apply = wls.apply_move_to\n"
             "from chiyo_bundle import world_journey as journey\n"
+            "class DirectPort:\n"
+            "    def submit_move(self, *, destination, origin, execution_id, hermes_home,\n"
+            "                    environment, now=None):\n"
+            "        return wls.apply_move_to(destination, hermes_home=hermes_home,\n"
+            "            environment=environment, now=now, execution_id=execution_id)\n"
             + code
         )
         return subprocess.run(
@@ -455,7 +493,8 @@ class JourneyScenarioTest(JourneyTestCase):
             "    os._exit(9)\n"
             "wls.apply_move_to = killer\n"
             f"journey.accept_journey(target={target!r}, hermes_home={str(world.home)!r},\n"
-            f"    environment={self.env_literal(world)}, now={self.iso(self.now)!r})\n",
+            f"    environment={self.env_literal(world)}, now={self.iso(self.now)!r},\n"
+            "    submit_port=DirectPort())\n",
             world,
         )
         self.assertEqual(completed.returncode, 9, completed.stderr)
@@ -482,7 +521,8 @@ class JourneyScenarioTest(JourneyTestCase):
             "    os._exit(9)\n"
             "wls.apply_move_to = killer\n"
             f"journey.accept_journey(target={target!r}, hermes_home={str(world.home)!r},\n"
-            f"    environment={self.env_literal(world)}, now={self.iso(self.now)!r})\n",
+            f"    environment={self.env_literal(world)}, now={self.iso(self.now)!r},\n"
+            "    submit_port=DirectPort())\n",
             world,
         )
         self.assertEqual(completed.returncode, 9, completed.stderr)
@@ -547,10 +587,12 @@ class JourneyScenarioTest(JourneyTestCase):
             "    return real_apply(*args, **kwargs)\n"
             "wls.apply_move_to = killer\n"
             f"journey.accept_journey(target={target!r}, hermes_home={str(world.home)!r},\n"
-            f"    environment={self.env_literal(world)}, now={self.iso(self.now)!r})\n"
+            f"    environment={self.env_literal(world)}, now={self.iso(self.now)!r},\n"
+            "    submit_port=DirectPort())\n"
             f"journey.advance_journey(hermes_home={str(world.home)!r},\n"
             f"    environment={self.env_literal(world)},\n"
-            f"    now={self.iso(self.now + timedelta(seconds=300))!r})\n",
+            f"    now={self.iso(self.now + timedelta(seconds=300))!r},\n"
+            "    submit_port=DirectPort())\n",
             world,
         )
         self.assertEqual(completed.returncode, 9, completed.stderr)
@@ -620,7 +662,8 @@ class JourneyScenarioTest(JourneyTestCase):
         def worker():
             barrier.wait()
             results.put(journey.advance_journey(
-                hermes_home=str(world.home), environment=environment, now=moment
+                hermes_home=str(world.home), environment=environment, now=moment,
+                submit_port=DirectOwnerSubmitPort(),
             ))
 
         processes = [context.Process(target=worker) for _ in range(2)]
@@ -829,8 +872,39 @@ class JourneyScenarioTest(JourneyTestCase):
         self.assertEqual(self.world_revision(), 1)
 
 
+class _FormalGatewayMixin:
+    """工具与心跳是**生产入口**：给它们一个真实 World gateway。
+
+    这些用例不 patch ``apply_move_to``，而是让每一段都真的经
+    ``Intent Executor → gateway.sock → Resolver``；因此第二段也必须有自己的一张票。
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # 正式授权口的时间域是**真实墙钟**（一次性授权的 TTL、gateway 消费都不读
+        # 业务虚构时间）。这两个类跑的是生产入口，所以基准时间也用真实时间。
+        self.now = datetime.now(timezone.utc).replace(microsecond=0)
+        tests_dir = str(Path(__file__).resolve().parent)
+        if tests_dir not in sys.path:
+            sys.path.insert(0, tests_dir)
+        from test_one_day_life import WorldGateway
+
+        self._formal_gateway = WorldGateway(
+            self.world.home, world_id=self.world.package.world_id,
+            environment=self.world.env)
+        self.addCleanup(self._formal_gateway.stop)
+        gateway_env = dict(self._formal_gateway.environment())
+        # World 的 mutation gate 是 executor 的**进程环境**开关；不打开时它会
+        # 在铸造任何一次性授权之前就拒绝（GATE_OFF），工具/心跳会如实报 blocked。
+        gateway_env["WORLD_BODY_INTENT_MUTATION_GATE"] = "canonical"
+        self.world.env.update(gateway_env)
+        patch = mock.patch.dict(os.environ, gateway_env)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+
 @posix_only
-class JourneyToolIntegrationTest(JourneyTestCase):
+class JourneyToolIntegrationTest(_FormalGatewayMixin, JourneyTestCase):
     """H：工具接线、环境一致性、真名、旧意图退役、feature 门禁。"""
 
     def test_tool_creates_journey_and_reports_in_progress(self) -> None:
@@ -905,6 +979,11 @@ class JourneyToolIntegrationTest(JourneyTestCase):
             "XINXI_DIR": str(other),
             "CHIYO_WORLD_PACKAGE": str(broken),
             "CHIYO_WORLD_HOME": str(self.temp_dir(prefix="w02-elsewhere-")),
+            # 授权仍然必须落在本实例 gateway 自己消费的那本 registry 上；测试
+            # 劫持进程环境的 world home 时，显式固定 registry 目录，避免把
+            # "请求环境优先" 测成 "票发到别处"。
+            "WORLD_ACTION_AUTH_REGISTRY_DIR": str(
+                Path(world.env["WORLD_BODY_SOCKET"]).parent),
         }):
             self.wrd.reset_cache()
             result = self.move(world.ids["s4"])
@@ -965,7 +1044,7 @@ class JourneyToolIntegrationTest(JourneyTestCase):
 
 
 @posix_only
-class HeartbeatEntryTest(JourneyTestCase):
+class HeartbeatEntryTest(_FormalGatewayMixin, JourneyTestCase):
     """旧心跳入口：显式参数、一次性推进、无自主目标。"""
 
     def heartbeat(self, argv):
@@ -996,8 +1075,12 @@ class HeartbeatEntryTest(JourneyTestCase):
     def test_one_shot_advance_only_continues_existing_journey(self) -> None:
         world = self.world
         # W03：入口不再无条件强制启用行为特性，feature gate 必须显式给出。
+        # runner CLI 的 environment **不继承**进程里的世界配置（这是它自己的契约），
+        # 所以正式授权口需要的 socket/integration mode 必须像部署时一样显式给出。
         gates = ["--env", "CHIYO_WORLD_LIVING_SKELETON_ENABLED=1",
-                 "--env", "CHIYO_WORLD_TRAVEL_TIME_ENABLED=1"]
+                 "--env", "CHIYO_WORLD_TRAVEL_TIME_ENABLED=1",
+                 "--env", "WORLD_BODY_INTEGRATION_MODE=canonical",
+                 "--env", "WORLD_BODY_SOCKET=%s" % world.env["WORLD_BODY_SOCKET"]]
         empty_code, empty_output = self.heartbeat(
             ["--world-home", str(world.home), "--world-package", str(world.package_dir),
              *gates]
@@ -1010,10 +1093,10 @@ class HeartbeatEntryTest(JourneyTestCase):
         code, output = self.heartbeat([
             "--world-home", str(world.home),
             "--world-package", str(world.package_dir),
-            "--now", self.iso(self.now + timedelta(seconds=300)),
+            "--now", self.iso(self.now + timedelta(seconds=360)),
             *gates,
         ])
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, output)
         payload = json.loads(output)
         self.assertEqual(payload["status"], "started")
         self.assertEqual(payload["destination_location_id"], world.ids["s2"])

@@ -125,3 +125,13 @@ resident / phone / world / supply。
 * 未跑旧整库/全树回归、未 `py_compile`、未做全树 SHA；`PYTHONDONTWRITEBYTECODE=1` 全程开启；
   没有删除任何 fixture（无 `TemporaryDirectory` 清理、无 no-op `unlink`）；未改配置/实例/密钥，
   未 commit/push/deploy。
+
+## 后续规则（2026-10-24，只改 PAUSED 的槽位事实）
+
+用户批准 PAUSE 释放执行槽之后，**新产生**的 PAUSED Activity 不再让
+`foreground_activity_ref` 指向自己，因此 AG-1 在下一轮会正常提供 START 和另一活动的
+RESUME；旧版本写下的 PAUSED 指针没有 `foreground_released` 标记，仍按本笔记的“占用”
+规则处理，不会被读取路径迁移。`foreground_holds_occupancy` 的判据本身没有改：它读的是
+前台引用，而新规则改的是 owner 在 PAUSE 时是否留下引用。ABANDON 的
+`PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE` 安全门也原样保留。见
+[PAUSE 释放执行槽](../feature/2026-10-24-paused-background-single-execution.md)。

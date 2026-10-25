@@ -42,6 +42,7 @@ import hmac
 import json
 import logging
 import re
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -49,6 +50,7 @@ from typing import Any, Mapping, Optional
 from urllib.parse import parse_qsl, urlsplit
 
 from . import service as phone_service
+from . import living as phone_living
 from . import sharing as phone_sharing
 from . import contact as phone_contact
 from . import practice_shared as phone_practice
@@ -59,6 +61,14 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 API_PREFIX = "/api/phone"
 
 MAX_BODY_BYTES = 64 * 1024
+#: One album import may carry ~5 MiB of picture bytes (~7 MiB of base64 JSON).  This wider body
+#: belongs to ``POST /api/phone/album/images`` alone; every other POST keeps MAX_BODY_BYTES.
+MAX_ALBUM_BODY_BYTES = 8 * 1024 * 1024
+MAX_ALBUM_CAPTION = 200
+#: The local supervisor's run controls.  The client only names a bound and a pause intent; the
+#: shared feature cap, the ledger baseline and every refusal stay in ``living``/the supervisor.
+LIVING_WINDOW_FIELDS = frozenset({"duration_seconds", "max_new_requests"})
+LIVING_PAUSE_FIELDS = frozenset({"paused"})
 MAX_OPERATION_KEY_LEN = phone_service.MAX_OPERATION_KEY
 
 STATIC_FILES: dict[str, tuple[str, str]] = {
@@ -117,6 +127,12 @@ PROJECT_CLOSE_FIELDS = frozenset({"expected_revision", "operation_key"})
 PROJECT_DERIVE_FIELDS = frozenset({"title", "content", "source_artifact_id", "source_version_id",
                                    "purpose", "note", "operation_key"})
 PROJECT_VERSIONS_QUERY_FIELDS = frozenset({"limit", "before"})
+
+#: ``/api/phone/album`` -- her private imported pictures.  The import body names a caption, the
+#: declared image type and the picture bytes as plain base64; it never names a path, a URL, a
+#: file name, an owner, an authority or a subject.
+ALBUM_IMPORT_FIELDS = frozenset({"caption", "content_type", "data", "operation_key"})
+ALBUM_CONTENT_TYPES = frozenset({"image/png", "image/jpeg"})
 
 #: ``/api/phone/shares`` -- the share surface (B's ``LifeSharingService``, forwarded by P).  The
 #: client names the source it saw in ``GET /shares/sources``, its own explicit short text (or an
@@ -321,6 +337,11 @@ _PROJECT_VERSION_PATH = re.compile(
     r"^/api/phone/projects/([A-Za-z0-9._:\-]{1,200})/versions/([A-Za-z0-9._:\-]{1,200})$")
 _PROJECT_PROVENANCE_PATH = re.compile(
     r"^/api/phone/projects/([A-Za-z0-9._:\-]{1,200})/provenance$")
+#: ``/api/phone/album/<artifact_id>`` is one imported picture; ``/image`` is its real bytes.
+#: The image path is matched first so it can never be read as an artifact id.  The id is the
+#: owner's own protocol string, matched and never rewritten.
+_ALBUM_IMAGE_PATH = re.compile(r"^/api/phone/album/([A-Za-z0-9._:\-]{1,200})/image$")
+_ALBUM_PATH = re.compile(r"^/api/phone/album/([A-Za-z0-9._:\-]{1,200})$")
 LOG = logging.getLogger("chiyo.phone.http")
 
 #: ``GET /api/phone/materials/<artifact_id>``: a material id, matched exactly as the owner
@@ -433,7 +454,8 @@ class PhoneHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
 
     def __init__(self, address: tuple[str, int], *, service: phone_service.PhoneService,
-                 csrf_token: str, log_path: Optional[Path] = None) -> None:
+                 csrf_token: str, log_path: Optional[Path] = None,
+                 supervisor: Optional[Any] = None) -> None:
         if not isinstance(service, phone_service.PhoneService):
             raise TypeError("PhoneHTTPServer needs a PhoneService")
         if not isinstance(csrf_token, str) or not csrf_token:
@@ -441,6 +463,10 @@ class PhoneHTTPServer(ThreadingHTTPServer):
         self.service = service
         self.csrf_token = csrf_token
         self.log_path = Path(log_path) if log_path else None
+        #: The optional local supervisor.  A plain ``phone serve`` has none: the living view is
+        #: still readable, but the run controls answer ``SUPERVISOR_UNAVAILABLE`` instead of
+        #: starting a model window from a surface that never offered one.
+        self.supervisor = supervisor
         super().__init__(address, PhoneRequestHandler)
 
 
@@ -464,6 +490,19 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _send_image(self, content_type: str, body: bytes) -> None:
+        """One real picture response.  Same-origin only; never cached, never sniffed."""
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -550,7 +589,8 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         return None
 
     def _read_body(self, fields: frozenset[str],
-                   refused: frozenset[str] = frozenset()) -> dict[str, Any]:
+                   refused: frozenset[str] = frozenset(),
+                   max_bytes: Optional[int] = None) -> dict[str, Any]:
         content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
             raise PhoneRequestError("CONTENT_TYPE_REQUIRED")
@@ -560,7 +600,8 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         length = int(str(raw_length).strip())
         if length <= 0:
             raise PhoneRequestError("BODY_REQUIRED")
-        if length > MAX_BODY_BYTES:
+        limit = MAX_BODY_BYTES if max_bytes is None else int(max_bytes)
+        if length > limit:
             raise PhoneRequestError("BODY_TOO_LARGE", 413)
         raw = self.rfile.read(length)
         try:
@@ -636,6 +677,11 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/state":
                 self._get_state(service)
                 return
+            # The phone's "now": a read-only projection rebuilt from the resident's own records
+            # and the persisted ledger.  Opening the page never starts a service or a model.
+            if path == f"{API_PREFIX}/living":
+                self._get_living(service)
+                return
             if path == f"{API_PREFIX}/notes":
                 self._send(200, service.notes())
                 return
@@ -670,6 +716,18 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             # carries where she is and what her body is doing.
             if path == f"{API_PREFIX}/world":
                 self._get_world(service)
+                return
+            # Her private album: the list carries captions/owner media metadata (no bytes); the
+            # detail carries no bytes either; only ``/image`` serves the real picture.  The image
+            # path is matched before the bare id path.
+            if path == f"{API_PREFIX}/album":
+                self._get_album_list(service)
+                return
+            if _ALBUM_IMAGE_PATH.match(path):
+                self._get_album_image(service, _ALBUM_IMAGE_PATH.match(path).group(1))
+                return
+            if _ALBUM_PATH.match(path):
+                self._get_album_detail(service, _ALBUM_PATH.match(path).group(1))
                 return
             # Her own projects: a guarded pure read (the list carries no text; the detail does).
             if path == f"{API_PREFIX}/projects":
@@ -817,6 +875,11 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/reading/annotations":
                 self._post_reading_annotation(service)
                 return
+            # Her private album: exactly one explicit import.  There is no rename, no delete and
+            # no second write path; the picture bytes reach only the Supply owner.
+            if path == f"{API_PREFIX}/album/images":
+                self._post_album_import(service)
+                return
             # Her own projects: explicit title/text, one CAS head, one archived project.
             if path == f"{API_PREFIX}/projects":
                 self._post_project_create(service)
@@ -897,6 +960,17 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             # engages is decided by her own protocol after this transport row lands.
             if path == f"{API_PREFIX}/contact/events":
                 self._post_contact_event(service)
+                return
+            # The local supervisor's explicit run controls.  Without a supervisor attached (a
+            # plain ``phone serve``) they refuse by name; they never start a model themselves.
+            if path == f"{API_PREFIX}/living/window":
+                self._post_living_window(service)
+                return
+            if path == f"{API_PREFIX}/living/pause":
+                self._post_living_pause(service)
+                return
+            if path == f"{API_PREFIX}/living/stop":
+                self._post_living_stop(service)
                 return
             self._send(404, _failure("NOT_FOUND"))
             return
@@ -1278,6 +1352,94 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         payload["csrf_token"] = str(self.server.csrf_token)
         self._send(200, payload)
 
+    def _get_living(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/living``: the real "now", read-only.
+
+        It reads the resident summary, wake journal tail, coverage ledger and the persisted
+        request ledger only.  It starts nothing and calls no model, so a page refresh can never
+        turn a historical ACTIVE record into "she is doing this right now".
+        """
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        view = phone_living.living_view(
+            service.root, service=service,
+            supervisor=getattr(self.server, "supervisor", None), live=True)
+        self._send(200, {"ok": True, "status": "ok", "data": view})
+
+    def _living_supervisor(self) -> Optional[Any]:
+        return getattr(self.server, "supervisor", None)
+
+    def _living_envelope(self, result: Mapping[str, Any], *, ok_status: str) -> dict[str, Any]:
+        if result.get("ok"):
+            return phone_service.envelope(True, ok_status, dict(result))
+        reason = str(result.get("reason") or result.get("reason_code")
+                     or "LIVING_CONTROL_REFUSED")
+        return phone_service.envelope(False, phone_service.STATUS_REJECTED,
+                                      {key: value for key, value in dict(result).items()
+                                       if key not in {"ok", "status", "reason"}},
+                                      reason)
+
+    def _post_living_window(self, service: phone_service.PhoneService) -> None:
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        supervisor = self._living_supervisor()
+        if supervisor is None:
+            self._send(409, _failure("SUPERVISOR_UNAVAILABLE"))
+            return
+        payload = self._read_body(LIVING_WINDOW_FIELDS)
+        result = supervisor.start_window(
+            duration_seconds=payload.get("duration_seconds"),
+            max_new_requests=payload.get("max_new_requests"))
+        service.record_operation(actor=self._actor(), action="living:window",
+                                 operation_key="living-window:%d" % int(time.time()),
+                                 result=result)
+        self._send_or_map(self._living_envelope(result, ok_status="applied"))
+
+    def _post_living_pause(self, service: phone_service.PhoneService) -> None:
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        supervisor = self._living_supervisor()
+        if supervisor is None:
+            self._send(409, _failure("SUPERVISOR_UNAVAILABLE"))
+            return
+        payload = self._read_body(LIVING_PAUSE_FIELDS)
+        paused = payload.get("paused")
+        if not isinstance(paused, bool):
+            raise PhoneRequestError("PAUSED_MUST_BE_BOOLEAN")
+        result = supervisor.set_paused(paused)
+        service.record_operation(actor=self._actor(),
+                                 action="living:pause" if paused else "living:resume",
+                                 operation_key="living-pause:%d" % int(time.time()),
+                                 result=result)
+        self._send_or_map(self._living_envelope(result, ok_status="applied"))
+
+    def _post_living_stop(self, service: phone_service.PhoneService) -> None:
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        supervisor = self._living_supervisor()
+        if supervisor is None:
+            self._send(409, _failure("SUPERVISOR_UNAVAILABLE"))
+            return
+        # Consume a declared body even though nothing is read from it: leaving bytes in the
+        # stream would corrupt the next keep-alive request.
+        length = self.headers.get("Content-Length")
+        if length is not None and str(length).strip().isdigit() and int(str(length)) > 0:
+            self._read_body(frozenset())
+        result = supervisor.stop_window()
+        service.record_operation(actor=self._actor(), action="living:stop",
+                                 operation_key="living-stop:%d" % int(time.time()),
+                                 result=result)
+        self._send_or_map(self._living_envelope(result, ok_status="applied"))
+
     def _get_world(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/world`` is a pure read: no init, no settlement, no write."""
         guard = self._guard_common()
@@ -1548,6 +1710,83 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         self._send_or_map(result)
 
     # -- her private projects (B's owner service decides every fact) ----------------------
+
+    # -- private album (EP-16: one import, real bytes out) --------------------------------
+
+    def _get_album_list(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/album``: guarded pure read of her own imported pictures."""
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        self._send_or_map(service.album_list())
+
+    def _get_album_detail(self, service: phone_service.PhoneService,
+                          artifact_id: str) -> None:
+        """``GET /api/phone/album/<id>``: guarded pure read of one picture's own words."""
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        self._send_or_map(service.album_detail(artifact_id))
+
+    def _get_album_image(self, service: phone_service.PhoneService, artifact_id: str) -> None:
+        """``GET /api/phone/album/<id>/image``: the picture's real bytes, never an envelope."""
+        guard = self._guard_common()
+        if guard is not None:
+            # Even a refusal is a shape-checked JSON envelope, never image bytes.
+            self._send(*guard)
+            return
+        result = service.album_image(artifact_id)
+        body = result.get("data") if isinstance(result, dict) else None
+        content_type = result.get("content_type") if isinstance(result, dict) else None
+        if (isinstance(result, dict) and result.get("ok") is True
+                and isinstance(body, (bytes, bytearray))
+                and content_type in ALBUM_CONTENT_TYPES):
+            self._send_image(str(content_type), bytes(body))
+            return
+        if isinstance(result, dict) and result.get("ok") is True:
+            # A positive answer with no usable bytes is not a picture: never send an empty image.
+            self._send(502, _failure("ALBUM_ANSWER_INVALID"))
+            return
+        self._send_or_map(result)
+
+    def _post_album_import(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/album/images``: one explicit user import.
+
+        The body is the user's caption, the declared type and plain base64 bytes.  No path, URL,
+        file name, owner, authority or subject is accepted; ``IDENTITY_FIELDS`` refuses those by
+        name before the owner is called.
+        """
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(ALBUM_IMPORT_FIELDS, max_bytes=MAX_ALBUM_BODY_BYTES)
+        caption = payload.get("caption")
+        if not isinstance(caption, str):
+            raise PhoneRequestError("CAPTION_REQUIRED")
+        caption = caption.strip()
+        if len(caption) > MAX_ALBUM_CAPTION:
+            raise PhoneRequestError("CAPTION_TOO_LONG")
+        if any(ch in caption for ch in ("\x00", "\r")):
+            raise PhoneRequestError("CAPTION_INVALID")
+        content_type = payload.get("content_type")
+        if not isinstance(content_type, str) or content_type not in ALBUM_CONTENT_TYPES:
+            raise PhoneRequestError("IMAGE_CONTENT_TYPE_UNSUPPORTED", 415)
+        data = payload.get("data")
+        if not isinstance(data, str) or not data:
+            raise PhoneRequestError("IMAGE_DATA_REQUIRED")
+        # 5 MiB decoded is at most ~6.7 MiB of base64; refuse a longer text before the owner sees
+        # it (the owner enforces the decoded bound again).
+        if len(data) > 7 * 1024 * 1024 + 16:
+            raise PhoneRequestError("IMAGE_TOO_LARGE", 413)
+        key = _operation_key(payload.get("operation_key"))
+        result = service.album_import(caption=caption, content_type=str(content_type),
+                                      data=data, operation_key=key)
+        service.record_operation(actor=self._actor(), action="album:import",
+                                 operation_key=key, result=result)
+        self._send_or_map(result)
 
     def _get_projects(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/projects``: a guarded pure read.  It never creates or migrates one."""
@@ -2887,13 +3126,14 @@ def _world_params(action: str, value: Any) -> dict[str, Any]:
 
 
 def create_server(service: phone_service.PhoneService, *, csrf_token: str, port: int = 0,
-                  log_path: Optional[Path] = None) -> PhoneHTTPServer:
+                  log_path: Optional[Path] = None,
+                  supervisor: Optional[Any] = None) -> PhoneHTTPServer:
     """Bind one loopback server.  The host is not a caller choice."""
 
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
         raise ValueError("port must be an integer in 0..65535")
     return PhoneHTTPServer(("127.0.0.1", int(port)), service=service,
-                           csrf_token=csrf_token, log_path=log_path)
+                           csrf_token=csrf_token, log_path=log_path, supervisor=supervisor)
 
 
 __all__ = [

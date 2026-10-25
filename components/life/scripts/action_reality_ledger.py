@@ -1806,6 +1806,17 @@ class WorldActionAdapter(ActionAdapterProtocol):
                 error_class="WorldResolverAmbiguousOutcome",
                 error_ref=f"err:{exec_id}:uncertain",
             )
+        if tr == TRANSPORT_ERR_DEFINITE_PRE_SUBMIT:
+            # 明确没有越过提交边界（gate off / shadow / invalid）：不造"已接受"回执，
+            # 并把 resolver 自己的 code 留在 error_class 里。否则上层只看到笼统的
+            # PRE_SUBMIT_FAILED，无法把 GATE_OFF 这种"根本没发"的原因报给用户。
+            return AdapterSubmissionOutcome(
+                transport_result=tr,
+                provider_operation_ref=exec_id,
+                error_class=out.get("code"),
+                error_ref=(f"err:{exec_id}:{out.get('code')}" if out.get("code") else None),
+            )
+
         if tr in {TRANSPORT_ERR_DEFINITE_REJECT, TRANSPORT_ERR_EXECUTION_FAILURE}:
             claim = RECEIPT_CLAIM_REJECTED if tr == TRANSPORT_ERR_DEFINITE_REJECT else RECEIPT_CLAIM_FAILED
             receipt_hash_input = f"{attempt['attempt_id']}:{exec_id}:fail"

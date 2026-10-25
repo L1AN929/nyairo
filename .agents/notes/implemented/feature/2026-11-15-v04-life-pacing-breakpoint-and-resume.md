@@ -112,3 +112,5 @@ owner 自己的词是 `completed`，不是"恢复了"。
 - 已知红灯（不属于本决定）：`tests/test_life_wait_resume_v04.py::test_a_round_without_a_dependency_sends_no_basis_at_all`
   因 park 在"无依赖但有 ACTIVE 前台"时会发一个自选时间 basis 而失败，该代码路径（`autonomous_life_cycle.py:4952`）
   早于本节改动，未在本阶段修正。
+- 后续（2026-10-24）：同一身体/依赖 basis 也可以被显式条件 PAUSE 使用，见
+  [显式条件 PAUSE](2026-10-24-paused-explicit-resume-condition.md)；本笔记的 WAIT 语义未改。

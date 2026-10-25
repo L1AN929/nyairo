@@ -23,11 +23,23 @@ and only that:
     dailyact:place:room:<location_id>:<area_id>:<object_id>
     dailyact:place:surface:<location_id>:<surface_id>:<object_id>
 
-Every field is percent-encoded (``urllib.parse.quote(value, safe="")``), because a
-real surface id is ``desk_surface:<item_instance_id>`` and therefore contains the
-separator.  Encoding is deterministic (same parameters -> same string) and
-reversible (``parse`` returns exactly what ``encode`` was given), the field count is
-fixed per action, and an extra or missing field is a refusal rather than a guess.
+Every plain field is percent-encoded (``urllib.parse.quote(value, safe="")``), because
+a real surface id is ``desk_surface:<item_instance_id>`` and therefore contains the
+separator.  The surface field is instead spelled with a **ref-safe token** (see
+``_encode_surface_field``): the whole target must also pass AG-0's structured-ref
+charset when it travels as an observed opportunity, and that charset has no ``%``.
+Encoding is deterministic (same parameters -> same string) and reversible
+(``parse`` returns exactly what ``encode`` was given), the field count is fixed per
+action, and an extra or missing field is a refusal rather than a guess.
+
+Old and new surface spellings are told apart without a version byte.  An old field is
+``quote(value, safe="")``, whose output only uses ``[A-Za-z0-9_.~-]`` plus ``%XX``; a
+new field only uses ``[A-Za-z0-9_.-]`` plus ``/`` escapes.  ``/`` cannot appear in the
+old spelling (``quote`` writes it as ``%2F``) and ``%`` cannot appear in the new one, so
+a field containing either marker belongs to exactly one spelling.  A field containing
+neither is a plain literal in both spellings and therefore means the same value --
+that is why an old ``desk-x3Asurface`` still reads as the literal ``desk-x3Asurface``
+rather than being guessed into ``desk:surface``.
 
 It provides the four things the Life core needs, and no others:
 
@@ -235,7 +247,7 @@ def encode_daily_action_target(verb: Any, params: Any) -> str:
         surface = _field(target.get("surface_id"), "placement.surface_id")
         return "%s%s:%s:%s:%s:%s" % (
             DAILY_ACTION_REF_PREFIX, PLACE_ACTION, PLACEMENT_SURFACE,
-            quote(location, safe=""), quote(surface, safe=""),
+            quote(location, safe=""), _encode_surface_field(surface),
             quote(object_id, safe=""))
     raise DailyActionTargetError(
         "PLACE target kind %r cannot be expressed: this encoding carries %s "
@@ -245,6 +257,107 @@ def encode_daily_action_target(verb: Any, params: Any) -> str:
 
 def _unquote_field(raw: str, label: str) -> str:
     return _field(unquote(raw), label)
+
+
+#: Characters a surface token may carry literally.  This is AG-0's structured-ref id
+#: charset (``[A-Za-z0-9_.:/-]``) minus the ``:`` field separator and minus the escape
+#: introducer ``/``, so the encoded target itself survives as a target ref.
+_SURFACE_LITERAL = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+
+#: The surface field's escape introducer.  ``/`` is legal inside an AG-0 ref id but can
+#: never occur literally in the older percent spelling (``quote(value, safe="")``
+#: writes it as ``%2F``), which is what separates the two spellings without a version
+#: byte.  ``-`` cannot play that role: it is a plain unreserved character in the old
+#: spelling, so an old literal ``-x3A`` would be indistinguishable from a new escape.
+_SURFACE_ESCAPE = "/"
+
+
+def _encode_surface_field(value: str) -> str:
+    """A reversible, ref-safe spelling of a surface id.
+
+    ``urllib.parse.quote(value, safe="")`` would spell ``desk_surface:<item>`` as
+    ``desk_surface%3A<item>``.  That is fine inside this module, but the same string also
+    travels as an AG-0 ``target_ref``/opportunity id, and ``%`` is not in that contract's
+    charset (``activity_continuity._STRUCTURED_REF_RE``).  So the surface field uses
+    ``/`` as an escape: ``/`` doubles, every other non-literal character becomes one
+    ``/xHH`` byte of its UTF-8 encoding.  The result contains only ``[A-Za-z0-9_./-]``,
+    still no field separator, and is byte-identical after ``_decode_surface_field`` --
+    ASCII and non-ASCII alike.
+    """
+
+    encoded: list[str] = []
+    for character in value:
+        if character == _SURFACE_ESCAPE:
+            encoded.append(_SURFACE_ESCAPE * 2)
+        elif character in _SURFACE_LITERAL:
+            encoded.append(character)
+        else:
+            for byte in character.encode("utf-8"):
+                encoded.append("%sx%02x" % (_SURFACE_ESCAPE, byte))
+    return "".join(encoded)
+
+
+def _decode_surface_field(token: str, label: str = "placement.surface_id") -> str:
+    """Reverse :func:`_encode_surface_field`; an older ``%XX`` field still reads.
+
+    Disambiguation needs no version: a token containing ``%`` is the older percent
+    spelling and is unquoted as before; otherwise the token can only be the current
+    spelling, where ``//`` is a literal ``/`` and ``/xHH`` is one UTF-8 byte.  Runs of
+    ``/xHH`` bytes are decoded as UTF-8 together (a multi-byte character is several of
+    them); a run that is not valid UTF-8 falls back to Latin-1, which is what the
+    pre-UTF-8 two-digit spelling meant.
+
+    A token with neither marker is a plain literal in both spellings -- every character
+    in it is returned unchanged, which is exactly why an old ``desk-x3Asurface`` is not
+    reinterpreted as ``desk:surface``.  A bare ``/`` followed by neither ``/`` nor a
+    valid ``xHH`` is likewise kept literally; the encoder always doubles it, so no new
+    target depends on that leniency.
+    """
+
+    if "%" in token:
+        return _unquote_field(token, label)
+    decoded: list[str] = []
+    pending = bytearray()
+
+    def flush() -> None:
+        if not pending:
+            return
+        raw = bytes(pending)
+        pending.clear()
+        try:
+            decoded.append(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            decoded.append(raw.decode("latin-1"))
+
+    index = 0
+    while index < len(token):
+        character = token[index]
+        if character != _SURFACE_ESCAPE:
+            flush()
+            decoded.append(character)
+            index += 1
+            continue
+        following = token[index + 1:index + 2]
+        if following == _SURFACE_ESCAPE:
+            flush()
+            decoded.append(_SURFACE_ESCAPE)
+            index += 2
+            continue
+        if following == "x" and len(token) >= index + 4:
+            try:
+                byte = int(token[index + 2:index + 4], 16)
+            except ValueError:
+                pass
+            else:
+                pending.append(byte)
+                index += 4
+                continue
+        flush()
+        decoded.append(_SURFACE_ESCAPE)
+        index += 1
+    flush()
+    return _field("".join(decoded), label)
 
 
 def parse_daily_action_target(target: Any) -> Optional[dict[str, Any]]:
@@ -316,7 +429,7 @@ def parse_daily_action_target(target: Any) -> Optional[dict[str, Any]]:
         }
     if kind == PLACEMENT_SURFACE:
         location = _unquote_field(fields[3], "placement.location_id")
-        surface = _unquote_field(fields[4], "placement.surface_id")
+        surface = _decode_surface_field(fields[4], "placement.surface_id")
         object_id = _unquote_field(fields[5], "object_id")
         return {
             "verb": PLACE_VERB,

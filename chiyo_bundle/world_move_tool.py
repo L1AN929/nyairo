@@ -220,6 +220,22 @@ def _journey_module():
     return importlib.import_module("chiyo_bundle.world_journey")
 
 
+def _submit_port(env):
+    """World 自己的正式授权入口；不可达时返回 None，让引擎失败关闭。
+
+    工具不会退回进程内直写：每一段都是新的 Action，各自需要一次性授权。
+    """
+
+    try:
+        module = importlib.import_module("chiyo_bundle.journey_authorization")
+    except ImportError:  # pragma: no cover - 直接以脚本路径导入时的回退
+        module = importlib.import_module("journey_authorization")
+    try:
+        return module.default_submit_port(environment=env)
+    except Exception:
+        return None
+
+
 
 def _control_module():
     """持久暂停控制状态模块（懒加载）。"""
@@ -388,7 +404,9 @@ def move_handler(args, **kwargs) -> str:
                                destination_location_id=observed.get("destination_location_id"),
                                remaining_minutes=observed.get("remaining_minutes"),
                                requested_location_id=target)
-            advanced = journey.advance_journey(hermes_home=home, environment=env, now=now)
+            advanced = journey.advance_journey(
+                hermes_home=home, environment=env, now=now,
+                submit_port=_submit_port(env))
             return _journey_result(advanced, world, target, home, env)
         if observed_status == "blocked":
             # W03 统一语义：工具不会自动替换被阻塞的旅程；只有低层显式
@@ -420,7 +438,8 @@ def move_handler(args, **kwargs) -> str:
         if wtd.travel_enabled(env):
             # 计时旅程：耐久意图 + 单段 owner 提交，由旅程引擎负责推进与恢复。
             accepted = journey.accept_journey(target=target, hermes_home=home, environment=env,
-                                              now=now, request_key=request_key)
+                                              now=now, request_key=request_key,
+                                              submit_port=_submit_port(env))
             return _journey_result(accepted, world, target, home, env)
         committed = []
         for step in route:

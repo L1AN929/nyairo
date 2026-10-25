@@ -1083,8 +1083,13 @@ class CandidateSourceAdapter:
 class CurrentActivityCandidateSource(CandidateSourceAdapter):
     """Sections 16-19, 67: Reads LR-2 ActivityReadService.
 
-    Emits `CONTINUE_CURRENT` iff foreground Activity exists and is `ACTIVE`.
-    Never emits for `IDLE`, `PAUSED`, `WAITING`, `INTERRUPTED`, or terminal statuses.
+    Emits `CONTINUE_CURRENT` iff the foreground Activity exists and is `ACTIVE` or
+    `PAUSED`.  v0.4 background pause: a successful PAUSE now clears the foreground
+    pointer, so a newly suspended Activity is *not* read here -- its way back is the
+    RESUME_ELIGIBLE source, owned by LR-4.  The PAUSED branch remains for a legacy
+    record whose pointer was written before that rule: it is still the Activity the
+    single slot points at, and the projection says *nothing* about executing it.
+    Never emits for `IDLE`, `WAITING`, `INTERRUPTED`, or terminal statuses.
     """
 
     source_kind = SOURCE_CURRENT_ACTIVITY
@@ -1152,7 +1157,11 @@ class CurrentActivityCandidateSource(CandidateSourceAdapter):
         if status == STATUS_WAITING:
             return False, "ACTIVITY_WAITING_NOT_CONTINUE_CANDIDATE"
         if status == STATUS_PAUSED:
-            return False, "ACTIVITY_PAUSED_REQUIRES_RESUME_ELIGIBLE"
+            # Legacy only: a PAUSED record written before v0.4 background pause still holds
+            # the pointer.  Projecting it is not permission to continue (AG-1 offers no
+            # execution-shaped decision for it); a newly paused Activity has no pointer and
+            # is reached through RESUME_ELIGIBLE instead.
+            return True, None
         if status == STATUS_INTERRUPTED:
             return False, "ACTIVITY_INTERRUPTED_NOT_ACTIVE_FOREGROUND"
         if status != STATUS_ACTIVE:
@@ -1232,7 +1241,7 @@ class CurrentActivityCandidateSource(CandidateSourceAdapter):
                 observed_at=obs_iso,
                 new_status=CANDIDATE_STATUS_STALE,
             )
-        if act["status"] != STATUS_ACTIVE:
+        if act["status"] not in (STATUS_ACTIVE, STATUS_PAUSED):
             return self.invalidate(
                 candidate,
                 reason_code=f"ACTIVITY_NO_LONGER_ACTIVE_{act['status']}",
@@ -1279,10 +1288,26 @@ class ResumeEligibleCandidateSource(CandidateSourceAdapter):
         activity_read: Optional[ActivityReadService],
         *,
         per_source_cap: int = DEFAULT_PER_SOURCE_CAP,
+        target_read: Any = None,
     ) -> None:
         super().__init__(per_source_cap=per_source_cap)
         self.waiting_source = waiting_source
         self.activity_read = activity_read
+        #: The owner that can prove a *target* still exists and is readable.  It is the existing
+        #: ``LifeArtifactPort`` (``read_artifact``); this adapter adds no owner or contract.
+        #: ``None`` is a first-class answer: a target that names a ManagedArtifact then has no
+        #: proof of provenance and fails closed, while a non-Artifact Activity keeps exactly the
+        #: Activity-owner checks it always had.  The assembly attaches the real port.
+        self.target_read = target_read
+
+    def attach_target_read(self, target_read: Any) -> None:
+        """Attach the existing owner read used to prove an Artifact target is still there.
+
+        A narrow assembly seam, not a new permission: the call only stores the port the cycle
+        already holds.  A later round reads through it; nothing is cached across rounds.
+        """
+
+        self.target_read = target_read
 
     def _eligibility_store(self) -> Optional[ResumeEligibilityStore]:
         if self.waiting_source is None:
@@ -1351,6 +1376,141 @@ class ResumeEligibleCandidateSource(CandidateSourceAdapter):
             "cap": self.per_source_cap,
         }
 
+    #: A foreground in this status does not keep the slot for itself: LR-2 ``resume_activity``
+    #: passes ``allow_background_waiting`` for it, and AG-1's legal set offers RESUME of another
+    #: Activity under the same condition.  A PAUSED/ACTIVE foreground keeps the reference, so a
+    #: RESUME elsewhere would be certain to be refused -- it is not a valid supply.
+    _BACKGROUND_FOREGROUND_STATUSES = frozenset({STATUS_WAITING})
+
+    @staticmethod
+    def _time_and_episode_refusal(
+        raw_item: Mapping[str, Any], act: Mapping[str, Any], *, observed_at: str
+    ) -> Optional[str]:
+        """The owner's own expiry/episode rules, applied read-only to one OPEN row.
+
+        Expiry mirrors ``WaitingCoordinator.explicit_resume_from_eligibility`` exactly (the row
+        is refused once ``now`` is later than ``expires_at``), and the episode token mirrors
+        ``_collect_stale_and_terminal_updates`` (a mismatch invalidates the row).  An unreadable
+        timestamp fails closed: "cannot check" is never "still valid".
+        """
+
+        expires = raw_item.get("expires_at")
+        if expires is not None:
+            try:
+                if _parse_iso(observed_at) > _parse_iso(str(expires)):
+                    return "RESUME_ELIGIBILITY_EXPIRED"
+            except (TypeError, ValueError):
+                return "RESUME_ELIGIBILITY_EXPIRY_UNREADABLE"
+        episode = raw_item.get("waiting_episode_id")
+        activity_episode = act.get("waiting_episode_id")
+        if episode is not None and activity_episode is not None and str(episode) != str(activity_episode):
+            return "WAITING_EPISODE_MISMATCH"
+        return None
+
+    def _foreground_refusal(self, activity_id: str) -> Optional[str]:
+        """Is another Activity holding the single foreground slot in a way LR-2 would refuse?"""
+
+        if self.activity_read is None or not activity_id:
+            return None
+        reader = getattr(self.activity_read, "get_current_life_view", None)
+        try:
+            if callable(reader):
+                view = reader() or {}
+            else:
+                read_state = getattr(self.activity_read, "read_canonical_state", None)
+                if not callable(read_state):
+                    return None
+                state, _journal = read_state(include_journal=False)
+                view = state or {}
+        except Exception:
+            return "FOREGROUND_VIEW_UNREADABLE"
+        foreground = view.get("foreground_activity_ref") if isinstance(view, Mapping) else None
+        if not foreground or str(foreground) == str(activity_id):
+            return None
+        try:
+            foreground_activity = self.activity_read.get_activity(str(foreground))
+        except Exception:
+            return "FOREGROUND_ACTIVITY_UNREADABLE"
+        status = str((foreground_activity or {}).get("status") or "")
+        if status in self._BACKGROUND_FOREGROUND_STATUSES:
+            return None
+        return "FOREGROUND_CONFLICT"
+
+    #: The namespace the ManagedArtifact owner mints for its own ids (``artifact:`` is the id,
+    #: not a wrapper): ``lifesupply/artifact/store.py`` writes ``aid = "artifact:" + uuid4().hex``.
+    #: The candidate's Activity records that same ref in ``subject_refs`` (AG-2 passes the
+    #: adoption spec's ``target_refs`` there), so this is a real binding, not an inferred one.
+    ARTIFACT_TARGET_PREFIX = "artifact:"
+
+    @classmethod
+    def _artifact_target_refs(cls, act: Mapping[str, Any]) -> list[str]:
+        """The Artifact refs the Activity itself binds, in the same fields ``materialize`` reads."""
+
+        refs: list[str] = []
+        for field in ("subject_refs", "target_ref", "checkpoint_ref"):
+            raw = act.get(field)
+            values = raw if isinstance(raw, (list, tuple)) else [raw]
+            for value in values:
+                text = str(value or "")
+                if text.startswith(cls.ARTIFACT_TARGET_PREFIX) and text not in refs:
+                    refs.append(text)
+        return refs
+
+    def _target_source_refusal(self, act: Mapping[str, Any]) -> Optional[str]:
+        """Can the owner still prove this Activity's Artifact target is there?
+
+        A resume candidate is *offered* here, so "the source may have been withdrawn" has to be
+        answered before the offer, not only when adoption tries to use it.  The only formal read
+        this tree has is the ManagedArtifact owner's own ``read_artifact`` (subject-scoped,
+        tombstone-refusing); no id is stripped, guessed or mapped, and a second owner contract is
+        not invented.
+
+        * an Activity that binds one or more ``artifact:`` refs must prove every one of them
+          readable; a refusal, a missing record or an unwired read fails closed;
+        * an Activity whose ``origin_ref`` is an Artifact but which binds no Artifact target has
+          no provenance to check -- ``TARGET_BINDING_MISSING``, never a guessed ``actv:`` target;
+        * every other Activity (World/future-item/reading-origin refs) is not an Artifact claim:
+          it keeps exactly the Activity-owner checks it had, and is not blanket-passed by this
+          method.  Its own source authority is not in this adapter's read surface, so this method
+          neither invents one nor removes the existing candidate path.
+        """
+
+        refs = self._artifact_target_refs(act)
+        origin = str(act.get("origin_ref") or "")
+        if not refs:
+            if origin.startswith(self.ARTIFACT_TARGET_PREFIX):
+                return "TARGET_BINDING_MISSING"
+            return None
+        reader = self.target_read
+        if reader is None or not callable(getattr(reader, "read_artifact", None)):
+            return "TARGET_SOURCE_READ_NOT_WIRED"
+        for ref in refs:
+            try:
+                view = reader.read_artifact(ref)
+            except Exception:
+                # A typed owner refusal (revoked/tombstoned/unreachable) and an unreadable answer
+                # are the same fact here: the source is not proven available.
+                return "TARGET_SOURCE_UNREADABLE"
+            if not isinstance(view, Mapping):
+                return "TARGET_SOURCE_UNREADABLE"
+            artifact = view.get("artifact")
+            if not isinstance(artifact, Mapping) or not artifact.get("artifact_id"):
+                return "TARGET_SOURCE_MISSING"
+            if str(artifact.get("lifecycle") or "") == "TOMBSTONED":
+                return "TARGET_SOURCE_TOMBSTONED"
+        return None
+
+    def _not_resumable_reason(
+        self, raw_item: Mapping[str, Any], act: Mapping[str, Any], *, observed_at: str
+    ) -> Optional[str]:
+        reason = self._time_and_episode_refusal(raw_item, act, observed_at=observed_at)
+        if reason is not None:
+            return reason
+        reason = self._target_source_refusal(act)
+        if reason is not None:
+            return reason
+        return self._foreground_refusal(str(act.get("activity_id") or raw_item.get("activity_id") or ""))
+
     def validate_source(
         self, raw_item: Mapping[str, Any], *, observed_at: str
     ) -> tuple[bool, Optional[str]]:
@@ -1370,6 +1530,9 @@ class ResumeEligibleCandidateSource(CandidateSourceAdapter):
             return False, "ACTIVITY_ALREADY_ACTIVE"
         if int(act["revision"]) != int(raw_item.get("activity_revision", -1)):
             return False, "STALE_ACTIVITY_REVISION"
+        refusal = self._not_resumable_reason(raw_item, act, observed_at=observed_at)
+        if refusal is not None:
+            return False, refusal
         return True, None
 
     def materialize(
@@ -1486,6 +1649,36 @@ class ResumeEligibleCandidateSource(CandidateSourceAdapter):
                 reason_code="ACTIVITY_REVISION_ADVANCED",
                 observed_at=obs_iso,
                 new_status=CANDIDATE_STATUS_STALE,
+            )
+        # The same rules the source applied before it offered the candidate are re-applied at
+        # use time: an eligibility that expired, an episode that changed or a foreground that
+        # became occupied between the Decision and adoption must not be adopted on the old view.
+        refusal = self._time_and_episode_refusal(elig, act, observed_at=obs_iso)
+        if refusal is not None:
+            return self.invalidate(
+                candidate,
+                reason_code=refusal,
+                observed_at=obs_iso,
+                new_status=CANDIDATE_STATUS_STALE,
+            )
+        # The offer was made from the owner's state at discovery time.  A target withdrawn,
+        # deleted or made unreadable since then is refused here, *before* adoption can use the
+        # old view -- the same read that proved it at discovery, asked again.
+        refusal = self._target_source_refusal(act)
+        if refusal is not None:
+            return self.invalidate(
+                candidate,
+                reason_code=refusal,
+                observed_at=obs_iso,
+                new_status=CANDIDATE_STATUS_INVALID,
+            )
+        refusal = self._foreground_refusal(str(candidate.activity_ref))
+        if refusal is not None:
+            return self.invalidate(
+                candidate,
+                reason_code=refusal,
+                observed_at=obs_iso,
+                new_status=CANDIDATE_STATUS_INVALID,
             )
         return copy.deepcopy(candidate)
 

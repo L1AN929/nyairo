@@ -41,9 +41,12 @@ start 不了 —— 所以 `POSE` 与 `REST` 必须同批接。
    `parse_body_action_target(ref)` 不是 `bodyact:` 就返回 `None`；是但不完整/多字段/未知动作/
    越界枚举就抛 `BodyActionTargetError`。返回**只有五键**：`verb`、`target`（编码原串）、
    `params`（owner 参数，一个字段不多）、`fact_key`、`expected_value`。
-   `build_body_action_step(ref, *, place, revision)` 出原 AG-2 world step spec，`payload_spec`
-   仍是 `{verb, target, expected_dependencies}`（**没有 `params` 键**），
-   key = `idem_step:v02:world:bodyact:<place>:r<revision>:<编码原串>`（绑定全部参数 + 前置版本）。
+   `build_body_action_step(ref, *, place, revision, decision_ref=None)` 出原 AG-2 world step spec，
+   `payload_spec` 仍是 `{verb, target, expected_dependencies}`（**没有 `params` 键**）。
+   身份按调用方是否带着已提交的 Decision 分两路：正式 cycle 的 BODY 分支传
+   `decision_ref=<decision_id>`，key = `idem_step:v02:world:bodyact:decision:<quoted decision>:<编码原串>`
+   （绑定 Decision + 全部参数，不含观测坐标）；没有 Decision 的手工调用保留
+   `idem_step:v02:world:bodyact:<place>:r<revision>:<编码原串>`。后者只是兼容路径，不是正式安全保证。
 2. **AR-0 只窄增 `REST`**（`action_reality_ledger.py:1766`）：`{MOVE, POSE, CONSUME, REST}`。
    `POSE` 原本就在白名单里，本轮**没有**把 payload 改成任意 `params`，也没有给任何动词开自由参数口。
 3. **bridge 解码、journey 委托**：`SUPPORTED_VERBS=("MOVE","CONSUME","POSE","REST")`；
@@ -122,3 +125,48 @@ start 不了 —— 所以 `POSE` 与 `REST` 必须同批接。
   fail-closed 拒掉（有意方向：宁可拒，不可猜）。
 * B 还需要接线（cycle 的候选识别 / step 分支 / 进度事实），本包只提供三条固定接口；
   `bodyact:` 候选在 B 接线前会被 cycle 的既有前缀过滤掉，不会半途生效。
+  （接线已于后续完成；本条保留当时事实，不倒写。）
+
+## 2026-10-25 续步边界：BODY Activity 没有可放行的"下一步"（STOP，未施工）
+
+核查结论：现有 owner 合同**没有定义**一个已创建 BODY Activity 的后续步骤，所以前台
+`has_foreground` 不是这次 k 的 `CONTINUE -> NO_STEP_AVAILABLE` 的可修根因。依据：
+
+* 一个 `bodyact:` target 就是一次动作：`build_body_action_step` 只产出一份 payload，
+  `POST_SUBMIT_KEEP_ACTIVE`，幂等键绑定 place+revision+target，`REST` 的 start/stop 是两个
+  独立编码而非两阶段；成功判据是单一 `WORLD_FACT_MATCH`，`_classify_body_action` 满足后立即
+  ingest LR-5。`ACTIVE` 只说明这条 Activity 还没被关闭、完成判据还没被确认：它**不能**反推
+  动作一定没成功——提交、结算与 LR-5 完成是三层证据，k 那次只是恰好停在明确未提交。
+* cycle 的 `world_step` 只在 `not has_foreground` 时构建；阅读与 stay 各有前台特例，BODY 没有。
+* 即使解除该条件也不够：adoption 把目标写成 `world_fact:bodyact:...`，而
+  `_candidate_is_world`/`_world_step_spec` 只认裸 `bodyact:` 前缀，CONTINUE 候选会被判成非 World。
+
+能补上的只有两条，均需新合同：(a) 预提交失败的同 Action id 重试政策（谁触发、上限、gate off
+是否重试）；(b) 把重复同一 body 动作当新进度（与机会源排除当前姿态、owner `already_in_pose`、
+LR-5 单事实匹配冲突）。另有 (c) 裁定 BODY Activity 无下一步并撤回 CONTINUE 候选，属用户可见
+候选面变化。三条都必须先拍板，本包不代选、不施工。它不改变 `REST` 事实是会话状态、
+姿态/恢复仍归 Body owner、机会只来自 owner 这些既有边界。
+
+## 2026-10-25 裁定与实现：选 (c)，BODY 无下一步就撤回 CONTINUE
+
+用户当天直接裁定接受"BODY 活动现为单动作/单完成条件"，撤掉不可执行的 CONTINUE、保留既有
+退出，不为凑多步新增动作语义；多步身体活动另开设计，不在本轮。上面 (a)/(b) 两条新合同
+都没有实施，本包的 STOP 历史保留。
+
+落地就是 `life_step_readiness` 对已绑定的
+`BODY_ACTION_AT_OBSERVED_PLACE` / `bodyact:` 前台答
+`BODY_SINGLE_ACTION_NO_FURTHER_STEP`，经既有 `current_step_unavailable_true` 通道让 AG-1
+只撤当前 CONTINUE；`PAUSE`/`ABANDON`/`DEFER`/`NO_ACTION` 与 park 提供的 `WAIT` 不动，
+Action 结算、World step builder、`world_fact:` 编码、默认 gate 全不改。理由、被否的备选与
+边界见 [BODY 单动作 readiness](../bug-fix/2026-10-25-body-single-action-readiness.md)。
+
+## 2026-10-25 动作身份纠正：bodyact step 属于已提交 Decision
+
+只读定位发现：`_world_step_spec` 的 BODY 分支此前只把 place/revision/target 交给 builder，
+因此两个不同 Decision、两个不同 Activity 在同 place/revision/target 下会落到同一个
+step/Action，旧 Activity/Decision/授权被冻结进第一次创建。现已在同一接缝把 committed
+`decision_id` 传给 `build_body_action_step`；no-Decision 的旧 key 保留为兼容 fallback。
+AR-0 幂等索引、AG-2 step 语义、readiness 撤 CONTINUE、World/Body owner 与默认 gate 均未改，
+也没有新增自动重试或多步 BODY。问题、取舍与离线证据见
+[BODY 动作身份对齐已提交 Decision](../bug-fix/2026-10-25-body-action-decision-identity.md)；
+dailyact 侧同一原则见 [v04 一天生活与世界日常动作](../architecture/2026-11-13-v04-lived-day-world-daily-actions.md)。

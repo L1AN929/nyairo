@@ -1078,11 +1078,15 @@ class WorldResolver:
         if crash_after == CRASH_AFTER_PREPARED:
             raise ResolverCrash("crash after prepared (test)")
 
+        # 出发记录（travel started/expected arrival）属于业务时间：用本 Resolver 自己的
+        # 时刻，而不是函数内部的环境墙钟。普通路径 ``_clock`` 就是系统 UTC，行为不变；
+        # 显式压缩演示模式下它与 Life 的旅程结算同域。一次性授权仍由 gateway 用真实时间消费。
         applied = world.apply_move_to(
             target_text,
             hermes_home=self.hermes_home,
             environment=self.environment,
             execution_id=normalized["execution_id"],
+            now=self._clock(),
         )
         after = applied.get("after") or world.read_move_state(
             hermes_home=self.hermes_home, environment=self.environment

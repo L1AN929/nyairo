@@ -286,6 +286,7 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
             world_theme: str = "coastal_town",
             request_utc_day_max: int = DEFAULT_REQUEST_UTC_DAY_MAX,
             request_run_window_max: int = DEFAULT_REQUEST_RUN_WINDOW_MAX,
+            max_cognition_calls_per_day: int = DEFAULT_MAX_COGNITION_CALLS_PER_DAY,
             run_id: Optional[str] = None,
             world_body_socket: Optional[Path | str] = None,
             world_bridge_dir: Optional[Path | str] = None,
@@ -293,6 +294,7 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
             reading_content: Optional[str] = None,
             private_items_title: str = "私人日常事项",
             create_private_items: bool = False,
+            create_work_artifact: bool = True,
             memory_db: Optional[Path | str] = None,
             memory_controls_db: Optional[Path | str] = None,
             memory_subject: Optional[str] = None) -> dict[str, Any]:
@@ -314,6 +316,14 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
         raise OneDayError("SOCKET_PATH_NOT_ABSOLUTE")
     if not subject.strip() or not title.strip():
         raise OneDayError("SUBJECT_AND_TITLE_REQUIRED")
+    # 额度必须是显式整数：默认 96/96/96 不变，显式新总限由调用方（fast_day prepare）
+    # 绑定到这一新实例，不能靠改常量变成全项目默认。
+    for name, value, minimum in (
+            ("request_utc_day_max", request_utc_day_max, 0),
+            ("request_run_window_max", request_run_window_max, 0),
+            ("max_cognition_calls_per_day", max_cognition_calls_per_day, 1)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise OneDayError("%s_INVALID: %r" % (name.upper(), value))
 
     steps: list[dict[str, Any]] = []
 
@@ -352,17 +362,24 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
     # ``create_artifact`` writes the first version itself, so the operator's seed text is the
     # version 1 the owner stores -- there is no separate "seed" write, and no second commit to
     # reconcile.  The text is recorded as the operator's, never as her writing.
-    created = supply_call(supply_socket, {
-        "op": "create_artifact", "grant_id": artifact_grant["grant_id"],
-        "operation_key": "one-day:artifact:create:%s" % subject,
-        "artifact": {"subject_id": subject, "workspace_id": workspace_id, "title": title,
-                     "content": text}})
-    if str(created.get("status")) != "OK" or not created.get("artifact_id"):
-        raise OneDayError("ARTIFACT_CREATE_REFUSED: %s %s"
-                          % (created.get("status"), created.get("detail")))
-    artifact_id = created["artifact_id"]
-    steps.append({"step": "create_artifact", "artifact_id": artifact_id,
-                  "version_id": created.get("version_id")})
+    artifact_id: Optional[str] = None
+    created: Optional[dict[str, Any]] = None
+    if create_work_artifact:
+        created = supply_call(supply_socket, {
+            "op": "create_artifact", "grant_id": artifact_grant["grant_id"],
+            "operation_key": "one-day:artifact:create:%s" % subject,
+            "artifact": {"subject_id": subject, "workspace_id": workspace_id, "title": title,
+                         "content": text}})
+        if str(created.get("status")) != "OK" or not created.get("artifact_id"):
+            raise OneDayError("ARTIFACT_CREATE_REFUSED: %s %s"
+                              % (created.get("status"), created.get("detail")))
+        artifact_id = created["artifact_id"]
+        steps.append({"step": "create_artifact", "artifact_id": artifact_id,
+                      "version_id": created.get("version_id")})
+    else:
+        # 专用开关：不建 demo 的占位作品。房间/物件/阅读材料仍然是真实的，但没有任何
+        # 合成种子被当成她的历史；首次作品由她自己后来真实创建。
+        steps.append({"step": "create_artifact", "skipped": "SEED_WORK_DISABLED"})
 
     # D (life-v1): the reading material is a *second* real artifact with its own explicit id.
     # Its versions are what a real page read is taken from; nothing here claims she read it.
@@ -436,7 +453,7 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
         "CHIYO_AUTONOMOUS_CHECK_INTERVAL_MINUTES": str(DEFAULT_CHECK_INTERVAL_MINUTES),
         "CHIYO_AUTONOMOUS_MAX_ROUNDS_PER_DAY": str(DEFAULT_MAX_ROUNDS_PER_DAY),
         "CHIYO_AUTONOMOUS_MAX_COGNITION_CALLS_PER_DAY":
-            str(DEFAULT_MAX_COGNITION_CALLS_PER_DAY),
+            str(int(max_cognition_calls_per_day)),
         "CHIYO_AUTONOMOUS_MAX_ACTIONS_PER_DAY": str(DEFAULT_MAX_ACTIONS_PER_DAY),
         # W05R: the hard *total request* ceilings.  The one-day entry always writes both,
         # so a real run can never end up with "no ceiling configured" by accident.
@@ -445,9 +462,10 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
         RUN_ID_ENV: str(run_id or ("run:" + root.name)),
         # D (life-v1): the explicit bindings, and the Memory boundary when the operator gave one.
         # A run that has no Memory database simply has no continuity reader; that is reported,
-        # not papered over.
-        WORK_ARTIFACT_ENV: artifact_id,
+        # not papered over.  With no seeded work artifact there is no work binding to carry.
     }
+    if artifact_id:
+        environment[WORK_ARTIFACT_ENV] = artifact_id
     if reading_artifact_id:
         environment[READING_ARTIFACT_ENV] = reading_artifact_id
     if private_items_artifact_id:
@@ -473,9 +491,9 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
         "workspace_id": workspace_id,
         "artifact_id": artifact_id,
         "artifact_grant_id": artifact_grant["grant_id"],
-        "artifact_title": title,
-        "seed_provided_by": "operator",
-        "seed_version_id": created.get("version_id"),
+        "artifact_title": title if create_work_artifact else "",
+        "seed_provided_by": "operator" if create_work_artifact else "",
+        "seed_version_id": (created or {}).get("version_id"),
         "supply_socket": str(supply_socket),
         "governance_socket": str(governance_socket),
         "world_id": world_id,
@@ -831,7 +849,9 @@ def status(root: Path | str) -> dict[str, Any]:
     out["work"] = _report_work(data)
     # D (life-v1): the technical state (and its evidence), the room as it was last observed, the
     # reading material's real head, and the private items' metadata view.  All read-only.
-    out["state"] = classify_state(out["resident"], out["pause"])
+    out["state"] = classify_state(out["resident"], out["pause"],
+                                  activity=activity_view(state_root),
+                                  windows=recent_windows(state_root))
     out["room"] = data.get("room_observation") or {"status": "unavailable",
                                                    "reason_code": "NO_ROOM_OBSERVATION"}
     out["reading"] = reading_view(root)
@@ -1112,12 +1132,122 @@ def reading_view(root: Path | str) -> dict[str, Any]:
     return out
 
 
-def classify_state(summary: Mapping[str, Any], pause_view: Mapping[str, Any]) -> dict[str, Any]:
+#: The Activity authority's own file.  It is read here as a file on purpose: the canonical
+#: store's read service takes the store's IO lock and creates ``run/`` before reading, and a
+#: status view must create nothing on an instance that has not been started yet.
+CANONICAL_ACTIVITY_STATE_FILENAME = "canonical_life_state.json"
+#: The statuses that occupy the one foreground slot (``activity_continuity``'s own vocabulary).
+OPEN_ACTIVITY_STATUSES = ("ACTIVE", "PAUSED", "WAITING")
+#: A bounded journal read: enough for the newest windows, never the whole life of the instance.
+JOURNAL_TAIL_BYTES = 65536
+JOURNAL_TAIL_RECORDS = 40
+#: A window that considered nothing (NOT_DUE/QUIET, or held by the operator pause) is not
+#: evidence that anything was recovered, so it is skipped when looking for the last block.
+SILENT_STATUS_CLASSES = frozenset({"silence"})
+
+
+def activity_view(state_root: Path | str) -> dict[str, Any]:
+    """The foreground Activity, read from the authority's own file.  Creates nothing.
+
+    ``READ`` means the authority was parsed: ``foreground_activity_ref`` is then either a ref
+    whose Activity is open (``foreground_status`` names ACTIVE/PAUSED/WAITING) or ``None``.
+    Anything else is ``UNVERIFIED`` with a named reason, and no caller may turn that into
+    "there is no open Activity".
+    """
+
+    path = Path(state_root) / CANONICAL_ACTIVITY_STATE_FILENAME
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {"status": "UNVERIFIED", "reason_code": "CANONICAL_STATE_ABSENT",
+                "source": path.name}
+    except OSError as exc:
+        return {"status": "UNVERIFIED", "reason_code": "CANONICAL_STATE_UNREADABLE",
+                "detail": "%s: %s" % (type(exc).__name__, exc), "source": path.name}
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        return {"status": "UNVERIFIED", "reason_code": "CANONICAL_STATE_CORRUPT",
+                "detail": "%s: %s" % (type(exc).__name__, exc), "source": path.name}
+    if not isinstance(data, dict):
+        return {"status": "UNVERIFIED", "reason_code": "CANONICAL_STATE_CORRUPT",
+                "detail": "top-level JSON is not an object", "source": path.name}
+    activities = data.get("activities")
+    if activities is None:
+        activities = {}
+    if not isinstance(activities, Mapping):
+        return {"status": "UNVERIFIED", "reason_code": "CANONICAL_STATE_CORRUPT",
+                "detail": "activities is not an object", "source": path.name}
+    ref = data.get("foreground_activity_ref")
+    view: dict[str, Any] = {"status": "READ", "source": path.name,
+                            "revision": data.get("revision"),
+                            "foreground_activity_ref": ref,
+                            "foreground_status": None, "foreground_kind": None}
+    if ref is None:
+        return view
+    act = activities.get(ref)
+    if not isinstance(act, Mapping):
+        return {"status": "UNVERIFIED", "reason_code": "FOREGROUND_ACTIVITY_MISSING",
+                "detail": "foreground_activity_ref does not exist in activities",
+                "foreground_activity_ref": ref, "source": path.name}
+    if act.get("status") not in OPEN_ACTIVITY_STATUSES:
+        return {"status": "UNVERIFIED", "reason_code": "FOREGROUND_ACTIVITY_NOT_OPEN",
+                "detail": "foreground activity status is %r" % act.get("status"),
+                "foreground_activity_ref": ref, "source": path.name}
+    view["foreground_status"] = act.get("status")
+    view["foreground_kind"] = act.get("activity_kind")
+    return view
+
+
+def recent_windows(state_root: Path | str, *, max_bytes: int = JOURNAL_TAIL_BYTES,
+                   limit: int = JOURNAL_TAIL_RECORDS) -> dict[str, Any]:
+    """The newest resident windows, from a bounded tail of the journal.  Creates nothing."""
+
+    path = Path(state_root) / resident_module.RESIDENT_JOURNAL_FILENAME
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            start = max(0, size - max(0, int(max_bytes)))
+            handle.seek(start)
+            blob = handle.read()
+    except FileNotFoundError:
+        return {"status": "ABSENT", "records": [], "complete": True, "source": path.name}
+    except OSError as exc:
+        return {"status": "UNREADABLE", "records": [], "complete": False,
+                "detail": "%s: %s" % (type(exc).__name__, exc), "source": path.name}
+    lines = blob.decode("utf-8", errors="replace").splitlines()
+    if start > 0 and lines:
+        lines = lines[1:]  # the first line may start mid-record
+    records: list[dict[str, Any]] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return {"status": "READ", "records": records[-max(1, int(limit)):],
+            "complete": start == 0, "source": path.name}
+
+
+def classify_state(summary: Mapping[str, Any], pause_view: Mapping[str, Any], *,
+                   activity: Optional[Mapping[str, Any]] = None,
+                   windows: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
     """Which technical state this instance is in, and on what evidence.
 
     The labels are technical, not personal: a paused instance is paused, a window that ended in
     a named block is blocked, and an instance that simply had nothing to do is idle.  No label
     here is a claim about a mood, a relationship or a personality.
+
+    The open-Activity clause reads the Activity *authority* (``activity_view``), never the
+    resident summary: the summary has no per-tick record at all.  The blocked clause reads the
+    newest window that actually considered something (``recent_windows``); a silent window is
+    not a recovery.  When either authority cannot be read the basis says so by name and makes
+    no claim about open Activities.  The two optional arguments keep older two-argument callers
+    working; such a caller simply did not supply those reads.
     """
 
     if pause_view.get("paused"):
@@ -1130,21 +1260,64 @@ def classify_state(summary: Mapping[str, Any], pause_view: Mapping[str, Any]) ->
     if summary.get("running"):
         return {"state_class": STATE_RUNNING, "basis": "the resident holds the runtime",
                 "source": "resident_summary.json"}
-    last_tick = summary.get("last_tick") or {}
-    due = last_tick.get("due") or {}
-    if str(due.get("status_class")) == "blocked":
+    last_considered: Optional[tuple[Mapping[str, Any], Mapping[str, Any]]] = None
+    if isinstance(windows, Mapping) and windows.get("status") == "READ":
+        for record in reversed(windows.get("records") or []):
+            due = record.get("due") if isinstance(record, Mapping) else None
+            if not isinstance(due, Mapping):
+                continue
+            status_class = str(due.get("status_class") or "")
+            if not status_class or status_class in SILENT_STATUS_CLASSES:
+                continue
+            last_considered = (record, due)
+            break
+    if last_considered is not None and str(last_considered[1].get("status_class")) == "blocked":
+        record, due = last_considered
         return {"state_class": STATE_BLOCKED,
-                "basis": "the last window was blocked: %s"
-                         % (due.get("detail") or due.get("outcome")),
+                "basis": "the last window that considered anything was blocked at %s: %s"
+                         % (record.get("at") or "an unrecorded time",
+                            due.get("detail") or due.get("outcome") or due.get("status")),
                 "source": "resident_journal.jsonl"}
-    material = (due.get("material") or {})
-    if material.get("foreground_activity"):
-        return {"state_class": STATE_WAITING,
-                "basis": "an Activity is open: %s" % material.get("foreground_activity"),
-                "source": "resident_journal.jsonl"}
-    return {"state_class": STATE_IDLE,
-            "basis": "no pause, no open Activity, no blocked window in the last record",
-            "source": "resident_journal.jsonl"}
+    basis: list[str] = []
+    sources: list[str] = []
+    if isinstance(activity, Mapping) and activity.get("status") == "READ":
+        sources.append(str(activity.get("source") or "canonical_life_state.json"))
+        ref = activity.get("foreground_activity_ref")
+        if ref:
+            return {"state_class": STATE_WAITING,
+                    "basis": "an Activity is open: %s (status %s, canonical revision %s)"
+                             % (ref, activity.get("foreground_status"),
+                                activity.get("revision")),
+                    "source": "canonical_life_state.json"}
+        basis.append("the Activity authority was read (canonical revision %s) and names no "
+                     "foreground Activity" % activity.get("revision"))
+    elif activity is None:
+        basis.append("the Activity authority was not read by this caller, so this view makes "
+                     "no claim about open Activities")
+    else:
+        sources.append(str(activity.get("source") or "canonical_life_state.json"))
+        basis.append("the Activity authority could not be verified (%s); this view does not "
+                     "claim that no Activity is open"
+                     % (activity.get("reason_code") or "UNVERIFIED"))
+    if last_considered is not None:
+        record, due = last_considered
+        sources.append("resident_journal.jsonl")
+        basis.append("the last window that considered anything ended as %s at %s"
+                     % (str(due.get("status_class")), record.get("at") or "an unrecorded time"))
+    elif isinstance(windows, Mapping) and windows.get("status") == "READ":
+        sources.append("resident_journal.jsonl")
+        if windows.get("records"):
+            basis.append("no window in the read tail considered anything (silent windows only)")
+        else:
+            basis.append("the resident journal records no window")
+    elif windows is None:
+        basis.append("the resident journal was not read by this caller")
+    else:
+        sources.append("resident_journal.jsonl")
+        basis.append("the resident journal could not be read (%s)"
+                     % (windows.get("status") or "UNREADABLE"))
+    return {"state_class": STATE_IDLE, "basis": "; ".join(basis),
+            "source": " + ".join(dict.fromkeys(sources))}
 
 
 def _step_receipts(state_root: Path) -> list[dict[str, Any]]:
@@ -1736,6 +1909,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                         default=DEFAULT_REQUEST_UTC_DAY_MAX)
     parser.add_argument("--request-run-window-max", type=int,
                         default=DEFAULT_REQUEST_RUN_WINDOW_MAX)
+    parser.add_argument("--max-cognition-calls-per-day", type=int,
+                        default=DEFAULT_MAX_COGNITION_CALLS_PER_DAY)
     parser.add_argument("--run-id")
     parser.add_argument("--new-run-window", action="store_true",
                         help="explicitly open a new request window (a plain restart does not)")
@@ -1786,6 +1961,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                              world_theme=args.world_theme,
                              request_utc_day_max=args.request_utc_day_max,
                              request_run_window_max=args.request_run_window_max,
+                             max_cognition_calls_per_day=args.max_cognition_calls_per_day,
                              run_id=args.run_id,
                              world_body_socket=args.world_body_socket,
                              world_bridge_dir=args.world_bridge_dir,

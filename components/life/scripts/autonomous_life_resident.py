@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -50,6 +51,7 @@ from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit
 import life_pause
 import life_runtime_coverage as runtime_coverage
+import resident_projection_counts as projection_counts
 
 HERE = Path(__file__).resolve().parent
 _COMPONENTS = HERE.parents[1]
@@ -75,12 +77,154 @@ MEMORY_DB_ENV = ("NYA02_MEMORY_DB", "CHIYO_LIFE_MEMORY_DB")
 MEMORY_CONTROLS_ENV = ("NYA02_MEMORY_CONTROLS_DB", "CHIYO_LIFE_MEMORY_CONTROLS_DB")
 MEMORY_SUBJECT_ENV = ("NYA02_MEMORY_SUBJECT", "NYA02_SUBJECT")
 MODEL_BASE_URL_ENV = "NYA02_MODEL_BASE_URL"
+#: 显式压缩演示模式（COMPRESSED_DEMO）只由 ``scripts/fast_day.py`` 写入。缺席即普通
+#: 真实时间路径，不加载任何业务时钟。
+FASTDAY_CLOCK_ENV = "NYA02_FASTDAY_CLOCK"
+FASTDAY_DOMAIN_ENV = "NYA02_FASTDAY_DOMAIN"
+FASTDAY_RUN_ID_ENV = "NYA02_FASTDAY_RUN_ID"
 
 #: The class names the runner already uses, named here so the record reads as words.
 CLASS_BLOCKED = "blocked"
 CLASS_ACTED = "acted"
 CLASS_UNKNOWN = "unknown"
 REASON_MODEL_CONNECTION = "BLOCKED: MODEL_CONNECTION"
+
+#: The cognition adapter's telemetry, written to *this* resident's own journal.  It is a
+#: diagnostic record, not a tick: ``_accumulate`` skips it so replaying the journal rebuilds
+#: exactly the counters it rebuilt before this record existed.
+COGNITION_DIAGNOSTIC_KIND = "cognition_diagnostic"
+
+#: Closed vocabularies.  A value outside them is either dropped or reported ``UNKNOWN``;
+#: nothing the model wrote is copied through as a free-form string.
+_SAFE_COGNITION_EVENTS = frozenset({
+    "cognition_send_started", "cognition_send_response_received", "cognition_send_failed",
+    "cognition_provider_error", "cognition_result", "cognition_late_result",
+    "cognition_budget_refused", "cognition_epoch_replay",
+})
+_SAFE_ERROR_CATEGORIES = frozenset({
+    "BUDGET_EXHAUSTED", "TRANSPORT_TIMEOUT", "TRANSPORT_CONNECTION", "PROVIDER_RATE_LIMITED",
+    "PROVIDER_SERVER_ERROR", "PROVIDER_AUTH_ERROR", "PROVIDER_MALFORMED_RESPONSE",
+    "PROVIDER_UNAVAILABLE", "CONFIG_MISSING", "PROVIDER_OUTPUT_TRUNCATED",
+    "PROVIDER_REASONING_ONLY", "PROVIDER_EMPTY_CONTENT", "PROVIDER_REQUEST_REJECTED",
+})
+_SAFE_FAILURE_CLASSES = frozenset({
+    "DECISION_ATTEMPT_FAILED:MODEL_TIMEOUT", "DECISION_ATTEMPT_FAILED:MODEL_CONNECTION",
+    "DECISION_ATTEMPT_FAILED:MODEL_RATE_LIMITED",
+    "DECISION_ATTEMPT_FAILED:MODEL_PROVIDER_ERROR",
+    "DECISION_ATTEMPT_FAILED:MODEL_AUTH_ERROR", "DECISION_ATTEMPT_FAILED:MODEL_UNAVAILABLE",
+    "DECISION_ATTEMPT_FAILED:INVALID_JSON",
+    "DECISION_ATTEMPT_FAILED:OUTPUT_TRUNCATED",
+    "DECISION_ATTEMPT_FAILED:REASONING_ONLY_NO_ANSWER",
+    "DECISION_ATTEMPT_FAILED:EMPTY_MODEL_OUTPUT",
+    "DECISION_ATTEMPT_FAILED:MODEL_REQUEST_REJECTED",
+    "DECISION_ATTEMPT_FAILED:COGNITION_BUDGET_EXHAUSTED",
+    "DECISION_ATTEMPT_FAILED:LATE_RESULT_DISCARDED",
+})
+_SAFE_PARSE_STATES = frozenset({"raw_text", "json_object", "json_non_object", "unparsed_text"})
+_SAFE_FINISH_REASONS = frozenset({"stop", "length", "content_filter", "tool_calls",
+                                  "function_call"})
+_SAFE_BUDGET_SCOPES = frozenset({"utc_day", "run_window", "budget"})
+_SAFE_TOKEN = re.compile(r"[A-Za-z0-9:_.+\-]{1,160}")
+
+
+def _bounded_int(value: Any, *, low: int, high: int) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if low <= value <= high else None
+
+
+def _safe_bool(value: Any) -> Optional[bool]:
+    return value if isinstance(value, bool) else None
+
+
+def _safe_enum(value: Any, allowed: frozenset[str]) -> Optional[str]:
+    return value if isinstance(value, str) and value in allowed else None
+
+
+def _safe_token(value: Any) -> Optional[str]:
+    """An identifier the adapter generated itself (attempt id, run ref, hashed id)."""
+
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text if _SAFE_TOKEN.fullmatch(text) else None
+
+
+def safe_cognition_diagnostic(record: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """Rebuild one adapter telemetry record value by value, or ``None`` to drop it.
+
+    The adapter's record is *not* safe to persist as-is: it carries ``output_keys`` (model
+    written key names), ``decision_kind_if_valid`` and the provider/model strings, any of
+    which may contain private text.  Only known events and closed-vocabulary/bounded values
+    are rebuilt here; prompt, completion, reasoning, exception messages, headers, tokens and
+    arbitrary key names never enter the result.
+    """
+
+    if not isinstance(record, Mapping):
+        return None
+    event = _safe_enum(record.get("event"), _SAFE_COGNITION_EVENTS)
+    if event is None:
+        return None
+    out: dict[str, Any] = {"event": event}
+
+    if "error_category" in record:
+        out["error_category"] = (_safe_enum(record.get("error_category"),
+                                            _SAFE_ERROR_CATEGORIES) or "UNKNOWN")
+    if "failure_class" in record:
+        # A mapped failure class is a short closed-vocabulary word; anything else is unknown.
+        out["failure_class"] = (_safe_enum(record.get("failure_class"),
+                                          _SAFE_FAILURE_CLASSES) or "UNKNOWN")
+    if "parse_state" in record:
+        out["parse_state"] = _safe_enum(record.get("parse_state"), _SAFE_PARSE_STATES) or "UNKNOWN"
+    if "scope" in record:
+        out["scope"] = _safe_enum(record.get("scope"), _SAFE_BUDGET_SCOPES) or "UNKNOWN"
+
+    for name, high in (("schema_retry_index", 64), ("response_status", 599),
+                       ("candidate_count", 256), ("latency_ms", 3_600_000),
+                       ("elapsed_ms", 3_600_000), ("deadline_ms", 3_600_000)):
+        value = _bounded_int(record.get(name), low=0, high=high)
+        if value is not None:
+            out[name] = value
+
+    for name in ("late", "response_verifiable", "response_received", "late_result_received",
+                 "late_result_promoted"):
+        value = _safe_bool(record.get(name))
+        if value is not None:
+            out[name] = value
+
+    for name in ("transport_attempt_id", "model_run_ref", "opportunity_id"):
+        token = _safe_token(record.get(name))
+        if token is not None:
+            out[name] = token
+    started_at = _safe_token(record.get("started_at"))
+    if started_at is not None:
+        out["started_at"] = started_at
+
+    # ``output_keys`` names are model-written and may contain private text: keep only a count.
+    keys = record.get("output_keys")
+    if isinstance(keys, (list, tuple)):
+        out["output_key_count"] = min(len(keys), 256)
+
+    shape = record.get("output_shape")
+    if isinstance(shape, Mapping):
+        for name, high in (("content_chars", 10_000_000), ("reasoning_chars", 10_000_000),
+                           ("parse_error_offset", 10_000_000),
+                           ("max_output_tokens_sent", 10_000_000),
+                           # Provider-reported integer token counts.  A missing or
+                           # non-integer value is omitted, never written as a fabricated 0.
+                           ("input_tokens", 10_000_000), ("output_tokens", 10_000_000),
+                           ("total_tokens", 10_000_000), ("reasoning_tokens", 10_000_000)):
+            value = _bounded_int(shape.get(name), low=0, high=high)
+            if value is not None:
+                out[name] = value
+        for name in ("fenced", "json_parsed", "reasoning_present"):
+            value = _safe_bool(shape.get(name))
+            if value is not None:
+                out[name] = value
+        if "finish_reason" in shape:
+            out["finish_reason"] = (_safe_enum(shape.get("finish_reason"),
+                                               _SAFE_FINISH_REASONS) or "UNKNOWN")
+    return out
 
 def _cycle_constant(name: str, fallback: str) -> str:
     """One of the cycle's own constants, read from the cycle instead of re-typed here.
@@ -180,7 +324,8 @@ def set_paused(state_root: Path | str, paused: bool, *, reason: str = "operator"
     return life_pause.set_paused(state_root, paused, reason=reason)
 
 
-def resolve_world_action_adapter(environment: Mapping[str, str], world: Mapping[str, Any]) -> Any:
+def resolve_world_action_adapter(environment: Mapping[str, str], world: Mapping[str, Any],
+                                 *, clock: Any = None) -> Any:
     """The AR-0 World adapter for this instance (W05).
 
     With ``CHIYO_WORLD_TRAVEL_TIME_ENABLED`` on, the action goes through the W04 journey engine:
@@ -198,7 +343,10 @@ def resolve_world_action_adapter(environment: Mapping[str, str], world: Mapping[
         from world_journey_action_adapter import (JourneyWorldResolver,
                                                   RealJourneyWorldActionAdapter)
 
-        return RealJourneyWorldActionAdapter(JourneyWorldResolver(environment=environment))
+        # 显式压缩演示模式：出发/到达与 Life 结算读同一个业务域。普通路径 ``clock=None``，
+        # 旅程引擎保持原来的真实墙钟；一次性授权与 gateway 消费始终走真实墙钟。
+        return RealJourneyWorldActionAdapter(
+            JourneyWorldResolver(environment=environment, now=clock))
     from world_action_bridge_adapter import RealWorldActionAdapter, WorldBridgeResolver
 
     return RealWorldActionAdapter(
@@ -211,7 +359,8 @@ class AutonomousLifeResident:
     def __init__(self, *, state_root: Path | str, environment: Optional[Mapping[str, str]] = None,
                  poll_seconds: int = DEFAULT_POLL_SECONDS, act: bool = True,
                  clock: Any = None, sleeper: Any = None, monotonic: Any = None,
-                 segment_request_cap: Optional[int] = None) -> None:
+                 segment_request_cap: Optional[int] = None,
+                 business_clock: Any = None, offline_scripted: bool = False) -> None:
         """``segment_request_cap`` is *this process only*: at most that many more HTTP
         attempts than the persisted ledger had already spent when the segment started.
 
@@ -229,7 +378,15 @@ class AutonomousLifeResident:
         self.segment_cap: dict[str, Any] = {"requested": self.segment_request_cap,
                                             "applied": False, "source": "PROCESS_SEGMENT_ONLY"}
         self.act = bool(act)
+        #: 真实墙钟：只用于进程覆盖账、lease 与真实超时。压缩演示模式不改它。
         self._clock = clock or _now
+        #: 业务时钟（COMPRESSED_DEMO 时注入）。它只影响业务到期/安静/业务事件时序；
+        #: 上面的 ``_clock`` 与 ``_monotonic`` 保持真实。缺席即普通真实时间路径。
+        self._business_clock = business_clock
+        self.business_clock_error: Optional[dict[str, Any]] = None
+        #: 只为零模型冒烟：装配一个**不发请求**的既有确定性 writer 占位。它只能和
+        #: ``act=False`` 一起用；summary 会明确标出，绝不当成她的写作或真实模型链。
+        self.offline_scripted = bool(offline_scripted)
         #: ``time.monotonic()`` is the only clock that can prove *this* process stayed up: it is
         #: per process and per boot, so it is never added to another process's measurement and
         #: never used to bridge a gap.  Injected in tests, real everywhere else.
@@ -264,9 +421,89 @@ class AutonomousLifeResident:
             "pending_unknown_last": 0, "pending_unknown_max": 0,
             "journey_settlements": 0, "journey_arrivals": 0,
             "journey_arrival_refusals": 0, "paused_windows": 0,
+            #: Windows whose local rule resolved an empty/all-rejected candidate set.  They
+            #: spent no model request, so they are counted apart from ``model_calls``.
+            "rule_resolved_windows": 0,
         }
+        #: 读面去重状态：同一完成旅程/连续静默窗口在每个 tick 都会重新投影一次，
+        #: 不能按投影行数累加。实时 tick 与 journal replay 共用同一套算术。
+        # 有界缓存只做加速；被淘汰的旅程/拒绝键在缓存未命中时回读既有 journal。
+        self._projections = projection_counts.ProjectionCounter(
+            history=self._journal_journey_history)
         self._stop = threading.Event()
         self._stop_reason: Optional[str] = None
+
+    # -- 业务时钟（显式压缩演示模式，默认缺席） ------------------------------------------
+
+    def _resolve_business_clock(self) -> Any:
+        """从显式环境取业务时钟客户端；缺/坏/域不符返回 ``None`` 并由调用方拒绝启动。
+
+        普通生产没有 ``NYA02_FASTDAY_CLOCK``，这里什么也不做，路径与以前完全一致。
+        """
+
+        if self._business_clock is not None:
+            return self._business_clock
+        path = str(self.env.get(FASTDAY_CLOCK_ENV) or "").strip()
+        if not path:
+            return None
+        try:
+            import demo_business_clock as dbc
+        except Exception as exc:
+            self.business_clock_error = {
+                "reason_code": "CLOCK_IMPORT_FAILED",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+            return None
+        try:
+            client = dbc.BusinessClockClient(
+                path,
+                expected_domain=(str(self.env.get(FASTDAY_DOMAIN_ENV) or "").strip() or None),
+                expected_run_id=(str(self.env.get(FASTDAY_RUN_ID_ENV) or "").strip() or None))
+            client.load()
+        except dbc.BusinessClockError as exc:
+            # 缺时钟/损坏/域不匹配：具名拒绝，绝不退回系统墙钟（那会悄悄混钟）。
+            self.business_clock_error = {"reason_code": exc.reason_code,
+                                         "detail": exc.detail}
+            return None
+        except Exception as exc:
+            self.business_clock_error = {
+                "reason_code": "CLOCK_UNAVAILABLE",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+            return None
+        return client
+
+    def _business_now(self) -> datetime:
+        clock = self._business_clock
+        if clock is None:
+            return self._clock()
+        return clock.now()
+
+    def _business_iso(self) -> str:
+        return _iso(self._business_now())
+
+    def time_domain(self) -> dict[str, Any]:
+        """双时间域：业务时刻与真实时刻分开报告，谁都不能冒充另一个。"""
+
+        if self._business_clock is None:
+            return {"mode": "REAL_TIME", "domain_id": None, "rate": 1.0,
+                    "logical_at": _iso(self._clock()), "real_at": _iso(self._clock()),
+                    "not_real_24h": False, "note": "普通真实时间路径"}
+        try:
+            snap = self._business_clock.snapshot()
+        except Exception as exc:
+            return {"mode": "COMPRESSED_DEMO", "domain_id": None, "rate": None,
+                    "logical_at": None, "real_at": _iso(self._clock()),
+                    "not_real_24h": True,
+                    "error": "%s: %s" % (type(exc).__name__, exc)}
+        return {"mode": snap.get("mode", "COMPRESSED_DEMO"),
+                "domain_id": snap.get("domain_id"), "run_id": snap.get("run_id"),
+                "rate": snap.get("rate"), "state": snap.get("state"),
+                "logical_at": snap.get("logical_at"),
+                "logical_elapsed_seconds": snap.get("logical_elapsed_seconds"),
+                "horizon_logical": snap.get("horizon_logical"),
+                "horizon_remaining_seconds": snap.get("horizon_remaining_seconds"),
+                "real_at": _iso(self._clock()),
+                "not_real_24h": True,
+                "note": "压缩逻辑日，不是真实 24 小时；真实超时/权限/请求 UTC 日不加速"}
 
     # -- paths ---------------------------------------------------------------------------
 
@@ -454,6 +691,25 @@ class AutonomousLifeResident:
         with self.journal_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(dict(record), ensure_ascii=False, sort_keys=True) + "\n")
 
+    def _cognition_diagnostic(self, record: Mapping[str, Any]) -> None:
+        """Bind the cognition adapter's telemetry to this resident's own journal.
+
+        The sink is the journal the resident already owns.  There is no second ledger, no
+        debug store and no shadow-runtime import.  Writing a diagnostic that cannot be
+        rebuilt safely drops it; an I/O failure is *not* swallowed, because the adapter's
+        required send marker calls this before a provider request and a send whose boundary
+        could not be durably recorded must not happen.  Optional records are caught by the
+        adapter itself and never break a legal decision.
+        """
+
+        diagnostic = safe_cognition_diagnostic(record)
+        if diagnostic is None:
+            return
+        payload: dict[str, Any] = {"kind": COGNITION_DIAGNOSTIC_KIND,
+                                   "at": _iso(self._clock())}
+        payload.update(diagnostic)
+        self._journal(payload)
+
     # -- memory boundary (optional, and only when a database is configured) ---------------
 
     def _memory_ports(self) -> tuple[Any, Any, Any]:
@@ -583,6 +839,61 @@ class AutonomousLifeResident:
         return None
     # -- start / stop --------------------------------------------------------------------
 
+    def _experiment_capped_budget(self, requests: Any) -> Any:
+        """显式压缩模式：把实验硬上限放到**每一次预留**的边界上。
+
+        普通路径（没有 ``NYA02_FASTDAY_CLOCK``）原样返回同一个账本对象。显式模式下
+        缺 run 身份、时钟域不符、实验上限文件缺失/损坏都抛 ``BusinessClockError``，
+        由调用方具名拒绝启动；绝不退化成「没有上限」。
+        """
+
+        path = str(self.env.get(FASTDAY_CLOCK_ENV) or "").strip()
+        if not path or requests is None:
+            return requests
+        import demo_business_clock as dbc
+
+        clock = dbc.read_clock_file(path)
+        run_id = str(self.env.get("CHIYO_AUTONOMOUS_RUN_ID") or "").strip()
+        if not run_id:
+            raise dbc.BusinessClockError(
+                dbc.REASON_EXPERIMENT_CAP_UNREADABLE,
+                "实例没有 run 身份；实验上限无法与账本绑定")
+        if clock.get("run_id") != run_id:
+            raise dbc.BusinessClockError(
+                dbc.REASON_EXPERIMENT_CAP_UNREADABLE,
+                "时钟 run %r 与实例账本 run %r 不一致" % (clock.get("run_id"), run_id))
+        experiment = Path(path).parent / "experiment_budget.json"
+        try:
+            stored = json.loads(experiment.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise dbc.BusinessClockError(
+                dbc.REASON_EXPERIMENT_CAP_UNREADABLE,
+                "%s: %s" % (type(exc).__name__, exc)) from exc
+        limit = stored.get("max_new_requests") if isinstance(stored, Mapping) else None
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise dbc.BusinessClockError(dbc.REASON_EXPERIMENT_CAP_UNREADABLE,
+                                         "实验上限文件没有可用的 max_new_requests")
+        # 显式新总限（例如 300/历史 14/新增 286）只属于这个实例的元数据；旧文件缺字段
+        # 时按默认 96/0 解释。文件里的授权总限不能高于实例环境声明的总限。
+        total = stored.get("authorized_total_limit", dbc.HARD_CONFIG_MAX) \
+            if isinstance(stored, Mapping) else dbc.HARD_CONFIG_MAX
+        historical = stored.get("historical_requests", 0) \
+            if isinstance(stored, Mapping) else 0
+        declared = None
+        try:
+            raw = str(self.env.get("CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_UTC_DAY") or "").strip()
+            declared = int(raw) if raw else None
+        except ValueError:
+            declared = None
+        if declared is not None and isinstance(total, int) and total > declared:
+            raise dbc.BusinessClockError(
+                dbc.REASON_EXPERIMENT_CAP_UNREADABLE,
+                "实验上限元数据的授权总限 %r 高于实例配置 %r" % (total, declared))
+        cap = dbc.ExperimentRequestCap(self.state_root, run_id=run_id,
+                                       max_new_requests=limit, total_limit=total,
+                                       historical_requests=historical)
+        return dbc.CappedRequestBudget(requests, cap)
+
     def start(self) -> dict[str, Any]:
         """Build the one runtime, take the lease, assemble, and reconcile once."""
 
@@ -590,6 +901,10 @@ class AutonomousLifeResident:
         import life_integration_ag2 as ag2
         import life_runtime_production as lrp
 
+        if self.offline_scripted and self.act:
+            # 脚本替身只证明装配/控制，不能产生她的文字或真实决定。
+            return {"ok": False, "reason": "OFFLINE_SCRIPTED_CANNOT_ACT",
+                    "detail": "offline_scripted 只能和 act=False（--no-act）一起用"}
         self.state_root.mkdir(parents=True, exist_ok=True)
         os.chmod(self.state_root, 0o700)
         previous = self.read_status()
@@ -605,6 +920,14 @@ class AutonomousLifeResident:
         # R: this process's own row, with its own monotonic measurement.  Written before any
         # window, so a crash from here on is visible as an unclosed interval instead of silence.
         self._open_process_record()
+        # 显式压缩演示模式的业务时钟：缺/坏/域不符在这里具名拒绝，绝不混钟。
+        self._business_clock = self._resolve_business_clock()
+        if self.business_clock_error is not None:
+            self.last_error = "%s: %s" % (self.business_clock_error.get("reason_code"),
+                                          self.business_clock_error.get("detail") or "")
+            return {"ok": False,
+                    "reason": self.business_clock_error.get("reason_code", "CLOCK_UNAVAILABLE"),
+                    "detail": self.business_clock_error.get("detail")}
         self.model_probe = probe_model_provider(self.env)
         self._replay_journal()
         self._load_model_env_file()
@@ -630,9 +953,13 @@ class AutonomousLifeResident:
         # One resolution of the World seam, used for both halves: the observation feed and the
         # action adapter.  A World that is not configured, unreachable or not ready yields no
         # provider and a named reason, and the feed is then recorded UNAVAILABLE.
-        world = assembly.resolve_world_provider(self.env)
+        world = assembly.resolve_world_provider(
+            self.env,
+            clock=(self._business_now if self._business_clock is not None else None))
         world_adapter = None
-        world_adapter = resolve_world_action_adapter(self.env, world)
+        world_adapter = resolve_world_action_adapter(
+            self.env, world,
+            clock=(self._business_now if self._business_clock is not None else None))
 
         consumer, experience_provider, memory_port = self._memory_ports()
         # W05R: the persisted request budget is built *before* either model surface, so the
@@ -650,11 +977,18 @@ class AutonomousLifeResident:
         if cap_refusal is not None:
             self.last_error = str(cap_refusal.get("detail") or "")
             return cap_refusal
+        try:
+            requests = self._experiment_capped_budget(requests)
+        except Exception as exc:
+            reason = getattr(exc, "reason_code", None) or "EXPERIMENT_CAP_REFUSED"
+            self.last_error = "%s: %s" % (reason, getattr(exc, "detail", str(exc)))
+            return {"ok": False, "reason": reason, "detail": str(self.last_error)}
         # W05R-R1b: the decision transport is admitted at each attempt's send boundary
         # against this instance's own pause bit (the same state root the operator writes).
         admission = assembly.pause_request_admission(self.state_root)
         cognition = assembly.model_cognition(self.env, requests=requests,
-                                             admission=admission, pause_guard=admission)
+                                             admission=admission, pause_guard=admission,
+                                             observer=self._cognition_diagnostic)
         try:
             self.runtime = lrp.build_production_life_runtime(
                 self.state_root, kill_switches=switches, cognition_adapter=cognition,
@@ -676,11 +1010,19 @@ class AutonomousLifeResident:
         # decision context) is wired and reports ``appraisal_wired: false`` instead of inventing
         # a feeling, a mood or a stable fact; an explicit experimental input may supply one.
         appraisal_source = None
+        offline_writer = None
+        if self.offline_scripted:
+            import autonomous_life_cycle as _alc
+
+            offline_writer = _alc.DeterministicContinuationWriter(
+                note="（零模型冒烟：没有产生她的文字）")
         assembled = assembly.assemble_autonomous_life(
             self.runtime, environment=self.env, state_root=self.state_root,
             experience_provider=experience_provider, world_provider=world["provider"],
             requests=requests, continuity_source=continuity_source,
-            appraisal_source=appraisal_source)
+            appraisal_source=appraisal_source, writer=offline_writer,
+            # 业务时钟只在这里贯通；真实墙钟仍留给进程覆盖/lease/真实超时。
+            clock=(self._business_now if self._business_clock is not None else None))
         if assembled.get("state") != assembly.READY:
             self.assembled = assembled
             self.last_error = assembled.get("reason")
@@ -813,6 +1155,9 @@ class AutonomousLifeResident:
         self.counters["reconciliations"] += len(reconciled)
 
         record = {"at": _iso(self._clock()), "tick": self.ticks + 1,
+                  # 双时间：``at`` 永远是真实墙钟，``logical_at`` 只在显式演示模式出现。
+                  "logical_at": (self._business_iso()
+                                 if self._business_clock is not None else None),
                   "events": list(result.get("events") or []),
                   "feed_errors": list(result.get("feed_errors") or []),
                   "due": result.get("due"), "reconciled": reconciled,
@@ -827,11 +1172,95 @@ class AutonomousLifeResident:
         self._write_summary(self.summary())
         return record
 
+    def _projection_counter(self) -> projection_counts.ProjectionCounter:
+        """读面去重状态；``__new__`` 构造的旧夹具（只设 counters）也能惰性拿到一份。"""
+
+        counter = getattr(self, "_projections", None)
+        if counter is None:
+            counter = projection_counts.ProjectionCounter(
+                history=self._journal_journey_history)
+            self._projections = counter
+        return counter
+
+    def _journal_journey_history(self, journey_id: str,
+                                 before_tick: Any) -> Mapping[str, Any] | None:
+        """按目标旅程回读既有 journal 的**先前行**。
+
+        有界缓存只做加速：一个旅程被淘汰后再次出现时，历史最大
+        ``segments_confirmed`` 与拒绝键必须从持久行恢复，不能把旧段重新算成新到达。
+        边界用当前行的 ``tick``：只读 ``tick < before_tick`` 的行，所以
+        ``tick`` 先落盘、后 ``_accumulate`` 的顺序不会把当前行当成过去事件，重放时
+        也不会扫描未来行。读不出来返回 ``None``（未知），由计数侧丢弃而不是假计。
+        """
+
+        if isinstance(before_tick, bool) or not isinstance(before_tick, int):
+            return None
+        try:
+            lines = self.journal_path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            # 还没有 journal：这不是读失败，而是“此前没有任何行”。
+            return {"max_confirmed": 0, "refusals": set()}
+        except OSError:
+            return None
+        max_confirmed = 0
+        refusals: set[tuple[int, str]] = set()
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, Mapping):
+                continue
+            tick = record.get("tick")
+            if isinstance(tick, bool) or not isinstance(tick, int) or tick >= before_tick:
+                continue
+            journey = record.get("journey")
+            if not isinstance(journey, Mapping) or journey.get("journey_id") != journey_id:
+                continue
+            if journey.get("ok") is not True:
+                continue
+            confirmed = journey.get("segments_confirmed")
+            if (isinstance(confirmed, int) and not isinstance(confirmed, bool)
+                    and confirmed >= 0):
+                max_confirmed = max(max_confirmed, confirmed)
+            reason = journey.get("arrival_refused")
+            if isinstance(reason, str) and reason.strip() and confirmed is not None:
+                refusals.add((confirmed, reason.strip()))
+        return {"max_confirmed": max_confirmed, "refusals": refusals}
+
     def _accumulate(self, record: Mapping[str, Any]) -> None:
-        for wake in [record.get("due") or {}] + list(record.get("events") or []):
+        # A cognition diagnostic is not a wake.  Counting it would make a journal replay add
+        # one phantom wake per provider event and change every counter after a restart.
+        if record.get("kind") == COGNITION_DIAGNOSTIC_KIND:
+            return
+        # 旅程结算：只按 owner 已确认段的单调增量计到达。同一条完成投影在每个 tick
+        # 都会再读一次，``arrived`` 布尔值不能当身份；``segments_confirmed`` 才是
+        # 段级、可跨重放重建的证据。
+        # ``record["tick"]`` 是当前行的明确边界：tick 先落盘再累计，恢复历史时只读
+        # tick 更小的行，不会把当前行或重放时的未来行提前当成过去事件。
+        arrivals, refusals = self._projection_counter().journey_delta(
+            record.get("journey"), before=record.get("tick"))
+        self.counters["journey_arrivals"] += arrivals
+        self.counters["journey_arrival_refusals"] += refusals
+        # 顺序与 runner_tick 的真实调用一致：事件先写 journal，check window 最后。
+        for wake in list(record.get("events") or []) + [record.get("due") or {}]:
             self._count(wake)
 
     def _count(self, wake: Mapping[str, Any]) -> None:
+        if not isinstance(wake, Mapping):
+            return
+        # 请求数只认真实记录里的 llm_calls；被去重的静默投影本来就没有请求，但仍先累计，
+        # 保证任何真实调用都不会因为跳过一条 wake 而丢失。
+        self.counters["model_calls"] += int(wake.get("llm_calls") or 0)
+        # 只有 runner 真的写进 autonomous_wakes.jsonl 的记录才算一个 wake：非静默全写，
+        # 连续静默只写第一条。合成 tick dict（没有 at/status_class）不算。
+        # 空 due（``{}``）只出现在旧的手工 journal 行，按旧口径保留；真实 runner 总会
+        # 给出一条 WakeRecord，不会走到这里。
+        if wake and not self._projection_counter().wake_is_recorded(wake):
+            return
+
         status_class = str(wake.get("status_class") or "")
         outcome = str(wake.get("outcome") or "")
         kind = str(wake.get("kind") or "")
@@ -842,7 +1271,14 @@ class AutonomousLifeResident:
             self.counters["by_class"].get(status_class, 0) + 1
         if outcome:
             self.counters["outcomes"][outcome] = self.counters["outcomes"].get(outcome, 0) + 1
-        self.counters["model_calls"] += int(wake.get("llm_calls") or 0)
+        if (outcome in {"NO_ACTION", OUTCOME_DEFERRED}
+                and str((wake.get("extra") or {}).get("decision_route") or "")
+                == "RULE_RESOLVED"):
+            # A local rule decided this window (empty or all-hard-rejected candidate set).
+            # It is a legal quiet window, not a provider call; counting it apart keeps the
+            # summary honest even when an older journal row carried a stale ``llm_calls``.
+            self.counters["rule_resolved_windows"] = int(
+                self.counters.get("rule_resolved_windows") or 0) + 1
 
         if kind == "CHECK_WINDOW" and status != "NOT_DUE":
             self.counters["check_windows"] += 1
@@ -941,6 +1377,17 @@ class AutonomousLifeResident:
             self.tick()
             if max_ticks is not None and self.ticks >= int(max_ticks):
                 break
+            # 显式压缩演示模式：逻辑 horizon 到了就收尾，不靠空转把窗口撑住。
+            # 真实墙钟的 ``duration_seconds`` 仍然独立生效（下面），冻结不会绕过它。
+            if self._business_clock is not None:
+                try:
+                    if int(self._business_clock.snapshot()
+                           .get("horizon_remaining_seconds") or 0) <= 0:
+                        break
+                except Exception as exc:  # 读不到 horizon 是命名的失败，不是静默继续
+                    self.last_error = "CLOCK_READ_FAILED: %s: %s" % (
+                        type(exc).__name__, exc)
+                    break
             remaining = (None if deadline is None
                          else deadline - self._clock().timestamp())
             if remaining is not None and remaining <= 0:
@@ -962,27 +1409,29 @@ class AutonomousLifeResident:
 
     # -- the journey half (W05) -----------------------------------------------------------
 
-    def settle_journey(self) -> dict[str, Any]:
-        """Let real time settle the W04 world journey.  Never starts a new target.
+    def settle_journey(self, *, observed_at: Optional[str] = None) -> dict[str, Any]:
+        """Let the business clock settle the W04 world journey.  Never starts a new target.
 
         This runs on every tick, before the consideration window: an already departed segment
-        has to be able to arrive even in a tick that then decides nothing.
+        has to be able to arrive even in a tick that then decides nothing.  The *travel clock*
+        is a business clock: in the explicit demo mode it is the same compressed domain as the
+        rest of the day, and in normal production it is the real one.
         """
         cycle = (self.assembled or {}).get("cycle")
         if cycle is None or not hasattr(cycle, "settle_world_journey"):
             return {"ok": False, "reason_code": "NO_CYCLE"}
         try:
-            record = dict(cycle.settle_world_journey() or {})
+            record = dict(cycle.settle_world_journey(
+                observed_at=observed_at or self._business_iso()) or {})
         except Exception as exc:  # a real failure is reported, never hidden
             self.last_error = "JOURNEY_SETTLE_FAILED: %s: %s" % (type(exc).__name__, exc)
             return {"ok": False, "reason_code": "JOURNEY_SETTLE_FAILED",
                     "detail": self.last_error}
         self.last_settlement = record
+        # 结算检查次数按真实循环递增（每个 tick 一次）。到达数不在这里加：同一条完成
+        # 投影会在后续每个 tick 再读一次，计数由 ``_accumulate`` 按 owner 已确认段的
+        # 单调增量统一处理，实时路径与 journal replay 因此使用同一口径。
         self.counters["journey_settlements"] += 1
-        if record.get("arrived"):
-            self.counters["journey_arrivals"] += 1
-        if record.get("arrival_refused"):
-            self.counters["journey_arrival_refusals"] += 1
         return record
 
     def journey_view(self) -> dict[str, Any]:
@@ -1075,11 +1524,22 @@ class AutonomousLifeResident:
         surface_total = sum(measured) if measured else None
         requests = getattr(getattr(cycle, "budget", None), "requests", None)
         base = {"cognition_calls": cognition,
+                #: Model-served decision rounds in this process.  A rule-resolved NO_ACTION
+                #: (empty candidate set) never reaches the provider and is not counted here.
+                "decision_rounds": cognition,
+                "rule_resolved_windows": int(
+                    self.counters.get("rule_resolved_windows") or 0),
                 "content_generation_calls": surface_total,
                 "reading_response_calls": reading,
                 "surfaces": surfaces,
                 "surface_scope": "this process (not replayed from the journal)",
-                "reading_response_counted": reading is not None}
+                "reading_response_counted": reading is not None,
+                #: The request total comes from the persisted ledger and includes failed and
+                #: retried attempts.  No "successful round trips" figure is derived from the
+                #: counters: an unknown transport stays unknown instead of becoming a success.
+                "count_semantics": ("decision_rounds = wake.llm_calls of model-served rounds; "
+                                    "total_requests = persisted reservations (decision + "
+                                    "content + reading_response + retry)")}
         if requests is not None:
             view = requests.view()
             ledger_total = view.get("utc_day_calls")
@@ -1137,6 +1597,10 @@ class AutonomousLifeResident:
             # process ledger and the owners' results, so `soak_verified` stays NOT_VERIFIED.
             **self._coverage_fields(),
             "poll_seconds": self.poll_seconds,
+            # 业务/真实双时间域。普通路径是 REAL_TIME；只有显式压缩演示模式才出现
+            # COMPRESSED_DEMO，并明确写出「不是真实 24 小时」。
+            "time_domain": self.time_domain(),
+            "business_clock_error": self.business_clock_error,
             "act": self.act,
             "autonomous_enabled": (getattr(assembled.get("runner"), "enabled", None)
                                    if assembled.get("runner") is not None
@@ -1144,6 +1608,26 @@ class AutonomousLifeResident:
             "interval_minutes": getattr(assembled.get("runner"), "interval_minutes", None),
             "feeds": assembled.get("feeds"),
             "world": assembled.get("world"),
+            # 装配事实：runtime 是否真建起来、装配状态/原因、owner 是否 READY、Memory
+            # 绑定是否真的进了这个进程。零模型冒烟的替身也在这里明说，不冒充真实模型链。
+            "offline_scripted": self.offline_scripted,
+            "runtime_assembly": {
+                "runtime_present": self.runtime is not None,
+                "state": assembled.get("state"),
+                "reason": assembled.get("reason"),
+                "detail": assembled.get("detail"),
+                "missing": assembled.get("missing"),
+                "world_status": (assembled.get("world") or {}).get("status")
+                if isinstance(assembled.get("world"), Mapping) else None,
+                "owner_ready": (assembled.get("world") or {}).get("status") == "READY"
+                if isinstance(assembled.get("world"), Mapping) else None,
+            },
+            "memory_binding": {
+                "database_configured": bool(_first(self.env, MEMORY_DB_ENV)),
+                "controls_configured": bool(_first(self.env, MEMORY_CONTROLS_ENV)),
+                "subject": _first(self.env, MEMORY_SUBJECT_ENV),
+                "continuity_wired": assembled.get("continuity_wired"),
+            },
             # W05: the two switches are reported separately on purpose -- the Life's own pause
             # and the World's own pause are different owners' bits.
             # D (life-v1): what was wired and what the last round actually read.  The two
@@ -1218,6 +1702,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="clear the life-side pause and exit")
     parser.add_argument("--reason", default="operator", help="recorded with pause/resume")
     parser.add_argument("--no-act", action="store_true", help="consider but never execute")
+    parser.add_argument("--offline-scripted", action="store_true",
+                        dest="offline_scripted",
+                        help="零模型冒烟：装配一个不发请求的既有确定性 writer 占位；"
+                             "必须与 --no-act 一起用，summary 会明确标注")
     args = parser.parse_args(argv)
 
     environment = dict(os.environ)
@@ -1229,7 +1717,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     resident = AutonomousLifeResident(state_root=state_root, environment=environment,
-                                      poll_seconds=args.poll_seconds, act=not args.no_act)
+                                      poll_seconds=args.poll_seconds, act=not args.no_act,
+                                      offline_scripted=args.offline_scripted)
     if args.status:
         print(json.dumps(resident.read_status(), ensure_ascii=False, indent=1, sort_keys=True))
         return 0

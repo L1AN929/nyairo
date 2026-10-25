@@ -63,6 +63,7 @@ justify the lying-pose + declared-surface preconditions the owner already enforc
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional
+from urllib.parse import quote
 
 #: The target namespace this module owns.  Every other prefix is somebody else's.
 BODY_ACTION_REF_PREFIX = "bodyact:"
@@ -239,16 +240,28 @@ def build_body_action_step(
     *,
     place: Any = None,
     revision: Any = None,
+    decision_ref: Any = None,
 ) -> dict[str, Any]:
     """The AG-2 world step spec for one body action.
 
     Same shape the core already builds for ``place:`` / ``object:`` (``step_kind``
     ``WORLD_ACTION``, one frozen ``payload_spec`` with a single ``target``), so AR-0's
     payload contract does not change: the *encoded ref itself* is the parameter set.
-    The idempotency key names the place she acted from, the World revision the
-    observation came from, and the encoded ref -- i.e. every parameter plus the
-    precondition -- so a retry reuses one execution and a changed parameter can never
-    be mistaken for the same action.
+
+    Identity
+    --------
+    ``decision_ref`` is the committed Decision that chose this action.  When it is
+    present the idempotency key names the Decision and the encoded target, and nothing
+    observed: a retry or an UNKNOWN reconciliation for the *same* Decision must keep the
+    same execution even if the owner's revision or her observed pose has moved on since
+    the decision was committed, while a *different* Decision is a different logical body
+    action even when place, revision and target all look identical again.  Observation
+    coordinates cannot express that; they only describe where the decision was taken.
+
+    Callers that carry no Decision identity keep the previous deterministic key
+    (``place`` + ``revision`` + target).  That fallback is a compatibility path for
+    hand-built steps, not a safety guarantee: two independent callers that happen to
+    observe the same place/revision/target do collapse onto one execution by design.
     """
 
     parsed = parse_body_action_target(ref)
@@ -261,6 +274,17 @@ def build_body_action_step(
 
     place_text = str(place) if place else "unknown"
     target_ref = str(parsed["target"])
+    decision_identity = "" if decision_ref is None else str(decision_ref).strip()
+    if len(decision_identity) > 256:
+        raise BodyActionTargetError(
+            "decision_ref is too long (%d > 256)" % len(decision_identity))
+    if decision_identity:
+        # Quoted so a Decision id can never be read as one of the key's own fields.
+        idempotency_key = "idem_step:v02:world:bodyact:decision:%s:%s" % (
+            quote(decision_identity, safe=""), target_ref)
+    else:
+        idempotency_key = "idem_step:v02:world:bodyact:%s:r%s:%s" % (
+            place_text, revision, target_ref)
     return {
         "step_kind": ag2.STEP_KIND_WORLD_ACTION,
         "action_kind": ACTION_KIND_WORLD,
@@ -276,8 +300,7 @@ def build_body_action_step(
         },
         "expected_effect_predicates": body_action_effect_predicates(parsed),
         "post_submit_life_behavior": ag2.POST_SUBMIT_KEEP_ACTIVE,
-        "idempotency_key": "idem_step:v02:world:bodyact:%s:r%s:%s"
-                           % (place_text, revision, target_ref),
+        "idempotency_key": idempotency_key,
     }
 
 

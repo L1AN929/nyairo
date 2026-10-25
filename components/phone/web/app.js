@@ -21,6 +21,10 @@
   const WRITE_TIMEOUT_MS = 20000;
   const MAX_REQUEST_LOG = 12;
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  /* 相册（EP-16）：与 owner 同一条上限；图片 id 只接受协议形状。 */
+  const ALBUM_MAX_BYTES = 5 * 1024 * 1024;
+  const ALBUM_MAX_CAPTION = 200;
+  const ALBUM_ID_SAFE = /^[A-Za-z0-9._:\-]+$/;
 
   const SESSION_KEYS = {
     pending: 'nyairo.phone.pending.v1',
@@ -45,6 +49,8 @@
     world: {label: '世界', icon: 'map', desc: '街区、房间与路程'},
     /* 第十个入口：她自己的私人项目（B 的 private_project_service，作品仍是 Supply 工件）。 */
     projects: {label: '项目', icon: 'note', desc: '自己的多份作品'},
+    /* 第十一个入口：自己从本机导入的相册图片（Supply 同一 owner 的媒体工件）。 */
+    album: {label: '相册', icon: 'bookmark', desc: '自己导入的图片'},
   };
   const SCREEN_META = {
     home: {label: '主屏'},
@@ -61,6 +67,9 @@
     store: {label: '实体日用店'},
     'store-item': {label: '店里的商品'},
     projects: {label: '项目'},
+    album: {label: '相册'},
+    'album-image': {label: '这张图片'},
+    'album-import': {label: '导入图片'},
     project: {label: '项目详情'},
     'project-edit': {label: '写项目'},
     materials: {label: '资料'},
@@ -97,7 +106,17 @@
     world: '/world',
     store: '/store',
     projects: '/projects',
+    album: '/album',
   };
+
+  /* 主屏「此刻」：只读投影，与服务/监督入口同一源；不是资源读取，走自己的装载函数。 */
+  const LIVING_PATH = '/living';
+  const LIVING_WINDOW_PATH = '/living/window';
+  const LIVING_PAUSE_PATH = '/living/pause';
+  const LIVING_STOP_PATH = '/living/stop';
+  /* 一次明确的有界窗口：默认只花 1 次请求、120 秒；上限由服务端强制，界面不放大。 */
+  const LIVING_DEFAULT_SECONDS = 120;
+  const LIVING_DEFAULT_REQUESTS = 1;
 
   const SCREEN_RESOURCE = {
     notes: 'notes',
@@ -109,12 +128,14 @@
     world: 'world',
     store: 'store',
     projects: 'projects',
+    album: 'album',
   };
 
   /* 详情屏各自记住选中哪一件：商品详情用 shop-item，实体店用 store-item（两条渠道不串）；
      项目详情/写项目共用 projectDetailId，因为写的就是那一件。 */
   const DETAIL_FIELDS = {'shop-item': 'shopDetailId', 'store-item': 'storeDetailId',
     'project': 'projectDetailId', 'project-edit': 'projectDetailId',
+    'album-image': 'albumDetailId',
     'material': 'materialDetailId', 'material-import': 'materialDetailId',
     'research-item': 'researchDetailId', 'research-create': 'researchDetailId',
     'research-edit': 'researchDetailId',
@@ -4394,6 +4415,15 @@
     canWrite: canWrite,
     deriveReadOutcome: deriveReadOutcome,
     deriveMutationOutcome: deriveMutationOutcome,
+    LIVING_PATH: LIVING_PATH,
+    LIVING_WINDOW_PATH: LIVING_WINDOW_PATH,
+    LIVING_PAUSE_PATH: LIVING_PAUSE_PATH,
+    LIVING_STOP_PATH: LIVING_STOP_PATH,
+    LIVING_DEFAULT_SECONDS: LIVING_DEFAULT_SECONDS,
+    LIVING_DEFAULT_REQUESTS: LIVING_DEFAULT_REQUESTS,
+    livingView: livingView,
+    livingMemoryText: memoryLineText,
+    livingActivityStatusText: activityStatusText,
     isReadSuccessStatus: isReadSuccessStatus,
     readStatusWarning: readStatusWarning,
     buildRequestInit: buildRequestInit,
@@ -4436,6 +4466,15 @@
     makeOperationKey: makeOperationKey,
     createOpStore: createOpStore,
     createNavStore: createNavStore,
+    /* 私人相册 */
+    ALBUM_MAX_BYTES: ALBUM_MAX_BYTES,
+    ALBUM_MAX_CAPTION: ALBUM_MAX_CAPTION,
+    albumIdFor: albumIdFor,
+    albumRowView: albumRowView,
+    albumListView: albumListView,
+    albumDetailPath: albumDetailPath,
+    albumImagePath: albumImagePath,
+    albumImageSrc: albumImageSrc,
     /* 世界 / 身体 */
     HOME_ORDER: HOME_ORDER,
     WORLD_APP: WORLD_APP,
@@ -5469,6 +5508,9 @@
     shopDetailId: null,
     storeDetailId: null,
     projectDetailId: null,
+    albumDetailId: null,
+    /* 相册导入的预览与字节只活在内存里：不落 sessionStorage，也不写 localStorage。 */
+    albumBroken: Object.create(null),
     /* 项目详情页上的“全部版本 / 这一版 / 对比”都只活在内存里，不落 sessionStorage。 */
     projectHistory: null,
     projectVersion: null,
@@ -5480,8 +5522,9 @@
     shareDetailId: null,
     contactDetailRef: null,
     sharedPracticeDetailId: null,
-    data: {notes: null, references: null, reading: null, readingMaterial: null, wallet: null, shop: null,
+    data: {living: null, notes: null, references: null, reading: null, readingMaterial: null, wallet: null, shop: null,
       inventory: null, world: null, store: null, projects: null, project: null,
+      album: null, albumImage: null,
       materials: null, material: null, research: null, researchItem: null,
       practice: null, practiceReview: null, practiceMethod: null,
       experiences: null, experience: null, memory: null,
@@ -5492,6 +5535,9 @@
     readingDraft: {title: '', body: '', note: '', importText: '', errors: []},
     /* 项目草稿同样只在内存里；title/content 绝不进 sessionStorage。 */
     projectDraft: {mode: 'create', artifactId: '', title: '', content: '', head: '', revision: null, errors: []},
+    /* 相册导入草稿：说明、预览 data URL 与 base64 字节只在内存里，刷新即丢弃。 */
+    albumDraft: {caption: '', fileName: '', contentType: '', dataUrl: '', data: '',
+      bytes: 0, previewOk: false, previewError: '', errors: []},
     /* 资料/研究草稿也只在内存里：正文、来源声明绝不进 sessionStorage。 */
     materialDraft: {title: '', text: '', source_kind: 'user_supplied', origin: '', query: '', errors: []},
     researchDraft: {mode: 'create', artifactId: '', title: '', question: '', scope: '',
@@ -5550,6 +5596,22 @@
     dom.refreshBtn.addEventListener('click', function () { loadState(); });
     dom.homeBtn.addEventListener('click', goHome);
     dom.backBtn.addEventListener('click', goBack);
+    /* 异步刷新（例如「此刻」读到结果）不能把用户正按着的按钮换掉：那会吞掉这一次 click。
+       指针按着时先挂起整屏重建，抬起后再补一次。 */
+    document.addEventListener('pointerdown', function () { store.pointerDown = true; }, true);
+    document.addEventListener('pointerup', function () {
+      store.pointerDown = false;
+      releaseDeferredRender();
+    }, true);
+    document.addEventListener('pointercancel', function () {
+      store.pointerDown = false;
+      releaseDeferredRender();
+    }, true);
+    /* 指针在窗口外抬起时 document 收不到 pointerup：失焦也要把挂起的重建补上。 */
+    root.addEventListener('blur', function () {
+      store.pointerDown = false;
+      releaseDeferredRender();
+    });
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape') closeSheet();
     });
@@ -5676,6 +5738,7 @@
     store.storeDetailId = saved.screen === 'store-item' ? (saved.detail || null) : null;
     store.projectDetailId = (saved.screen === 'project' || saved.screen === 'project-edit')
       ? (saved.detail || null) : null;
+    store.albumDetailId = saved.screen === 'album-image' ? (saved.detail || null) : null;
     store.materialDetailId = saved.screen === 'material' ? (saved.detail || null) : null;
     store.researchDetailId = (saved.screen === 'research-item' || saved.screen === 'research-edit')
       ? (saved.detail || null) : null;
@@ -5691,6 +5754,7 @@
       screen: store.screen === 'note-edit' ? 'notes' : store.screen,
       detail: ((store.screen === 'store-item' ? store.storeDetailId
         : (store.screen === 'project' || store.screen === 'project-edit') ? store.projectDetailId
+          : store.screen === 'album-image' ? store.albumDetailId
           : store.screen === 'material' ? store.materialDetailId
             : (store.screen === 'research-item' || store.screen === 'research-edit')
               ? store.researchDetailId
@@ -5730,7 +5794,8 @@
       shareDetail: store.screen === 'share' ? store.shareDetailId : null,
       contactDetail: store.screen === 'contact-event' ? store.contactDetailRef : null,
       sharedPracticeDetail: store.screen === 'shared-practice-work'
-        ? store.sharedPracticeDetailId : null
+        ? store.sharedPracticeDetailId : null,
+      albumDetail: store.screen === 'album-image' ? store.albumDetailId : null
     });
     store.screen = screen;
     store.shopDetailId = screen === 'shop-item' ? targetDetail : null;
@@ -5743,6 +5808,7 @@
     store.shareDetailId = screen === 'share' ? targetDetail : null;
     store.contactDetailRef = screen === 'contact-event' ? targetDetail : null;
     store.sharedPracticeDetailId = screen === 'shared-practice-work' ? targetDetail : null;
+    store.albumDetailId = screen === 'album-image' ? targetDetail : null;
     if (!options.keepResult) store.result = null;
     persistNav();
     ensureLoaded(screen);
@@ -5762,6 +5828,7 @@
     store.practiceExperienceId = null;
     store.shareDetailId = null;
     store.contactDetailRef = null;
+    store.albumDetailId = null;
     store.result = null;
     persistNav();
     renderAll();
@@ -5794,12 +5861,19 @@
       ? (previous.contactDetail || null) : null;
     store.sharedPracticeDetailId = previous.screen === 'shared-practice-work'
       ? (previous.sharedPracticeDetail || null) : null;
+    store.albumDetailId = previous.screen === 'album-image'
+      ? (previous.albumDetail || null) : null;
     persistNav();
     ensureLoaded(previous.screen);
     renderAll();
   }
 
   function ensureLoaded(screen) {
+    if (screen === 'home') {
+      /* 主屏的「此刻」只读刷新；连不上服务也照样尝试一次，由它自己回答读不到。 */
+      if (!store.data.living) loadLiving();
+      return;
+    }
     if (screen === 'shares') {
       /* 分享这一屏一次读齐：列表里有草稿/延后/收件箱的计数与来源当前性（没有正文）。 */
       if (store.conn.phase !== 'online' && store.conn.phase !== 'readonly') return;
@@ -5890,6 +5964,26 @@
       /* 项目列表：/state 报不了这个 app（老实例）也照样去读，由它自己回答。 */
       if (store.conn.phase !== 'online' && store.conn.phase !== 'readonly') return;
       if (!store.data.projects) loadResource('projects');
+      return;
+    }
+    if (screen === 'album') {
+      /* 相册列表：/state 不报这个 app，读不读得到由相册接口自己回答。 */
+      if (store.conn.phase !== 'online' && store.conn.phase !== 'readonly') return;
+      if (!store.data.album) loadResource('album');
+      return;
+    }
+    if (screen === 'album-image') {
+      /* 详情按 id 读：id 变了就重读，绝不复用上一张的说明冒充这一张。 */
+      if (store.conn.phase !== 'online' && store.conn.phase !== 'readonly') return;
+      if (!store.albumDetailId) return;
+      const albumEntry = store.data.albumImage;
+      if (!albumEntry || albumEntry.artifactId !== store.albumDetailId) {
+        loadAlbumImage(store.albumDetailId);
+      }
+      return;
+    }
+    if (screen === 'album-import') {
+      /* 导入屏不需要预读；图片由用户实际选择后才进入内存。 */
       return;
     }
     if (screen === 'materials') {
@@ -6238,11 +6332,24 @@
 
   /* ---------------- 渲染 ---------------- */
 
+  let pendingRender = false;
+
   function renderAll() {
     if (!dom.ready) return;
+    /* A pointer is down: replacing the buttons now would detach the one being clicked. */
+    if (store.pointerDown) {
+      pendingRender = true;
+      return;
+    }
     renderScreen();
     renderChrome();
     renderSidebar();
+  }
+
+  function releaseDeferredRender() {
+    if (!pendingRender) return;
+    pendingRender = false;
+    root.setTimeout(renderAll, 0);
   }
 
   function renderScreen() {
@@ -6368,6 +6475,327 @@
 
   /* ---------------- 主屏 ---------------- */
 
+  /* ---------------- 主屏「此刻」 ---------------- */
+
+  /* 只读刷新只负责主屏：用户已经进了阅读/输入，就不要用「此刻」的结果重建那一屏。 */
+  function renderHomeIfCurrent() {
+    if (store.screen === 'home') renderAll();
+  }
+
+  async function loadLiving() {
+    store.data.living = {phase: 'loading', doc: null, message: ''};
+    renderHomeIfCurrent();
+    const res = await request('GET', LIVING_PATH, {});
+    const outcome = deriveReadOutcome(res);
+    if (outcome.status === 'ok') {
+      const data = outcome.doc && outcome.doc.data && typeof outcome.doc.data === 'object'
+        ? outcome.doc.data : null;
+      store.data.living = data
+        ? {phase: 'ready', doc: data, message: ''}
+        : {phase: 'error', doc: null, message: '服务返回了 ok，但没有此刻数据'};
+    } else {
+      store.data.living = {
+        phase: outcome.status === 'offline' ? 'offline' : 'error',
+        doc: null,
+        message: outcome.message,
+        http: res && res.status
+      };
+    }
+    renderHomeIfCurrent();
+  }
+
+  /* 一个已经过去的「下一次窗口」不能继续叫下一次：它只是记录，不是预约。 */
+  function nextPast(value) {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    const when = Date.parse(value);
+    return Number.isFinite(when) && when < Date.now();
+  }
+
+  /* 把 GET /living 的投影收成页面能渲染的字段；缺字段就留 null，界面不补造。 */
+  function livingView(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const phase = raw.phase && typeof raw.phase === 'object' ? raw.phase : {};
+    const key = typeof phase.key === 'string' ? phase.key : 'unknown';
+    const where = raw.where && typeof raw.where === 'object' ? raw.where : {};
+    const work = raw.work && typeof raw.work === 'object' ? raw.work : {};
+    const reading = raw.reading && typeof raw.reading === 'object' ? raw.reading : {};
+    const memory = raw.memory && typeof raw.memory === 'object' ? raw.memory : {};
+    const foreground = raw.foreground && typeof raw.foreground === 'object' ? raw.foreground : {};
+    const next = raw.next && typeof raw.next === 'object' ? raw.next : {};
+    const run = raw.run && typeof raw.run === 'object' ? raw.run : {};
+    const resident = run.resident && typeof run.resident === 'object' ? run.resident : {};
+    const pause = run.pause && typeof run.pause === 'object' ? run.pause : {};
+    const windowState = run.window && typeof run.window === 'object' ? run.window : {};
+    const capacity = run.capacity && typeof run.capacity === 'object' ? run.capacity : {};
+    const child = windowState.child && typeof windowState.child === 'object' ? windowState.child : null;
+    const allowed = ['active', 'paused', 'blocked', 'quiet', 'idle', 'stopped', 'unknown'];
+    return {
+      key: allowed.indexOf(key) >= 0 ? key : 'unknown',
+      sentence: sanitizeLine(raw.sentence, 240) || '读不到她的当前状态。',
+      observedAt: sanitizeLine(raw.observed_at, 40),
+      place: sanitizeLine(where.place_name, 80) || sanitizeLine(where.place_id, 80),
+      placeKnown: where.status === 'READY',
+      whereUnknown: Array.isArray(where.unknowns)
+        ? where.unknowns.slice(0, 4).map(function (item) { return sanitizeLine(String(item), 40); })
+        : [],
+      workTitle: sanitizeLine(work.title, 80),
+      workVersion: sanitizeLine(work.head_version_id, 60),
+      workStoppedAt: sanitizeLine(work.stopped_at, 40),
+      activityRef: sanitizeLine(work.activity_ref, 60),
+      /* 前台活动来自权威文件：标题/状态/它自己的时间；读不到就写读不到，不拿读取时间冒充。 */
+      activityKnown: foreground.status === 'READ',
+      activityTitle: sanitizeLine(foreground.title, 80),
+      activityStatus: sanitizeLine(foreground.activity_status, 16),
+      activityKind: sanitizeLine(foreground.activity_kind, 40),
+      activityRefFg: sanitizeLine(foreground.ref, 60),
+      activityAt: sanitizeLine(foreground.paused_at || foreground.updated_at, 40),
+      activityReason: sanitizeLine(foreground.reason_code, 40),
+      readingTitle: sanitizeLine(reading.title, 80),
+      readingPage: firstNumber(reading, ['page']),
+      readingPages: firstNumber(reading, ['pages']),
+      nextAt: sanitizeLine(next.check_window_at, 40),
+      nextPast: nextPast(next.check_window_at),
+      memoryStatus: sanitizeLine(memory.binding_status, 24),
+      memoryRecall: typeof memory.recall_state === 'string' && memory.recall_state
+        ? memory.recall_state
+        : (memory.recall_ready === true ? 'ready'
+          : (memory.recall_ready === false ? 'not_ready' : 'unknown')),
+      memoryCount: firstNumber(memory, ['experience_count']),
+      memorySource: sanitizeLine(memory.source, 32),
+      residentRunning: resident.running_recorded === true && resident.pid_alive === true,
+      residentRecorded: resident.running_recorded === true,
+      residentPid: firstNumber(resident, ['pid']),
+      paused: pause.paused === true,
+      pauseKnown: pause.paused === true || pause.paused === false,
+      used: firstNumber(capacity, ['used']),
+      remaining: firstNumber(capacity, ['remaining']),
+      cap: firstNumber(capacity, ['function_cap']),
+      supervisorAttached: windowState.running === true,
+      childAlive: !!(child && child.alive === true),
+      childPid: child ? firstNumber(child, ['pid']) : null
+    };
+  }
+
+  const LIVING_PHASE = {
+    active: {label: '进行中', tone: 'is-ok'},
+    paused: {label: '暂停', tone: 'is-warn'},
+    blocked: {label: '受阻', tone: 'is-warn'},
+    quiet: {label: '安静', tone: 'is-neutral'},
+    idle: {label: '暂缓', tone: 'is-neutral'},
+    stopped: {label: '未运行', tone: 'is-neutral'},
+    unknown: {label: '未知', tone: 'is-warn'}
+  };
+
+  function livingLine(label, value, mono) {
+    if (!value) return null;
+    return h('div', {class: 'living-line'}, [
+      h('span', {class: 'living-line-k', text: label}),
+      h('span', {class: 'living-line-v' + (mono ? ' is-mono' : ''), text: value})
+    ]);
+  }
+
+  function activityStatusText(value) {
+    const labels = {ACTIVE: '进行中', PAUSED: '已暂缓', WAITING: '等待中'};
+    return labels[value] || sanitizeLine(value, 16);
+  }
+
+  /* Memory 只说绑定与召回事实；「已接通」永远不等于「她因此记得/改变了选择」。 */
+  function memoryLineText(view) {
+    if (view.memoryStatus === 'READY') {
+      if (view.memoryRecall === 'empty') return '记忆已接通 · 暂无已记录的亲身经历';
+      if (view.memoryRecall === 'ready' && view.memoryCount !== null) {
+        return '记忆已接通 · 可召回 ' + view.memoryCount + ' 条经历';
+      }
+      if (view.memoryRecall === 'ready') return '记忆已接通 · 可召回条数未读到';
+      if (view.memoryRecall === 'not_ready') return '记忆已接通 · 当前不可召回';
+      return '记忆已接通 · 召回未确认';
+    }
+    if (view.memoryStatus === 'UNBOUND') return '未绑定记忆（可选状态，不是故障）';
+    if (view.memoryStatus === 'CONFIGURED') return '已配置 Memory · 健康未证实';
+    if (view.memoryStatus === 'BLOCKED') return '记忆不可用';
+    return '记忆状态未知';
+  }
+
+  function renderLiving() {
+    const entry = store.data.living;
+    const view = entry && entry.phase === 'ready' ? livingView(entry.doc) : null;
+    if (!view) {
+      const message = entry && entry.phase === 'loading' ? '正在读取她的此刻…'
+        : (entry && entry.message) || '还没有读到她的此刻。';
+      return h('section', {class: 'living living-unknown', 'aria-label': '此刻'}, [
+        h('div', {class: 'living-head'}, [
+          h('p', {class: 'living-kicker', text: '此刻'}),
+          chip('未读到', 'is-warn')
+        ]),
+        h('p', {class: 'living-sentence', text: message}),
+        h('p', {class: 'living-note', text: '这里只写服务真实报告的事实；读不到就写读不到。'}),
+        h('div', {class: 'row-actions'}, [
+          btn('重新读取此刻', {small: true, onClick: loadLiving})
+        ])
+      ]);
+    }
+    const meta = LIVING_PHASE[view.key] || LIVING_PHASE.unknown;
+    const observed = view.observedAt ? (formatWhen(view.observedAt) || view.observedAt) : '';
+    const nodes = [
+      h('div', {class: 'living-head'}, [
+        h('p', {class: 'living-kicker', text: '此刻'}),
+        chip(meta.label, meta.tone),
+        observed ? h('span', {class: 'living-observed', text: '读取于 ' + observed}) : null
+      ]),
+      h('p', {class: 'living-sentence', text: view.sentence}),
+      h('p', {class: 'living-where', text: view.placeKnown && view.place
+        ? '位置：' + view.place
+        : '位置：未知' + (view.whereUnknown.length ? '（' + view.whereUnknown.join('、') + '）' : '')})
+    ];
+
+    const lines = [];
+    /* 前台活动是权威文件里的一等事实：标题、状态、它自己的发生/暂停时间。
+       内部 id 只进折叠的技术细节，不在主行冒充她做了什么。 */
+    if (view.activityKnown && (view.activityTitle || view.activityStatus)) {
+      const status = activityStatusText(view.activityStatus);
+      const when = view.activityAt ? (formatWhen(view.activityAt) || view.activityAt) : '';
+      const title = view.activityTitle ? '《' + view.activityTitle + '》' : '';
+      const parts = [title, status, when].filter(function (item) { return !!item; });
+      lines.push(livingLine('当前活动', parts.join(' · ')));
+    } else if (view.activityReason) {
+      lines.push(livingLine('当前活动', '未核实（' + view.activityReason + '）'));
+    }
+    if (view.workTitle) {
+      const when = view.workStoppedAt ? ' · ' + (formatWhen(view.workStoppedAt) || view.workStoppedAt) : '';
+      lines.push(livingLine('作品停点', view.workTitle + (view.workVersion ? ' · ' + view.workVersion : '') + when));
+    }
+    if (view.readingTitle) {
+      const page = view.readingPage !== null ? '第 ' + view.readingPage + (view.readingPages !== null ? '/' + view.readingPages : '') + ' 页' : '';
+      lines.push(livingLine('阅读停点', view.readingTitle + (page ? ' · ' + page : '')));
+    }
+    if (view.nextAt) {
+      lines.push(livingLine(view.nextPast ? '上次记录的窗口（已过）' : '下一次自然窗口',
+        formatWhen(view.nextAt) || view.nextAt));
+    }
+    if (view.memoryStatus) {
+      lines.push(livingLine('Memory', memoryLineText(view)));
+    }
+    if (lines.length) nodes.push(h('div', {class: 'living-lines'}, lines));
+
+    const tech = [
+      livingLine('活动引用', view.activityRefFg, true),
+      livingLine('记录引用', view.activityRefFg ? '' : view.activityRef, true),
+      livingLine('活动类型', view.activityKind, true),
+      livingLine('活动核实', view.activityReason, true),
+      livingLine('Memory 来源', view.memorySource, true)
+    ].filter(function (node) { return !!node; });
+    if (tech.length) {
+      nodes.push(h('details', {class: 'tech-details'}, [
+        h('summary', {class: 'tech-summary', text: '技术细节'}),
+        h('div', {class: 'tech-body'}, tech)
+      ]));
+    }
+    nodes.push(h('p', {class: 'living-note', text: 'Memory 接通只表示服务可读，不代表它影响了她这次的选择。'}));
+
+    /* 运行与额度：这里说的是「本机运行」，不是她生活的完成度。 */
+    const used = view.used === null ? '—' : String(view.used);
+    const cap = view.cap === null ? '—' : String(view.cap);
+    const remaining = view.remaining === null ? '—' : String(view.remaining);
+    const runLines = [
+      livingLine('resident', view.residentRunning ? '运行中'
+        : (view.residentRecorded ? '记录说运行，但进程不在' : '未运行')),
+      livingLine('暂停位', view.pauseKnown ? (view.paused ? '已暂停' : '未暂停') : '未知'),
+      livingLine('本功能请求额度', used + ' / ' + cap + '（剩余 ' + remaining + '）')
+    ];
+    if (view.childAlive) runLines.push(livingLine('窗口子进程', '运行中 · pid ' + view.childPid, true));
+    nodes.push(h('div', {class: 'living-run'}, [
+      h('p', {class: 'living-run-title', text: '本机运行'})
+    ].concat(runLines)));
+
+    const canControl = store.conn.phase === 'online' && !store.conn.readOnly;
+    const windowBlocked = !view.supervisorAttached
+      || view.childAlive
+      || (view.remaining !== null && view.remaining <= 0)
+      || !canControl
+      || store.busy === 'living:window';
+    nodes.push(h('div', {class: 'row-actions living-actions'}, [
+      btn(view.childAlive ? '窗口已在运行' : '启动有界窗口（120 秒 / 1 次，会调用模型）', {
+        small: true,
+        variant: 'primary',
+        disabled: windowBlocked,
+        title: view.supervisorAttached ? '只启动一个明确、有界的窗口：会调用模型；上限由服务端强制'
+          : '页面没有挂载本机监督入口（请用 usable_day.py serve 启动）',
+        onClick: function () { startLivingWindow(); }
+      }),
+      btn(view.paused ? '解除暂停' : '暂停运行', {
+        small: true,
+        disabled: !view.supervisorAttached || !canControl || store.busy === 'living:pause',
+        title: view.paused
+          ? '只撤销本机暂停位：不启动模型，也不会自动恢复 Activity'
+          : '只封住新的决定：不会停掉正在运行的进程，也不会改动 Activity',
+        onClick: function () { setLivingPaused(!view.paused); }
+      }),
+      btn('停止窗口', {
+        small: true,
+        disabled: !view.childAlive || !canControl || store.busy === 'living:stop',
+        title: '只停本监督自己启动的窗口子进程；没有窗口时这里不可点',
+        onClick: stopLivingWindow
+      }),
+      btn('刷新此刻', {small: true, onClick: loadLiving})
+    ]));
+    if (view.paused) {
+      nodes.push(h('p', {class: 'living-note', text: '本机暂停位已打开：解除暂停不会自动开始运行，也不会把活动状态改回去。'}));
+    }
+    if (!view.supervisorAttached) {
+      nodes.push(h('p', {class: 'living-note', text: '当前页面没有挂载本机监督入口：可以看状态，不能用网页启动运行。用 scripts/usable_day.py serve 启动手机面后再看这里。'}));
+    }
+    if (view.remaining !== null && view.remaining <= 0) {
+      nodes.push(h('p', {class: 'living-note', text: '这个功能的请求额度已经用完：页面继续只读，不会重开窗口，也不会刷新额度。'}));
+    }
+    return h('section', {class: 'living living-' + view.key, 'aria-label': '此刻'}, nodes);
+  }
+
+  async function runLivingControl(scope, path, body, message) {
+    const guard = canWrite(store.conn);
+    if (!guard.ok) {
+      store.result = {scope: scope, status: 'blocked', message: guard.message};
+      renderAll();
+      return;
+    }
+    store.busy = scope;
+    store.result = {scope: scope, status: 'pending', message: message};
+    renderAll();
+    const res = await request('POST', path, {csrf: store.conn.csrf, body: body || {}});
+    const outcome = deriveMutationOutcome(res);
+    store.busy = null;
+    const labels = {
+      applied: message + '：服务已接受。',
+      rejected: message + '：服务拒绝了这次请求。',
+      conflict: message + '：服务明确拒绝，没有执行。',
+      blocked: message + '：请求没有发出。',
+      unknown: message + '：结果未知，先刷新状态，不要重复点击。'
+    };
+    store.result = {
+      scope: scope,
+      status: outcome.status,
+      message: labels[outcome.status] || message + '：服务返回了未识别的状态。',
+      reason: outcome.reason || '',
+      data: outcome.doc && outcome.doc.data && typeof outcome.doc.data === 'object' ? outcome.doc.data : null
+    };
+    loadLiving();
+  }
+
+  function startLivingWindow() {
+    runLivingControl('living:window', LIVING_WINDOW_PATH, {
+      duration_seconds: LIVING_DEFAULT_SECONDS,
+      max_new_requests: LIVING_DEFAULT_REQUESTS
+    }, '启动有界窗口');
+  }
+
+  function setLivingPaused(paused) {
+    runLivingControl('living:pause', LIVING_PAUSE_PATH, {paused: paused === true},
+      paused ? '暂停运行' : '继续运行');
+  }
+
+  function stopLivingWindow() {
+    runLivingControl('living:stop', LIVING_STOP_PATH, {}, '停止窗口');
+  }
+
   function renderHome() {
     const nodes = [];
     const phase = store.conn.phase;
@@ -6403,6 +6831,9 @@
       h('p', {class: 'home-instance', text: instanceLine()})
     ]));
 
+    /* 「此刻」放在磁贴之前：用户先看到她真实的当前状态，再决定进哪个应用。 */
+    nodes.push(renderLiving());
+
     nodes.push(h('div', {class: 'grid'}, HOME_ORDER.map(appTile)));
     /* 生活链的两个直接入口：实体日用店（店里买）与房间（在世界的自家房间里布置）。
        它们是行内按钮，不是第九个 app 图标；点进去读到的事实仍然只来自服务。 */
@@ -6421,7 +6852,9 @@
       /* 来访与共同时间：普通来话 / 明确邀请 / 显式结束。主屏直达，不是第九个磁贴。 */
       btn('来访与共同时间', {small: true, icon: 'heart', onClick: function () { go('contact'); }}),
       /* 共同实践：选一份明确共享的材料，和她一起做同一件作品。主屏直达，不是磁贴。 */
-      btn('共同实践', {small: true, icon: 'check', onClick: function () { go('shared-practice'); }})
+      btn('共同实践', {small: true, icon: 'check', onClick: function () { go('shared-practice'); }}),
+      /* 相册：自己有真实图片字节的私人图片，导入/回看都走 Supply 同一 owner。 */
+      btn('相册', {small: true, icon: 'bookmark', onClick: function () { go('album'); }})
     ]));
     nodes.push(h('p', {class: 'footnote', text: '图标都能进入真实内容；没有连接时按钮不会替你编一个结果。'}));
 
@@ -6841,6 +7274,363 @@
     nodes.push(h('p', {class: 'footnote',
       text: '作品就是 Supply 的 ManagedArtifact：这一屏读的是 owner 的列表，归档也只是不再活跃。'}));
     return page('项目', '多份作品各自推进；正文在详情里', nodes);
+  }
+
+  /* ---------------- 私人相册（真实图片字节；仍是 Supply 同一 owner） ---------------- */
+
+  function albumIdFor(value) {
+    const checked = protocolId(value, PROTOCOL_ID_MAX);
+    if (!checked.ok || !ALBUM_ID_SAFE.test(checked.value)) return '';
+    return checked.value;
+  }
+
+  function albumDetailPath(artifactId) {
+    const id = albumIdFor(artifactId);
+    return id ? '/album/' + id : '';
+  }
+
+  function albumImagePath(artifactId) {
+    const id = albumIdFor(artifactId);
+    return id ? '/album/' + id + '/image' : '';
+  }
+
+  /* `request()` 接受 /album/... 这样的相对路径并统一补 API_BASE；
+   * 但 <img src> 是浏览器自己发请求，拿不到那层前缀，必须在这里补全。 */
+  function albumImageSrc(artifactId) {
+    const path = albumImagePath(artifactId);
+    return path ? API_BASE + path : '';
+  }
+
+  function albumRowView(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = albumIdFor(raw.artifact_id);
+    if (!id) return null;
+    const media = raw.media && typeof raw.media === 'object' ? raw.media : {};
+    const bytes = typeof media.bytes === 'number' && isFinite(media.bytes) && media.bytes > 0
+      ? media.bytes : null;
+    const contentType = raw.content_type === 'image/jpeg' ? 'image/jpeg'
+      : (raw.content_type === 'image/png' ? 'image/png' : '');
+    if (!contentType) return null;
+    return {
+      artifactId: id,
+      caption: sanitizeText(raw.caption, ALBUM_MAX_CAPTION),
+      contentType: contentType,
+      bytes: bytes,
+      createdAt: raw.created_at_iso || (typeof raw.created_at === 'number' ? raw.created_at : null),
+      lifecycle: sanitizeLine(raw.lifecycle, 24)
+    };
+  }
+
+  function albumListView(doc) {
+    const raw = doc && Array.isArray(doc.images) ? doc.images : null;
+    const images = (raw || []).map(albumRowView).filter(function (row) { return !!row; });
+    return {images: images, missing: raw === null, bounded: !!(doc && doc.bounded)};
+  }
+
+  async function loadAlbumImage(artifactId) {
+    const path = albumDetailPath(artifactId);
+    if (!path) return;
+    store.data.albumImage = {phase: 'loading', doc: null, message: '', artifactId: artifactId};
+    renderAll();
+    const res = await request('GET', path, {});
+    const outcome = deriveReadOutcome(res);
+    if (outcome.status === 'ok') {
+      store.data.albumImage = {phase: 'ready', doc: outcome.doc, message: '',
+        artifactId: artifactId, http: res && res.status};
+    } else {
+      store.data.albumImage = {
+        phase: outcome.status === 'offline' ? 'offline' : 'error',
+        doc: null,
+        message: outcome.message,
+        artifactId: artifactId,
+        http: res && res.status
+      };
+    }
+    renderAll();
+  }
+
+  function albumBroken(artifactId) {
+    return !!store.albumBroken[artifactId];
+  }
+
+  function markAlbumBroken(artifactId) {
+    if (!artifactId || store.albumBroken[artifactId]) return;
+    store.albumBroken[artifactId] = true;
+    renderAll();
+  }
+
+  function albumPicture(artifactId, className) {
+    if (albumBroken(artifactId)) {
+      return h('div', {class: className + ' album-broken'}, [
+        h('span', {class: 'album-broken-text', text: '这张图片现在读不到'})
+      ]);
+    }
+    return h('img', {
+      class: className,
+      src: albumImageSrc(artifactId),
+      alt: '',
+      loading: 'lazy',
+      decoding: 'async',
+      on: {error: function () { markAlbumBroken(artifactId); }}
+    });
+  }
+
+  function renderAlbum() {
+    const nodes = [];
+    const result = resultCard();
+    if (result) nodes.push(result);
+    nodes.push(h('div', {class: 'row-actions'}, [
+      btn('导入图片', {variant: 'primary', icon: 'plus', onClick: startAlbumImport}),
+      btn('刷新', {icon: 'refresh', onClick: function () { loadResource('album'); }})
+    ]));
+    if (store.conn.phase === 'readonly') {
+      nodes.push(statePanel('readonly', '只读模式：能看不能导入', '服务没有提供 CSRF 令牌，导入会被界面挡下。'));
+    }
+    const entry = store.data.album;
+    if (!entry || entry.phase === 'loading') {
+      nodes.push(statePanel('loading', '正在读取相册…'));
+      return page('相册', '自己从本机导入的图片', nodes);
+    }
+    if (entry.phase !== 'ready') {
+      nodes.push(statePanel(entry.phase === 'offline' ? 'offline' : 'error', '没有读到相册',
+        entry.message, [btn('重试', {onClick: function () { loadResource('album'); }})]));
+      return page('相册', '自己从本机导入的图片', nodes);
+    }
+    const view = albumListView(entry.doc);
+    if (view.missing) {
+      nodes.push(statePanel('error', '服务没有返回相册列表', '响应里没有 images 数组。'));
+    } else if (!view.images.length) {
+      nodes.push(statePanel('empty', '还没有图片', '这里只放你自己选择导入的图片；不会生成、抓取或外发。', [
+        btn('导入第一张图片', {variant: 'primary', onClick: startAlbumImport})
+      ]));
+    } else {
+      nodes.push(h('div', {class: 'album-grid'}, view.images.map(function (row) {
+        return h('button', {
+          class: 'album-card',
+          type: 'button',
+          'aria-label': (row.caption || '这张图片') + '，打开详情',
+          on: {click: function () { go('album-image', {detail: row.artifactId}); }}
+        }, [
+          albumPicture(row.artifactId, 'album-thumb'),
+          h('span', {class: 'album-caption', text: row.caption || '没有说明'})
+        ]);
+      })));
+    }
+    const lines = ['共 ' + view.images.length + ' 张'];
+    if (view.bounded) lines.push('列表已截断');
+    nodes.push(h('p', {class: 'footnote', text: lines.join(' · ')}));
+    nodes.push(h('p', {class: 'footnote',
+      text: '图片保存在这个实例里；说明是你自己填的，不是她对图片内容的判断。'}));
+    return page('相册', '双列回看；点开是完整图片与说明', nodes);
+  }
+
+  function renderAlbumImage() {
+    const entry = store.data.albumImage;
+    const nodes = [];
+    const result = resultCard();
+    if (result) nodes.push(result);
+    if (!entry || entry.phase === 'loading') {
+      nodes.push(statePanel('loading', '正在读取这张图片…'));
+      return page('这张图片', '', nodes);
+    }
+    if (entry.phase !== 'ready') {
+      nodes.push(statePanel(entry.phase === 'offline' ? 'offline' : 'error', '没有读到这张图片',
+        entry.message, [btn('重试', {onClick: function () { loadAlbumImage(entry.artifactId); }})]));
+      return page('这张图片', '', nodes);
+    }
+    const row = albumRowView(entry.doc && entry.doc.image);
+    if (!row) {
+      nodes.push(statePanel('error', '服务没有返回这张图片的说明', '响应里没有 image 对象。'));
+      return page('这张图片', '', nodes);
+    }
+    nodes.push(h('div', {class: 'album-detail-frame'}, [albumPicture(row.artifactId, 'album-detail-img')]));
+    nodes.push(h('h2', {class: 'card-title', text: row.caption || '没有说明'}));
+    nodes.push(kv('来源', '你从本机导入（自述）'));
+    const when = formatWhen(row.createdAt);
+    if (when) nodes.push(kv('保存于', when));
+    if (row.bytes !== null) nodes.push(kv('图片大小', Math.round(row.bytes / 1024) + ' KB'));
+    nodes.push(h('div', {class: 'row-actions'}, [
+      btn('导入另一张', {onClick: startAlbumImport}),
+      btn('回到相册', {onClick: function () { go('album'); }})
+    ]));
+    nodes.push(h('p', {class: 'footnote',
+      text: '这张图是相册里的一张私人图片，不会进入作品列表、不会自动写进记忆，也不代表她看过或理解图片内容。'}));
+    return page('这张图片', '说明与来源都来自你自己的填写', nodes);
+  }
+
+  function startAlbumImport() {
+    store.albumDraft = {caption: '', fileName: '', contentType: '', dataUrl: '', data: '',
+      bytes: 0, previewOk: false, previewError: '', errors: []};
+    store.result = null;
+    go('album-import');
+  }
+
+  function chooseAlbumFile(file) {
+    const draft = store.albumDraft;
+    draft.errors = [];
+    draft.previewOk = false;
+    draft.previewError = '';
+    draft.dataUrl = '';
+    draft.data = '';
+    draft.bytes = 0;
+    draft.contentType = '';
+    draft.fileName = '';
+    if (!file) {
+      draft.errors = ['没有选到文件。'];
+      renderAll();
+      return;
+    }
+    if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
+      draft.errors = ['只支持 PNG 或 JPEG 图片；其他格式不会保存。'];
+      renderAll();
+      return;
+    }
+    if (!(file.size > 0) || file.size > ALBUM_MAX_BYTES) {
+      draft.errors = ['图片必须大于 0 且不超过 5 MB。'];
+      renderAll();
+      return;
+    }
+    draft.fileName = sanitizeLine(file.name, 120);
+    draft.contentType = file.type;
+    draft.bytes = file.size;
+    const Reader = typeof root.FileReader === 'function' ? root.FileReader : null;
+    if (!Reader) {
+      draft.errors = ['这个浏览器读不了本地文件，不能导入。'];
+      renderAll();
+      return;
+    }
+    const reader = new Reader();
+    reader.onerror = function () {
+      draft.previewError = '这个文件读不出来，不能保存。';
+      draft.previewOk = false;
+      renderAll();
+    };
+    reader.onload = function () {
+      const url = String(reader.result || '');
+      const comma = url.indexOf(',');
+      if (comma < 0) {
+        draft.previewError = '这个文件不是可预览的图片，不能保存。';
+        renderAll();
+        return;
+      }
+      draft.dataUrl = url;
+      draft.data = url.slice(comma + 1);
+      draft.previewOk = false;
+      draft.previewError = '';
+      renderAll();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function renderAlbumImport() {
+    const draft = store.albumDraft;
+    const nodes = [];
+    const result = resultCard();
+    if (result) nodes.push(result);
+    if (store.conn.phase === 'readonly') {
+      nodes.push(statePanel('readonly', '只读模式：不能导入', '服务没有提供 CSRF 令牌，保存会被界面挡下。'));
+    }
+    const input = h('input', {
+      class: 'album-file-input',
+      type: 'file',
+      accept: 'image/png,image/jpeg',
+      on: {change: function (event) {
+        const files = event.target && event.target.files;
+        chooseAlbumFile(files && files[0] ? files[0] : null);
+      }}
+    });
+    nodes.push(field('选择图片', input, '只支持 PNG / JPEG，最大 5 MB'));
+    if (draft.dataUrl) {
+      const preview = draft.previewError
+        ? statePanel('error', '这张图片预览失败', draft.previewError + '（预览失败不会保存）')
+        : h('div', {class: 'album-import-preview'}, [h('img', {
+          src: draft.dataUrl,
+          alt: '这次选择的图片预览',
+          on: {
+            load: function () {
+              if (!draft.previewOk) { draft.previewOk = true; renderAll(); }
+            },
+            error: function () {
+              draft.previewOk = false;
+              draft.previewError = '浏览器解码不了这张图片，不能保存。';
+              renderAll();
+            }
+          }
+        })]);
+      nodes.push(preview);
+    }
+    if (draft.fileName) {
+      nodes.push(h('p', {class: 'footnote', text: draft.fileName +
+        (draft.bytes ? ' · ' + Math.round(draft.bytes / 1024) + ' KB' : '')}));
+    }
+    const captionInput = h('input', {
+      class: 'input',
+      type: 'text',
+      maxlength: String(ALBUM_MAX_CAPTION),
+      value: draft.caption,
+      placeholder: '这张图对你来说是什么？（可不填）',
+      on: {input: function (event) {
+        draft.caption = event.target.value;
+        const counter = document.getElementById('album-caption-count');
+        if (counter) counter.textContent = draft.caption.length + ' / ' + ALBUM_MAX_CAPTION;
+      }}
+    });
+    nodes.push(field('说明', captionInput, '最多 200 字；这是你自己写的说明，不是图片内容的识别结果'));
+    nodes.push(h('p', {class: 'footnote', id: 'album-caption-count',
+      text: draft.caption.length + ' / ' + ALBUM_MAX_CAPTION}));
+    if (draft.errors.length) nodes.push(statePanel('error', '这次还不能保存', draft.errors[0]));
+    const busy = store.busy === 'album:import';
+    const disabled = busy || !draft.previewOk || !draft.data || draft.caption.length > ALBUM_MAX_CAPTION;
+    nodes.push(h('div', {class: 'form-actions'}, [
+      btn(busy ? '保存中…' : '保存到相册', {variant: 'primary', icon: 'check',
+        disabled: disabled,
+        title: draft.previewOk ? '' : '先选择一张能预览的图片',
+        onClick: submitAlbumImport}),
+      btn('取消', {onClick: function () { goBack(); }})
+    ]));
+    nodes.push(h('p', {class: 'footnote',
+      text: '保存后，图片和这条说明都留在这个实例里；不会抓取、生成或发到外面。'}));
+    return page('导入图片', '先预览，确认能显示再保存', nodes);
+  }
+
+  async function submitAlbumImport() {
+    const draft = store.albumDraft;
+    if (!draft.previewOk || !draft.data) {
+      draft.errors = ['先选择一张能预览的图片。'];
+      renderAll();
+      return;
+    }
+    if (draft.caption.length > ALBUM_MAX_CAPTION) {
+      draft.errors = ['说明最多 200 字。'];
+      renderAll();
+      return;
+    }
+    const guard = canWrite(store.conn);
+    if (!guard.ok) {
+      store.result = {scope: 'album:import', status: 'blocked', message: guard.message};
+      renderAll();
+      return;
+    }
+    const scope = 'album:import';
+    const entry = ops.ensure(scope, {path: '/album/images'});
+    const payload = {
+      caption: draft.caption,
+      content_type: draft.contentType,
+      data: draft.data,
+      operation_key: entry.key
+    };
+    store.busy = scope;
+    store.result = {scope: scope, status: 'pending', message: '正在保存图片…', key: entry.key};
+    renderAll();
+    const res = await request('POST', '/album/images', {csrf: store.conn.csrf, body: payload});
+    finishMutation(scope, deriveMutationOutcome(res), '图片导入');
+    if (store.result && (store.result.status === 'applied' ||
+        store.result.status === 'already_applied')) {
+      store.albumDraft = {caption: '', fileName: '', contentType: '', dataUrl: '', data: '',
+        bytes: 0, previewOk: false, previewError: '', errors: []};
+      store.data.album = null;
+      go('album', {keepResult: true});
+    }
   }
 
   /* 历史一行：点开就是“这一版”，不再新开屏。 */
@@ -12100,6 +12890,10 @@
     if (kind === 'note') {
       store.data.notes = null;
       if (store.screen === 'notes') loadResource('notes');
+    } else if (kind === 'album') {
+      store.data.album = null;
+      store.albumBroken = Object.create(null);
+      if (store.screen === 'album') loadResource('album');
     } else if (kind === 'reference') {
       store.data.references = null;
       if (store.screen === 'references') loadResource('references');
@@ -14357,6 +15151,9 @@
     store: {render: renderStore},
     'store-item': {render: renderStoreItem},
     projects: {render: renderProjects},
+    album: {render: renderAlbum},
+    'album-image': {render: renderAlbumImage},
+    'album-import': {render: renderAlbumImport},
     project: {render: renderProject},
     'project-edit': {render: renderProjectEditor},
     materials: {render: renderMaterials},

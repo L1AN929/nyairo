@@ -31,6 +31,7 @@
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -1128,6 +1129,12 @@ class PhoneService:
             project["practice_surface"] = "/api/phone/practice/%s/%s" % (
                 "reviews" if artifact_type == "review" else "methods",
                 str(answer.get("artifact_id") or artifact_id or ""))
+        if artifact_type == "album":
+            # 相册清单是 owner 的媒体引用，不是可续写的正文；只把这一件指回相册面。
+            project["content"] = ""
+            project["content_available"] = False
+            project["album_surface"] = "/api/phone/album/%s" % str(
+                answer.get("artifact_id") or artifact_id or "")
         return {
             "ok": True,
             "status": STATUS_OK,
@@ -1301,6 +1308,16 @@ class PhoneService:
             if found in ("review", "method"):
                 return found
         try:
+            from .album import is_album_manifest
+        except Exception:  # a broken import is not a project
+            is_album_manifest = None  # type: ignore[assignment]
+        if callable(is_album_manifest):
+            try:
+                if is_album_manifest(content):
+                    return "album"
+            except Exception:
+                return "unknown"
+        try:
             from research_workspace_service import is_material_content, is_research_content
         except Exception:  # a broken import is not a project
             return "unknown"
@@ -1348,6 +1365,9 @@ class PhoneService:
             return rejected("PROJECT_IS_A_PRACTICE_DOCUMENT", artifact_id=artifact_id,
                             artifact_type=artifact_type,
                             detail="回顾/做法要在实践工作台里改；这里写会改写它的第一行标记。")
+        if artifact_type == "album":
+            return rejected("PROJECT_IS_AN_ALBUM_IMAGE", artifact_id=artifact_id,
+                            detail="相册图片不是可续写作品；它只在相册里查看。")
         return None
 
     def close_project(self, *, artifact_id: str, expected_revision: int,
@@ -1362,6 +1382,132 @@ class PhoneService:
         except Exception as exc:
             return unavailable("PROJECTS_UNAVAILABLE", error_type=type(exc).__name__)
         return _project_answer(answer, "PROJECT_CLOSE_REFUSED")
+
+    # -- EP-16: the private album (narrow owner reads + one explicit import) --------------
+
+    def _album(self):
+        """The album transport over this instance's own Supply socket and grant."""
+        from .album import PhoneAlbum
+
+        if not Path(self.supply_socket).exists():
+            raise PhoneUnavailable("SUPPLY_UNAVAILABLE")
+        if not self.artifact_grant_id:
+            raise PhoneUnavailable("ALBUM_UNBOUND")
+        return PhoneAlbum(self.supply_socket, self.subject, grant_id=self.artifact_grant_id)
+
+    def _album_row(self, raw: Any) -> Optional[dict[str, Any]]:
+        """One owner album row, narrowed to the facts the picture surface may show."""
+        if not isinstance(raw, Mapping):
+            return None
+        artifact_id = raw.get("artifact_id")
+        content_type = raw.get("content_type")
+        media = raw.get("media")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            return None
+        if content_type not in ("image/png", "image/jpeg"):
+            return None
+        if not isinstance(media, Mapping):
+            return None
+        name = media.get("name")
+        digest = media.get("sha256")
+        size = media.get("bytes")
+        if not isinstance(name, str) or not isinstance(digest, str):
+            return None
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            return None
+        created = raw.get("created_at")
+        created = float(created) if isinstance(created, (int, float)) and not isinstance(created, bool) else None
+        iso = raw.get("created_at_iso")
+        return {
+            "artifact_id": artifact_id,
+            "caption": raw.get("caption") if isinstance(raw.get("caption"), str) else "",
+            "content_type": content_type,
+            "media": {"name": name, "sha256": digest, "bytes": size},
+            "source": {"origin": "user_import", "declared": "self_declared"},
+            "lifecycle": raw.get("lifecycle") if isinstance(raw.get("lifecycle"), str) else "",
+            "created_at": created,
+            "created_at_iso": iso if isinstance(iso, str) else None,
+            "head_version_id": raw.get("head_version_id") if isinstance(raw.get("head_version_id"), str) else None,
+            "version_number": raw.get("version_number") if isinstance(raw.get("version_number"), int) else None,
+        }
+
+    def album_list(self) -> dict[str, Any]:
+        """``GET``: the pictures this subject imported, newest first.  No bytes, no paths."""
+        try:
+            answer = self._album().list_images()
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return unavailable("ALBUM_UNAVAILABLE", error_type=type(exc).__name__)
+        if answer.get("status") != "OK":
+            return _album_failure(answer, "ALBUM_UNAVAILABLE")
+        rows = answer.get("images")
+        images = [row for row in (self._album_row(entry) for entry in (rows or []))
+                  if row is not None]
+        return {
+            "ok": True,
+            "status": STATUS_OK,
+            "images": images,
+            "count": len(images),
+            "bounded": bool(answer.get("bounded")),
+            "source": "ManagedArtifact",
+            "private_media_included": False,
+        }
+
+    def album_detail(self, artifact_id: str) -> dict[str, Any]:
+        """``GET`` one picture's caption/source facts.  No bytes in this view."""
+        try:
+            answer = self._album().read_image(artifact_id)
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return unavailable("ALBUM_UNAVAILABLE", error_type=type(exc).__name__)
+        if answer.get("status") != "OK":
+            return _album_failure(answer, "ALBUM_IMAGE_UNAVAILABLE")
+        row = self._album_row(answer.get("image"))
+        if row is None:
+            return unavailable("ALBUM_ANSWER_INVALID")
+        return {"ok": True, "status": STATUS_OK, "artifact_id": row["artifact_id"],
+                "image": row, "private_media_included": False}
+
+    def album_image(self, artifact_id: str) -> dict[str, Any]:
+        """``GET`` one picture's real bytes, verified against the owner's own manifest."""
+        try:
+            answer = self._album().read_image_bytes(artifact_id)
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return unavailable("ALBUM_UNAVAILABLE", error_type=type(exc).__name__)
+        if answer.get("status") != "OK":
+            return _album_failure(answer, "ALBUM_IMAGE_UNAVAILABLE")
+        row = self._album_row(answer.get("image"))
+        content_type = answer.get("content_type")
+        data_text = answer.get("data")
+        if row is None or content_type != row["content_type"] or not isinstance(data_text, str):
+            return unavailable("ALBUM_ANSWER_INVALID")
+        try:
+            data = base64.b64decode(data_text.encode("ascii"), validate=True)
+        except Exception:
+            return unavailable("ALBUM_ANSWER_INVALID")
+        if (len(data) != row["media"]["bytes"]
+                or hashlib.sha256(data).hexdigest() != row["media"]["sha256"]):
+            return unavailable("ALBUM_ANSWER_INVALID")
+        return {"ok": True, "status": STATUS_OK, "artifact_id": row["artifact_id"],
+                "content_type": content_type, "data": data, "image": row,
+                "private_media_included": True}
+
+    def album_import(self, *, caption: str, content_type: str, data: str,
+                     operation_key: str) -> dict[str, Any]:
+        """One explicit import.  P sends the user's caption and picture; the owner decides."""
+        try:
+            answer = self._album().import_image(
+                caption=caption, content_type=content_type, data=data,
+                operation_key=operation_key)
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return unavailable("ALBUM_UNAVAILABLE", error_type=type(exc).__name__)
+        return _album_write_answer(answer, "ALBUM_IMPORT_REFUSED")
 
     # -- shares (B's LifeSharingService; P forwards, it decides nothing) -------------------
 
@@ -2259,6 +2405,51 @@ def _project_failure(answer: Mapping[str, Any], default_reason: str) -> dict[str
                 "data": data}
     return {"ok": False, "status": STATUS_UNAVAILABLE, "reason_code": reason.upper()[:64],
             "data": data}
+
+
+def _album_failure(answer: Mapping[str, Any], default_reason: str) -> dict[str, Any]:
+    """Map one owner album *read* refusal onto the phone envelope, keeping its reason."""
+    status = str(answer.get("status") or "")
+    reason = str(answer.get("reason") or "") or default_reason
+    data: dict[str, Any] = {}
+    if answer.get("detail"):
+        data["detail"] = str(answer["detail"])[:200]
+    if status == "NOT_FOUND":
+        return {"ok": False, "status": STATUS_NOT_FOUND,
+                "reason_code": reason.upper()[:64], "data": data}
+    if status == "UNKNOWN":
+        return {"ok": False, "status": STATUS_UNKNOWN,
+                "reason_code": reason.upper()[:64], "data": data}
+    if status in ("DENY", "BLOCKED"):
+        return rejected(reason.upper()[:64], **data)
+    return unavailable(reason.upper()[:64], **data)
+
+
+def _album_write_answer(answer: Mapping[str, Any], default_reason: str) -> dict[str, Any]:
+    """Map one owner album *import* answer onto the phone envelope."""
+    status = str(answer.get("status") or "")
+    reason = str(answer.get("reason") or "") or default_reason
+    data: dict[str, Any] = {}
+    for key in ("artifact_id", "version_id", "version_number", "caption", "content_type",
+                "media", "operation_key", "lifecycle"):
+        if answer.get(key) is not None:
+            data[key] = answer[key]
+    if answer.get("detail"):
+        data["detail"] = str(answer["detail"])[:200]
+    if status == "OK":
+        return envelope(True, STATUS_OK, data)
+    if status == "NO_CHANGE":
+        return envelope(True, STATUS_ALREADY, data)
+    if status == "CONFLICT":
+        return {"ok": False, "status": "conflict",
+                "reason_code": reason.upper()[:64], "data": data}
+    if status == "NOT_FOUND":
+        return {"ok": False, "status": STATUS_NOT_FOUND,
+                "reason_code": reason.upper()[:64], "data": data}
+    if status == "UNKNOWN":
+        return {"ok": False, "status": STATUS_UNKNOWN,
+                "reason_code": reason.upper()[:64], "data": data}
+    return rejected(reason.upper()[:64], **data)
 
 
 def _project_answer(answer: Mapping[str, Any], default_reason: str) -> dict[str, Any]:

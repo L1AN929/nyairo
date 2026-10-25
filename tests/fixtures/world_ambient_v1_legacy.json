@@ -1,0 +1,117 @@
+{
+  "schema_version": "worldgen.ambient.v1",
+  "templates": [
+    {
+      "end_hour": 21,
+      "event_type": "street_traffic",
+      "location_id": "street_front",
+      "start_hour": 7,
+      "summary": "门前街道上偶尔有车经过"
+    },
+    {
+      "end_hour": 18,
+      "event_type": "park_birds",
+      "location_id": "park",
+      "start_hour": 6,
+      "summary": "公园的树上有鸟叫"
+    },
+    {
+      "end_hour": 11,
+      "event_type": "cafe_morning_grind",
+      "location_id": "cafe",
+      "start_hour": 8,
+      "summary": "咖啡店刚开门，磨豆机响了一会儿"
+    },
+    {
+      "end_hour": 17,
+      "event_type": "cafe_afternoon_seats",
+      "location_id": "cafe",
+      "start_hour": 13,
+      "summary": "午后靠窗的座位坐了人"
+    },
+    {
+      "end_hour": 13,
+      "event_type": "reading_point_shelf_cart",
+      "location_id": "reading_point",
+      "start_hour": 10,
+      "summary": "书架旁停着一辆待上架的书车"
+    },
+    {
+      "end_hour": 19,
+      "event_type": "reading_point_quiet",
+      "location_id": "reading_point",
+      "start_hour": 14,
+      "summary": "阅读角里只有翻书声"
+    },
+    {
+      "end_hour": 12,
+      "event_type": "park_bench_newspaper",
+      "location_id": "park",
+      "start_hour": 7,
+      "summary": "长椅上摊着一份别人留下的报纸"
+    },
+    {
+      "end_hour": 21,
+      "event_type": "park_evening_walkers",
+      "location_id": "park",
+      "start_hour": 17,
+      "summary": "傍晚有人绕着步道散步"
+    },
+    {
+      "end_hour": 9,
+      "event_type": "street_corner_crossing",
+      "location_id": "street_corner",
+      "start_hour": 7,
+      "summary": "早高峰时段路口等灯的人多了些"
+    },
+    {
+      "end_hour": 20,
+      "event_type": "street_corner_evening",
+      "location_id": "street_corner",
+      "start_hour": 17,
+      "summary": "放学后路口的声音比平时杂"
+    },
+    {
+      "end_hour": 8,
+      "event_type": "street_front_sweeper",
+      "location_id": "street_front",
+      "start_hour": 6,
+      "summary": "清晨有清洁工沿人行道扫过"
+    },
+    {
+      "end_hour": 18,
+      "event_type": "street_front_shadow",
+      "location_id": "street_front",
+      "start_hour": 15,
+      "summary": "楼影盖住了半条人行道"
+    },
+    {
+      "end_hour": 18,
+      "event_type": "cafe_closing_chairs",
+      "location_id": "cafe",
+      "start_hour": 17,
+      "summary": "店员开始把外面的椅子搬回店里"
+    },
+    {
+      "end_hour": 20,
+      "event_type": "reading_point_return_cart",
+      "location_id": "reading_point",
+      "start_hour": 19,
+      "summary": "闭馆前有人把翻过的书放回推车"
+    },
+    {
+      "end_hour": 8,
+      "event_type": "park_lawn_sprinkler",
+      "location_id": "park",
+      "start_hour": 6,
+      "summary": "草坪边的喷头在浇水"
+    },
+    {
+      "end_hour": 22,
+      "event_type": "park_lamp_on",
+      "location_id": "park",
+      "start_hour": 18,
+      "summary": "公园的灯亮起来"
+    }
+  ]
+}

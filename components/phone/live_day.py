@@ -216,6 +216,8 @@ def _recorded_ticks(state_root: Path | str) -> int:
     except (TypeError, ValueError):
         recorded = 0
     for row in _read_jsonl_tail(Path(state_root) / "resident_journal.jsonl", 5):
+        if row.get("kind") == "cognition_diagnostic":
+            continue
         try:
             recorded = max(recorded, int(row.get("tick") or 0))
         except (TypeError, ValueError):
@@ -546,7 +548,8 @@ def segment_summary(root: Path | str, *, phone: Optional[Mapping[str, Any]] = No
                      if start is None or (_parse(wake.get("at")) or start) >= start]
     wakes = segment_wakes[-max(1, int(limit)):]
     ticks = [row for row in _read_jsonl_tail(resolved_state_root / "resident_journal.jsonl", 20)
-             if start is None or (_parse(row.get("at")) or start) >= start][-5:]
+             if row.get("kind") != "cognition_diagnostic"
+             and (start is None or (_parse(row.get("at")) or start) >= start)][-5:]
     counters = dict(summary.get("counters") or {})
     baseline = dict(summary.get("baseline") or {})
     model = dict(summary.get("model_calls_detail") or {})

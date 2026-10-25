@@ -75,6 +75,9 @@ rc1（`v0.3.0-rc1` = `41e818fa…`）里世界与身体各自都有真东西，�
 - **给 substrate 加 `pose_since` 以测量姿势持续时长**（review 的建议）：能让 `posture_seconds=60` 的假设消失。
   否决——本轮不改 substrate schema 是硬约束（避免第二真相、避免对旧档做迁移写），而 60s 只影响 `comfort/tension`
   的一小段既有数学；把「姿势多久」留成已知上限，比为了它动全库格式更保守。
+  （2026-10-24 更新：60s 假设已由 [持续姿态积分](2026-10-24-body-posture-elapsed-integration.md)
+  按 Body 已持久游标 + World `before.pose` 取代，仍未新增 `pose_since`；本条关于"不改 substrate schema"
+  的拒绝理由保持有效，不作废。）
 - **让 `snapshot()` 复用 `observe_world`/`read_move_state`**：一行就能拿到最丰富的观察。
   否决——这两个入口会**顺手结算到达**（`wtd.realize_due_travel`），GET 就变成写路径；「看一眼就到达」是不可接受的语义。
 - **给手机建一份世界/身体影子档（`state/world_phone_world.json`）**：读起来快，也能记住「这个 key 当时请求了什么」。
@@ -96,7 +99,10 @@ rc1（`v0.3.0-rc1` = `41e818fa…`）里世界与身体各自都有真东西，�
 - **代价**：世界侧多了一条 `REST` 动词与一个 `_rest_available` 能力投影；`act()` 与 `tick()` 变长（多了 pre-flight、
   到达结算、pending 补结算）；`submit_local_owner_action` 的拒绝话术从 `NOT_EXPOSED` 变成具体原因
   （`test_world_consume.py` 的 `NOT_EXPOSED` 断言走的是 `submit_action`，未受影响）。
-- **已知上限**：姿势持续时长仍是既有 60s 假设（substrate 无 `pose_since`）；`sensory_load`/`warmth` 仍无世界来源；
+- **已知上限**：姿势持续时长仍是既有 60s 假设（substrate 无 `pose_since`）；
+        **2026-10-24 更新：该 60s 假设已由 [持续姿态积分](2026-10-24-body-posture-elapsed-integration.md)
+        按已记账 elapsed 取代，未新增 substrate 字段，本条对 `pose_since` 的拒绝理由不变**；
+        `sensory_load`/`warmth` 仍无世界来源；
   MOVE 只走一条边；`pending` 记录会让 consequences 账本多一条（这是为了崩溃窗口不丢负荷而故意留的）；
   `snapshot()` 每次都读整份执行账本（与既有 `reconcile` 同量级）。
 - **升级触发条件**：若将来要「坐了三小时」这类真实姿势测量，应先在 substrate 加 `pose_since` 并写迁移

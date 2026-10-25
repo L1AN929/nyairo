@@ -162,6 +162,11 @@ def cmd_owner_world(argv: list[str]) -> int:
     parser.add_argument("--world-home", required=True)
     parser.add_argument("--package", default="")
     parser.add_argument("--tick-seconds", type=float, default=3600.0)
+    #: 显式压缩演示模式：World/Body 进程必须读与 Life 同一个业务时钟域。
+    #: 不传即普通真实时间路径，行为不变。
+    parser.add_argument("--business-clock", default="")
+    parser.add_argument("--clock-domain", default="")
+    parser.add_argument("--clock-run-id", default="")
     args = parser.parse_args(argv)
 
     for entry in ("components/world/service", "components/world/scripts"):
@@ -182,7 +187,27 @@ def cmd_owner_world(argv: list[str]) -> int:
     except wcfg.ConfigError as exc:
         sys.stderr.write("world-body config refused: %s\n" % exc)
         return EXIT_USAGE
+    clock = None
+    if str(args.business_clock or "").strip():
+        # 同一个域：缺文件/损坏/域不匹配一律拒绝启动，绝不悄悄退回系统墙钟。
+        for entry in (str(REPO_ROOT / "components" / "life" / "scripts"),):
+            if entry not in sys.path:
+                sys.path.insert(0, entry)
+        import demo_business_clock as dbc
+
+        try:
+            client = dbc.BusinessClockClient(
+                args.business_clock,
+                expected_domain=(str(args.clock_domain or "").strip() or None),
+                expected_run_id=(str(args.clock_run_id or "").strip() or None))
+            client.load()
+        except dbc.BusinessClockError as exc:
+            sys.stderr.write("world-body clock refused: %s: %s\n"
+                             % (exc.reason_code, exc.detail))
+            return EXIT_REFUSED
+        clock = client.now
     service = wbsvc.WorldBodyService(config, tick_seconds=float(args.tick_seconds),
+                                     clock=clock,
                                      instance_id="phone-world:%d" % os.getpid())
     try:
         service.startup()

@@ -42,6 +42,7 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -112,6 +113,26 @@ RECOVERY_ACTIONS = ("REST",)
 
 #: Actions whose posture consequence is worth recording.
 POSTURE_ACTIONS = ("POSE", "MOVE")
+
+#: Posture is integrated over the interval the body owner has *actually*
+#: accounted for: ``[body.last_advanced_at, at]``.  The interval is attributed
+#: to the World-measured pose in force at its end (the action's ``before.pose``),
+#: never to an inferred "pose since" instant.  A missing anchor means no
+#: interval: the first settlement after a fresh/old runtime charges nothing and
+#: only establishes the cursor.  Every owner advance that moves that cursor
+#: (an action settlement, the environment tick, an arrival) must also settle the
+#: interval it consumes, or those seconds are silently lost; a measured walk is
+#: billed as movement and only its static remainder as posture, so no second is
+#: ever billed twice.
+POSTURE_INTERVAL_SOURCE = "elapsed_since_last_body_advance"
+POSTURE_MAX_SECONDS = MAX_MEASUREMENT_SECONDS
+
+#: An UNKNOWN POSE/MOVE may or may not have changed the pose at its own instant,
+#: so the interval that ends at a later settlement cannot be attributed to any
+#: one pose.  The window is closed with an input-free cursor advance and the
+#: pending record carries this note; a later reconciliation charges no posture
+#: for the same window instead of inventing one.
+POSTURE_INTERVAL_UNKNOWN_NOTE = "posture_interval_unknown:no_attribution"
 
 STATUS_SUCCESS = frozenset({"applied", "already_applied"})
 STATUS_FAILURE = frozenset({"rejected", "failed", "disabled", "noop"})
@@ -210,6 +231,71 @@ def _movement_measurement(
         return MOVEMENT_SECONDS_BY_ACTION[action], MEASUREMENT_ASSUMED
     return round(seconds, 3), str(source)
 
+
+def _posture_interval(elapsed_seconds: Optional[float]) -> float:
+    """Bound the accounted interval.  No number -> no posture load."""
+
+    if elapsed_seconds is None or isinstance(elapsed_seconds, bool):
+        return 0.0
+    try:
+        value = float(elapsed_seconds)
+    except (TypeError, ValueError):
+        return 0.0
+    if not (0.0 < value < float("inf")) or value != value:  # NaN guard
+        return 0.0
+    return round(min(value, POSTURE_MAX_SECONDS), 3)
+
+
+def _elapsed_since(anchor: Any, at: Any) -> Optional[float]:
+    """Seconds between the body's persisted cursor and this settlement.
+
+    ``None`` when either side is missing or unreadable: an unknown anchor is
+    never backfilled.  A cursor in the future yields ``None`` (no negative load).
+    """
+    if anchor is None or at is None:
+        return None
+
+    def _instant(value: Any) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        try:
+            text = str(value).strip().replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(text)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    start = _instant(anchor)
+    end = _instant(at)
+    if start is None or end is None:
+        return None
+    seconds = (end - start).total_seconds()
+    return seconds if seconds > 0.0 else 0.0
+
+
+def _pose_in_force(result: Mapping[str, Any], pose: Optional[str]) -> Optional[str]:
+    """The pose the body was in for the interval that ends now.
+
+    ``before`` is the World's own measured model *before* this action, so for a
+    POSE change it is the pose that actually held during the elapsed interval.
+    ``after``/``pose`` are only fallbacks for callers that provide no before
+    snapshot; they are never used to backfill history.
+    """
+
+    before = result.get("before")
+    if isinstance(before, Mapping):
+        candidate = before.get("pose")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip().lower()
+    if isinstance(pose, str) and pose.strip():
+        return pose.strip().lower()
+    after = result.get("after")
+    if isinstance(after, Mapping):
+        candidate = after.get("pose")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip().lower()
+    return None
+
 # --------------------------------------------------------------------------
 # the mapping  (Resolver facts -> BodyRuntimeInput)
 # --------------------------------------------------------------------------
@@ -223,8 +309,15 @@ def build_consequence(
     pose: Optional[str] = None,
     object_id: Optional[str] = None,
     applied_at: Optional[str] = None,
+    elapsed_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
-    """Derive the body input from a canonical result.  Facts in, facts out."""
+    """Derive the body input from a canonical result.  Facts in, facts out.
+
+    ``elapsed_seconds`` is the body owner's accounted interval ending at this
+    settlement (see ``POSTURE_INTERVAL_SOURCE``).  It replaces the old fixed
+    ``posture_seconds=60`` assumption; ``None`` means "no trustworthy anchor",
+    which charges no posture rather than inventing one.
+    """
 
     execution_id = _text(result.get("execution_id"), "execution_id")
     action_type = result.get("action") or result.get("action_type")
@@ -267,6 +360,11 @@ def build_consequence(
         return record
 
     inputs: list[dict[str, Any]] = []
+    interval = _posture_interval(elapsed_seconds)
+    posture_pose = _pose_in_force(result, pose)
+    if posture_pose is None:
+        # no measured pose -> no attribution; a default strain would be invented
+        interval = 0.0
 
     if action in MOVEMENT_SECONDS_BY_ACTION:
         seconds, measurement_source = _movement_measurement(action, world_facts)
@@ -293,6 +391,30 @@ def build_consequence(
             record["notes"].append(
                 "movement_load_measured:%ss:%s" % (seconds, measurement_source)
             )
+        if action == "MOVE" and interval > 0.0:
+            # The measured walk is billed as movement; only the static remainder
+            # of the accounted interval (time spent in the old pose *before*
+            # departure) is billed as posture.  The walk seconds are never charged
+            # twice, and pre-departure stillness is never dropped.
+            static = round(max(0.0, interval - seconds), 3)
+            if static > 0.0 and posture_pose:
+                inputs.append(
+                    {
+                        "class": "PHYSICAL_RESULT",
+                        "movement_duration_seconds": 0.0,
+                        "effort": EFFORT_BY_ACTION[action],
+                        "posture_seconds": static,
+                        "pose": posture_pose,
+                        "execution_id": execution_id,
+                    }
+                )
+                record["notes"].append(
+                    "posture_before_departure:%.3fs:pose=%s" % (static, posture_pose)
+                )
+            elif interval > 0.0:
+                record["notes"].append(
+                    "posture_covered_by_movement:%.3fs" % interval
+                )
 
     elif action in ("PICK_UP", "PLACE", "CONSUME"):
         # a small manipulation: resource context, deliberately tiny load so the
@@ -301,27 +423,45 @@ def build_consequence(
         # of magnitude as picking one portion up -- never a meal duration and
         # never an intake/nutrition input.
         seconds = CONSUME_OPERATION_SECONDS if action == "CONSUME" else 2.0
-        inputs.append(
-            {
-                "class": "PHYSICAL_RESULT",
-                "movement_duration_seconds": seconds,
-                "effort": EFFORT_BY_ACTION[action],
-                "execution_id": execution_id,
-            }
-        )
+        item = {
+            "class": "PHYSICAL_RESULT",
+            "movement_duration_seconds": seconds,
+            "effort": EFFORT_BY_ACTION[action],
+            "execution_id": execution_id,
+            # the accounted interval since the last settlement, in the pose that
+            # actually held; continuous posture integration, not a per-action 60s
+            "posture_seconds": interval,
+        }
+        if posture_pose:
+            item["pose"] = posture_pose
+        inputs.append(item)
         record["resource_ref"] = object_id or result.get("object_id")
         record["notes"].append(
             CONSUME_LOAD_NOTE if action == "CONSUME" else "manipulation_load_minimal"
         )
+        if interval > 0.0:
+            record["notes"].append(
+                "posture_elapsed:%.3fs:pose=%s" % (interval, posture_pose or "unknown")
+            )
 
-    if action in POSTURE_ACTIONS and pose:
-        inputs.append(
-            {
-                "class": "PHYSICAL_RESULT",
-                "posture_seconds": 60.0,
-                "pose": pose,
-                "execution_id": execution_id,
-            }
+    if action == "POSE":
+        # The interval that just ended was spent in the *old* pose; the new pose
+        # begins at this settlement and is billed by the next one.  A zero
+        # interval is still recorded (zero load) so the cursor is established.
+        item = {
+            "class": "PHYSICAL_RESULT",
+            "movement_duration_seconds": 0.0,
+            "effort": EFFORT_BY_ACTION[action],
+            "posture_seconds": interval,
+            "execution_id": execution_id,
+        }
+        if posture_pose:
+            item["pose"] = posture_pose
+        inputs.append(item)
+        record["notes"].append(
+            "posture_elapsed:%.3fs:pose=%s" % (interval, posture_pose or "unknown")
+            if interval > 0.0
+            else "posture_elapsed_zero:first_or_same_instant"
         )
 
     if action in RECOVERY_ACTIONS:
@@ -590,6 +730,13 @@ def apply_for_execution(
                 "transition": None,
             }
 
+        # A prior UNKNOWN posture-relevant result already closed its own window
+        # without attribution; the reconciled record must not re-claim it.
+        prior_notes = list((existing or {}).get("notes") or [])
+        unattributable = any(
+            isinstance(item, str) and item.startswith(POSTURE_INTERVAL_UNKNOWN_NOTE)
+            for item in prior_notes
+        )
         record = build_consequence(
             result,
             body_id=body_id,
@@ -597,7 +744,18 @@ def apply_for_execution(
             pose=pose,
             object_id=object_id,
             applied_at=str(at),
+            # the same cursor ``apply_consequence`` advances from: one interval,
+            # one owner, no second clock
+            elapsed_seconds=(
+                0.0
+                if unattributable
+                else _elapsed_since(runtime_state.get("last_advanced_at"), at)
+            ),
         )
+        if unattributable:
+            record["notes"].append(
+                "posture_interval_unknown:reconciled_without_attribution"
+            )
         if record["state"] == CONSEQUENCE_STATE_SKIPPED:
             ledger.append_unlocked(record)
             return {
@@ -608,14 +766,51 @@ def apply_for_execution(
                 "transition": None,
             }
         if record["verdict"] == "UNKNOWN":
+            if action in POSTURE_ACTIONS:
+                # The pose in force after this instant is not known until the
+                # result is reconciled, so the window is closed here: it is
+                # never later billed to ``before.pose`` from the end state.
+                record["notes"].append(POSTURE_INTERVAL_UNKNOWN_NOTE)
             ledger.append_unlocked(record)
-            return {
+            outcome: dict[str, Any] = {
                 "applied": False,
                 "reason": "pending_reconciliation",
                 "consequence": record,
                 "state": runtime_state,
                 "transition": None,
             }
+            if action in POSTURE_ACTIONS:
+                before = br.validate_runtime(runtime_state)
+                anchor = before["last_advanced_at"]
+                elapsed = _elapsed_since(anchor, at)
+                if anchor is None or elapsed is not None:
+                    # An unreadable or future cursor makes no claim either way.
+                    moved = br.advance(
+                        before,
+                        anchor or at,
+                        at,
+                        [],
+                        runtime_version or before["runtime_version"],
+                    )
+                    # Bounded, input-free advance: no load is claimed, only the
+                    # boundary is established (the same idiom as an unknown
+                    # environment gap).  The state moves even when no somatic
+                    # variable changed -- that is the point of a boundary.
+                    outcome["state"] = moved["state"]
+                    outcome["cursor_advanced"] = True
+                    outcome["transition"] = br.build_transition(
+                        before,
+                        moved["state"],
+                        at=at,
+                        cause_class=br.CAUSE_TIME_ADVANCE,
+                        cause_classes=moved["cause_classes"],
+                        input_summary={
+                            **moved["inputs_summary"],
+                            "execution_id": execution_id,
+                            "posture_interval_unknown": True,
+                        },
+                    )
+            return outcome
 
         outcome = apply_consequence(
             record, runtime_state, at=at, runtime_version=runtime_version
@@ -778,6 +973,8 @@ def advance_environment(
     at: Any,
     min_seconds: float = MIN_ENVIRONMENT_SECONDS,
     max_gap_seconds: float = MAX_ENVIRONMENT_GAP_SECONDS,
+    posture: Optional[str] = None,
+    movement_in_flight_since: Optional[str] = None,
 ) -> dict[str, Any]:
     """Advance the body by the declared room light, at most once per tick.
 
@@ -785,6 +982,20 @@ def advance_environment(
     rate constants, thresholds and signal bands are untouched -- this only feeds
     the existing ``ENVIRONMENT.sensory_intensity`` input.  A ``dim`` lamp that
     never reaches ``sensory_load_elevated`` is a correct outcome, not a bug.
+
+    ``posture`` is the World-measured pose in force (from the substrate owner).
+    When given, the same advance also bills the accounted interval since
+    ``last_advanced_at`` as posture, so a tick between two POSE actions cannot
+    silently consume those seconds.  It is *not* billed while a recovery session
+    is active (REST owns that interval; passive posture must not interrupt it)
+    and never across an unknown gap or an unreadable clock.
+
+    ``movement_in_flight_since`` (a departure instant) does **not** stop the tick:
+    the light still lands on time.  It only bounds the posture interval at the
+    departure, so the walk's own seconds are never billed twice and the stillness
+    before departure is billed once, here, instead of being swallowed by the
+    cursor move.  The arrival settlement then sees a cursor at/after departure
+    and bills the measured walk without a second static remainder.
     """
 
     from datetime import datetime, timedelta
@@ -824,6 +1035,8 @@ def advance_environment(
         }
 
     gap_unknown = elapsed > float(max_gap_seconds)
+    posture_seconds = 0.0
+    posture_pose = None
     if gap_unknown:
         # The process was not running across this window: what the light did in
         # between is unknown.  We therefore apply **no** environment input and
@@ -849,11 +1062,39 @@ def advance_environment(
                 "anchor": anchor.isoformat(),
                 "wrote": False,
             }
+        posture_seconds = 0.0
+        posture_pose = None
+        candidate = str(posture or "").strip().lower()
+        posture_end_dt = now_dt
+        if movement_in_flight_since:
+            departure = _instant_of(movement_in_flight_since)
+            if departure is not None:
+                if departure.tzinfo is None:
+                    departure = departure.replace(tzinfo=now_dt.tzinfo)
+                # Only the static interval before departure is attributable here;
+                # the walk itself is settled by the arrival.
+                posture_end_dt = min(now_dt, departure)
+        if candidate and before["recovery"]["state"] != "active":
+            # the body cursor, not the lamp's `since`: the pose held for the
+            # whole accounted interval even if the lamp was switched on later
+            posture_seconds = _posture_interval(
+                (posture_end_dt - last_dt).total_seconds()
+            )
+            if posture_seconds > 0.0:
+                posture_pose = candidate
+                inputs = [inputs, {
+                    "class": "PHYSICAL_RESULT",
+                    "movement_duration_seconds": 0.0,
+                    "effort": "light",
+                    "posture_seconds": posture_seconds,
+                    "pose": candidate,
+                    "execution_id": "environment-tick:%s" % now_dt.isoformat(),
+                }]
         result = br.advance(
             before,
             anchor.isoformat(),
             now_dt.isoformat(),
-            [inputs],
+            inputs,
             before["runtime_version"],
         )
 
@@ -877,6 +1118,10 @@ def advance_environment(
             "environment_model": room.ENVIRONMENT_MODEL,
             "observation_anchor": anchor.isoformat(),
             "environment_gap_unknown": bool(gap_unknown),
+            "posture_interval_seconds": round(posture_seconds, 3),
+            "posture_pose": posture_pose,
+            "posture_interval_source": POSTURE_INTERVAL_SOURCE if posture_pose else None,
+            "movement_in_flight_since": movement_in_flight_since,
         },
     )
     return {

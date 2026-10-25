@@ -89,6 +89,10 @@ STATUS_UNAVAILABLE = "unavailable"
 #: Why a history is short (never why a version is missing).
 REASON_PORT_LACKS_LIST_VERSIONS = "PORT_LACKS_LIST_VERSIONS"
 REASON_ARTIFACT_EXCLUDED = "PROJECT_ARTIFACT_EXCLUDED"
+#: An EP-16 album picture is a real artifact of hers, but it is a media manifest -- never a work
+#: that may be continued, compared, derived or closed from the project surface.
+REASON_ALBUM_IMAGE = "PROJECT_IS_AN_ALBUM_IMAGE"
+ALBUM_MARKER = "album.image.v1"
 REASON_OPERATION_NEVER_LANDED = "OPERATION_NEVER_LANDED"
 REASON_RESOLUTION_INCONCLUSIVE = "RESOLUTION_INCONCLUSIVE"
 REASON_RECONCILED = "RECONCILED_AFTER_UNKNOWN"
@@ -162,6 +166,35 @@ def project_operation_key(*parts: Any) -> str:
         raise ProjectContractRefused("project_operation_key requires at least one part")
     digest = operation_key_for("private_project", *cleaned)
     return "project:%s" % digest.split(":", 1)[-1]
+
+
+def is_album_manifest(content: Any) -> bool:
+    """True only for the owner's structured album manifest (classification, not authentication).
+
+    The project surface must not present a picture's media manifest as her text.  A malformed or
+    unrelated JSON document is simply not an album manifest; an unreadable answer is handled by
+    the caller as "cannot classify", never as "not a work".
+    """
+    if not isinstance(content, str) or not content or len(content) > 4096:
+        return False
+    try:
+        doc = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(doc, dict) or doc.get("kind") != ALBUM_MARKER:
+        return False
+    media = doc.get("media")
+    source = doc.get("source")
+    return (
+        isinstance(doc.get("caption"), str)
+        and doc.get("content_type") in ("image/png", "image/jpeg")
+        and isinstance(media, dict)
+        and isinstance(media.get("name"), str)
+        and isinstance(media.get("sha256"), str)
+        and isinstance(source, dict)
+        and source.get("origin") == "user_import"
+        and source.get("declared") == "self_declared"
+    )
 
 
 def _text(value: Any, name: str, *, limit: int, allow_empty: bool = False) -> str:
@@ -397,6 +430,29 @@ class PrivateProjectService:
     def is_excluded(self, artifact_id: str) -> bool:
         return str(artifact_id) in self.excluded_artifact_ids
 
+    def _is_album_artifact(self, artifact_id: str) -> bool:
+        """Whether this artifact's current head is an album media manifest.
+
+        A read failure answers ``False``: a caller that cannot classify must let the owner answer
+        normally rather than silently hide one of her works.  Only a positively parsed album
+        manifest is excluded from the text-work surface.
+        """
+        try:
+            view = self.port.read_artifact(artifact_id)
+        except Exception:
+            return False
+        return is_album_manifest((view or {}).get("content"))
+
+    def _album_refusal(self, artifact_id: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status": STATUS_NOT_FOUND,
+            "reason_code": REASON_ALBUM_IMAGE,
+            "detail": "an album picture is a media manifest, not a text work",
+            "artifact_id": str(artifact_id),
+            "source": SOURCE_OWNER,
+        }
+
     # -- reads ---------------------------------------------------------------------------
 
     def list_projects(self, *, include_archived: bool = True,
@@ -416,13 +472,19 @@ class PrivateProjectService:
             return self._unavailable("PROJECT_PORT_ERROR", exc)
         projects: list[dict[str, Any]] = []
         counts = {"total": 0, "active": 0, "archived": 0, "excluded": 0}
+        scanned = 0
         for row in rows or ():
             if not isinstance(row, Mapping):
                 continue
             artifact_id = str(row.get("artifact_id") or "")
             if not artifact_id:
                 continue
-            if self.is_excluded(artifact_id):
+            # Bounded classification: every album picture needs one head read, so the scan stops
+            # after a small multiple of this surface's own page size.
+            scanned += 1
+            if scanned > self.max_list * 4:
+                break
+            if self.is_excluded(artifact_id) or self._is_album_artifact(artifact_id):
                 counts["excluded"] += 1
                 continue
             counts["total"] += 1
@@ -483,6 +545,8 @@ class PrivateProjectService:
             return {"ok": False, "status": STATUS_NOT_FOUND,
                     "reason_code": "PROJECT_NOT_FOUND", "detail": "", "artifact_id": target,
                     "source": SOURCE_OWNER}
+        if is_album_manifest(content):
+            return self._album_refusal(target)
         project = self._project_row(artifact)
         project["head_version_id"] = head.get("version_id") or artifact.get("head_version_id")
         project["version_number"] = head.get("version_number")
@@ -535,6 +599,10 @@ class PrivateProjectService:
             return {"ok": False, "status": STATUS_NOT_FOUND,
                     "reason_code": REASON_ARTIFACT_EXCLUDED, "artifact_id": target,
                     "source": SOURCE_OWNER, "entries": [], "complete": False}
+        if self._is_album_artifact(target):
+            answer = self._album_refusal(target)
+            answer.update({"entries": [], "complete": False})
+            return answer
         try:
             view = self.port.read_artifact(target)
         except (LifeArtifactUnavailable, ArtifactOwnerRefused, LifeArtifactError) as exc:
@@ -586,6 +654,10 @@ class PrivateProjectService:
             return {"ok": False, "status": STATUS_NOT_FOUND,
                     "reason_code": REASON_ARTIFACT_EXCLUDED, "artifact_id": target,
                     "version_id": str(version_id or ""), "source": SOURCE_OWNER}
+        if self._is_album_artifact(target):
+            answer = self._album_refusal(target)
+            answer["version_id"] = str(version_id or "")
+            return answer
         answer = self._read_version_raw(target, version_id)
         if not answer.get("ok"):
             return answer
@@ -859,6 +931,10 @@ class PrivateProjectService:
         laundered by continuing it.
         """
         target = _artifact_id(artifact_id)
+        if self._is_album_artifact(target):
+            answer = self._album_refusal(target)
+            answer["provenance"] = None
+            return answer
         try:
             page = self._list_versions(target, limit=1, before_version_number=2)
         except ProjectContractRefused as exc:
@@ -1313,6 +1389,8 @@ class PrivateProjectService:
             return {"ok": False, "status": STATUS_NOT_FOUND,
                     "reason_code": REASON_ARTIFACT_EXCLUDED, "artifact_id": target,
                     "source": SOURCE_OWNER}
+        if self._is_album_artifact(target):
+            return self._album_refusal(target)
         if not isinstance(expected_head, str) or not expected_head.strip():
             raise ProjectContractRefused(
                 "expected_head is required: pass the head_version_id you read before editing")
@@ -1356,6 +1434,8 @@ class PrivateProjectService:
             return {"ok": False, "status": STATUS_NOT_FOUND,
                     "reason_code": REASON_ARTIFACT_EXCLUDED, "artifact_id": target,
                     "source": SOURCE_OWNER}
+        if self._is_album_artifact(target):
+            return self._album_refusal(target)
         if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) \
                 or expected_revision < 1:
             raise ProjectContractRefused(

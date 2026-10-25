@@ -33,7 +33,7 @@ import errno
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -92,12 +92,16 @@ class WorldBodyService:
         config: Any,
         *,
         now: Optional[Any] = None,
+        #: 显式压缩演示模式的业务时钟（无参 callable）。``None`` 是普通真实时间路径：
+        #: 本服务继续用系统墙钟；非 None 时业务时刻（暴露/恢复/到期）读同一个域。
+        clock: Optional[Callable[[], datetime]] = None,
         instance_id: Optional[str] = None,
         socket_path: Optional[pathlib.Path | str] = None,
         tick_seconds: float = DEFAULT_TICK_SECONDS,
     ):
         self.config = config
         self._now = now
+        self._clock = clock
         self.instance_id = instance_id
         self.tick_seconds = float(tick_seconds)
         self.socket_path = pathlib.Path(socket_path) if socket_path else (
@@ -182,6 +186,8 @@ class WorldBodyService:
     # time
     # ------------------------------------------------------------------
     def _moment(self) -> datetime:
+        if self._clock is not None:
+            return self._clock()
         return self._now if self._now is not None else datetime.now(timezone.utc)
 
     # ------------------------------------------------------------------
@@ -214,12 +220,14 @@ class WorldBodyService:
         step("paths", "runtime=%s home=%s" % (cfg.runtime_root, cfg.world_home))
 
         # 3. authority (single writer, fail closed) ------------------------
+        # 权威是内核 flock 决定的（与时间无关）；marker 的 ``acquired_at`` 属于安全/审计面，
+        # 显式压缩演示模式也写真实墙钟，不写业务逻辑时刻。
         self.lease = AuthorityLease(
             cfg.run_dir,
             service_name=SERVICE_UNIT,
             instance_id=self.instance_id,
             world_home=cfg.world_home,
-            now=self._moment(),
+            now=datetime.now(timezone.utc),
         )
         try:
             authority = self.lease.acquire()
@@ -356,6 +364,42 @@ class WorldBodyService:
             return store.load_with_migration()[0]
         except Exception:
             return None
+
+    def _measured_pose(self) -> Optional[str]:
+        """The World substrate's pose, or ``None`` when it cannot be claimed.
+
+        A pose is only attributed to an accounted Body interval when the World
+        owner still holds one.  Nothing is inferred from the body cursor or from
+        the last action's name.
+        """
+
+        substrate = self._live_substrate() or {}
+        pose = substrate.get("pose")
+        if isinstance(pose, str) and pose.strip():
+            return pose.strip().lower()
+        return None
+
+    def _walk_in_flight(self) -> bool:
+        try:
+            return bool(self.bcon.pending_movements(self.consequence_ledger))
+        except Exception:  # noqa: BLE001 - unreadable ledger: make no posture claim
+            return True
+
+    def _in_flight_movement(self) -> Optional[str]:
+        """Departure instant of an in-flight walk whose load is still owed.
+
+        The consequence ledger's own pending record carries ``applied_at`` (the
+        departure) and ``movement_settlement=pending``; nothing is inferred from
+        the action name or from the body cursor.
+        """
+
+        stamps = [
+            str(record.get("applied_at"))
+            for record in self.bcon.pending_movements(self.consequence_ledger)
+            if record.get("movement_settlement") == "pending"
+            and record.get("applied_at")
+        ]
+        return min(stamps) if stamps else None
 
     def reconcile_now(self, *, persist: bool = False) -> dict[str, Any]:
         from world_body_reconcile import reconcile_startup
@@ -587,7 +631,9 @@ class WorldBodyService:
                 payload["consequence_id"] = (outcome.get("consequence") or {}).get(
                     "consequence_id"
                 )
-                if outcome["applied"]:
+                if outcome["applied"] or outcome.get("cursor_advanced"):
+                    # an UNKNOWN POSE/MOVE closes its window with an
+                    # input-free cursor advance; it must be persisted too
                     self.body_state = self._persist_consequence(outcome)
                 if action == "MOVE":
                     payload["movement_settlement"] = (
@@ -644,14 +690,21 @@ class WorldBodyService:
             "reason": outcome.get("reason"),
             "consequence_id": (outcome.get("consequence") or {}).get("consequence_id"),
         }
-        if outcome["applied"]:
+        if outcome["applied"] or outcome.get("cursor_advanced"):
             self.body_state = self._persist_consequence(outcome)
         return payload
     def _recovery_open(self) -> bool:
         return (self.body_state or {}).get("recovery", {}).get("state") == "active"
 
     def _advance_due(self, *, force: bool = False) -> Optional[dict[str, Any]]:
-        """Advance only when there is real work: an open recovery session."""
+        """Advance only when there is real work: an open recovery session.
+
+        A REST session owns its interval: the catch-up moves the Body cursor but
+        deliberately bills no posture, because passive posture strain must not
+        be re-read as the physical load that interrupts recovery.  Idle ticks
+        outside recovery advance nothing at all, so the interval stays available
+        to the next real settlement instead of being dropped.
+        """
 
         state = self.body_state
         if state is None:
@@ -1086,13 +1139,25 @@ class WorldBodyService:
             return None
         if self.body_state is None:
             return None
+        try:
+            walk_since = self._in_flight_movement()
+        except Exception:  # noqa: BLE001 - unreadable ledger: make no posture claim
+            return {"advanced": False, "reason": "movement_state_unreadable", "wrote": False}
         now = self._moment()
         try:
             light = room.light_for_home(self.config.world_home, now=now)
         except Exception:  # noqa: BLE001 - unknown light is not an input
             return {"advanced": False, "reason": "light_unavailable", "wrote": False}
         outcome = self.bcon.advance_environment(
-            runtime_state=self.body_state, light=light, at=now.isoformat()
+            runtime_state=self.body_state,
+            light=light,
+            at=now.isoformat(),
+            # the World's own measured pose (substrate owner), never inferred from
+            # the body cursor
+            posture=self._measured_pose(),
+            # a walk in flight does not stop the light sample; it only bounds the
+            # posture interval at its departure
+            movement_in_flight_since=walk_since,
         )
         if outcome.get("wrote") and outcome.get("state") is not None:
             self.body_state = outcome["state"]

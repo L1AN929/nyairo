@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from lifesupply.artifact import album as album_media
 from lifesupply.fencing import activate_writer_epoch, install_write_guards, register_writer_connection, require_schema_columns, reject_incompatible_existing_schema
 
 OUTCOMES = frozenset({"OK", "NO_CHANGE", "DENY", "CONFLICT", "BLOCKED", "NOT_FOUND", "UNKNOWN"})
@@ -36,6 +37,7 @@ class ManagedArtifactStore:
     """SQLite authority for identities, immutable versions, operations, receipts and bindings."""
 
     def __init__(self, db_path: str | Path | None = None, *, projection_root: str | Path | None = None,
+                 media_root: str | Path | None = None,
                  workspace_authority: Any = None, clock=_now, writer_fence: Any = None,
                  read_only: bool = False, db: Any = None):
         if db is None and db_path is None:
@@ -43,6 +45,10 @@ class ManagedArtifactStore:
         self.db = db
         self.db_path = str(db_path) if db_path is not None else str(db.path)
         self.projection_root = Path(projection_root) if projection_root else None
+        #: Album picture bytes live beside the owner's own database, never in a repo data path.
+        #: The path is derived by the caller from the service root; ``None`` keeps every old
+        #: construction valid and simply means "this owner has no media directory".
+        self.media_root = Path(media_root) if media_root else None
         self.workspace_authority = workspace_authority
         self.clock = clock
         self.writer_fence = writer_fence
@@ -51,6 +57,8 @@ class ManagedArtifactStore:
             # C7 single database: the DB owns the schema, the epochs and the guards.
             if not read_only and self.projection_root:
                 self.projection_root.mkdir(parents=True, exist_ok=True)
+            if not read_only and self.media_root:
+                self.media_root.mkdir(parents=True, exist_ok=True)
             self._verify_schema()
         elif not read_only:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +70,8 @@ class ManagedArtifactStore:
                 "c6_writer_epoch": {"active_epoch", "instance_id", "writer_token"}})
             if self.projection_root:
                 self.projection_root.mkdir(parents=True, exist_ok=True)
+            if self.media_root:
+                self.media_root.mkdir(parents=True, exist_ok=True)
             self._init_db()
         else:
             self._verify_schema()
@@ -278,6 +288,30 @@ class ManagedArtifactStore:
                 return dict(row) if row else None
         except sqlite3.Error:
             return None
+    # -- album media (EP-16): owner-named files beside the canonical database ---------------
+
+    def put_media(self, data: bytes, content_type: str) -> dict[str, Any]:
+        """Write one album picture through the owner's own media directory.
+
+        The caller supplies bytes and a declared type only; the file name, digest and size are
+        produced here.  The write is atomic and idempotent for identical bytes.  A failed write
+        leaves no reference behind -- the caller's database transaction has not committed yet.
+        """
+        if self.media_root is None:
+            return {"status": "BLOCKED", "reason": "MEDIA_ROOT_NOT_CONFIGURED"}
+        self._assert_writer()
+        try:
+            facts = album_media.write_media(self.media_root, data, content_type)
+        except album_media.AlbumImageRefused as exc:
+            return {"status": "DENY", "reason": exc.reason, "detail": exc.detail}
+        except OSError:
+            return {"status": "UNKNOWN", "reason": "MEDIA_WRITE_FAILED"}
+        return {"status": "OK", **facts}
+
+    def get_media(self, name: Any, sha256: Any, size: Any) -> bytes | None:
+        """Read one owner-named media file, verified against the manifest's own facts."""
+        return album_media.read_media(self.media_root, name, sha256, size)
+
     #: Bounds on one page of version *metadata*.  A caller can page with the returned cursor; the
     #: owner never returns an unbounded list and never returns version bodies here.
     DEFAULT_VERSION_PAGE = 20
@@ -342,6 +376,40 @@ class ManagedArtifactStore:
                 return dict(row) if row else None
         except sqlite3.Error:
             return None
+
+    def read_create_operation(self, artifact_id: str) -> dict[str, Any] | None:
+        """The CREATE operation row that brought one artifact identity into being.
+
+        Album reads use it only to find the operation key under which the artifact was created,
+        so the Governance reservation recorded for that exact action can be compared.  It is the
+        owner's own durable log, never a caller-supplied claim.
+        """
+        try:
+            with self._connection() as con:
+                row = con.execute(
+                    "SELECT operation_key,artifact_id,outcome,result_json FROM artifact_operations"
+                    " WHERE artifact_id=? AND operation_kind='CREATE'",
+                    (artifact_id,)).fetchone()
+                return dict(row) if row else None
+        except sqlite3.Error:
+            return None
+
+    def read_reservations_for_action(self, action_key: str) -> list[dict[str, Any]]:
+        """The Governance reservations recorded for one action key (shared single DB, read only).
+
+        This mirrors the narrow read the Workspace owner already makes of the reservation table:
+        the caller compares the row's own ``action_digest`` and ``state``; this method never
+        inserts, updates or interprets Governance state, and an unavailable read answers ``[]``
+        (never "allowed").
+        """
+        try:
+            with self._connection() as con:
+                rows = con.execute(
+                    "SELECT reservation_id,grant_id,action_key,action_digest,state"
+                    " FROM permission_reservations WHERE action_key=?", (action_key,)).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error:
+            return []
 
     def commit_markdown(self, *, artifact_id: str, authorized_subject_id: str,
                         expected_head: str | None, content: str, operation_key: str,

@@ -388,11 +388,36 @@ def _shiomi_world() -> WorldData:
         )
     ambient_templates = tuple(
         {
+            "kind": "finite" if template.finite else "single_day",
             "event_type": template.event_type,
             "location_id": template.location_id,
             "summary": template.summary,
             "start_hour": template.start_hour,
             "end_hour": template.end_hour,
+            # 目录元信息：类别与有限跨天定义（不进入事件投影字段）。
+            # 世界包 v1 模板没有这些键，由 ambient_events 按单日日常模板处理。
+            "category": template.category,
+            **(
+                {
+                    "finite": {
+                        "identity": template.finite.identity,
+                        "starts_on": template.finite.starts_on.isoformat(),
+                        "ends_on": template.finite.ends_on.isoformat(),
+                        "end_reason": template.finite.end_reason,
+                        "phases": tuple(
+                            {
+                                "local_date": phase.local_date.isoformat(),
+                                "start_hour": phase.start_hour,
+                                "end_hour": phase.end_hour,
+                                "summary": phase.summary,
+                            }
+                            for phase in template.finite.phases
+                        ),
+                    }
+                }
+                if template.finite
+                else {}
+            ),
         }
         for template in wae._TEMPLATES
     )

@@ -24,6 +24,7 @@ Boundary rules enforced here:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -36,9 +37,11 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+from lifesupply.artifact import album as album_media
 from lifesupply.artifact.store import ManagedArtifactStore
 from lifesupply.db import (
     CANONICAL_FILENAME,
@@ -89,6 +92,15 @@ DEFAULT_MAX_PAYLOAD_BYTES = 1_000_000
 DEFAULT_VERSION_PAGE = 20
 MAX_VERSION_PAGE = 50
 MAX_VERSION_CONTENT_CHARS = 20000
+
+#: EP-16 private album.  One import may carry up to 5 MiB of picture bytes, which is ~7 MiB of
+#: base64 JSON; the *wire* framing therefore reads up to 8 MiB.  That wider framing belongs to
+#: the transport only: every other operation is still validated against the service's normal
+#: ``max_payload_bytes`` (1 MB by default), so the old contract is not widened.
+ALBUM_MAX_WIRE_BYTES = 8 * 1024 * 1024
+ALBUM_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+ALBUM_MAX_LIST = 200
+ALBUM_TITLE = "相册图片"
 
 WORKSPACE_CAPABILITY = "PROVISION_PERSONAL_WORKSPACE"
 INQUIRY_CAPABILITY = "WRITE_OPEN_INQUIRY"
@@ -235,11 +247,19 @@ READ_OPS: frozenset[str] = frozenset({
     # v0.4 work-revisit: the two history reads.  Both are pure reads of immutable version rows:
     # no head moves, no operation row and no Activity is written, and nothing is restored.
     "list_versions", "read_version",
+    # EP-16 private album reads.  The three are pure reads of one subject's artifacts and of the
+    # owner's own media directory; the bytes are base64 on the wire and are never stored in a
+    # version body.
+    "list_album_images", "read_album_image", "read_album_image_bytes",
 })
 
 COMMAND_OPS: frozenset[str] = frozenset({
     "issue_grant", "revoke_grant", "provision_workspace", "admit_inquiry",
     "create_artifact", "commit_markdown", "archive_artifact", "tombstone",
+    # EP-16: one explicit user import.  It is a create + first commit through the existing
+    # COMMIT_MANAGED_ARTIFACT grant and the existing coordinated unit of work; no new owner,
+    # table or capability is introduced.
+    "import_album_image",
 })
 
 OPS: frozenset[str] = READ_OPS | COMMAND_OPS
@@ -268,6 +288,9 @@ _NESTED_INQUIRY = frozenset({"subject_id", "workspace_id", "topic", "source_refs
 _NESTED_ARTIFACT_CREATE = frozenset({"subject_id", "workspace_id", "title", "content"})
 _NESTED_ARTIFACT_COMMIT = frozenset({"subject_id", "artifact_id", "expected_head", "content"})
 _NESTED_ARTIFACT_LIFECYCLE = frozenset({"subject_id", "artifact_id", "expected_revision"})
+#: One album import: the caption and the picture's declared type/bytes.  There is deliberately no
+#: field for a path, a URL, a file name, an owner or an authority.
+_NESTED_ALBUM_IMPORT = frozenset({"subject_id", "caption", "content_type", "data"})
 
 FIELD_TYPES: dict[str, dict[str, Any]] = {
     "health": {},
@@ -287,6 +310,10 @@ FIELD_TYPES: dict[str, dict[str, Any]] = {
                       "before_version_number": (int, type(None))},
     "read_version": {"subject": str, "artifact_id": str, "version_id": str,
                      "max_chars": (int, type(None))},
+    "list_album_images": {"subject": str},
+    "read_album_image": {"subject": str, "artifact_id": str},
+    "read_album_image_bytes": {"subject": str, "artifact_id": str},
+    "import_album_image": {"grant_id": str, "operation_key": str, "image": dict},
     "issue_grant": {"grant": dict},
     "revoke_grant": {"grant_id": str, "expected_revision": int, "operation_id": str},
     "provision_workspace": {"grant_id": str, "operation_key": str, "workspace": dict},
@@ -306,6 +333,10 @@ REQUIRED_FIELDS: dict[str, frozenset[str]] = {
     "lookup_operation": frozenset({"owner", "operation_id"}),
     "list_versions": frozenset({"subject", "artifact_id"}),
     "read_version": frozenset({"subject", "artifact_id", "version_id"}),
+    "list_album_images": frozenset({"subject"}),
+    "read_album_image": frozenset({"subject", "artifact_id"}),
+    "read_album_image_bytes": frozenset({"subject", "artifact_id"}),
+    "import_album_image": frozenset({"grant_id", "operation_key", "image"}),
     "read_effect_receipt": frozenset({"operation_key"}),
     "list_personal_opportunities": frozenset({"subject"}),
     "get_grant": frozenset({"grant_id"}),
@@ -327,6 +358,7 @@ NESTED_FIELDS: dict[str, dict[str, frozenset[str]]] = {
     "commit_markdown": {"artifact": _NESTED_ARTIFACT_COMMIT},
     "archive_artifact": {"artifact": _NESTED_ARTIFACT_LIFECYCLE},
     "tombstone": {"artifact": _NESTED_ARTIFACT_LIFECYCLE},
+    "import_album_image": {"image": _NESTED_ALBUM_IMPORT},
 }
 
 
@@ -387,10 +419,14 @@ def validate_request(request: Any, *, max_payload_bytes: int = DEFAULT_MAX_PAYLO
                                          f"unknown {name} field(s) {nested_unknown}",
                                          fields=nested_unknown))
     encoded = json.dumps(request, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    if len(encoded.encode("utf-8")) > int(max_payload_bytes):
+    # Only the album import may carry picture bytes.  Every other operation keeps the exact
+    # limit it had before, even though the transport may have read a wider frame.
+    limit = int(max_payload_bytes)
+    if op == "import_album_image":
+        limit = max(limit, ALBUM_MAX_PAYLOAD_BYTES)
+    if len(encoded.encode("utf-8")) > limit:
         raise RequestRefused(refusal("DENY", "PAYLOAD_TOO_LARGE",
-                                     f"request exceeds {int(max_payload_bytes)} bytes",
-                                     limit=int(max_payload_bytes)))
+                                     f"request exceeds {limit} bytes", limit=limit))
     return dict(request)
 
 
@@ -461,6 +497,7 @@ class LifeSupplyService:
                                             read_only=self.read_only, clock=self.clock)
             self.artifact = ManagedArtifactStore(
                 db=self.db, projection_root=self.root / "projection",
+                media_root=self.root / "media",
                 workspace_authority=self.workspace,
                 writer_fence=self.fences.get("ManagedArtifact"), read_only=self.read_only,
                 clock=self.clock)
@@ -866,6 +903,362 @@ class LifeSupplyService:
             "content_truncated": truncated,
             "lifecycle": artifact["lifecycle"],
         }
+
+    # -- EP-16: the private album (one explicit import + bounded pure reads) -------------
+
+    @staticmethod
+    def _iso_time(value: Any) -> str | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        try:
+            return datetime.fromtimestamp(float(value), timezone.utc).isoformat(
+                timespec="milliseconds")
+        except (OSError, OverflowError, ValueError):
+            return None
+
+    @staticmethod
+    def _album_binding_digest(artifact: Mapping[str, Any], manifest: Mapping[str, Any]) -> str:
+        """The Governance action digest an ``import_album_image`` reservation would record.
+
+        ``GovernanceAuthority.reserve_use`` digests exactly ``{subject, capability, scope,
+        target, payload}`` with sorted compact JSON.  The payload below is the one the import
+        reserves with, so a reservation that matches this digest was made for *this* manifest
+        under *this* subject and workspace -- not for an ordinary artifact that merely carries a
+        copied manifest.
+        """
+        payload = {"operation": "import_album_image",
+                   "subject_id": str(artifact.get("subject_id") or ""),
+                   "workspace_id": str(artifact.get("workspace_id") or ""),
+                   "title": ALBUM_TITLE,
+                   "caption": manifest["caption"],
+                   "content_type": manifest["content_type"],
+                   "media_sha256": manifest["media"]["sha256"],
+                   "media_bytes": manifest["media"]["bytes"]}
+        canonical = json.dumps(
+            {"subject": str(artifact.get("subject_id") or ""),
+             "capability": ARTIFACT_CAPABILITY, "scope": ARTIFACT_SCOPE,
+             "target": f"workspace:{artifact.get('workspace_id') or ''}",
+             "payload": payload},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _album_import_binding(self, artifact: Mapping[str, Any], head: Mapping[str, Any],
+                              manifest: Mapping[str, Any]) -> bool:
+        """Prove the owner really imported these bytes for this artifact's subject.
+
+        A manifest alone is only a self-description: any workspace writer could copy another
+        picture's manifest into an ordinary artifact and then ask for its bytes.  The binding is
+        the owner's own CREATE operation plus the Governance reservation that the import command
+        made for that exact operation key, subject, workspace, caption and media digest.  The
+        head must still be the import's own first version, so a later ordinary commit cannot
+        turn arbitrary content into an album picture either.
+        """
+        artifact_id = str(artifact.get("artifact_id") or "")
+        operation = self.artifact_store.read_create_operation(artifact_id)
+        operation_key = str((operation or {}).get("operation_key") or "")
+        if not operation_key:
+            return False
+        if str(head.get("operation_key") or "") != f"{operation_key}#v1":
+            return False
+        expected = self._album_binding_digest(artifact, manifest)
+        matched = [row for row in self.artifact_store.read_reservations_for_action(operation_key)
+                   if str(row.get("state")) == "CONSUMED"
+                   and str(row.get("action_digest") or "") == expected]
+        return len(matched) == 1
+
+    def _album_image_view(self, artifact: Mapping[str, Any]) -> dict[str, Any] | None:
+        """One artifact as an album row, or ``None`` when it is not a readable album image.
+
+        The marker is classification only: the artifact must already belong to the asking
+        subject and be ``ACTIVE`` before this is called, and its head must be bound to a real
+        import under that subject.  The manifest is read from the owner's own head; a work, a
+        material, a copied manifest or a corrupt manifest is simply not an album image.
+        """
+        if str(artifact.get("lifecycle")) != "ACTIVE":
+            return None
+        artifact_id = str(artifact.get("artifact_id") or "")
+        head = self.artifact_store.read_head(artifact_id)
+        if head is None:
+            return None
+        manifest = album_media.parse_manifest(head.get("content"))
+        if manifest is None:
+            return None
+        if not self._album_import_binding(artifact, head, manifest):
+            return None
+        created = artifact.get("created_at")
+        return {
+            "artifact_id": artifact_id,
+            "caption": manifest["caption"],
+            "content_type": manifest["content_type"],
+            "media": dict(manifest["media"]),
+            "source": dict(manifest["source"]),
+            "lifecycle": str(artifact.get("lifecycle")),
+            "created_at": created,
+            "created_at_iso": self._iso_time(created),
+            "head_version_id": head.get("version_id"),
+            "version_number": head.get("version_number"),
+        }
+
+    def _album_subject_artifact(self, req: Mapping[str, Any]
+                                ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The subject's *currently readable* album artifact and its parsed manifest."""
+        subject, artifact_id = req["subject"], req["artifact_id"]
+        self.subject_identity(subject)
+        artifact = self.artifact_store.get_artifact_for_subject(artifact_id, subject)
+        if artifact is None:
+            raise RequestRefused(refusal("NOT_FOUND", "ALBUM_IMAGE_NOT_FOUND",
+                                         "album image/subject mismatch or unknown image"))
+        if str(artifact.get("lifecycle")) != "ACTIVE":
+            # Archiving closes it and a tombstone hides it; neither serves the picture now.
+            raise RequestRefused(refusal("NOT_FOUND", "ALBUM_IMAGE_WITHHELD",
+                                         "the album image is not active; its content is withheld"))
+        head = self.artifact_store.read_head(artifact_id)
+        manifest = album_media.parse_manifest(None if head is None else head.get("content"))
+        if manifest is None:
+            raise RequestRefused(refusal("NOT_FOUND", "NOT_AN_ALBUM_IMAGE",
+                                         "this artifact has no album manifest"))
+        if not self._album_import_binding(artifact, head, manifest):
+            raise RequestRefused(refusal("NOT_FOUND", "NOT_AN_ALBUM_IMAGE",
+                                         "this artifact was not imported as an album picture"))
+        return artifact, manifest
+
+    def _op_list_album_images(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        subject = req["subject"]
+        self.subject_identity(subject)
+        rows = self.artifact_store.list_artifacts(subject)
+        if rows is None:
+            return refusal("UNKNOWN", "OWNER_READ_UNAVAILABLE",
+                           "ManagedArtifact owner read unavailable")
+        images: list[dict[str, Any]] = []
+        scanned = 0
+        bounded = False
+        for row in rows:
+            if scanned >= ALBUM_MAX_LIST * 5 or len(images) >= ALBUM_MAX_LIST:
+                bounded = True
+                break
+            scanned += 1
+            view = self._album_image_view(row)
+            if view is not None:
+                images.append(view)
+        images.sort(key=lambda view: (
+            -(float(view["created_at"]) if isinstance(view.get("created_at"), (int, float))
+              and not isinstance(view.get("created_at"), bool) else 0.0),
+            str(view["artifact_id"])))
+        return {"status": "OK", "subject": subject, "images": images,
+                "count": len(images), "bounded": bounded, "source": "ManagedArtifact"}
+
+    def _op_read_album_image(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        artifact, _manifest = self._album_subject_artifact(req)
+        view = self._album_image_view(artifact)
+        if view is None:  # the checks above already ran; a moving head is an honest NOT_FOUND
+            return refusal("NOT_FOUND", "NOT_AN_ALBUM_IMAGE", "this artifact has no album manifest")
+        return {"status": "OK", "subject": req["subject"], "image": view,
+                "source": "ManagedArtifact"}
+
+    def _op_read_album_image_bytes(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        artifact, manifest = self._album_subject_artifact(req)
+        view = self._album_image_view(artifact)
+        if view is None:
+            return refusal("NOT_FOUND", "NOT_AN_ALBUM_IMAGE", "this artifact has no album manifest")
+        media = manifest["media"]
+        content = self.artifact_store.get_media(media["name"], media["sha256"], media["bytes"])
+        if content is None:
+            # The reference exists but its bytes do not verify: say so, never serve an empty image.
+            return refusal("UNKNOWN", "ALBUM_MEDIA_UNAVAILABLE",
+                           "the stored picture bytes are missing or do not match the manifest")
+        return {"status": "OK", "subject": req["subject"], "image": view,
+                "content_type": manifest["content_type"],
+                "data": album_media.encode_base64(content),
+                "data_bytes": len(content), "source": "ManagedArtifact"}
+
+    def _op_import_album_image(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        gated = self.switches.require("ARTIFACT_EXTERNAL_ACTION")
+        if gated is not None:
+            return gated
+        body = dict(req["image"])
+        subject = str(body["subject_id"])
+        operation_key, grant_id = req["operation_key"], req["grant_id"]
+        if not operation_key or len(operation_key) > 128:
+            return refusal("DENY", "OPERATION_KEY_INVALID",
+                           "operation_key must be 1..128 characters")
+        self.subject_identity(subject)
+        caption = body.get("caption")
+        if not isinstance(caption, str):
+            return refusal("DENY", "FIELD_TYPE:caption", "caption must be a string")
+        caption = caption.strip()
+        if len(caption) > album_media.MAX_CAPTION_CHARS:
+            return refusal("DENY", "CAPTION_TOO_LONG",
+                           f"caption exceeds {album_media.MAX_CAPTION_CHARS} characters",
+                           limit=album_media.MAX_CAPTION_CHARS)
+        if any(ch in caption for ch in ("\x00", "\r")):
+            return refusal("DENY", "CAPTION_INVALID", "caption carries control characters")
+        content_type = body.get("content_type")
+        try:
+            content = album_media.decode_base64(body.get("data"))
+            detected = album_media.validate_image(content_type, content)
+            media_name = album_media.media_name_for(content, detected)
+            digest = hashlib.sha256(content).hexdigest()
+            manifest = album_media.build_manifest(
+                caption=caption, content_type=detected, media_name=media_name,
+                sha256=digest, size=len(content))
+        except album_media.AlbumImageRefused as exc:
+            return refusal("DENY", exc.reason, exc.detail)
+        workspace = self._active_workspace(subject)
+        workspace_id = workspace["workspace_id"]
+        target = f"workspace:{workspace_id}"
+        reserve_payload = {"operation": "import_album_image", "subject_id": subject,
+                           "workspace_id": workspace_id, "title": ALBUM_TITLE,
+                           "caption": caption, "content_type": detected,
+                           "media_sha256": digest, "media_bytes": len(content)}
+        create_payload = {"operation": "create_artifact", "subject_id": subject,
+                          "workspace_id": workspace_id, "title": ALBUM_TITLE}
+        first_version_key = f"{operation_key}#v1"
+        # The coordinated unit of work refuses a second transaction under the same operation id
+        # (``OPERATION_ALREADY_COMMITTED``).  So a replay is answered from the owner's own
+        # operation row *before* opening one: the committed head decides whether this key really
+        # means the same picture.  A different picture is a conflict, not a silent overwrite.
+        existing_create = self.artifact_store.lookup_operation(operation_key)
+        if existing_create is not None:
+            try:
+                previous = json.loads(existing_create.get("result_json") or "{}")
+            except ValueError:
+                previous = {}
+            artifact_id = str(previous.get("artifact_id") or "")
+            if not artifact_id:
+                return refusal("CONFLICT", "ALBUM_OPERATION_CONFLICT",
+                               "this operation key already belongs to another command")
+            # A replay is only the *same* subject repeating the *same* import: another subject
+            # holding the key must not be handed the original artifact, and a closed artifact
+            # must not be reopened by re-sending its bytes.
+            artifact = self.artifact_store.get_artifact_for_subject(artifact_id, subject)
+            if artifact is None:
+                return refusal("NOT_FOUND", "ALBUM_IMAGE_NOT_FOUND",
+                               "this operation key belongs to another subject's import")
+            if str(artifact.get("lifecycle")) != "ACTIVE":
+                return refusal("NOT_FOUND", "ALBUM_IMAGE_WITHHELD",
+                               "the album image is not active; its content is withheld")
+            head = self.artifact_store.read_head(artifact_id)
+            if head is None or head.get("content") != manifest:
+                return refusal("CONFLICT", "ALBUM_OPERATION_CONFLICT",
+                               "this operation key already landed a different album picture")
+            parsed = album_media.parse_manifest(head.get("content"))
+            if parsed is None or not self._album_import_binding(artifact, head, parsed):
+                return refusal("CONFLICT", "ALBUM_OPERATION_CONFLICT",
+                               "this operation key does not bind an album import of these bytes")
+            # The original grant must still be usable: a revoked (or expired / retargeted)
+            # grant may not be spent again, and nothing is written before this check passes.
+            decision = self.gov_store.validate_grant(
+                grant_id, subject=subject, capability=ARTIFACT_CAPABILITY,
+                scope=ARTIFACT_SCOPE, target=target, payload=reserve_payload)
+            if not decision.allowed:
+                return refusal(decision.status or "DENY", "GOVERNANCE_REFUSED",
+                               decision.detail or "this import grant is no longer usable",
+                               stage="replay_grant", grant_id=grant_id)
+            stored = self.artifact_store.get_media(media_name, digest, len(content))
+            if stored is None:
+                put = self.artifact_store.put_media(content, detected)
+                if put.get("status") != "OK":
+                    return refusal(put.get("status") or "UNKNOWN", "ALBUM_MEDIA_WRITE_FAILED",
+                                   str(put.get("reason") or ""))
+            return {
+                "status": "NO_CHANGE", "artifact_id": artifact_id,
+                "workspace_id": workspace_id, "title": ALBUM_TITLE, "caption": caption,
+                "content_type": detected,
+                "media": {"name": media_name, "sha256": digest, "bytes": len(content)},
+                "version_id": head.get("version_id"),
+                "version_number": head.get("version_number"),
+                "operation_key": operation_key,
+                "first_version_operation_key": first_version_key,
+                "reservation_id": None, "uow_id": None,
+            }
+        self._require_ready_for_write("ManagedArtifact")
+        try:
+            with self.db_store.unit_of_work(command="COMMIT_MARKDOWN", operation_id=operation_key,
+                                            subject_id=subject,
+                                            caller_principal=SERVICE_PRINCIPAL) as uow:
+                uow.param("subject_id", subject)
+                uow.param("operation_key", operation_key)
+                uow.param("grant_id", grant_id)
+                reserved = self._reserve(
+                    uow, grant_id=grant_id, subject=subject, capability=ARTIFACT_CAPABILITY,
+                    scope=ARTIFACT_SCOPE, target=target, operation_key=operation_key,
+                    payload=reserve_payload, actor_uid=peer_uid,
+                    authority_scope=ARTIFACT_AUTHORITY_SCOPE)
+                created = self.artifact_store.create_artifact(
+                    subject_id=subject, workspace_id=workspace_id, title=ALBUM_TITLE,
+                    operation_key=operation_key, grant_reservation_id=reserved.reservation_id,
+                    operation_payload=create_payload)
+                uow.step(created, owner="ManagedArtifact", action="create_artifact")
+                if created.get("status") not in {"OK", "NO_CHANGE"}:
+                    raise RequestRefused(refusal(created.get("status") or "UNKNOWN",
+                                                 "ARTIFACT_REFUSED",
+                                                 str(created.get("detail") or ""),
+                                                 stage="create_artifact"))
+                artifact_id = str(created.get("artifact_id") or "")
+                if not artifact_id:
+                    raise RequestRefused(refusal("UNKNOWN", "ARTIFACT_REFUSED",
+                                                 "the owner returned no artifact id"))
+                uow.param("artifact_id", artifact_id)
+                uow.param("operation_key", first_version_key)
+                existing = self.artifact_store.lookup_operation(first_version_key)
+                if existing is not None:
+                    # The same key must mean the same intended picture.  The first version's own
+                    # body is the comparison: an identical manifest is a replay, anything else is
+                    # a different intent and is refused without writing a second file.
+                    head = self.artifact_store.read_head(artifact_id)
+                    if head is None or head.get("content") != manifest:
+                        raise RequestRefused(refusal(
+                            "CONFLICT", "ALBUM_OPERATION_CONFLICT",
+                            "this operation key already landed a different album picture"))
+                    stored = self.artifact_store.get_media(media_name, digest, len(content))
+                    if stored is None:
+                        put = self.artifact_store.put_media(content, detected)
+                        if put.get("status") != "OK":
+                            raise RequestRefused(refusal(put.get("status") or "UNKNOWN",
+                                                         "ALBUM_MEDIA_WRITE_FAILED",
+                                                         str(put.get("reason") or "")))
+                    committed = {"status": "NO_CHANGE",
+                                 "version_id": (head or {}).get("version_id"),
+                                 "version_number": (head or {}).get("version_number")}
+                    # The coordinated command still owes the contract its commit step; this
+                    # replay wrote nothing, so it is recorded honestly as NO_CHANGE.
+                    uow.step(committed, owner="ManagedArtifact", action="commit_markdown")
+                else:
+                    put = self.artifact_store.put_media(content, detected)
+                    if put.get("status") != "OK":
+                        raise RequestRefused(refusal(put.get("status") or "UNKNOWN",
+                                                     "ALBUM_MEDIA_WRITE_FAILED",
+                                                     str(put.get("reason") or "")))
+                    commit_payload = {"operation": "commit_markdown", "subject_id": subject,
+                                      "artifact_id": artifact_id, "expected_head": None,
+                                      "content": manifest}
+                    committed = self.artifact_store.commit_markdown(
+                        artifact_id=artifact_id, authorized_subject_id=subject,
+                        expected_head=None, content=manifest, operation_key=first_version_key,
+                        grant_reservation_id=reserved.reservation_id,
+                        operation_payload=commit_payload)
+                    uow.step(committed, owner="ManagedArtifact", action="commit_markdown")
+                    if committed.get("status") not in {"OK", "NO_CHANGE"}:
+                        raise RequestRefused(refusal(committed.get("status") or "UNKNOWN",
+                                                     "ARTIFACT_REFUSED",
+                                                     str(committed.get("detail") or ""),
+                                                     stage="commit_markdown"))
+                uow.note("ManagedArtifact", "managed_artifacts", "album image imported",
+                         artifact_id)
+                result = {
+                    "status": "OK" if committed.get("status") == "OK" else "NO_CHANGE",
+                    "artifact_id": artifact_id, "workspace_id": workspace_id,
+                    "title": ALBUM_TITLE, "caption": caption, "content_type": detected,
+                    "media": {"name": media_name, "sha256": digest, "bytes": len(content)},
+                    "version_id": committed.get("version_id"),
+                    "version_number": committed.get("version_number"),
+                    "operation_key": operation_key,
+                    "first_version_operation_key": first_version_key,
+                    "reservation_id": reserved.reservation_id, "uow_id": uow.uow_id,
+                }
+        except RequestRefused as exc:
+            return exc.payload
+        return result
 
     def _op_lookup_operation(self, req, *, caller, peer_uid) -> dict[str, Any]:
         owner, operation_id = req["owner"], req["operation_id"]
@@ -1354,21 +1747,38 @@ class LifeSupplyRequestHandler(socketserver.StreamRequestHandler):
     def _serve_one_request(self) -> None:
         peer_uid = peer_uid_from_socket(self.request)
         limit = int(getattr(self.server, "max_payload_bytes", DEFAULT_MAX_PAYLOAD_BYTES))
-        raw = self.rfile.readline(limit + 1)
+        # The wire frame is allowed to be wider so one album import can carry its base64 picture;
+        # the operation-specific payload check in ``validate_request`` still enforces the old
+        # 1 MB limit for every non-album op.
+        wire_limit = max(limit, ALBUM_MAX_WIRE_BYTES)
+        raw = self.rfile.readline(wire_limit + 1)
         if not raw:
             return
-        if len(raw) > limit:
+        if len(raw) > wire_limit:
             response = refusal("DENY", "PAYLOAD_TOO_LARGE",
-                               f"request exceeds {limit} bytes", limit=limit)
+                               f"request exceeds {wire_limit} bytes", limit=wire_limit)
         else:
+            oversized = len(raw) > limit
+            request = None
             try:
                 request = json.loads(raw.decode("utf-8"))
             except (UnicodeError, ValueError):
-                response = refusal("DENY", "MALFORMED_REQUEST",
-                                   "request is not valid UTF-8 JSON")
-            else:
-                service = self.server.service
-                response = service.dispatch(request, peer_uid=peer_uid)
+                if not oversized:
+                    response = refusal("DENY", "MALFORMED_REQUEST",
+                                       "request is not valid UTF-8 JSON")
+                else:
+                    response = refusal("DENY", "PAYLOAD_TOO_LARGE",
+                                       f"request exceeds {limit} bytes", limit=limit)
+            if request is not None:
+                if oversized and not (isinstance(request, dict)
+                                      and request.get("op") == "import_album_image"):
+                    # The wider frame exists only for one album import.  Every other op keeps
+                    # the original refusal, exactly as before the album was added.
+                    response = refusal("DENY", "PAYLOAD_TOO_LARGE",
+                                       f"request exceeds {limit} bytes", limit=limit)
+                else:
+                    service = self.server.service
+                    response = service.dispatch(request, peer_uid=peer_uid)
         self.wfile.write(json.dumps(response, ensure_ascii=False,
                                     separators=(",", ":")).encode() + b"\n")
 

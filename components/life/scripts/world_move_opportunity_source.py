@@ -65,8 +65,11 @@ selector-facing projection stays the one ``action_intent`` defines.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from datetime import timedelta
 from typing import Any, Mapping, Optional
+from urllib.parse import unquote
 
 import candidate_sources_ag0 as ag0
 import life_body_action_targets as body_actions
@@ -376,6 +379,30 @@ def observed_body_action_opportunities(
     return opportunities
 
 
+#: The id charset AG-0's ``ObservedWorldOpportunity`` accepts after the ``wopp:`` prefix
+#: (``activity_continuity._STRUCTURED_REF_RE``).  The ``dailyact:`` encoding spells plain
+#: fields with percent quoting; a ``%`` is not a legal ref character, so the opportunity id
+#: is built from the *decoded* spelling (or a hash when that is not survivable).
+_OPPORTUNITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,160}$")
+
+
+def _daily_opportunity_suffix(target: str) -> str:
+    """A deterministic, structured-ref-safe spelling of a ``dailyact:`` target.
+
+    The target's own field encoding is untouched (that is ``life_daily_action_targets``'
+    contract).  Only the *opportunity id* is normalized: room/pick-up targets already
+    survive verbatim, while a legacy percent-quoted field is decoded.  Anything still
+    outside AG-0's id charset is replaced by a stable hash of the exact target, so a real
+    owner fact is never dropped merely because its id is exotic.
+    """
+
+    suffix = str(target)[len(DAILY_ACTION_REF_PREFIX):]
+    decoded = unquote(suffix)
+    if _OPPORTUNITY_ID_RE.fullmatch(decoded):
+        return decoded
+    return "h:" + hashlib.sha256(suffix.encode("utf-8")).hexdigest()[:32]
+
+
 def observed_daily_action_opportunities(
     observation: Mapping[str, Any],
     *,
@@ -424,7 +451,7 @@ def observed_daily_action_opportunities(
         return {
             "opportunity_id": "wopp:%s:%s:r%s:%s"
                               % (verb.lower(), place, revision,
-                                 target[len(daily_actions.DAILY_ACTION_REF_PREFIX):]),
+                                 _daily_opportunity_suffix(target)),
             "perception_ref": perception_ref,
             "world_revision_ref": "wrev:%s:r%s" % (world_id or "world", revision),
             "target_refs": [target],
@@ -508,7 +535,15 @@ def _daily_destinations(
     (``location.place_id`` + ``location.area_id``), which is also exactly what the owner's
     own ``PLACE`` destination rule compares a room target against.  Surfaces only ever
     arrive from the owner's own projection for *this* place; a destination naming another
-    place, or a kind this encoding cannot spell, is dropped rather than repaired.
+    place, or a shape this encoding cannot carry, is dropped rather than repaired.
+
+    The owner's projection (``get_environment`` -> ``surfaces_here``) spells a surface
+    object ``{"surface_id", "surface_kind", "location_id", ...}``: ``surface_kind`` is the
+    furniture kind (``desk_surface``, ``bed_surface``, ...), while this module's placement
+    encoding names the *target* kind ``surface``.  Those are two different vocabularies, so
+    the presence of a real ``surface_id`` -- not a matching ``kind`` string -- is what says
+    "owner-projected surface here".  Reading the furniture kind as the placement kind would
+    drop every surface the owner really exposes, leaving only the coarse room destination.
     """
 
     location = observation.get("location") or {}
@@ -521,9 +556,6 @@ def _daily_destinations(
     seen = {daily_actions.PLACEMENT_ROOM}
     for item in destinations or []:
         if not isinstance(item, Mapping):
-            continue
-        kind = str(item.get("kind") or "").strip()
-        if kind != daily_actions.PLACEMENT_SURFACE:
             continue
         surface_id = str(item.get("surface_id") or "").strip()
         location_id = str(item.get("location_id") or "").strip()

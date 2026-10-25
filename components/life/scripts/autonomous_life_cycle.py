@@ -79,10 +79,25 @@ from life_artifact_port import (
     LifeArtifactUnavailable,
     operation_key_for,
 )
-from action_reality_ledger import ACTION_KIND_FILE, ACTION_KIND_WORLD
+#: v0.4 wake cost: the artifact owner is read several times inside one round (the
+#: material check, the candidate refresh/materialise and the selected-work read all
+#: want the same point-in-time answer).  The wrapper reuses those answers for that
+#: one round only and drops them at every round boundary and every owner write.
+from wake_candidate_cost import maybe_round_cached_port
+from action_reality_ledger import (
+    ACTION_KIND_FILE,
+    ACTION_KIND_WORLD,
+    ACTION_STATUS_PREPARED,
+    ATTEMPT_STATUS_PRE_SUBMIT_FAILED,
+    TRANSPORT_ERR_DEFINITE_PRE_SUBMIT,
+)
 from managed_artifact_action_adapter import OP_COMMIT_VERSION
 import life_pause
 import life_request_budget
+#: v2 第一段连接（过去到候选 → 下一步准备）：only the *projection* of an owner record's own
+#: target refs.  It reads no owner, mints no ref and authorizes nothing; the owner's resume point
+#: and AR-0 admission still decide whether the object can really be continued.
+import past_candidate_bridge as pcb
 #: v0.4 day-life: the *read-only* step readiness of the foreground Activity, plus the bounded
 #: reconsideration ledger.  Both are this cycle's own state; neither is an owner, a permission
 #: or a second store of the subject.
@@ -1038,10 +1053,16 @@ class AutonomousLifeCycle:
         #: offers no sharing action at all -- an unwired owner is never replaced by a stand-in,
         #: and there is no other place a share could go.
         sharing_service: Any = None,
+        #: 显式压缩演示模式（COMPRESSED_DEMO）的业务时钟：一个无参 callable，返回
+        #: 本域的业务 now。``None`` 是普通真实时间路径；非 None 时业务到期、安静、
+        #: 未来事项、LR-5 业务证据与事件时刻都读同一个域。真实安全面（账本 UTC 日、
+        #: lease、权限、provider 超时）不经过这里。
+        clock: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.runtime = runtime
+        self._business_clock = clock
         self.state_root = Path(runtime.state_root)
-        self.artifact_port = artifact_port
+        self.artifact_port = maybe_round_cached_port(artifact_port)
         self.subject_id = subject_id
         self.workspace_id = workspace_id
         self.artifact_grant_id = artifact_grant_id
@@ -1236,8 +1257,13 @@ class AutonomousLifeCycle:
         #: actually see the work; the registry refuses unknown or forbidden source kinds itself.
         self.artifact_source: Optional[ArtifactContinuationSource] = None
         if artifact_port is not None and subject_id:
+            #: The source reads through ``self.artifact_port`` -- the *round-scoped* memo, not the
+            #: raw transport.  That is what makes one wake's material check, candidate build and
+            #: selection share one owner snapshot instead of asking four times; the snapshot is
+            #: never used to *authorize* anything across it, because the pre-adoption freshness
+            #: check drops the memo first (``_pause_gate_hook``) and re-reads the owners.
             self.artifact_source = ArtifactContinuationSource(
-                artifact_port, subject_id=subject_id,
+                self.artifact_port, subject_id=subject_id,
                 # D (life-v1): the private-items document is not a piece of writing; it must
                 # never be offered as one.  The reading material *is* offered here -- that is
                 # how a reading opportunity becomes an admitted PERSONAL_OPPORTUNITY candidate.
@@ -1433,7 +1459,7 @@ class AutonomousLifeCycle:
             # never C's future recheck time.
             "eligibility_watermark": (considered_at
                                       or previous.get("eligibility_watermark")),
-            "updated_at": _utc_now_iso(),
+            "updated_at": self._now_iso(),
         }
         path = self.continuity_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2003,6 +2029,57 @@ class AutonomousLifeCycle:
             "not_recovery": "an eased body is not a claim that she recovered",
         }
 
+    def pause_condition_view(self, basis: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        """The bounded condition a PAUSE may name this round -- or a named "none offered".
+
+        It is the *same* basis the round already offers for WAIT (never a second source): a body
+        the owner really reports as limited, a work/material whose owner owes a next version, or
+        a time she herself named in this Decision.  The block says only what the condition is,
+        that a PAUSE keeps the foreground, and that she has to choose RESUME later.  It grants
+        nothing and creates nothing; without a basis ``available: false`` carries a reason code.
+        """
+
+        if not isinstance(basis, Mapping) or not str(basis.get("basis_ref") or ""):
+            return {
+                "schema_version": "chiyo.life.pause_condition.v1",
+                "available": False,
+                "why_not": "NO_OFFERED_CONDITION",
+                "how": ("a conditional PAUSE needs a condition this round can really check; "
+                        "without one PAUSE is still allowed, but it is unconditional and can "
+                        "never become a resume candidate"),
+            }
+        source = str(basis.get("source") or "")
+        if source == lwb.SOURCE_BODY_REST:
+            satisfied_by = ("a newer read of the same body: a higher recovery band, a named "
+                            "burden no longer reported (or lighter), or an improving trend")
+        elif source == lfi.PARK_SOURCE:
+            satisfied_by = ("the instant this Decision itself names in its later_item proposal; "
+                            "there is no default timer")
+        else:
+            satisfied_by = ("the owner of the named work/material reporting a new head version "
+                            "after the one recorded in the baseline")
+        how = ("choose PAUSE and copy condition_ref into reevaluation_hint_ref: the Activity "
+               "stays PAUSED and keeps the foreground, the owner alone decides when the "
+               "condition holds, and a later Decision may choose RESUME")
+        if source == lfi.PARK_SOURCE:
+            how += ("; the instant comes from this same answer's later_item with "
+                    "park_current=true -- there is no default timer")
+        return {
+            "schema_version": "chiyo.life.pause_condition.v1",
+            "available": True,
+            "condition_ref": str(basis["basis_ref"]),
+            "source": source,
+            "activity_ref": (basis.get("activity_ref")
+                             or (self._last_foreground_record or {}).get("activity_ref")
+                             or (self._last_foreground_record or {}).get("activity_id")),
+            "waiting_on_ref": basis.get("waiting_on_ref"),
+            "keeps_foreground": True,
+            "satisfied_by": satisfied_by,
+            "how": how,
+            "not_automatic": ("an OPEN eligibility is only the right to ask; nothing resumes by "
+                              "itself and no condition means no resume candidate"),
+        }
+
     def _owner_head(self, artifact_ref: Any) -> Optional[str]:
         """The head the artifact owner reports *now*, or ``None`` when it cannot be read.
 
@@ -2096,7 +2173,7 @@ class AutonomousLifeCycle:
         and never spends a request.
         """
 
-        obs = observed_at or _utc_now_iso()
+        obs = observed_at or self._now_iso()
         report: dict[str, Any] = {
             "observed_at": obs, "state": "OK", "checked": 0, "unchanged": 0, "changed": 0,
             "evaluated": 0, "satisfied": [], "expired": [], "emitted_eligibilities": [],
@@ -2258,8 +2335,9 @@ class AutonomousLifeCycle:
         * the closeout plan really exists (see ``closeout_plan``);
         * an artifact is explicitly bound as this instance's work -- never a recency pick, so a
           material or a private-items document can never be closed out "by accident";
-        * the foreground slot is free: while an Activity is open this round does not quietly
-          switch her away from it;
+        * the foreground slot is free: while an Activity is *executing* this round does not
+          quietly switch her away from it.  A PAUSED Activity released by the v0.4 background
+          pause does not hold the slot, so it does not block this candidate;
         * the owner reports the artifact ``ACTIVE`` (an already archived one is not a candidate)
           and publishes its own ``revision`` -- W's step needs it, and a substituted "current"
           revision would archive a work the Decision was not about.
@@ -2386,6 +2464,34 @@ class AutonomousLifeCycle:
                 if not self.reading_artifact_id.startswith("artifact:")
                 else self.reading_artifact_id)
 
+    # -- v0.4 wake cost: one round, one owner read --------------------------------
+
+    def begin_round_reads(self, observed_at: Any = None) -> None:
+        """Open this round's read memo (a no-op for ports that do not cache).
+
+        Every round starts empty.  Even when two wakes carry the same observed
+        instant, the previous round's answers are not reused: the owner may have
+        moved between them.
+        """
+
+        begin = getattr(self.artifact_port, "begin_round", None)
+        if callable(begin):
+            begin(observed_at)
+
+    def end_round_reads(self) -> None:
+        """Drop this round's read memo; the next round starts from the owners."""
+
+        end = getattr(self.artifact_port, "end_round", None)
+        if callable(end):
+            end()
+
+    def _invalidate_owner_reads(self) -> None:
+        """Forget cached owner reads before a deliberate fresh re-check."""
+
+        invalidate = getattr(self.artifact_port, "invalidate", None)
+        if callable(invalidate):
+            invalidate()
+
     def private_material_situation(self, *, refresh: bool = False) -> Optional[dict[str, Any]]:
         """The read-only situation of this instance's own materials, or ``None`` if unbound.
 
@@ -2398,6 +2504,11 @@ class AutonomousLifeCycle:
             return None
         if self._reading_situation_cache is not None and not refresh:
             return dict(self._reading_situation_cache)
+        if refresh:
+            # ``refresh=True`` is this module's contract for "ask the owners again";
+            # that also means the round's read memo cannot answer this one.
+            self._invalidate_owner_reads()
+            self._reading_situation_cache = None
         situation = private_materials_module().read_reading_situation(
             self.artifact_port,
             reading_artifact_id=self.reading_artifact_id,
@@ -2711,6 +2822,10 @@ class AutonomousLifeCycle:
         except Exception as exc:
             raise ReadingResponseFailed(
                 "the private reading response failed: %s" % _error_label(exc)) from exc
+        # A real writing wait elapsed.  Whatever was read before it is no longer
+        # proof of the owners' state; the following re-check must hit them again.
+        self._invalidate_owner_reads()
+        self._reading_situation_cache = None
         if not isinstance(response, Mapping):
             raise ReadingResponseFailed("the reading response is not a mapping")
         kind = str(response.get("kind") or "")
@@ -2794,6 +2909,12 @@ class AutonomousLifeCycle:
         """
         import private_daily_items as pdi
 
+        # The private request is a real wait: the material and the private-items
+        # document may have moved while it was in flight.  The round's read memo
+        # must not answer this re-check, and the situation cached before the wait
+        # is no longer evidence about the owners.
+        self._invalidate_owner_reads()
+        self._reading_situation_cache = None
         current = self.artifact_port.read_artifact(reading_id)
         now_revision = str((current.get("head") or {}).get("version_id") or "")
         if now_revision != str(revision):
@@ -3330,7 +3451,8 @@ class AutonomousLifeCycle:
             return None
 
     def decision_situation_context(self, *, now: str, park: Any = None,
-                                   park_basis: Optional[Mapping[str, Any]] = None
+                                   park_basis: Optional[Mapping[str, Any]] = None,
+                                   wait_basis: Optional[Mapping[str, Any]] = None
                                    ) -> dict[str, Any]:
         """The bounded, present-tense situation the decision model needs -- data, not authority.
 
@@ -3366,6 +3488,11 @@ class AutonomousLifeCycle:
         #: (WAIT, which frees the foreground).  When it is not on offer the block carries a named
         #: reason instead of looking like "there is nothing to put down".
         ctx["breakpoint"] = self.body_breakpoint_view()
+        #: v0.4 explicit-condition PAUSE: the one condition this round may be paused *until*, if
+        #: she explicitly names it.  Same basis as WAIT; the block is data and an allow-list, not
+        #: an offer of authority.  Without a basis it carries a named ``why_not`` so "nothing to
+        #: wait for" never looks like "the field was forgotten".
+        ctx["pause_condition"] = self.pause_condition_view(wait_basis)
         #: v0.4 sharing: her open drafts (ids, states, titles, CAS heads) and the sources she could
         #: share from -- read once per decision round through B's owner.  It is a menu of facts:
         #: nothing here sends, and ``LOCAL_DELIVERED`` is the only delivery this tree has.
@@ -3492,7 +3619,7 @@ class AutonomousLifeCycle:
         store = self.future_items
         if store is None:
             return {"status": "NOT_WIRED", "open_count": 0, "due_refs": [], "due": [], "open": []}
-        view = store.view(now=now or _utc_now_iso())
+        view = store.view(now=now or self._now_iso())
         self.last_future_items = view
         return view
 
@@ -3503,7 +3630,7 @@ class AutonomousLifeCycle:
         if store is None:
             return []
         try:
-            return [row.to_dict() for row in store.due(now or _utc_now_iso())]
+            return [row.to_dict() for row in store.due(now or self._now_iso())]
         except Exception as exc:  # an unreadable store is reported, never read as "none"
             self.last_error = f"FUTURE_ITEMS_READ_FAILED: {type(exc).__name__}: {exc}"[:200]
             return []
@@ -3675,18 +3802,16 @@ class AutonomousLifeCycle:
         return point if getattr(point, "resumable", False) else None
 
     def round_point_for(self, decision_record: Any) -> Optional[ArtifactResumePoint]:
-        """The work the committed Decision actually named, if it named an artifact candidate."""
+        """The work the committed Decision actually named, if it named an artifact candidate.
 
-        candidate = self._selected_candidate_payload(decision_record)
-        if not candidate:
-            return None
-        ref = str(candidate.get("source_ref") or "")
-        if ref.startswith(lfi.ITEM_REF_NAMESPACE):
-            # A due item is carried out on the artifact it named; the item ref is not an object.
-            item = next((row for row in self._round_future_items
-                         if str(row.get("item_ref")) == ref), None)
-            ref = self._future_item_artifact_ref(item or {}) or ""
-        if not ref.startswith("artifact:"):
+        "Named" is the same answer the step builder uses (``_named_work_ref``): a due item's
+        artifact, an artifact ``source_ref``, or the owner targets of the running ``CURRENT_ACTIVITY``
+        candidate.  The round report and the executed step therefore cannot point at two different
+        objects.
+        """
+
+        ref = self._named_work_ref(decision_record)
+        if not ref:
             return None
         return self.resume_point_for_artifact(ref)
 
@@ -3944,7 +4069,12 @@ class AutonomousLifeCycle:
         ref = str(getattr(record, "method_ref", "") or "")
         if not ref:
             return
-        row = self.practice.method_by_ref(ref)
+        # Resolve against the *exact* read AG-1 validated the handle in.  ``practice.last_methods``
+        # is overwritten by any later read this round (the writing prompt's own method search), and
+        # a method can also gain a new head between the decision and this settlement.  Looking the
+        # handle up there would silently bind the claim -- and its trial -- to a version she never
+        # saw.  The offered row's head is the version this usage and its trial are about.
+        row = self._offered_method(ref)
         if row is None:
             self.last_practice_error = ("%s:%s" % (lpc.REASON_METHOD_REF_UNKNOWN, ref))[:200]
             return
@@ -3963,6 +4093,22 @@ class AutonomousLifeCycle:
             self._pending_method_trial = dict(trial, artifact_id=row.get("artifact_id"),
                                               expected_head=row.get("head_version_id"))
 
+    def _offered_method(self, method_ref: str) -> Optional[dict[str, Any]]:
+        """The method row this round really offered for ``method_ref`` (or ``None``).
+
+        This is the same list AG-1 validated the handle against, so a handle that was legal when
+        the Decision committed can never resolve to a row that was read later -- or to a newer
+        head -- during the same round.
+        """
+
+        wanted = str(method_ref or "").strip()
+        if not wanted:
+            return None
+        for row in self._round_methods:
+            if str(row.get("method_ref") or "") == wanted:
+                return dict(row)
+        return None
+
     def _settle_method_binding(self, base: dict[str, Any]) -> None:
         """Report the practice this round followed and record the trial it named (at most once).
 
@@ -3978,8 +4124,11 @@ class AutonomousLifeCycle:
         receipt = base.get("step_receipt")
         receipt = dict(receipt) if isinstance(receipt, Mapping) else {}
         consequence: list[str] = []
-        artifact_ref = self._owner_artifact_ref(receipt.get("artifact_id")
-                                                or usage.get("artifact_id"))
+        # Only the owner's own step receipt can name a result.  A round with no receipt (NO_ACTION,
+        # WAIT, PAUSE, ...) produced no step result, so this list stays empty: naming the *method
+        # document itself* as its own consequence would invent an outcome the owner never
+        # confirmed.  The method artifact already travels in ``usage["artifact_id"]``.
+        artifact_ref = self._owner_artifact_ref(receipt.get("artifact_id"))
         if artifact_ref:
             consequence.append(artifact_ref)
         version_written = receipt.get("version_id")
@@ -4220,7 +4369,11 @@ class AutonomousLifeCycle:
         if not self.practice.available() and not self.practice.memory_bound():
             return {"status": "NOT_WIRED", "experiences": [], "methods": [], "method_refs": []}
         view = self.practice.decision_context(query=self._practice_query())
-        self._round_methods = [dict(row) for row in self.practice.last_methods]
+        #: Only methods the owner still lets this round use become handles AG-1 may accept.  A
+        #: retired method, or one whose evidence can no longer be read, stays in the workspace
+        #: (and in the context's own ``withheld_methods``) but is never offered as usable here.
+        self._round_methods = [dict(row) for row in self.practice.last_methods
+                               if row.get("available", True)]
         if self.practice.last_error:
             self.last_practice_error = self.practice.last_error
         self._round_practice_context = view
@@ -4325,7 +4478,14 @@ class AutonomousLifeCycle:
         return self._earlier_project_service
 
     def _named_work_ref(self, decision_record: Any) -> Optional[str]:
-        """The artifact the committed Decision named, as an ``artifact:`` ref (or ``None``)."""
+        """The artifact the committed Decision named, as an ``artifact:`` ref (or ``None``).
+
+        A ``CONTINUE_CURRENT`` candidate names its work only through the **owner's own** target
+        refs: its ``source_ref`` is the Activity id, not an artifact.  Reading it here is what
+        makes the formal next step continue the object the running Activity was really started
+        on instead of whatever this round happened to select as a fallback.  A candidate that
+        names no work ref still answers ``None`` and the caller keeps its fallback.
+        """
 
         candidate = self._selected_candidate_payload(decision_record)
         if not candidate:
@@ -4337,7 +4497,17 @@ class AutonomousLifeCycle:
             return self._future_item_artifact_ref(item or {})
         if ref.startswith("artifact:"):
             return ref
+        if (str(candidate.get("candidate_kind") or "") == "CONTINUE_CURRENT"
+                or str(candidate.get("source_kind") or "") == "CURRENT_ACTIVITY"):
+            return pcb.work_ref_from_candidate(
+                candidate, exclusions=self._artifact_exclusion_ids())
         return None
+
+    def _artifact_exclusion_ids(self) -> set[str]:
+        """The bare ids this instance must never treat as a work target."""
+
+        return {ident for ident in (self._artifact_identity(ref)
+                                    for ref in self.artifact_exclusions) if ident}
 
     def _work_adoption_spec_for_decision(self, decision_record: Any, *,
                                          fallback: Optional[ArtifactResumePoint]) -> dict[str, Any]:
@@ -4395,6 +4565,14 @@ class AutonomousLifeCycle:
             except Exception as exc:  # pragma: no cover
                 status = {"status": "ERROR", "detail": f"{type(exc).__name__}: {exc}"}
             found["source_availability"][adapter.source_kind] = status
+
+        # v0.4 day-life: a parked Activity with a *valid* LR-4 eligibility is material in its own
+        # right -- exactly like a page left to read or a work with a head.  Without this, an
+        # instance whose only real offer is "the thing she set down and can now come back to"
+        # returned NO_MATERIAL before AG-0 ever ran, so the offer could never be considered.
+        # The read is the same RESUME_ELIGIBLE source the Decision uses; it consumes nothing.
+        found["parked_candidates"] = self.parked_resume_candidates(
+            observed_at=now or getattr(self, "_round_observed_at", None))
 
         # D (life-v1): the continuity read comes first, because it is what decides *which*
         # work this round continues.  It is a read of the owners C was given: it authorizes
@@ -4458,7 +4636,8 @@ class AutonomousLifeCycle:
         # B6-5: ask the World what she can actually perceive right now.  This is a bounded read
         # through the gateway, not a model call, and it is the only way AG-0 may ever see a
         # World opportunity: the source is fed from outside by design.
-        observed = self._refresh_world_opportunities()
+        observed = self._refresh_world_opportunities(
+            observed_at=now or getattr(self, "_round_observed_at", None))
         found["world_opportunities"] = [item.get("opportunity_id") for item in observed]
         # I: what she saw, with the owner verb each opportunity implies and the place facts
         # (distance, opening state, uncertainty).  Report only -- nothing here is a grant.
@@ -4518,7 +4697,8 @@ class AutonomousLifeCycle:
         found["has_material"] = bool(
             found["foreground_activity"] or found["continuable_artifact"] or observed
             or found.get("reading_material") or self._round_future_items
-            or self._round_project_options)
+            or self._round_project_options
+            or int((found.get("parked_candidates") or {}).get("count") or 0) > 0)
         return found
 
     # -- v0.4 day-life: read-only step readiness + the bounded reconsideration ledger -----
@@ -4906,6 +5086,86 @@ class AutonomousLifeCycle:
                     "llm_calls": 0}
         return dict(port.tick(limit=limit))
 
+    def parked_resume_candidates(self, *, observed_at: Optional[str] = None) -> dict[str, Any]:
+        """Read-only: which parked Activities LR-4 would currently let her resume.
+
+        This is the *same* AG-0 source the Decision materializes (``RESUME_ELIGIBLE``), asked
+        one step earlier: a due check window whose only real offer is "a thing she set down and
+        can now come back to" must be able to see it *before* the quiet gate decides that
+        nothing is on offer.  The source applies LR-4's own predicates (OPEN, not expired,
+        WAITING/PAUSED, matching revision/episode, no foreground held elsewhere), so this adds
+        no second eligibility system, consumes nothing, resumes nothing and writes nothing.
+
+        A source that is unwired, disabled or fails to read is reported by name and yields
+        **zero** material: "cannot prove it is resumable" is never counted as an offer.
+        """
+
+        obs = observed_at or getattr(self, "_round_observed_at", None) or self._now_iso()
+        base: dict[str, Any] = {
+            "source_kind": ag2.SOURCE_RESUME_ELIGIBLE,
+            "available": False,
+            "count": 0,
+            "refs": [],
+            "activity_refs": [],
+        }
+        registry = getattr(self.runtime, "candidate_registry", None)
+        getter = getattr(registry, "get_adapter", None)
+        adapter: Any = None
+        if callable(getter):
+            try:
+                adapter = getter(ag2.SOURCE_RESUME_ELIGIBLE)
+            except Exception as exc:
+                base["reason_code"] = "RESUME_SOURCE_NOT_WIRED"
+                base["detail"] = "%s: %s" % (type(exc).__name__, exc)
+                return base
+        if adapter is None:
+            base["reason_code"] = "RESUME_SOURCE_NOT_WIRED"
+            return base
+        enabled = getattr(adapter, "is_enabled", None)
+        if callable(enabled):
+            try:
+                if not enabled():
+                    base["reason_code"] = "RESUME_SOURCE_DISABLED"
+                    return base
+            except Exception as exc:
+                self.last_error = "%s: %s" % (type(exc).__name__, exc)
+                base["reason_code"] = "RESUME_SOURCE_DISABLED"
+                base["detail"] = self.last_error
+                return base
+        discover = getattr(adapter, "discover", None)
+        if not callable(discover):
+            base["reason_code"] = "RESUME_SOURCE_WITHOUT_READ"
+            return base
+        try:
+            items, snapshot_ref, meta = discover(observed_at=obs)
+        except Exception as exc:  # a failed owner read is reported, never guessed around
+            self.last_error = "%s: %s" % (type(exc).__name__, exc)
+            base["reason_code"] = "RESUME_SOURCE_READ_FAILED"
+            base["detail"] = self.last_error
+            return base
+        refs: list[str] = []
+        activity_refs: list[str] = []
+        for row in items:
+            if not isinstance(row, Mapping):
+                continue
+            eligibility_id = str(row.get("eligibility_id") or "")
+            if not eligibility_id:
+                continue
+            refs.append(eligibility_id)
+            activity_ref = str(row.get("activity_id") or "")
+            if activity_ref and activity_ref not in activity_refs:
+                activity_refs.append(activity_ref)
+        base.update({
+            "available": True,
+            "reason_code": "READ_OK",
+            "count": len(refs),
+            "refs": refs,
+            "activity_refs": activity_refs,
+            "snapshot_ref": (snapshot_ref if isinstance(snapshot_ref, str) else None),
+            "discovered": int((meta or {}).get("discovered") or 0),
+        })
+        return base
+
     def open_resume_refs(self) -> list[str]:
         """The resume eligibilities LR-4 currently reports OPEN -- ids only, bounded."""
 
@@ -4971,6 +5231,19 @@ class AutonomousLifeCycle:
         return {"released": released, "reason": reason}
 
     # -- the cycle ---------------------------------------------------------------------
+    # -- business time -----------------------------------------------------
+
+    def _now(self) -> datetime:
+        """本域的业务 now。普通路径就是系统 UTC 墙钟；演示模式是压缩逻辑时间。"""
+
+        clock = self._business_clock
+        if clock is None:
+            return datetime.now(timezone.utc)
+        return clock()
+
+    def _now_iso(self) -> str:
+        return self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
+
     def evaluate_once(
         self,
         *,
@@ -4979,13 +5252,39 @@ class AutonomousLifeCycle:
         observed_at: Optional[str] = None,
         act: bool = True,
     ) -> dict[str, Any]:
-        """One real evaluation.  Returns a compact, honest report; never raises for a refusal."""
-        obs = observed_at or _utc_now_iso()
+        """One real evaluation.  Returns a compact, honest report; never raises for a refusal.
+
+        The round's read memo is opened and closed here, not only in ``_finish`` or in the
+        runner's ``finally``.  A caller that drives ``evaluate_once`` directly -- a probe, a
+        tool, a test -- gets the same guarantee as the resident: a round that raises, exits
+        early or returns normally always drops the memo, so the next wake (even one carrying
+        the same instant) reads the owners again.
+        """
+
+        try:
+            return self._evaluate_once_round(
+                trigger_ref=trigger_ref, trigger_kind=trigger_kind,
+                observed_at=observed_at, act=act)
+        finally:
+            # ``_finish`` already ends the round on every normal exit; ending it again is a
+            # no-op and makes the exception path explicit.
+            self.end_round_reads()
+
+    def _evaluate_once_round(
+        self,
+        *,
+        trigger_ref: str,
+        trigger_kind: str = TRIGGER_IDLE_WINDOW,
+        observed_at: Optional[str] = None,
+        act: bool = True,
+    ) -> dict[str, Any]:
+        obs = observed_at or self._now_iso()
         base: dict[str, Any] = {"trigger_kind": trigger_kind, "trigger_ref": trigger_ref,
                                 "observed_at": obs}
         # rc1-C: one round, one instant.  The read-only material situation is cached for this
         # round only (the candidate, the step plan and the facts must not disagree inside one
         # round, and the next round must see whatever the owners then say).
+        self.begin_round_reads(obs)
         self._reading_situation_cache = None
         # v0.4 day-life: the round's own readiness is reset here, so an early exit below can never
         # record the previous round's state into the reconsideration ledger.
@@ -5122,15 +5421,25 @@ class AutonomousLifeCycle:
         # exactly what "park it and do something else" means.  Treating the pointer alone as
         # "busy" hid every World step (and the reading/closeout step) for the whole parked stretch,
         # so the only thing a parked round could do was continue the *work*.
-        # The rule is the narrow one: **only WAITING frees the slot**.  ``ACTIVE`` and ``PAUSED``
-        # both occupy it (a PAUSE is still the operator holding that Activity; resuming it is her
-        # only legal move), and an unread status keeps the old pointer rule.
+        # v0.4 background pause: a successful PAUSE now clears the pointer and marks the PAUSED
+        # record ``foreground_released``, so the slot is free while the Activity stays suspended.
+        # ``ACTIVE`` still occupies it; a *legacy* PAUSED record whose pointer predates the rule
+        # also still occupies it (nothing migrates it in a read), and an unread status keeps the
+        # old pointer rule.  The cycle reads the pointer, so it needs no second status list: the
+        # owner is the one that decides whether a pointer exists.
         foreground_record = self._last_foreground_record or {}
         foreground_status = str(foreground_record.get("status") or "")
         has_foreground = ((foreground_status != "WAITING") if foreground_status
                           else bool(material.get("foreground_activity")))
         artifact_available = resume_point is not None
         world_available = bool(self.last_world_opportunities)
+        #: The work object the *running* Activity itself names (its owner's own target refs), or
+        #: ``None``.  It is a projection, not a permission: the step builder still asks the owner
+        #: for a resumable point and refuses by name when it has none.  Reported for the round.
+        foreground_work_ref = (pcb.work_ref_from_activity(
+            foreground_record, exclusions=self._artifact_exclusion_ids())
+            if has_foreground else None)
+        base["foreground_work_ref"] = foreground_work_ref
 
         # rc1-C: is the *foreground* Activity this material's page read?  Asked of the Activity
         # owner itself (``_foreground_reading_activity``), never inferred from the fact that
@@ -5220,8 +5529,8 @@ class AutonomousLifeCycle:
                 # never from a chosen destination: choosing is AG-1's job and it has not
                 # happened yet at this point.
                 adoption_spec = _DecisionBoundAdoptionSpec(
-                    lambda decision: self._world_adoption_spec(
-                        self.last_world_opportunities, decision=decision))
+                    lambda decision: self._world_adoption_for_decision(
+                        self.last_world_opportunities, decision))
         else:
             adoption_spec = None
 
@@ -5230,7 +5539,11 @@ class AutonomousLifeCycle:
         # original operation.  Without one, nothing crosses a submission fence at all.
         ar0_step = None
         if (act and self._ar0_enabled() and foreground_reading is None
-                and (resume_point is not None or artifact_available or project_available)):
+                and (resume_point is not None or artifact_available or project_available
+                     # The running Activity may name a work object even when this round's own
+                     # selection (bound work / history / latest) points elsewhere or at nothing.
+                     # The step builder asks the owner for a resumable point and refuses by name.
+                     or foreground_work_ref is not None)):
             # Lazy on purpose: AG-2 materialises this override only *after* the decision, so the
             # content model call happens when a step will really be executed -- never for a
             # NO_ACTION or DEFER round.  A writer failure surfaces from that materialisation.
@@ -5262,7 +5575,9 @@ class AutonomousLifeCycle:
         # committed Decision rather than a fixed Mapping.
         world_step = None
         if act and not has_foreground and self._world_step_enabled() and world_available:
-            world_step = _DecisionBoundStepSpec(self._world_step_spec)
+            # A Decision that selected something other than a World candidate is refused by the
+            # step builder itself (``_world_step_for_decision``), before any shape is described.
+            world_step = _DecisionBoundStepSpec(self._world_step_for_decision)
 
         # I-r1: a stay she is already in is the *only* legal continuation of its own round --
         # the foreground slot is a single one (AG-2 refuses a second), so while she is staying
@@ -5374,6 +5689,27 @@ class AutonomousLifeCycle:
                                if self.last_body_wait_basis else None),
         }
 
+        # v0.4 explicit-condition PAUSE: the *same* basis this round already offers for WAIT is
+        # the only condition a PAUSE may name.  The spec is the existing waiting spec with the
+        # basis ref added so AG-2 can re-check that the committed Decision quoted exactly this
+        # offer.  A round with no basis gets ``None``: unconditional PAUSE stays legal, but a
+        # Decision that names a condition is refused rather than given an invented one.
+        pause_condition_spec: Any = None
+        if wait_basis is not None and str(wait_basis.get("basis_ref") or ""):
+            _pause_basis_ref = str(wait_basis["basis_ref"])
+            _pause_source = waiting_spec
+            if callable(_pause_source):
+                def pause_condition_spec(decision, _source=_pause_source,
+                                         _ref=_pause_basis_ref):
+                    spec = dict(_source(decision) or {})
+                    spec["basis_ref"] = _ref
+                    return spec
+            else:
+                _pause_static = dict(_pause_source or {})
+                _pause_static["basis_ref"] = _pause_basis_ref
+                def pause_condition_spec(decision, _spec=_pause_static):
+                    return dict(_spec)
+
         # W05R-R1: the round is deliberately *not* wrapped in one pause boundary.  A
         # boundary held across the decision and content requests made the operator's
         # ``pause`` wait behind a model call, which is not a finite commit and is exactly
@@ -5432,7 +5768,8 @@ class AutonomousLifeCycle:
         #: v0.4 C: the situation is built *first* and held, because building it is what reads the
         #: practice slice (and therefore what decides which method handles this round offers).  The
         #: allow-list below must be the same read, not a second one that could disagree.
-        situation_context = self.decision_situation_context(now=obs, park=park)
+        situation_context = self.decision_situation_context(
+            now=obs, park=park, wait_basis=wait_basis)
         try:
             out = self.runtime.coordinator.run_decision_and_adoption_cycle(
                 trigger_kind=trigger_kind,
@@ -5462,6 +5799,9 @@ class AutonomousLifeCycle:
                 # spends one decision request and produces no content.
                 known_waiting_basis_ref=(str(wait_basis["basis_ref"]) if wait_basis else None),
                 waiting_spec=waiting_spec,
+                # v0.4 explicit-condition PAUSE: the same offered basis, with the same spec but
+                # carrying its own ``basis_ref`` so AG-2 can prove the Decision quoted it.
+                pause_condition_spec=pause_condition_spec,
                 **capacity_kwargs,
                 pre_adoption_mutation_hook=self._pause_gate_hook,
                 fault_hook=self._pause_fault_hook,
@@ -5508,7 +5848,11 @@ class AutonomousLifeCycle:
         self.last_correlation_id = out.get("correlation_id")
         base.update({
             "correlation_id": out.get("correlation_id"),
-            "decision_route": dec_res.get("decision_route"),
+            # The route lives on the committed DecisionRecord itself.  ``evaluate_opportunity``
+            # returns the record (and its attempt) but no separate top-level route, so reading
+            # only the result dict left this ``None`` in the real chain.
+            "decision_route": (getattr(record, "decision_route", None)
+                               or dec_res.get("decision_route")),
             "decision": getattr(record, "decision", None),
             "reason_codes": list(getattr(record, "reason_codes", []) or []),
             "short_rationale": getattr(record, "short_rationale", None),
@@ -5609,8 +5953,17 @@ class AutonomousLifeCycle:
                 base["sharing_outcome_note"] = (
                     "decision=NO_ACTION; one sharing step was applied by the owner, so this round "
                     "is reported as SHARE_ACTED and not as NO_ACTION")
-            return self._finish(base, outcome, llm_calls=1,
-                                detail=f"decision={decision}")
+            # A rule-resolved Decision (empty / all-hard-rejected CandidateSet) never reached a
+            # model: AG-1's own contract says ``RULE_RESOLVED`` is 0 LLM calls.  Counting it as
+            # one made "eight wakes" read as "eight model calls" while the ledger showed four
+            # decision tokens.  The count follows the recorded route, never the outcome name.
+            route = str(base.get("decision_route") or "")
+            calls = 0 if route == ag1.ROUTE_RULE_RESOLVED else 1
+            reasons = list(getattr(record, "reason_codes", []) or [])
+            detail = f"decision={decision} route={route or 'UNKNOWN'}"
+            if reasons:
+                detail += " reason=%s" % ",".join(str(r) for r in reasons)
+            return self._finish(base, outcome, llm_calls=calls, detail=detail)
         # v0.4 day-life: a chosen exit is reported only after the owner really applied it.  The
         # adoption record is checked first, and then the Activity owner's own state is re-read: a
         # Decision the owner refused is an ``ADOPTION_REJECTED`` (never "she stopped"), and an
@@ -5797,7 +6150,7 @@ class AutonomousLifeCycle:
         else:
             effect_state = EffectState.UNKNOWN
         step_receipt = StepReceipt(
-            observed_at=_utc_now_iso(),
+            observed_at=self._now_iso(),
             artifact_id=str(payload.get("artifact_id") or ""),
             expected_head=payload.get("expected_head"),
             operation_key=str(action.get("provider_operation_ref") or ""),
@@ -5864,7 +6217,8 @@ class AutonomousLifeCycle:
         return (self.world_opportunity_provider is not None
                 and getattr(self.runtime, "world_action_adapter", None) is not None)
 
-    def _refresh_world_opportunities(self) -> list[dict[str, Any]]:
+    def _refresh_world_opportunities(
+            self, *, observed_at: Optional[str] = None) -> list[dict[str, Any]]:
         """Feed AG-0 the World opportunities one real observation supports.
 
         AG-0's ``WorldOpportunityCandidateSource`` is fed from outside by design -- it
@@ -5872,6 +6226,12 @@ class AutonomousLifeCycle:
         fact can become a candidate.  Recording is idempotent: the opportunity id is
         derived from the place, the World revision and the destination, so observing
         twice from the same state produces the same records, not duplicates.
+
+        ``observed_at`` is **the round's own instant** and is handed to the provider so the
+        opportunity's validity window is anchored to the same clock the candidate set is
+        validated on.  Without it the provider stamped a real-wall-clock window while a
+        compressed-demo round read a business-clock instant: every opportunity was then
+        either "not yet open" or "expired" and a real observed place produced no candidate.
         """
         self.last_world_opportunities = []
         self.last_world_error = None
@@ -5882,7 +6242,16 @@ class AutonomousLifeCycle:
             self.last_world_error = "runtime has no world_opportunity_source"
             return []
         try:
-            observed = list(self.world_opportunity_provider() or [])
+            observer = getattr(self.world_opportunity_provider, "observe", None)
+            if observed_at and callable(observer):
+                try:
+                    observed = list(observer(occurred_at=observed_at) or [])
+                except TypeError:
+                    # A provider that does not take ``occurred_at`` keeps its old call shape;
+                    # the reading is still real, only the window is its own clock's.
+                    observed = list(self.world_opportunity_provider() or [])
+            else:
+                observed = list(self.world_opportunity_provider() or [])
         except Exception as exc:  # a broken seam is reported, never papered over
             self.last_world_error = f"{type(exc).__name__}: {exc}"
             return []
@@ -5911,7 +6280,7 @@ class AutonomousLifeCycle:
         expire = getattr(source, "expire_opportunity", None)
         if stale_ids and callable(expire):
             moment = str((recorded[0].get("observed_at") if recorded else "")
-                         or _utc_now_iso())
+                         or self._now_iso())
             for opportunity_id in sorted(stale_ids):
                 try:
                     expire(opportunity_id, observed_at=moment)
@@ -6342,6 +6711,36 @@ class AutonomousLifeCycle:
     def _decision_chose_world(self, decision_record: Any) -> bool:
         return self._candidate_is_world(self._selected_candidate(decision_record))
 
+    def _require_world_candidate(self, decision_record: Any) -> None:
+        """A single-World round may only build the World shape for a World candidate.
+
+        The routed branch asks ``_candidate_is_world`` before it reaches a World builder.  When
+        the World path is the *only* one available there is no such routing step, so the same
+        predicate is applied here, before any World Activity shape or step is described: a
+        Decision that selected a personal candidate is refused up front, instead of being
+        discovered only inside ``_world_step_spec`` after the Activity shape was already built.
+        The predicate and the refusal text are the existing ones; nothing is re-selected,
+        retried or rewritten.
+        """
+
+        candidate_ref = getattr(decision_record, "selected_candidate_ref", None)
+        if not self._candidate_is_world(self._selected_candidate(decision_record)):
+            raise AutonomousLifeError(
+                "the committed Decision %r names no observed World target" % (candidate_ref,))
+
+    def _world_step_for_decision(self, decision_record: Any) -> dict[str, Any]:
+        """The single-World step: only for a Decision that really selected a World candidate."""
+
+        self._require_world_candidate(decision_record)
+        return self._world_step_spec(decision_record)
+
+    def _world_adoption_for_decision(self, opportunities: list[dict[str, Any]],
+                                     decision_record: Any) -> dict[str, Any]:
+        """The single-World Activity shape: the same guard, before any shape is built."""
+
+        self._require_world_candidate(decision_record)
+        return self._world_adoption_spec(opportunities, decision=decision_record)
+
     def _routed_step_builder(self, point: Optional[ArtifactResumePoint], *, observed_at: str,
                              closeout: Optional[Mapping[str, Any]] = None
                              ) -> Callable[[Any], Mapping[str, Any]]:
@@ -6365,6 +6764,47 @@ class AutonomousLifeCycle:
                                                     observed_at=observed_at)
 
         return build
+
+    @staticmethod
+    def _daily_action_state_token(observation: Mapping[str, Any]) -> str:
+        """A stable token for the body/World state a hand action was decided in.
+
+        Only facts that a real hand action changes: where every visible object is (kind,
+        surface/container/slot, in-hand), which hands hold what, the pose/orientation, the
+        place, and the World's own revision.  It is a *fallback* origin for daily-action
+        steps that carry no committed Decision identity -- not an action identity: it cannot
+        tell two Decisions apart when an ABA cycle brings the same placements back, and it
+        changes when the owner executed an action whose answer the client lost.  Both cases
+        are why the real path keys on ``decision_id`` instead.  It grants nothing and is not
+        persisted as a second state record.
+        """
+
+        visible: list[list[Any]] = []
+        for item in observation.get("visible_objects") or []:
+            if not isinstance(item, Mapping):
+                continue
+            visible.append([
+                str(item.get("object_id") or ""),
+                item.get("kind"),
+                item.get("surface_id"),
+                item.get("container_id"),
+                item.get("slot_id"),
+                bool(item.get("in_hand")),
+            ])
+        visible.sort(key=lambda row: row[0])
+        hands = observation.get("hands")
+        facts = {
+            "world_revision": observation.get("world_revision"),
+            "location": observation.get("location"),
+            "pose": observation.get("pose"),
+            "orientation": observation.get("orientation"),
+            "hands": ({str(slot): held for slot, held in hands.items()}
+                      if isinstance(hands, Mapping) else None),
+            "visible": visible,
+        }
+        text = json.dumps(facts, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"))
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
     def _world_step_spec(self, decision_record: Any) -> dict[str, Any]:
         """One bounded World action, described from the Decision that actually chose it.
@@ -6429,9 +6869,19 @@ class AutonomousLifeCycle:
             # W owns the encoding *and* the step shape: the whole parameter set travels as the one
             # AR-0 target, and the World bridge decodes it at submission time.  Nothing about a
             # pose or a rest session is re-spelled here.
+            #
+            # The identity is the committed Decision, exactly as with ``dailyact:`` below.  A
+            # retry or an UNKNOWN reconciliation for this Decision must keep this execution even
+            # when the observed revision/pose moved on; a different Decision that happens to
+            # choose the same target in the same place is a different logical body action and
+            # must not inherit this one's step/Action/authorization.  Observation coordinates
+            # alone cannot tell those two cases apart.
             self.last_world_target_ref = target_ref
+            decision_identity = str(
+                getattr(decision_record, "decision_id", "") or "").strip()
             return dict(body_action_targets_module().build_body_action_step(
-                target_ref, place=place, revision=revision))
+                target_ref, place=place, revision=revision,
+                decision_ref=decision_identity or None))
         if target_ref.startswith(DAILYACT_REF_PREFIX):
             # B owns the encoding *and* the step shape, exactly as with ``bodyact:``: the whole
             # parameter set travels inside the one AR-0 target and the World bridge decodes it at
@@ -6444,7 +6894,25 @@ class AutonomousLifeCycle:
                 raise AutonomousLifeError(
                     "DAILY_ACTION_STEP_BUILDER_MISSING: life_daily_action_targets publishes no "
                     "build_daily_action_step")
-            origin = "place:%s" % place
+            # The origin names the committed *Decision*, not the observation.  Action identity
+            # belongs to the Decision: a retry or an UNKNOWN reconciliation must keep the same
+            # execution even when the owner already changed the world (that is exactly what the
+            # AR-0 submission fence is for), while a *different* Decision is a different logical
+            # action even if the world happens to look identical again.
+            #
+            # An observation hash cannot express that.  PICK_UP/PLACE move substrate placements
+            # without bumping ``world_revision``, so after two full pick/place cycles the visible
+            # facts are byte-identical: a state-hash key would rebuild the earlier key and AR-0
+            # would answer the first SUCCEEDED execution instead of touching the owner.  The
+            # reverse is just as wrong: if the owner executed but the client lost the answer, the
+            # observation changes and a state-hash key would mint a *new* action for the same
+            # Decision.  The state token therefore only remains the fallback for callers that
+            # carry no Decision identity (hand-built steps); the real Decision path is stable.
+            decision_identity = str(getattr(decision_record, "decision_id", "") or "").strip()
+            if decision_identity:
+                origin = "place:%s@%s" % (place, decision_identity)
+            else:
+                origin = "place:%s@%s" % (place, self._daily_action_state_token(observation))
             try:
                 spec = builder(target_ref, origin_ref=origin)
             except TypeError:
@@ -6804,6 +7272,14 @@ class AutonomousLifeCycle:
         """
 
         self._pause_confirmed("after_decision_before_adoption")
+        # The Decision request was a real wait: what the round read before it is no longer
+        # proof of the owners' state.  The very next thing that happens is the owner-side
+        # final freshness check (``validate_decision_for_adoption`` -> ``validate_candidate``
+        # -> ``ArtifactContinuationSource.refresh``), which is a re-check *at use time*.  Drop
+        # the round's read memo here so that check really asks the owner: an archive, a
+        # tombstone or a newer head that landed while the model was answering is observed and
+        # blocks adoption instead of being papered over by the pre-Decision snapshot.
+        self._invalidate_owner_reads()
         return None
 
     def _pause_fault_hook(self, name: str) -> None:
@@ -6915,6 +7391,8 @@ class AutonomousLifeCycle:
         home = self.world_home
         if not home:
             return {"ok": False, "reason_code": "WORLD_HOME_NOT_CONFIGURED"}
+        # 旅程进度是业务时间：显式演示模式读同一个压缩域；普通路径仍是真实 now。
+        observed_at = observed_at or self._now_iso()
         if settle_only is None:
             settle_only = bool(self.pause_gate()["blocked"])
         # W05R: starting the *next* segment is a commit, so it happens inside the pause
@@ -6926,9 +7404,15 @@ class AutonomousLifeCycle:
                 settle_only = True
             try:
                 journey = journey_module()
+                # 每一段都是新的 Action：结算之后若要发起下一段，也必须经 World
+                # 自己的正式授权入口。端口来自本 runtime 的旅程 resolver——同一个
+                # 已用于首段提交的正式口；没有正式口的 runtime 交给引擎失败关闭。
+                adapter = getattr(self.runtime, "world_action_adapter", None)
+                resolver = getattr(adapter, "resolver", None)
+                submit_port = getattr(resolver, "submit_port", None)
                 projection = journey.advance_journey(
                     hermes_home=home, environment=self.env, now=observed_at,
-                    settle_only=bool(settle_only))
+                    settle_only=bool(settle_only), submit_port=submit_port)
             except Exception as exc:
                 self.last_world_error = "%s: %s" % (type(exc).__name__, exc)
                 return {"ok": False, "reason_code": "JOURNEY_UNAVAILABLE",
@@ -6967,7 +7451,7 @@ class AutonomousLifeCycle:
             return record
         base: dict[str, Any] = {"trigger_kind": TRIGGER_IDLE_WINDOW,
                                 "trigger_ref": "evt:journey:arrival",
-                                "observed_at": observed_at or _utc_now_iso()}
+                                "observed_at": observed_at or self._now_iso()}
         self._record_world_progress(
             base, activity_ref=activity_ref, destination="place:%s" % target,
             action_ref=None, correlation_id=None)
@@ -6998,7 +7482,7 @@ class AutonomousLifeCycle:
         asking for a *decision*, not for a replay of the unknown one.
         """
 
-        observed = str(occurred_at or _utc_now_iso())
+        observed = str(occurred_at or self._now_iso())
         record: dict[str, Any] = {"ok": False, "action_id": str(action_id or ""),
                                   "reason": reason or "WORLD_STEP_UNKNOWN",
                                   "action_status": None, "reconciled": False,
@@ -7058,6 +7542,78 @@ class AutonomousLifeCycle:
                                  else "RECONCILED_FAILED")
         return record
 
+    @staticmethod
+    def _definite_pre_submit_refusal(action_status: Any,
+                                     attempt: Any) -> Optional[dict[str, Any]]:
+        """A World step the owner *provably* never received, or ``None``.
+
+        AR-0 keeps the Action at ``PREPARED`` after a definite pre-submission failure
+        (gate off / shadow / invalid) so the same action id may be retried, and records
+        the attempt as ``PRE_SUBMIT_FAILED``.  That status is neither SUCCEEDED nor
+        FAILED nor UNKNOWN; treating it as unsettled hides a clean refusal behind
+        "something may have happened".  Only this exact evidence is a refusal -- a
+        fenced/submitted attempt, a missing attempt, or a terminal Action stays on the
+        unsettled/owner path.
+        """
+
+        if str(action_status or "") != ACTION_STATUS_PREPARED:
+            return None
+        if not isinstance(attempt, Mapping):
+            return None
+        if str(attempt.get("status") or "") != ATTEMPT_STATUS_PRE_SUBMIT_FAILED:
+            return None
+        if str(attempt.get("transport_result") or "") != TRANSPORT_ERR_DEFINITE_PRE_SUBMIT:
+            return None
+        return {
+            "reason_code": str(attempt.get("error_class") or "PRE_SUBMIT_FAILED"),
+            "transport_result": TRANSPORT_ERR_DEFINITE_PRE_SUBMIT,
+            "attempt_id": attempt.get("attempt_id"),
+            "attempt_status": ATTEMPT_STATUS_PRE_SUBMIT_FAILED,
+            "provider_operation_ref": attempt.get("provider_ref"),
+            # This is the fact the report is allowed to state: nothing crossed the fence.
+            "not_sent": True,
+        }
+
+    @staticmethod
+    def _step_submit_attempt(submit: Mapping[str, Any],
+                             action: Mapping[str, Any]) -> Mapping[str, Any]:
+        """AR-0's attempt for the action this step submitted, in either shipped shape.
+
+        The bridge's own result is flat (``action`` + ``attempt``), but the production
+        ``LifeIntegrationCoordinator.execute_activity_step`` puts that bridge result under
+        its own ``submit_result`` key.  Reading only the flat key meant a real
+        pre-submission refusal never matched, so "nothing was sent" was reported as
+        "something may have happened".
+
+        Only one explicit layer is unwrapped, and only an attempt that names the *same*
+        action is used: records from two executions are never stitched into one identity.
+        A missing, non-mapping or mismatched attempt is ``{}`` -- the caller then keeps
+        its existing unknown/unsettled semantics instead of inventing a refusal.
+        """
+
+        action_id = str(action.get("action_id") or "")
+        flat = submit.get("attempt")
+        nested = submit.get("submit_result")
+
+        def belongs_to_the_action(candidate: Any) -> bool:
+            if not isinstance(candidate, Mapping) or not candidate:
+                return False
+            candidate_id = str(candidate.get("action_id") or "")
+            return not (action_id and candidate_id) or action_id == candidate_id
+
+        if belongs_to_the_action(flat):
+            return flat
+        if isinstance(nested, Mapping):
+            nested_action = nested.get("action")
+            nested_action_id = (str(nested_action.get("action_id") or "")
+                                if isinstance(nested_action, Mapping) else "")
+            same_layer = (not (action_id and nested_action_id)
+                          or action_id == nested_action_id)
+            candidate = nested.get("attempt")
+            if same_layer and belongs_to_the_action(candidate):
+                return candidate
+        return {}
+
     def _classify_world_step(self, out: Mapping[str, Any], base: dict[str, Any],
                              obs: str) -> dict[str, Any]:
         """Report the World result as exactly what the World owner confirmed.
@@ -7072,8 +7628,13 @@ class AutonomousLifeCycle:
                 and str(getattr(step_spec, "step_kind", ""))
                 == ag2.STEP_KIND_INTERNAL_CHECKPOINT):
             return self._classify_stay_step(step_spec, base, obs)
-        submit = step_res.get("submit_result") or {}
-        action = submit.get("action") or {}
+        submit = step_res.get("submit_result")
+        if not isinstance(submit, Mapping):
+            submit = {}
+        action = submit.get("action")
+        if not isinstance(action, Mapping):
+            action = {}
+        attempt = self._step_submit_attempt(submit, action)
         status = str(action.get("status") or "")
         verb = str((action.get("frozen_payload") or {}).get("verb") or MOVE_VERB)
         receipts: list[dict[str, Any]] = []
@@ -7096,6 +7657,20 @@ class AutonomousLifeCycle:
             "world_revision": details.get("world_revision"),
             "world_mutation_ref": evidence[-1] if evidence else None,
         })
+
+        # A definite pre-submission refusal (gate off / shadow / invalid) never reached the
+        # World owner: AR-0 keeps the Action at PREPARED and records the attempt as
+        # PRE_SUBMIT_FAILED.  Reporting that as "unsettled" is how a clean refusal used to
+        # read as an unknown execution.  It is a refusal -- nothing was sent, nothing may be
+        # reconciled -- and only this exact evidence is treated that way.
+        refusal = self._definite_pre_submit_refusal(status, attempt)
+        if refusal is not None:
+            base["pre_submit"] = dict(refusal)
+            base["transport_result"] = refusal["transport_result"]
+            return self._finish(
+                base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                detail="world action was refused before submission (%s); nothing was sent "
+                       "to the World owner" % refusal["reason_code"])
 
         # v0.4 day-life / W: a pose or a rest session is not an arrival.  Its own classifier reads
         # the World owner's own observation (the snapshot for POSE, the REST session state for REST)
@@ -7333,7 +7908,7 @@ class AutonomousLifeCycle:
             return
         target_ref = str(parsed.get("target") or "")
         source = str(fact.get("source") or "world_gateway")
-        now = _utc_now_iso()
+        now = self._now_iso()
         evidence = lr5.LifeProgressEvidence(
             progress_evidence_id=(
                 f"pevid:{hashlib.sha256(f'{activity_ref}:{target_ref}'.encode('utf-8')).hexdigest()[:16]}"),
@@ -7507,7 +8082,7 @@ class AutonomousLifeCycle:
 
         if not activity_ref or not fact_key or not expected:
             return
-        now = _utc_now_iso()
+        now = self._now_iso()
         observed_facts: dict[str, Any] = {fact_key: expected, "observation_source": source}
         held = observation.get("held_object_ids") if isinstance(observation, Mapping) else None
         if isinstance(held, list):
@@ -7708,7 +8283,7 @@ class AutonomousLifeCycle:
         # namespace, with the revision the observation was taken from.
         fact_ref = ("world_fact:place:%s:r%s" % (place, revision)
                     if revision is not None else "world_fact:place:%s" % place)
-        now = _utc_now_iso()
+        now = self._now_iso()
         evidence = lr5.LifeProgressEvidence(
             progress_evidence_id=(
                 f"pevid:{hashlib.sha256(f'{activity_ref}:{place}'.encode('utf-8')).hexdigest()[:16]}"),
@@ -7765,7 +8340,7 @@ class AutonomousLifeCycle:
         if not activity_ref or not object_id:
             return
         fact_ref = "world_fact:object:%s:consumed" % object_id
-        now = _utc_now_iso()
+        now = self._now_iso()
         evidence = lr5.LifeProgressEvidence(
             progress_evidence_id=(
                 f"pevid:{hashlib.sha256(f'{activity_ref}:consume:{object_id}'.encode('utf-8')).hexdigest()[:16]}"),
@@ -7846,7 +8421,7 @@ class AutonomousLifeCycle:
             # so the end checkpoint names the stay and the declared end it really reached.
             facts["checkpoint_ref"] = "checkpoint:stay:%s:at:%d" % (
                 plan["descriptor"], _epoch_seconds(started_at))
-        now = str(base.get("observed_at") or _utc_now_iso())
+        now = str(base.get("observed_at") or self._now_iso())
         evidence = lr5.LifeProgressEvidence(
             progress_evidence_id=(
                 "pevid:%s" % hashlib.sha256(
@@ -7926,6 +8501,11 @@ class AutonomousLifeCycle:
         version = str(version_ref or "").strip()
         if not owner_ref or not version:
             return None
+        # This is a deliberate re-check of the version the owner just confirmed, not a reuse of a
+        # read made earlier in the round.  The write itself went through AR-0's own port (it
+        # predates the round memo), so the memo can still hold the *pre-write* head and would make
+        # a real confirmed change look unsupported.  Drop it before asking the owner.
+        self._invalidate_owner_reads()
         try:
             view = self.artifact_port.read_artifact(owner_ref)
         except Exception as exc:  # a failed read is reported, never dressed as a description
@@ -8068,7 +8648,7 @@ class AutonomousLifeCycle:
             return
         artifact_bare = str(artifact_id or "").split(":", 1)[-1]
         version_bare = str(version_id).split(":", 1)[-1]
-        now = _utc_now_iso()
+        now = self._now_iso()
         evidence = lr5.LifeProgressEvidence(
             progress_evidence_id=(
                 f"pevid:{hashlib.sha256(f'{activity_ref}:{version_id}'.encode('utf-8')).hexdigest()[:16]}"),
@@ -8257,7 +8837,7 @@ class AutonomousLifeCycle:
                 readiness=(readiness if readiness is not None else lsr.StepReadiness(
                     available=False, reason_code=lsr.REASON_WORK_NO_CHANGE)),
                 outcome=OUTCOME_NO_ACTION,
-                at=str(base.get("observed_at") or _utc_now_iso()),
+                at=str(base.get("observed_at") or self._now_iso()),
                 target_ref=target_ref, source_revision=revision,
                 reason_code=lsr.REASON_WORK_NO_CHANGE,
                 activity_ref=(readiness.activity_ref if readiness is not None else None))
@@ -8284,6 +8864,12 @@ class AutonomousLifeCycle:
 
     def _finish(self, base: dict[str, Any], outcome: str, *, llm_calls: int,
                 detail: str = "") -> dict[str, Any]:
+        # A round whose committed Decision says ``RULE_RESOLVED`` made no model request by
+        # AG-1's contract.  Clamped here (not only at one call site) so every exit path --
+        # including a missing Decision on a rule-resolved attempt -- keeps the model-round
+        # count low instead of turning a local rule into a provider call.
+        if str(base.get("decision_route") or "") == ag1.ROUTE_RULE_RESOLVED:
+            llm_calls = 0
         self.last_outcome = outcome
         # v0.4 C: the practice this round followed (and the one trial it named) are settled here, so
         # every exit path reports the same fields and the trial is written at most once.
@@ -8313,7 +8899,7 @@ class AutonomousLifeCycle:
         # rationale or a Decision, and a real change (new page/head/place/pose/opportunity set)
         # produces a different fingerprint instead of needing a release.
         if outcome in lsr.RECORDED_OUTCOMES:
-            at = str(base.get("observed_at") or _utc_now_iso())
+            at = str(base.get("observed_at") or self._now_iso())
             readiness = self._round_readiness
             try:
                 situation = self._round_situation
@@ -8335,6 +8921,9 @@ class AutonomousLifeCycle:
         # version id is only ever a ref an owner handed back; with no such evidence the answer is
         # ``None`` (unknown), never a guess and never "0 means healthy".
         base["owner_evidence"] = self._owner_evidence(base, outcome)
+        # One round is over: the next wake must read the owners again, never reuse
+        # this round's answers (even if it happens to carry the same instant).
+        self.end_round_reads()
         return base
 
     #: Outcomes in which nothing reached an owner write, so "no version was created" is *known*.
@@ -8379,6 +8968,16 @@ class AutonomousLifeCycle:
                 evidence["owner_version_id"] = "%s:%s" % (prefix, str(ref))
                 return evidence
         if outcome in self.UNKNOWN_WRITE_OUTCOMES:
+            return evidence
+        # A definite pre-submission refusal is same-round evidence, not an inference: AR-0
+        # kept the Action at PREPARED and recorded the attempt as PRE_SUBMIT_FAILED, so no
+        # owner write can have happened.  Only the classified refusal may use this shortcut,
+        # so a misclassified or ambiguous round still reports ``None`` (unknown).
+        pre_submit = base.get("pre_submit")
+        if (outcome == OUTCOME_STEP_REFUSED
+                and isinstance(pre_submit, Mapping)
+                and pre_submit.get("not_sent") is True):
+            evidence["owner_version_created"] = False
             return evidence
         evidence["owner_version_created"] = False if outcome in self.NO_WRITE_OUTCOMES else None
         return evidence

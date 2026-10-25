@@ -128,3 +128,18 @@ Status: implemented
    原读材料 Activity 由 START→CONTINUE 承接；"开着的会话"仍只在隔离 body 夹具（声明 seed）里证明。
 7. `tests/test_v04_practice_life_stage.py` 的 FAIL 来自 Memory port 的 `MEMORY_DB_MISSING` 文件检查
    （`life_experience_port.py:293-296`），本写集不构造 Memory，无负控 → 不归因、未改。
+8. **被撤源/不可读草稿的正文扣留进入表达视图（2026-10-24）**：B 的 `read_share` 既定返回
+   `text_withheld` / `text_available` / `withheld_reason_code`（来源读被拒或不可达时整份不投影
+   正文），A 的 `_share_detail` 此前只把 `ok` 当"详情可读"，把扣留正文投影成空
+   `text_excerpt`，看起来像空草稿。现在这三个事实原样进入 `prompt_block` / `read_draft`
+   与 adapter 白名单（`_bounded_sharing`）；`missing` 字段保持 `None`，不猜。发送仍由 owner
+   以 `stale_source` 拒且零写，未新增字段/合同/外发。
+   **helper 与正式链的边界**：最初的冒烟直接 `validate_sharing_action` → `_apply_sharing_action`，
+   并手塞 `last_sharing_block`、`candidate_read=None`，那只证明 helper 可达，不能证明扣留事实
+   经过正式回合。补充 `tests/test_v04_sharing_life_chain.py` 的正式链用例（真实
+   `assemble_autonomous_life` + `evaluate_once` + 原始 JSON 经 AG-1）与改写后的冒烟：
+   来源拒读后本轮 Decision 视图带扣留原因，脚本仍请求发送时 owner 拒、本地零增量；
+   正常 prepare→defer→send_local 只有一条本地 receipt。Decision 仍是脚本替身，撤权仍是
+   source-only 读拒绝，不称真实 Memory 治理或用户收到。证据：
+   `tests/test_situation_expression_behavior.py`、`tests/test_v04_sharing_life_chain.py`、
+   `scripts/situation_expression_behavior_smoke.py`。

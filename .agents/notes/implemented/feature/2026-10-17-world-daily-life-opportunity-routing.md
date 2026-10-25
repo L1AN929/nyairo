@@ -35,3 +35,14 @@ W 包给了只读机会目录（`location_opportunity_catalog`），B6-5 的翻�
 - **收益**：消费与移动各自走对的 owner 与各自的完成判据——消费靠 owner 回执，移动靠计时到达；"到达"再也不会被一次消费冒充，"物件不见了"也不会被当成吃过。
 - **代价与已知上限**：`MOVE` 机会仍是 owner 的单跳候选（本笔记 Alternatives 里说明为什么本版不扩）；`walk_seconds` 对 MOVE 条目来自目录的路线求和，因此是"从当前位置走过去要多久"，不是单跳时长。
 - **代价与已知上限**：目录读失败只降级为"没有地点事实"（`availability` 为 `NOT_READ`），机会本身照旧产出——这是刻意的：营业事实缺失不该让"能走到的地方"消失，但任何消费候选仍由 owner 自己判（`available=False` 就不产出）。
+- **后续（2026-10-22）**：`_candidate_is_world` 的五类 target 前缀语义不变；只有 World 一条路径可走时，分派点在进入 World builder 之前也复用同一谓词做预检，见
+  [2026-10-22-single-world-candidate-guard.md](../bug-fix/2026-10-22-single-world-candidate-guard.md)。
+  该篇只补“拒绝前不构建 World 形状”的防误送缺口，不改本笔记的命名空间分流决定。
+- **后续（2026-10-23）**：本笔记的机会有效期窗口必须与本回合的 `observed_at` 同域。
+  压缩演示时钟下 provider 曾按真实墙钟盖章，而 cycle 用业务时钟校验，机会被整批读成
+  `NOT_YET_OPEN`/`EXPIRED`。修复只在既有接缝把回合时刻传给
+  `observe(occurred_at=...)`，并在压缩模式下把业务时钟交给 provider 的
+  `now`/`observed_now`；`place:`/`object:`/`stay:`/`bodyact:` 的产出与 AG-0 资格政策
+  一字未改，见
+  [2026-10-23-explicit-compressed-demo-clock.md](../architecture/2026-10-23-explicit-compressed-demo-clock.md)
+  的收口条目。

@@ -395,6 +395,15 @@ class AutonomousLifeRunner:
             return self._record(kind, reason, WAKE_ERROR, "blocked", moment,
                                 trigger_ref=trigger_ref, trigger_kind=trigger_kind,
                                 detail=self.last_error)
+        finally:
+            # A round that raised still ends its read memo; the next wake starts
+            # from the owners.  Cycles without the seam keep working unchanged.
+            end_reads = getattr(self.cycle, "end_round_reads", None)
+            if callable(end_reads):
+                try:
+                    end_reads()
+                except Exception:
+                    pass
         status, status_class = self._classify(out)
         return self._record(
             kind, reason, status, status_class, moment,
@@ -460,6 +469,17 @@ class AutonomousLifeRunner:
             block["step_readiness"] = dict(out["step_readiness"])
         if isinstance(out.get("reconsideration"), Mapping):
             block["reconsideration"] = dict(out["reconsideration"])
+        # v0.4 day-life: the Decision's own route and reason codes travel with the wake, so a
+        # reader can tell a local rule (``RULE_RESOLVED`` + ``NO_LEGAL_CANDIDATE``) apart from
+        # a model that chose to be quiet.  Both are the committed record's facts, never an
+        # inference from the outcome name; ``None`` means the round recorded no Decision.
+        block["decision_route"] = (str(out["decision_route"])
+                                   if out.get("decision_route") else None)
+        block["reason_codes"] = ([str(code) for code in out["reason_codes"]]
+                                 if isinstance(out.get("reason_codes"), (list, tuple))
+                                 else [])
+        block["selected_candidate_ref"] = (str(out["selected_candidate_ref"])
+                                           if out.get("selected_candidate_ref") else None)
         return block
 
     def run_due(self, *, act: bool = True, now: Optional[datetime] = None,
@@ -609,18 +629,26 @@ class AutonomousLifeRunner:
         # so nothing is lost from the in-process view.
         quiet = status in {WAKE_NOT_DUE, WAKE_QUIET}
         if not (quiet and self._journal_quiet):
-            self._journal(record)
+            if not self._journal(record):
+                # The record never reached the wake journal. Mark it in memory only (a
+                # failed write leaves no disk row, so the on-disk format is unchanged);
+                # the read-surface counter must not count a wake the journal does not have.
+                record.extra["journal_write_failed"] = True
             self._journal_quiet = quiet
         return record
 
-    def _journal(self, record: WakeRecord) -> None:
+    def _journal(self, record: WakeRecord) -> bool:
+        """Append one record; return ``True`` only when the row actually reached disk."""
+
         try:
             self.wake_log.parent.mkdir(parents=True, exist_ok=True)
             with self.wake_log.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True)
                              + "\n")
+            return True
         except OSError as exc:  # journalling must never break a wake
             self.last_error = "wake journal unavailable: %s" % exc
+            return False
 
     def recent_wakes(self, limit: int = 20) -> list[dict[str, Any]]:
         if limit <= 0 or not self.wake_log.exists():
