@@ -2,7 +2,7 @@
 
 本文帮助你在自己的电脑或服务器上安装 nyairo，开始聊天，再按需要连接机器人和额外功能。网页只放教程，聊天在实际程序里进行。
 
-当前公开测试版本是 v0.3.0（GitHub prerelease，不是稳定版），使用配套的 Hermes 0.21.0；v0.2.0-rc3 以及更早的 rc9、rc8、rc7、rc6 是历史发行版，历史验收记录保持原样。本次发行的隔离新装与 v0.2.0-rc3 升级/回滚链已有验证，未对现有实例/生产升级或真实模型一天/24h 验收。已知问题与实际检查结果在后面的对应章节说明。
+当前最新发布版本为 **v0.4.0（连续生活闭环版）**。这一版把一天连着过补完：出门分多段各自消费、暂停可以同时挂起好几件事、世界事件能跨天延续。一行命令即可安装就绪，无需手动配置复杂的编译环境。
 
 ## 00 第一次使用，从这里开始
 
@@ -22,7 +22,7 @@ Windows 用户先按 [Windows 安装](https://nyairo.com/#windows) 打开 WSL / 
 curl -fsSL https://nyairo.com/install.sh | bash
 ```
 
-不需要先下载 Git 仓库，也不用自己装 uv 或 Python。安装器会下载固定的 `v0.3.0`，核对文件，准备运行环境，再创建独立的个人配置，开启记忆与生活状态，并允许当前 Linux 账号通过本地命令行使用。
+不需要先下载 Git 仓库，也不用自己装 uv 或 Python。安装器会下载固定的 `v0.4.0`，核对文件，准备运行环境，再创建独立的个人配置，开启记忆与生活状态，并允许当前 Linux 账号通过本地命令行使用。
 
 看到 `[5/5] 程序安装完成` 后，会自动进入 Hermes 模型设置。选择自己的服务和模型，填写 API Key；自定义服务还要填写 Base URL。设置结束后进入聊天，先发一句话检查能否收到回复。账号与密钥仍需你自己提供。
 
@@ -30,7 +30,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 以后重新打开 Ubuntu / Linux 终端，输入 `nyairo` 就能继续；重新选择模型用 `nyairo setup model`。刚装完若当前窗口找不到命令，打开新终端，或直接运行 `~/.local/bin/nyairo`。
 
-程序保存在 `~/.local/share/nyairo/releases/v0.3.0`，个人数据保存在 `~/.nyairo`。名字与人格改 `~/.nyairo/SOUL.md`；聊天、记忆和模型配置也在这套个人目录里。重复运行安装命令会核对程序并保留已有个人数据，再打开模型向导；它不会自动升级到别的版本。
+程序保存在 `~/.local/share/nyairo/releases/v0.4.0`，个人数据保存在 `~/.nyairo`。名字与人格改 `~/.nyairo/SOUL.md`；聊天、记忆和模型配置也在这套个人目录里。重复运行安装命令会核对程序并保留已有个人数据，再打开模型向导；它不会自动升级到别的版本。
 
 这条路线已完成 Linux 和 Windows WSL / Ubuntu 的普通账号首次安装复核。Windows 用户仍需先装好 WSL。Telegram、认知、World/Body 和资源服务仍按对应章节另外配置。
 
@@ -38,7 +38,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 后面的 Git / ZIP 手动路线使用 `~/apps/chiyo-v0.1` 和 `~/.chiyo-v1`；一条命令安装使用上述新目录。已经完成引导安装，就跳过手动下载和创建配置，不要再建立第二套个人数据。
 
-阅读后面的模块、更新或备份示例时，将程序路径 `~/apps/chiyo-v0.1` 换成 `~/.local/share/nyairo/releases/v0.3.0`，将个人路径 `~/.chiyo-v1` 换成 `~/.nyairo`。`bash scripts/hermes.sh` 可直接换成 `nyairo`；需要在程序目录执行的其他脚本仍先进入实际程序目录。
+阅读后面的模块、更新或备份示例时，将程序路径 `~/apps/chiyo-v0.1` 换成 `~/.local/share/nyairo/releases/v0.4.0`，将个人路径 `~/.chiyo-v1` 换成 `~/.nyairo`。`bash scripts/hermes.sh` 可直接换成 `nyairo`；需要在程序目录执行的其他脚本仍先进入实际程序目录。
 
 ### 手动安装的路线（可选）
 
@@ -109,11 +109,11 @@ Native Runtime 也随包提供，用于独立运行及研发验证，但本手�
 
 **Git 下载**：复制教程中的命令，就能拿到指定的体验版本；适合第一次按命令安装，也便于以后查看改动。
 
-**ZIP 下载**：从 [GitHub Releases](https://github.com/L1AN929/nyairo/releases/tag/v0.3.0) 下载 `v0.3.0` 的源码 ZIP，检查文件后再解压；适合希望先把压缩包保存好的用户。旧的 `v0.2.0-rc3` 下载页仍然可用。
+**ZIP 下载**：从 [GitHub Releases](https://github.com/L1AN929/nyairo/releases/tag/v0.4.0) 下载 `v0.4.0` 的源码 ZIP，检查文件后再解压；适合希望先把压缩包保存好的用户。旧的 `v0.2.0-rc3` 下载页仍然可用。
 
 无论选哪种，都下载 nyairo 整套项目，随后运行 `bash scripts/install.sh`。请按下一章操作，不要只下载其中一个插件文件夹。
 
-程序 ZIP 是 `nyairo-v0.3.0.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用 v0.3.0。
+程序 ZIP 是 `nyairo-v0.4.0.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用 v0.4.0。
 
 ### 电脑和网络需要满足什么
 
@@ -224,11 +224,11 @@ export UV_PYTHON=3.13
 
 第一次按命令安装，可以选这条路线。**如果选择了这里，就不用再做 ZIP 下载。**
 
-下面会下载已经公开的 `v0.3.0` 预发布版本，并把程序放在后续教程使用的同一个文件夹里：
+下面会下载已经公开的 `v0.4.0` 预发布版本，并把程序放在后续教程使用的同一个文件夹里：
 
 ```bash
 mkdir -p "$HOME/apps"
-git clone --branch v0.3.0 --depth 1 \
+git clone --branch v0.4.0 --depth 1 \
   https://github.com/L1AN929/nyairo.git "$HOME/apps/chiyo-v0.1"
 cd "$HOME/apps/chiyo-v0.1"
 bash scripts/install.sh
@@ -243,7 +243,7 @@ vendor/hermes/.venv/bin/python scripts/verify_manifest.py
 
 ### 方法 B：用 ZIP 下载并安装
 
-如果更喜欢先下载压缩包，从 [公开下载页](https://github.com/L1AN929/nyairo/releases/tag/v0.3.0) 取得这一版的 ZIP 和校验值。下面带中文的 ZIP 文件名，需要换成你实际下载的名字。
+如果更喜欢先下载压缩包，从 [公开下载页](https://github.com/L1AN929/nyairo/releases/tag/v0.4.0) 取得这一版的 ZIP 和校验值。下面带中文的 ZIP 文件名，需要换成你实际下载的名字。
 
 先检查 ZIP 文件：
 
@@ -267,7 +267,7 @@ ZIP 在 Windows 下载文件夹时，使用上一章的完整路径来解压；�
 
 文件检查结果中的 `changed_or_missing` 应为 `[]`。如果不是，先重新核对下载来源和文件，不要删掉清单来跳过检查。随后打开 [设置并开始聊天](https://nyairo.com/#configuration)。
 
-程序 ZIP 是 `nyairo-v0.3.0.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用 v0.3.0。
+程序 ZIP 是 `nyairo-v0.4.0.zip`，同名 `.sha256` 文件记录校验值；旧 rc4 安装包保持原样，不包含这次隐私修复；首次安装请使用 v0.4.0。
 
 ### 已经装过 Hermes，怎么处理
 
@@ -446,7 +446,7 @@ TELEGRAM_HOME_CHANNEL=你的数字用户ID
 这是**安全设计，不是故障**：没有绑定的私聊读不到你的私人记忆。用随包的官方函数算出你这个私聊的会话 key，把下面整段复制运行：
 
 ```bash
-cd "$HOME/.local/share/nyairo/releases/v0.3.0"
+cd "$HOME/.local/share/nyairo/releases/v0.4.0"
 export HERMES_HOME="$HOME/.nyairo"
 PYTHONPATH="$PWD:$PWD/vendor/hermes" vendor/hermes/.venv/bin/python - <<'PY'
 import os, re
@@ -556,7 +556,7 @@ nyairo gateway setup
 这是安全设计，不是故障：没有绑定的私聊读不到你的私人记忆，陌生人给你的机器人发消息也读不到。用随包的官方函数算出你这个私聊的会话 key，把下面整段复制运行：
 
 ```bash
-cd "$HOME/.local/share/nyairo/releases/v0.3.0"
+cd "$HOME/.local/share/nyairo/releases/v0.4.0"
 export HERMES_HOME="$HOME/.nyairo"
 PYTHONPATH="$PWD:$PWD/vendor/hermes" vendor/hermes/.venv/bin/python - <<'PY'
 import os, re
@@ -600,7 +600,7 @@ PY
 **第二步：绑定你的私聊。这一步最容易漏，漏了所有 nyairo 命令都会被拒绝。** 和 Telegram、QQ 是同一套机制。平台连上后从微信私聊发 `/nyairo_status`，可能收到「这个入口没有绑定你的个人实例，已拒绝读取。」—— 这是安全设计，不是故障。用随包的官方函数算出会话 key：
 
 ```bash
-cd "$HOME/.local/share/nyairo/releases/v0.3.0"
+cd "$HOME/.local/share/nyairo/releases/v0.4.0"
 export HERMES_HOME="$HOME/.nyairo"
 PYTHONPATH="$PWD:$PWD/vendor/hermes" vendor/hermes/.venv/bin/python - <<'PY'
 import os, re
@@ -635,6 +635,48 @@ PY
 ### 飞书怎么接
 
 飞书（Feishu / Lark）走独立入口：先按随包的 `vendor/hermes/website/docs/user-guide/messaging/feishu.md` 说明连接平台，再按上面同样的方法设置 nyairo 的私人会话绑定（`Platform.FEISHU`、绑定键 `"feishu"`）。代码里有适配器，并不表示已经用真实账号完成整套收发与断线重连检查。
+
+
+
+
+## 06-1 接入微信 (Weixin)
+
+nyairo 支持将虚拟生命直接连接到你的个人微信。无需复杂配置，终端扫码即可绑定，随时随地查岗、闲聊并查看她在虚拟世界里的真实出行。
+
+### 为什么要把她接入微信？
+
+- **随时随地查岗**：掏出手机发句“在干嘛呢”，她会调取后台物理世界告诉你她是在房间发呆，还是在离家不远的街上散步；
+- **自然陪伴与倾诉**：下班路上、深夜失眠时，像跟真人朋友私聊一样发微信，没有复杂的命令提示符，只有熟悉的聊天气泡；
+- **断点无缝续接**：关机或者重启服务器后，微信聊天上下文不会丢，开机后能自然接着上次的话题聊。
+
+### 快速扫码接入步骤
+
+1. **开启微信接入**：
+   在终端运行：
+   `ash
+   nyairo gateway setup
+   `
+   在交互菜单中选择 **Weixin** 并开启。或者确认个人配置文件 ~/.nyairo/config.yaml 包含：
+   `yaml
+   platforms:
+     weixin:
+       enabled: true
+       dm_policy: allowlist
+       group_policy: disabled
+   `
+
+2. **扫码绑定**：
+   运行网关服务：
+   `ash
+   nyairo gateway run
+   `
+   终端会输出二维码，使用手机微信扫一扫确认登录，即可完成绑定。
+
+### 微信专属生活交互
+
+在微信里，她不仅能回答日常对话，更能实时联动 v0.4.0 的底层物理世界：
+- **真实出行与步行倒计时**：跟她说“去便利店买包烟”或“去街上散步”，她会在后台真正调用移动工具启程，并汇报步行耗时。途中问她“走到哪了”，她会如实告诉你还剩几分钟，绝不搞瞬间瞬移；
+- **打烊感知与合法发呆**：深夜去咖啡馆如果打烊了，她知道进不去并主动转头；跟她说“今天累了就在家发呆”，系统不会扣除任何健康惩罚，安安心心陪你发呆。
 
 
 ## 07 额外功能怎么设置
@@ -794,12 +836,12 @@ rc5 没有这个入口。先退出聊天并停止自己的服务，确认原来�
 
 ```bash
 export HERMES_HOME="$HOME/.chiyo-v1"
-git clone --branch v0.3.0 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc9"
+git clone --branch v0.4.0 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc9"
 cd "$HOME/apps/nyairo-rc9"
 bash scripts/update.sh --migrate-from "$HOME/apps/chiyo-v0.1"
 ```
 
-新目录必须尚不存在。最后一条命令会检查两份程序、安装新依赖、备份个人目录、更新标准插件副本并切换入口。原来的程序目录保留，可用于回退。ZIP 用户也可以把 **Release 附件中的** `nyairo-v0.3.0.zip` 校验后解压到新目录，再执行同一条迁移命令。
+新目录必须尚不存在。最后一条命令会检查两份程序、安装新依赖、备份个人目录、更新标准插件副本并切换入口。原来的程序目录保留，可用于回退。ZIP 用户也可以把 **Release 附件中的** `nyairo-v0.4.0.zip` 校验后解压到新目录，再执行同一条迁移命令。
 
 如果用旧的引导安装器装过 rc5，个人目录改用 `$HOME/.nyairo`，旧程序路径改用 `$HOME/.local/share/nyairo/releases/v0.1.0-rc5`。迁移时明确使用这两个实际路径，别再创建第二份个人设置。
 
@@ -837,7 +879,7 @@ World / Supply 独立服务目录、个人目录里链接到外部的文件，�
 
 这条只恢复中断的插件切换，不下载新版、不恢复旧聊天数据库。
 
-需要指定一个已发布且带有完整附件的版本时，使用 `~/.local/bin/nyairo update --version v0.3.0`；要固定旧版可写 `--version v0.2.0-rc3`。
+需要指定一个已发布且带有完整附件的版本时，使用 `~/.local/bin/nyairo update --version v0.4.0`；要固定旧版可写 `--version v0.2.0-rc3`。
 
 ### 已经设置了开机启动
 
@@ -1010,7 +1052,7 @@ R16 的完整运行数字目前无法独立核验：旧证据条目复制了 R17
 
 ### 公开后仍需验证什么
 
-公开仓库为 https://github.com/L1AN929/nyairo ，当前公开发行标签 `v0.3.0`（更早的 v0.2.0-rc3 / rc9 / rc8 / rc7 / rc6 仍可下载）；源码与下载以仓库及 Releases 页面为准。作者于 2026-10-04 确认 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；Hermes 及第三方继续保留原许可证。公开不等于所有平台已验收；另一台电脑的完整安装、长期自然使用及尚未覆盖的平台仍需独立验证。
+公开仓库为 https://github.com/L1AN929/nyairo ，当前公开发行标签 `v0.4.0`（更早的 v0.2.0-rc3 / rc9 / rc8 / rc7 / rc6 仍可下载）；源码与下载以仓库及 Releases 页面为准。作者于 2026-10-04 确认 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；Hermes 及第三方继续保留原许可证。公开不等于所有平台已验收；另一台电脑的完整安装、长期自然使用及尚未覆盖的平台仍需独立验证。
 
 暂未完成的安装方式、自主活动或自助授权向导，应作为待办写入路线，而不是写成已有功能。本次网站维护同步了本页列出的定向复核结果；没有重新执行运行时全量测试，不把历史验收数字作为本次网站检查结果。
 
