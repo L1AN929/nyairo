@@ -808,12 +808,19 @@ class _DecisionBoundStepSpec:
     produced it instead of to a guess made before it.
     """
 
-    def __init__(self, build: Callable[[Any], Mapping[str, Any]]) -> None:
+    def __init__(self, build: Callable[[Any], Mapping[str, Any]],
+                 on_build: Optional[Callable[[], None]] = None) -> None:
         self._build = build
+        #: Called once, the first time the spec is really materialised.  AG-2 resolves this
+        #: override only after it committed the adopted integration, so the callback is a fact
+        #: about the round's own order (the Decision request was already paid), not a guess.
+        self._on_build = on_build
         self._cache: Optional[dict[str, Any]] = None
 
     def __call__(self, decision_record: Any) -> dict[str, Any]:
         if self._cache is None:
+            if self._on_build is not None:
+                self._on_build()
             self._cache = dict(self._build(decision_record))
         return self._cache
 
@@ -1189,6 +1196,9 @@ class AutonomousLifeCycle:
         self.last_step_readiness: Optional[dict[str, Any]] = None
         self.last_reconsideration: Optional[dict[str, Any]] = None
         self._round_readiness: Optional[lsr.StepReadiness] = None
+        #: True once this round's Decision-bound step spec was materialised -- i.e. AG-2 already
+        #: committed the adopted integration, so the Decision request was really paid.
+        self._round_step_spec_built = False
         #: The Activity record this round's readiness was read from (so the situation parts and the
         #: judgement can never be about two different Activities), the round's own situation parts,
         #: and the work this round *selected* (target + owner head) for a no_change that happens
@@ -1247,6 +1257,13 @@ class AutonomousLifeCycle:
         self.last_practice_context: Optional[dict[str, Any]] = None
         self._round_methods: list[dict[str, Any]] = []
         self._round_practice_context: Optional[dict[str, Any]] = None
+        #: v0.5: this round's bounded evaluation views for the offered methods and the flag that
+        #: makes the extra owner detail reads happen at most once per decision round.
+        self._round_practice_evaluations: dict[str, dict[str, Any]] = {}
+        self._round_practice_evaluated = False
+        #: v0.5 sharing: the titles this round already read *with* the artifact they belong to,
+        #: so a source can carry a name only when the identity was verified -- never by guessing.
+        self._round_work_titles: dict[str, str] = {}
         #: The practice this round's committed Decision named (filled after the record is read) and
         #: the bounded trial it asked for.  Both settle in ``_finish`` so every exit path reports
         #: them, and neither ever runs a method.
@@ -3203,12 +3220,20 @@ class AutonomousLifeCycle:
         sources: list[dict[str, Any]] = []
         work = self.work_artifact_id
         if work:
-            sources.append({"artifact_id": "artifact:%s" % str(work).replace("artifact:", ""),
-                            "kind": "current_work"})
+            work_ref = "artifact:%s" % str(work).replace("artifact:", "")
+            source = {"artifact_id": work_ref, "kind": "current_work"}
+            title = self._round_work_title_for(work_ref)
+            if title:
+                source["title"] = title
+            sources.append(source)
         reading = self.reading_artifact_id
         if reading:
-            sources.append({"artifact_id": "artifact:%s" % str(reading).replace("artifact:", ""),
-                            "kind": "reading_material"})
+            reading_ref = "artifact:%s" % str(reading).replace("artifact:", "")
+            source = {"artifact_id": reading_ref, "kind": "reading_material"}
+            title = self._round_reading_title(reading_ref)
+            if title:
+                source["title"] = title
+            sources.append(source)
         seen: set = set()
         out: list[dict[str, Any]] = []
         for row in sources:
@@ -3219,6 +3244,40 @@ class AutonomousLifeCycle:
             if len(out) >= limit:
                 break
         return out
+
+    def _round_work_title_for(self, artifact_id: Any) -> str:
+        """The title this round read for exactly this artifact, or ``""`` (never a guess).
+
+        The resume point read is what supplies it: its title and its artifact id were returned
+        together, so pairing them is a fact of one read rather than a lookup by similarity.
+        """
+
+        wanted = self._artifact_identity(artifact_id)
+        if not wanted:
+            return ""
+        for key, value in self._round_work_titles.items():
+            if self._artifact_identity(key) == wanted:
+                return " ".join(str(value or "").split())[:120]
+        return ""
+
+    def _round_reading_title(self, artifact_id: Any) -> str:
+        """The title of the material this round's own reading situation reported, or ``""``.
+
+        Deliberately reads the *cached* situation of this round only: a share source must not
+        cost a fresh artifact read just to decorate itself with a name.  When the identity does
+        not match, or the material could not be read, the name is omitted.
+        """
+
+        situation = self._reading_situation_cache
+        if not isinstance(situation, Mapping):
+            return ""
+        if (self._artifact_identity(situation.get("reading_artifact_id"))
+                != self._artifact_identity(artifact_id)):
+            return ""
+        material = situation.get("material")
+        if not isinstance(material, Mapping):
+            return ""
+        return " ".join(str(material.get("title") or "").split())[:120]
 
     def sharing_decision_context(self, *, limit: int = lsc.MAX_PROMPT_SHARES) -> dict[str, Any]:
         """What she may do about sharing this round -- bounds and facts only, never a send.
@@ -4376,8 +4435,40 @@ class AutonomousLifeCycle:
                                if row.get("available", True)]
         if self.practice.last_error:
             self.last_practice_error = self.practice.last_error
+        #: v0.5: the *recent explicit evaluation* of each offered method, read through the same
+        #: governed owner entry at most once per round (bounded by ``MAX_DETAIL_READS``).  It is
+        #: merged into this round's own list rows, so the handles and the counts stay one
+        #: snapshot; a head that moved is reported as unknown rather than stitched together.
+        evaluations = self._round_practice_evaluation_view()
+        for row in view.get("methods") or []:
+            if not isinstance(row, Mapping):
+                continue
+            found = evaluations.get(str(row.get("artifact_id") or ""))
+            if found is not None:
+                row["evaluation"] = dict(found)
         self._round_practice_context = view
         return view
+
+    def _round_practice_evaluation_view(self) -> dict[str, dict[str, Any]]:
+        """The narrowed evaluation facts for the offered methods -- read at most once a round."""
+
+        if self._round_practice_evaluated:
+            return dict(self._round_practice_evaluations)
+        self._round_practice_evaluated = True
+        self._round_practice_evaluations = {}
+        if not self._round_methods:
+            return {}
+        try:
+            found = self.practice.evaluations_for(self._round_methods)
+        except Exception as exc:  # a failed enrichment is named, never fatal to the round
+            self.last_practice_error = "%s: %s" % (type(exc).__name__, exc)
+            return {}
+        if self.practice.last_error:
+            self.last_practice_error = self.practice.last_error
+        self._round_practice_evaluations = {str(key): dict(value) for key, value
+                                            in (found or {}).items()
+                                            if isinstance(value, Mapping)}
+        return dict(self._round_practice_evaluations)
 
     def practice_method_refs(self) -> list[str]:
         """The practice handles this round really offered (the Decision's allow-list)."""
@@ -4602,6 +4693,11 @@ class AutonomousLifeCycle:
                 #: v0.4 C: the selected work's own title, so the practice search can be *about*
                 #: what she is doing (B matches; this only names the subject).
                 self._round_work_title = str(point.title or "")
+                #: v0.5 sharing: the same read already confirmed this title belongs to *this*
+                #: artifact, so a share source may carry the name without a second owner read.
+                title = " ".join(str(point.title or "").split())[:120]
+                if title and str(point.artifact_id or ""):
+                    self._round_work_titles[str(point.artifact_id)] = title
             elif selection.get("error"):
                 found["artifact_read_error"] = selection["error"]
 
@@ -5309,6 +5405,10 @@ class AutonomousLifeCycle:
         #: handle is legal unless this round offered it and no verdict is pending on entry.
         self._round_methods = []
         self._round_practice_context = None
+        self._round_practice_evaluations = {}
+        self._round_practice_evaluated = False
+        self._round_step_spec_built = False
+        self._round_work_titles = {}
         self._round_work_title = ""
         self._pending_method_usage = None
         self._pending_method_trial = None
@@ -5551,7 +5651,8 @@ class AutonomousLifeCycle:
             # actually named (multi-project) and to the work the owner just created (project).
             ar0_step = _DecisionBoundStepSpec(
                 lambda decision: self._work_step_spec_for_decision(decision, fallback=resume_point,
-                                                                   observed_at=obs))
+                                                                   observed_at=obs),
+                on_build=self._note_step_spec_build)
 
         # v0.4 C: the closeout step.  Built by W's pure plan *after* the Decision, and only for a
         # Decision whose own candidate named the closeout target -- this cycle never re-plans the
@@ -5560,7 +5661,8 @@ class AutonomousLifeCycle:
         if closeout_available and act and not has_foreground and self._ar0_enabled():
             closeout_step = _DecisionBoundStepSpec(
                 lambda decision: self._closeout_step_spec(closeout_point, decision_record=decision,
-                                                          observed_at=obs))
+                                                          observed_at=obs),
+                on_build=self._note_step_spec_build)
 
         # D (life-v1): the reading step.  Its own owner action: read one page from the material
         # and commit the bookmark, both through the existing port and owner.
@@ -5568,7 +5670,8 @@ class AutonomousLifeCycle:
         if (act and reading_available and self._ar0_enabled()
                 and (not has_foreground or foreground_reading is not None)):
             reading_step = _DecisionBoundStepSpec(
-                lambda _decision: self._reading_step_spec(observed_at=obs))
+                lambda _decision: self._reading_step_spec(observed_at=obs),
+                on_build=self._note_step_spec_build)
 
         # B6-5: the World step.  Same seam, same laziness, one difference -- a MOVE's shape
         # depends on *which* place the Decision chose, so this override is a callable of the
@@ -5577,7 +5680,8 @@ class AutonomousLifeCycle:
         if act and not has_foreground and self._world_step_enabled() and world_available:
             # A Decision that selected something other than a World candidate is refused by the
             # step builder itself (``_world_step_for_decision``), before any shape is described.
-            world_step = _DecisionBoundStepSpec(self._world_step_for_decision)
+            world_step = _DecisionBoundStepSpec(
+                self._world_step_for_decision, on_build=self._note_step_spec_build)
 
         # I-r1: a stay she is already in is the *only* legal continuation of its own round --
         # the foreground slot is a single one (AG-2 refuses a second), so while she is staying
@@ -5610,7 +5714,8 @@ class AutonomousLifeCycle:
             if len(live_paths) > 1:
                 step_spec = _DecisionBoundStepSpec(
                     self._routed_step_builder(resume_point, observed_at=obs,
-                                              closeout=closeout_point))
+                                              closeout=closeout_point),
+                    on_build=self._note_step_spec_build)
                 base["step_path"] = ("AR0_WORLD_ROUTED" if set(live_paths) == {"AR0", "WORLD"}
                                      else "%s_ROUTED" % "_".join(live_paths))
             elif live_paths == ["AR0"]:
@@ -5812,8 +5917,12 @@ class AutonomousLifeCycle:
             return self._finish(base, OUTCOME_DISABLED, llm_calls=0, detail=str(exc))
         except life_request_budget.RequestBudgetError as exc:
             # W05R: a request-budget refusal is neither a model choice nor a model
-            # failure.  It is reported as exactly what it is.
-            return self._finish(base, OUTCOME_BUDGET_EXHAUSTED, llm_calls=0,
+            # failure.  It is reported as exactly what it is.  A refusal that arrives after the
+            # committed Decision (the step spec was materialised, so the decision request was
+            # really paid) is a model-served decision round; only a refusal at the decision
+            # reservation itself is a zero-request window.
+            return self._finish(base, OUTCOME_BUDGET_EXHAUSTED,
+                                llm_calls=1 if self._round_step_spec_built else 0,
                                 detail="request budget refused: %s" % exc.reason_code)
         except Exception as exc:  # a real failure, reported as one
             self.last_error = f"{type(exc).__name__}: {exc}"
@@ -5828,7 +5937,10 @@ class AutonomousLifeCycle:
                                     detail=f"reading response failed, nothing written: "
                                            f"{self.last_error}"[:300])
             if "REQUEST_BUDGET_" in str(exc):
-                return self._finish(base, OUTCOME_BUDGET_EXHAUSTED, llm_calls=0,
+                # Same mapping as the typed refusal above: a wrapped budget error that only
+                # surfaces after the Decision was committed still counts the paid decision round.
+                return self._finish(base, OUTCOME_BUDGET_EXHAUSTED,
+                                    llm_calls=1 if self._round_step_spec_built else 0,
                                     detail=self.last_error[:300])
             if type(exc).__name__ == "ModelContentError" or "content writer" in str(exc):
                 # The decision happened; producing the content did not.  Nothing was written.
@@ -6083,6 +6195,18 @@ class AutonomousLifeCycle:
     def _ar0_enabled(self) -> bool:
         """True when the composition root has a real AR-0 adapter for the artifact verbs."""
         return getattr(self.runtime, "artifact_action_adapter", None) is not None
+
+    def _note_step_spec_build(self) -> None:
+        """This round's Decision-bound step spec was really materialised.
+
+        AG-2 commits the adopted integration *before* it resolves ``step_spec_override``, so a
+        request-budget refusal escaping from the builder happened after the decision request was
+        sent and paid.  The round is then a model-served decision round (``llm_calls=1``) even
+        though the content was refused; a refusal at the decision reservation itself never
+        reaches this point and stays a zero-request window.
+        """
+
+        self._round_step_spec_built = True
 
     def _ar0_step_spec(self, point: ArtifactResumePoint, *, observed_at: str) -> dict[str, Any]:
         """One bounded step, described for AR-0.  No second planner is introduced."""
@@ -8557,6 +8681,10 @@ class AutonomousLifeCycle:
                          if r]
         confirmed = self._owner_confirmed_context(artifact_ref=artifact_ref,
                                                   version_ref=version_ref)
+        # Only a real, owner-read-back version gets a result-level identity.  It is the owner's
+        # own artifact+version pair, never a timestamp, a Decision id or the Activity revision.
+        progress_result_ref = (ag2.canonical_owner_result_ref(confirmed)
+                               if confirmed else None)
         try:
             result = self.runtime.coordinator.emit_experience_handoff(
                 integration_id=str(integration_id),
@@ -8565,6 +8693,7 @@ class AutonomousLifeCycle:
                 occurred_at=base.get("observed_at"),
                 artifact_refs=artifact_refs,
                 owner_confirmed_context=confirmed,
+                progress_result_ref=progress_result_ref,
             )
         except Exception as exc:
             base["experience_handoff_error"] = f"{type(exc).__name__}: {exc}"
@@ -8574,6 +8703,8 @@ class AutonomousLifeCycle:
         handoff_event = result.get("handoff_event")
         base["experience_handoff"] = {
             "handoff_id": getattr(handoff_event, "handoff_id", None),
+            "progress_result_ref": progress_result_ref,
+            "reused_legacy_handoff": bool(result.get("reused_legacy_handoff")),
             "idempotent_replay": bool(result.get("idempotent_replay")),
             "disposition": deliveries[-1].get("consumer_disposition") if deliveries else None,
             "status": deliveries[-1].get("status") if deliveries else None,
@@ -8924,6 +9055,12 @@ class AutonomousLifeCycle:
         # One round is over: the next wake must read the owners again, never reuse
         # this round's answers (even if it happens to carry the same instant).
         self.end_round_reads()
+        #: v0.5: the round's own verified titles and bounded evaluation views do not outlive the
+        #: round either.  A context call made between rounds must not decorate a stale name or
+        #: re-run the detail reads against a finished round's method list.
+        self._round_work_titles = {}
+        self._round_practice_evaluations = {}
+        self._round_practice_evaluated = True
         return base
 
     #: Outcomes in which nothing reached an owner write, so "no version was created" is *known*.

@@ -77,6 +77,13 @@ Status: implemented
 5. **暂停后不绕 resume**：`ArtifactContinuationSource` 增可选 `paused_target_provider`；目标已有 PAUSED/
    WAITING Activity 时不发新候选（`PAUSED_TARGET_REQUIRES_RESUME`），`refresh` 时 withdraw。cycle 用
    Activity owner 的 `list_open_activities()` 提供这个集合。旧停点、resume 资格、LR-2/LR-4 一行未改。
+   **（2026-10-26 交叉反例修，同规则的 extra 路径）** 同一来源的到期事项 / 项目选项
+   （`_extra_raw_items`，`fitem:`/`popt:`）此前只检查 ref 前缀与 target 缺失，没有套这条规则：
+   到期事项指向一个已 PAUSE/WAIT 的同一作品时仍会产出 `FUTURE_ITEM_DUE` 候选并合法 `START`，
+   正式链上真的开出第二个 Activity 并写出版本。现在按 owner 目标身份（`artifact:` 前缀折叠）
+   在 `_extra_raw_items` 与 extra 分支的 `refresh` 里同样跳过/撤回，原因不变；事项本身仍 OPEN/due，
+   `popt:` 与可续作品的正控不受影响。证据见
+   [交叉点说明](../../../../docs/engineering/v05-due-parked-target-20261026.md)。
 6. **复用 W 的 bodyact**：`_chosen_target_ref` / `_candidate_is_world` / `_world_step_spec` 识别
    `bodyact:`；步骤由 `build_body_action_step(...)` 生成，采纳规格用 `parse_body_action_target(...)` 的
    `fact_key`/`expected_value` 走 LR-5 原 `WORLD_FACT_MATCH` + `WORLD_ACTION_BOUNDED`/`TARGET_STATE`；

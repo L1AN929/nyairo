@@ -125,3 +125,38 @@ Decision 点名的那份作品走，并新增一个窄的、可拒绝的项目 o
   `tests.test_life_closeout_cycle_v04` 全 `PASS`（`OK`，`Ran 43 tests`）。
 * 按父级要求**没有**跑全库回归、没有 SHA 巡检、没有跨进程 qualification、没有真实模型/密钥/实例；
   `PYTHONDONTWRITEBYTECODE=1` 全程开启；夹具在 `/tmp/nyairo-v04-stage-a-fixtures` 保留不删。
+
+## 后续（v0.5，2026-10-26）：到期重新考虑走正式 runner 窗口；改期时钟对齐提案
+
+实现事实补充，原决定不变：
+
+* **改期的相对延迟按本回合的 `observed_at` 解析**（此前 `validate_actions` 在真实墙钟上解析
+  `in_minutes`，压缩/注入业务钟下会把事项跳到墙钟时刻）。`validate_actions` 回显 `in_minutes`
+  与解析出的 `due_at`，与 `later_item` 提案同一条幂等形状；真正写入由 `apply_actions(now=...)`
+  按回合时钟重算。取消/改期仍是各自一次 owner 写，越界与未知字段仍按名拒绝。
+* 到期项的正式窗口路径已用真 owner 冒烟串起来：`AutonomousLifeRunner.run_due` →
+  `materials()`/处境指纹 → AG-0 `FUTURE_ITEM_DUE` 候选或既有项目选项 → AG-1/AG-2/AR-0；
+  到期前 `QUIET`（0 请求），同一到期集合保持安静，取消/改期后不复活；无对象项只作为项目选项。
+* 搁置到期的返回链与本链共用 LR-4 的 OPEN 资格：另一 ACTIVE 前台时没有 RESUME 候选、资格不被
+  消费；释放前台后显式 RESUME 消费一次。供给规则见
+  [有效搁置事项在安静门之前成为候选](../feature/2026-10-24-eligible-parked-candidate-supply.md)。
+* 证据：`tests/test_v05_due_reconsideration.py`（5 例）与
+  `scripts/v05_due_reconsideration_smoke.py`（44 项），
+  说明 `docs/engineering/v05-due-reconsideration-20261026.md`。仍是脚本 Decision/内容，
+  不证明真实模型自然提出或采用。
+
+### 2026-10-26 交叉点修正：到期事项不能绕过 PAUSED/WAITING 的 RESUME
+
+实现事实补充，原决定不变。到期项进入同一个 `PERSONAL_OPPORTUNITY` 来源的 extra 路径后，
+此前没有沿用「目标已有 PAUSED/WAITING Activity 就不发新候选」这条已有规则：
+
+* 真 owner 正式链复现：作品被真实 `PAUSE`（无条件、无资格）或 `WAIT` 后，指向它的到期事项
+  仍产出 `FUTURE_ITEM_DUE` 候选、`legal_decisions` 含 `START`，AG-2 采纳后写出新版本并在
+  同一作品上开出第二个 Activity。不是「owner 最终会拒」的展示问题。
+* 修复只落在 `artifact_continuation_source.py` 的 `_extra_raw_items` 与 extra 的 `refresh`：
+  按 owner 目标身份跳过/撤回，原因仍是 `PAUSED_TARGET_REQUIRES_RESUME`；事项本身保持
+  OPEN/due，`popt:` 与没有挂起活动的可续作品照常供应。
+* 证据：`tests/test_v05_due_parked_target.py`（6 例）与
+  `scripts/v05_due_parked_target_smoke.py`（35 项，修前 8 红、修后 `SMOKE_OK`），
+  说明 [交叉点说明](../../../../docs/engineering/v05-due-parked-target-20261026.md)。
+  Decision/内容仍是脚本替身；不证明自然采用、G1、V-C 或 24h。

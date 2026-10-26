@@ -644,8 +644,21 @@ def validate_actions(raw: Any) -> list[dict[str, Any]]:
             raise FutureItemError("FUTURE_ITEM_ACTION_UNSUPPORTED", op[:40])
         entry: dict[str, Any] = {"item_ref": ref, "op": op}
         if op == ACTION_RESCHEDULE:
-            entry["due_at"] = resolve_due_at(due_at=row.get("due_at"),
-                                             in_minutes=row.get("in_minutes"))
+            # 与 proposal 同一条语义：她说的「再过几分钟」是相对**本回合自己的观察时刻**，不是
+            # 相对校验发生时的墙钟。这里回显延迟和它此刻解析出的瞬间；真正的写入在
+            # ``apply_actions(now=...)`` 里按回合时钟重算，所以重放同一回合不会漂移。
+            # 两者都给（回显后再次校验）时只核绝对时刻，和 proposal 的幂等形状一致。
+            has_due = row.get("due_at") not in (None, "")
+            has_delay = row.get("in_minutes") not in (None, "")
+            if has_due and has_delay:
+                due = str(row.get("due_at"))
+                if _parse_iso(due) is None:
+                    raise FutureItemError("FUTURE_ITEM_DUE_AT_INVALID", due[:40])
+            else:
+                due = resolve_due_at(due_at=row.get("due_at"), in_minutes=row.get("in_minutes"))
+            entry["due_at"] = due
+            if has_delay:
+                entry["in_minutes"] = int(str(row.get("in_minutes")).strip())
         elif row.get("due_at") is not None or row.get("in_minutes") is not None:
             raise FutureItemError("FUTURE_ITEM_ACTION_DUE_TIME_NOT_APPLICABLE", op)
         reason = " ".join(str(row.get("reason") or "").split())[:MAX_REASON_CHARS]
@@ -712,9 +725,14 @@ def apply_actions(store: "FutureItems", actions: Sequence[Mapping[str, Any]], *,
         op = str(action.get("op"))
         try:
             if op == ACTION_RESCHEDULE:
-                row = store.reschedule(
-                    ref, due_at=action.get("due_at"),
-                    reason=str(action.get("reason") or "RESCHEDULED_BY_SUBJECT"), now=now)
+                # 延迟按**本轮**的 ``now`` 重算（与 proposal 一致），绝对时刻照原样写。
+                reason = str(action.get("reason") or "RESCHEDULED_BY_SUBJECT")
+                if action.get("in_minutes") is not None:
+                    row = store.reschedule(ref, in_minutes=action.get("in_minutes"),
+                                           reason=reason, now=now)
+                else:
+                    row = store.reschedule(ref, due_at=action.get("due_at"),
+                                           reason=reason, now=now)
             else:
                 row = store.cancel(
                     ref, reason=str(action.get("reason") or "CANCELLED_BY_SUBJECT"), now=now)

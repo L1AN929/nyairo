@@ -129,6 +129,44 @@ B 的实践工作台（`PersonalPracticeService`：review / method / trial）与
 * 真实链证明的是：真 Supply（自带 Unix socket）+ 真 M0（EvidenceStore + `MemoryAdmissionExperienceConsumer`）+
   AG-1 原始 JSON 校验 + AG-2 adoption + AR-0；决策回答与内容回答是**脚本替身**（文件里明示），不宣称真实模型自主。
 * 没有跑全库回归、没有跨进程 qualification、没有动原实例/配置/密钥、没有提交或部署。
+* **2026-10-25 有界评价投影（v0.5 第一块）**：列表行原有的 `trial_count` / `counterexample_count`
+  现在真的进入最终 decision practice 白名单；`PracticeSeam.evaluations_for` 只对本轮实际
+  offered 的最多 3 条方法各做**一次**既有治理 `read_method`，取最近一条显式 trial 的
+  `outcome` / `version_id` / `evidence_count`（永远不带 `detail` 正文）。列表 head 与详情 head
+  不一致时给 `PRACTICE_METHOD_HEAD_CHANGED`，不拼接、不再追读；读失败给
+  `PRACTICE_METHOD_DETAIL_UNAVAILABLE` 并保留可读列表；owner 扣留证据时给
+  `PRACTICE_EVIDENCE_WITHHELD`，不从原文/缓存/Decision 旁路恢复；没有显式 trial 时给
+  `PRACTICE_METHOD_NO_EXPLICIT_TRIAL`，不推断"没用过"。cycle 每回合最多富化一次，重复调用
+  同一回合的 context 不加读；纯读阶段 owner 零写，重新装配从同一 owner 读回同样事实。
+  它不新增 usage 存储、不改 owner 判据/CAS/HELPED 证据门。证据：
+  `tests/test_v05_results_expression_views.py`、`scripts/v05_results_expression_smoke.py`。
+* **2026-10-25 v0.5 第二块——评价承接到同一作品后续实践（含退休损失）**：没有新增业务规则；
+  已有的正式阶段在同一条真实 owner 链上被贯通验证：同一作品 A 的真实结果成为可回忆经历 →
+  正式 Decision 的 `method_proposal` 由 owner 存 TENTATIVE → 后续 `CONTINUE` A 命名该做法
+  （本轮 offered head 绑定，writer 的正式请求带 instruction/scope/uncertainty）→ 真实 owner
+  写 A 的下一版，`consequence_refs` 来自 step receipt → 同轮 `method_trial` `HELPED` 推进
+  TRIAL、`NOT_HELPED` 推进 CONTESTED → **下一轮真实决策请求的 `situation_context.practice`**
+  读到状态、计数与有界评价投影，并可继续同一 A。另有可续作品 B 且本轮绑定改到 B，每一步仍写
+  A、B 版本不变（沿用 [过去到候选](../feature/2026-10-24-past-to-candidate-owner-bridge.md) 的
+  owner 目标优先规则）。退休沿 [损失→承接](../feature/2026-10-24-loss-to-continuation-owner-bridge.md)：下一正式
+  回合旧手柄被 AG-1 `INVENTED_METHOD_REF` 拒且无 Decision 提交，不引用旧手柄的合法 `CONTINUE`
+  仍写 A，writer 请求不含退休指令，档案/版本/正文保留。证据：
+  `tests/test_v05_practice_continuation.py`、`scripts/v05_practice_continuation_smoke.py`；
+  Decision/内容仍是脚本替身；该次记录的第二轮 handoff 是**当时 Activity revision 粒度**下的
+  `DUPLICATE`（没有造第二条经历）。2026-10-25 起 owner 确证的进度改走结果级身份，见
+  [进度交接的结果级身份](2026-10-25-v05-progress-result-handoff-identity.md)；旧粒度没有删除，
+  缺省调用仍沿用它。不证明自然采用/G1/24h。
+* **2026-10-26 v0.5 第五条——多情境/反例/修订/退休（跨两个真实作品）**：没有新增业务规则；
+  两个不同 Activity（项目 A、回顾 B）各自由真实 owner 写出版本与结果级 handoff 经历，
+  A 的 `HELPED`（证据 A 的经历）→ TRIAL、B 的 `NOT_HELPED`（证据 B 的经历，不是 A 的）→
+  CONTESTED；下一轮正式请求读到反例计数 1、被评价版本与有界评价（无 detail），正评价没有
+  抹掉反例。owner `revise_method`（CAS）回到 TENTATIVE、旧版与两条评价保留，下一轮正式请求
+  与 writer 绑定新 head/新指令；已展示旧 head 后另一 owner 写者修订，旧 head 的 trial 被
+  CAS 拒绝且不重绑。退休后旧手柄被 AG-1 拒且无 Decision 提交，不引用旧手柄的合法 CONTINUE
+  仍写 B、writer 不含退休指令；同一 runtime 重装配从 owner 重读历史，纯读零写。证据：
+  `tests/test_v05_practice_counterexample.py`、`scripts/v05_practice_counterexample_smoke.py`；
+  Decision/内容仍是脚本替身，不证明自然采用/G1/24h。详见
+  [v0.5 多情境验证](../../../../docs/engineering/v05-practice-counterexample-20261026.md)。
 * **2026-10-24 接缝修正验证**：`tests.test_result_method_behavior` 12 例 OK（offered head 绑定、
   无 step 不冒结果、stale head 由 owner CAS 拒绝、无证据/证据撤回、反例 CONTESTED、下一轮
   `decision_context` 可见、重复结算只写一次、成功写版本不自动 HELPED）；真实隔离

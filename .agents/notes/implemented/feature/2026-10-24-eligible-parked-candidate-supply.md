@@ -130,3 +130,7 @@ LR-4 的 OPEN eligibility，可以回来**。这个状态当时到不了 Decisio
   RESUME 候选不会因为“PAUSED 前台冲突”被挡；真正的另一 ACTIVE 前台仍然冲突。旧 PAUSED
   指针没有释放标记，仍按本笔记的冲突规则处理。见
   [PAUSE 释放执行槽](2026-10-24-paused-background-single-execution.md)。
+- 后续（v0.5，2026-10-26）：本笔记的供给规则在正式 runner 窗口里与新加的「到期稍后事项」
+  一起被串起来（到期前 `QUIET`、另一 ACTIVE 前台时无 RESUME 候选且资格不消费、释放后显式
+  RESUME 消费一次）。见
+  [later / 多项目](../architecture/2026-11-02-v04-autonomous-day-later-and-multi-project.md)。

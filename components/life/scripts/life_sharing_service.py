@@ -618,7 +618,10 @@ class LifeSharingService:
         data = {
             "shares": visible,
             "counts": counts,
-            "truncated": len(shares) > cap,
+            # Two independent cuts, both real facts: this layer's own ``cap`` (at most ``MAX_LIST``)
+            # and the owner's own bounded list.  Re-deriving only the first would report an owner
+            # answer that held rows back as complete; a missing owner flag stays "not reported".
+            "truncated": bool(len(shares) > cap) or bool(listing.get("truncated")),
             "ignored": ignored,
             "inbox": self._inbox(delivered),
             # The flag reports the real projection, not the request: no text escaped, it is False.

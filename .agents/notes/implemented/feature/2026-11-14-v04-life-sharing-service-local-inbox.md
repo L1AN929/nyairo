@@ -48,8 +48,13 @@ fix 脚本。
    `EXPIRED` + `state_derived=True` 并拒绝发送（`SHARE_EXPIRED`）；要变成事实得调一次
    `expire`（`state_derived=False`）。
 7. **幂等键从意图派生**：`prepare` 用 (subject, workspace, source, source_version, text digest,
-   audience, channel, title)，`send_local` 用 (share_id, 上一版 head, channel, audience)。owner 按 key
-   幂等回原结果 → 不会出现第二份草稿或第二条投递；`delivery_id = sha256(share_id + key)` 也稳定，
+   audience, channel, title)，`send_local` 用 (share_id, 上一版 head, channel, audience)。
+   `send_local` 的 commit 重放由 owner 的 operation 账本回 `already_applied`，读侧重复发送先报
+   `SHARE_ALREADY_DELIVERED` 并回同一条 receipt → 不会出现第二条投递。
+   **`prepare` 不是同一个形状（2026-10-25 实测补正）**：显式 key 的第二次 `create` 被 owner
+   如实拒（`rejected`），不是 `already_applied` —— 结果仍然是"没有第二份草稿"，但调用方拿不到
+   原 `share_id`。这是既有 `PrivateProjectService.create_project` 合同，本轮没有为它新增读取口。
+   `delivery_id = sha256(share_id + key)` 也稳定，
    每次写之后**重新读回**现场，`receipt` 取自读回的 head 而不是这次"打算写什么"。
 8. **本地投递的诚实语义**：`send_local` 写一个 `LOCAL_DELIVERED` 版本 + 一条 receipt
    （`local_only=True`、`external_channel_sent=False`、`external_delivery_confirmed=False`、

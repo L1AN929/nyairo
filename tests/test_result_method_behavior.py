@@ -307,6 +307,13 @@ class EvaluationAndNextRoundVisibilityTest(unittest.TestCase):
         self.assertEqual(len(listed), 1, context)
         self.assertEqual(listed[0]["method_state"], pps.METHOD_STATE_CONTESTED)
         self.assertEqual(listed[0]["counterexample_count"], 1)
+        self.assertEqual(listed[0]["trial_count"], 1)
+        # v0.5: the *explicit* verdict itself is readable next round, bounded to its own facts.
+        evaluation = self.seam.evaluations_for(self.seam.last_methods)[self.artifact_id]
+        self.assertTrue(evaluation["available"], evaluation)
+        self.assertEqual(evaluation["outcome"], "NOT_HELPED")
+        self.assertEqual(evaluation["evidence_count"], 1)
+        self.assertNotIn("detail", evaluation)
         self.assertIn("不是权限", context["note"])
 
     def test_withdrawn_evidence_is_withheld_and_cannot_support_a_verdict(self):

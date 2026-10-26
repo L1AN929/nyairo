@@ -64,3 +64,18 @@ B 的个人实践工作台已经把退休定义得很清楚：`retire_method` �
   `withheld_methods`，writer 视图不含退休指令。既有
   `tests/test_result_method_behavior.py` 的撤回合同保持绿。相关决策见
   [v04 个人实践工作台](2026-11-07-v04-personal-practice-workspace.md)。
+- 2026-10-25 同一损失接回原作品：`scripts/v05_practice_continuation_smoke.py` 在真实
+  Supply/M0/Practice + 正式 AG-0/AG-1/AG-2/AR-0 上先让同一作品 A 经历
+  TRIAL→CONTESTED，再由 owner CAS 退休；下一正式回合旧手柄被 AG-1 拒、无 Decision，
+  不引用旧手柄的合法 `CONTINUE` 仍写 A 且 writer 请求不含退休指令。它不改变本笔记的
+  可用性规则，也不新增撤权或恢复能力。见
+  [评价承接到同一作品后续实践](../../../../docs/engineering/v05-practice-continuation-20261025.md)。
+
+- 2026-10-26 同一结果的来源损失：`scripts/v05_same_result_loss_smoke.py` 在同一隔离
+  root 里用同一个真实作品 A 的结果 R 串起 owner 结果身份、M0 经历、正式 Practice
+  TRIAL 与 Sharing 草稿 D；只对 A 的来源读注入既有故障形状时正文扣留、发送拒写，
+  方法证据域仍 TRIAL、不自动退休；解除后正文恢复且零自动动作；同一 owner
+  `archive_artifact` A 后版本/head/正文保留，当前目标 A 在 AG-1 前分层拒绝、不
+  fallback 可续 B，D 来源 ARCHIVED 仍可读但发送门拒 `SOURCE_ARCHIVED` 零写。它不新增
+  损失种类或恢复权威，也不改本篇的可用性规则。见
+  [同一结果来源损失](../../../../docs/engineering/v05-same-result-loss-20261026.md)。

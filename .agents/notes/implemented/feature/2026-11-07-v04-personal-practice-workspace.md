@@ -132,3 +132,7 @@ Life 文件、父级阶段单与进度表。
 - 后续读侧（2026-10-24）：Life 的 `PracticeSeam` 已把 `RETIRED` 从下一轮可命名的做法中
   移出，并在上下文里具名 `withheld_methods`；文档与版本仍保留，证据撤回合同不变。见
   [[2026-10-24-loss-to-continuation-owner-bridge]]。
+- 多情境验证（2026-10-26）：两个不同真实作品（项目与回顾）各自的 owner 结果经历分别支持
+  `HELPED` / `NOT_HELPED`，反例计数在后续正评价、修订与重装配读回后仍保留；见
+  [[2026-11-12-v04-practice-life-review-and-method]] 的 2026-10-26 条目与
+  `docs/engineering/v05-practice-counterexample-20261026.md`。

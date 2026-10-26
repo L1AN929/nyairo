@@ -1785,6 +1785,130 @@ def validate_owner_confirmed_context(raw: Any) -> dict[str, Any]:
     }
 
 
+def canonical_owner_result_ref(owner_confirmed_context: Any) -> str:
+    """The result-level ref of an owner-confirmed version, in the owner's own two spellings.
+
+    ``artifact:<id>@artifactversion:<version>``.  Both halves are refs the owner itself
+    published in ``owner_confirmed_context``; nothing here is derived from time, from free
+    text, from the model's own words, or from an Activity revision.
+    """
+
+    confirmed = validate_owner_confirmed_context(owner_confirmed_context)
+    return "%s@%s" % (confirmed["artifact_id"], confirmed["version_ref"])
+
+
+def _confirmed_result_ref(raw: Any) -> Optional[str]:
+    """``canonical_owner_result_ref`` for a stored mapping, or None when it is absent/unusable."""
+
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        return canonical_owner_result_ref(raw)
+    except LifeIntegrationError:
+        return None
+
+
+LEGACY_HANDOFF_PREFIX = "lexp:"
+RESULT_HANDOFF_PREFIX = "lexp:result:"
+
+
+def _find_reusable_legacy_handoff(
+    raw_events: Mapping[str, Any],
+    *,
+    activity_id: str,
+    terminal_or_milestone_kind: str,
+    result_ref: str,
+) -> Optional["LifeExperienceHandoffEvent"]:
+    """The earliest legacy handoff of *this* Activity that already names *this* result.
+
+    Legacy identity is ``activity_id + milestone kind + Activity.revision``, and a legal
+    Activity transition (checkpoint, PAUSE/RESUME, WAIT) advances that revision without
+    producing a new owner result.  A lookup pinned to the current revision therefore missed
+    an older event that already names the same confirmed result, and the new result-level
+    mode minted a second handoff for it.
+
+    The walk covers only the existing handoff map and keeps only this Activity's
+    ``SIGNIFICANT_PROGRESS`` events in the legacy namespace (``lexp:`` but not
+    ``lexp:result:``).  It adds no index, no schema, no scan across other Activities and
+    nothing in Memory; the cost is one pass over the handoff map for a new-mode emit that
+    the result namespace does not already answer.
+
+    Ordering is ``(activity_revision, handoff_id)`` and never the current revision, so the
+    chosen event cannot drift as the Activity moves.  An in-scope event that cannot be read
+    back, or that carries no comparable owner result, makes a complete lookup impossible --
+    it might be this same result -- so the caller is refused instead of guessing from a title
+    or reading "not found at the current revision" as "not found".
+    """
+
+    candidates: list[tuple[int, str, LifeExperienceHandoffEvent]] = []
+    for handoff_id, raw in (raw_events or {}).items():
+        if not isinstance(handoff_id, str) or not isinstance(raw, Mapping):
+            continue
+        if not handoff_id.startswith(LEGACY_HANDOFF_PREFIX):
+            continue
+        if handoff_id.startswith(RESULT_HANDOFF_PREFIX):
+            continue
+        if raw.get("activity_ref") != activity_id:
+            continue
+        if raw.get("terminal_or_milestone_kind") != terminal_or_milestone_kind:
+            continue
+        try:
+            event = LifeExperienceHandoffEvent.from_dict(dict(raw))
+        except Exception as exc:
+            raise LifeIntegrationError(
+                "legacy handoff %s for activity %s cannot be read back (%s: %s); refusing to "
+                "add a second handoff for result %r without a complete lookup"
+                % (handoff_id, activity_id, type(exc).__name__, exc, result_ref)) from exc
+        if event.handoff_id != handoff_id:
+            raise LifeIntegrationError(
+                "legacy handoff record under key %s names %s; refusing to reuse or shadow an "
+                "inconsistent legacy event for activity %s"
+                % (handoff_id, event.handoff_id, activity_id))
+        legacy_ref = _confirmed_result_ref(event.owner_confirmed_context)
+        if legacy_ref is None:
+            raise LifeIntegrationError(
+                "legacy handoff %s for activity %s has no comparable owner_confirmed_context; "
+                "refusing to guess whether it already names result %r"
+                % (handoff_id, activity_id, result_ref))
+        if legacy_ref == result_ref:
+            candidates.append((int(event.activity_revision), handoff_id, event))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+def _validate_progress_result_ref(
+    progress_result_ref: Any,
+    *,
+    owner_confirmed_context: Any,
+    artifact_refs: Optional[Sequence[str]],
+) -> str:
+    """Refuse anything that is not exactly the result this handoff's own payload confirms.
+
+    A bare non-empty string is not a result identity: the ref has to be the canonical
+    ``artifact``+``artifactversion`` pair from ``owner_confirmed_context`` *and* both halves
+    have to be present in the refs this call is actually carrying.
+    """
+
+    text = str(progress_result_ref or "").strip()
+    if not text:
+        raise LifeIntegrationError(
+            "progress_result_ref must be a non-empty owner result ref")
+    confirmed = validate_owner_confirmed_context(owner_confirmed_context)
+    expected = canonical_owner_result_ref(confirmed)
+    if text != expected:
+        raise LifeIntegrationError(
+            "progress_result_ref=%r does not name the owner-confirmed result %r"
+            % (text, expected))
+    carried = {str(ref).strip() for ref in (artifact_refs or [])}
+    for part in (confirmed["artifact_id"], confirmed["version_ref"]):
+        if part not in carried:
+            raise LifeIntegrationError(
+                "progress_result_ref=%r names %r, which this handoff does not carry"
+                % (text, part))
+    return text
+
+
 @dataclass
 class LifeExperienceHandoffEvent:
     """Section 107: Canonical handoff event from Life runtime to Experience consumer (NOT a Memory write)."""
@@ -4720,6 +4844,11 @@ class LifeIntegrationCoordinator:
         #: v0.4 C: the optional, already-owner-verified confirmation of what changed.  AG-2 stores
         #: and delivers it with the event; it grants nothing and it is never derived here.
         owner_confirmed_context: Optional[Mapping[str, Any]] = None,
+        #: v0.5: an explicit *result-level* identity for a SIGNIFICANT_PROGRESS handoff.  When
+        #: given it must be ``canonical_owner_result_ref(owner_confirmed_context)`` and its two
+        #: owner refs must be carried by this call.  Omitting it keeps the legacy
+        #: Activity+kind+revision identity byte-for-byte; nothing else may be used as a seed.
+        progress_result_ref: Optional[str] = None,
         fault_hook: Optional[Callable[[str], None]] = None,
     ) -> dict[str, Any]:
         """Emit a canonical `LifeExperienceHandoffEvent` into the AG-2 Outbox and dispatch to consumer."""
@@ -4735,21 +4864,76 @@ class LifeIntegrationCoordinator:
         act_rev = int(act["revision"])
         occ_iso = _require_iso(occurred_at or _iso(now()), "occurred_at")
 
+        #: The result-level identity is only meaningful where a real owner result was confirmed
+        #: for a progress milestone.  Terminal/milestone identity, retries and UNKNOWN outcomes
+        #: never produce one, and a bare string is never accepted as "a result".
+        result_ref: Optional[str] = None
+        if progress_result_ref is not None:
+            if terminal_or_milestone_kind != HANDOFF_KIND_SIGNIFICANT_PROGRESS:
+                raise LifeIntegrationError(
+                    "progress_result_ref is only valid for %r, not %r"
+                    % (HANDOFF_KIND_SIGNIFICANT_PROGRESS, terminal_or_milestone_kind))
+            if owner_confirmed_context is None:
+                raise LifeIntegrationError(
+                    "progress_result_ref requires an owner_confirmed_context")
+            result_ref = _validate_progress_result_ref(
+                progress_result_ref,
+                owner_confirmed_context=owner_confirmed_context,
+                artifact_refs=artifact_refs,
+            )
+
         # Exactly-once handoff ID per (activity_id, terminal_or_milestone_kind, activity_revision or COMPLETED)
         if terminal_or_milestone_kind in {HANDOFF_KIND_COMPLETED, HANDOFF_KIND_ABANDONED}:
             idem_seed = f"{activity_id}:{terminal_or_milestone_kind}"
+            handoff_id = f"lexp:{sha256_hex(idem_seed)[:16]}"
+        elif result_ref is not None:
+            # A separate namespace on purpose: the legacy formula keys on the Activity revision,
+            # which a CONTINUE does not advance, so two owner versions of one Activity would
+            # otherwise collapse into one event.  Same confirmed result -> same id even after
+            # the Activity revision moves; a different confirmed version -> a different id.
+            idem_seed = f"{activity_id}:{terminal_or_milestone_kind}:result:{result_ref}"
+            handoff_id = f"lexp:result:{sha256_hex(idem_seed)[:16]}"
         else:
             idem_seed = f"{activity_id}:{terminal_or_milestone_kind}:v{act_rev}"
-        handoff_id = f"lexp:{sha256_hex(idem_seed)[:16]}"
+            handoff_id = f"lexp:{sha256_hex(idem_seed)[:16]}"
 
         if handoff_id in int_state["handoff_events_by_id"]:
             existing_ev = LifeExperienceHandoffEvent.from_dict(int_state["handoff_events_by_id"][handoff_id])
+            if result_ref is not None:
+                existing_ref = _confirmed_result_ref(existing_ev.owner_confirmed_context)
+                if existing_ref != result_ref:
+                    raise LifeIntegrationError(
+                        "handoff %s already exists with owner result %r, not %r; refusing to "
+                        "replay a different result" % (handoff_id, existing_ref, result_ref))
             disp_res = self.dispatch_experience_handoffs(handoff_id=handoff_id, fault_hook=fault_hook)
             return {
                 "idempotent_replay": True,
                 "handoff_event": existing_ev,
                 "dispatch_result": disp_res,
             }
+
+        if result_ref is not None:
+            # Old/new boundary: one confirmed result must not grow a second experience.  The
+            # result-level id above is authoritative when it exists; otherwise reuse the
+            # *earliest* legacy event of this Activity that already names the same owner result
+            # -- including one written under an earlier revision, which a legal transition can
+            # leave behind.  An event without a comparable confirmed result is refused rather
+            # than guessed from a title or from "nothing at this revision".
+            legacy_ev = _find_reusable_legacy_handoff(
+                int_state["handoff_events_by_id"],
+                activity_id=activity_id,
+                terminal_or_milestone_kind=terminal_or_milestone_kind,
+                result_ref=result_ref,
+            )
+            if legacy_ev is not None:
+                disp_res = self.dispatch_experience_handoffs(
+                    handoff_id=legacy_ev.handoff_id, fault_hook=fault_hook)
+                return {
+                    "idempotent_replay": True,
+                    "reused_legacy_handoff": True,
+                    "handoff_event": legacy_ev,
+                    "dispatch_result": disp_res,
+                }
 
         # Gather structured refs (0 prompt dumps, 0 chain-of-thought, 0 direct memory writes)
         dec_refs = [int_dict["decision_ref"]] if int_dict.get("decision_ref") else []

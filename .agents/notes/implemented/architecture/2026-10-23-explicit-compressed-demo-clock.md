@@ -150,3 +150,12 @@ lease、权限过期、请求账本的真实 UTC 日、审计 `recorded_at`）�
   adapter 的出发时刻落在业务域、权威 marker 写真实墙钟/零模型 CLI 冒烟；
   `scripts/fast_day_smoke.py` 是一条自建隔离根、真实 Supply/World/resident 进程、
   0 产品请求的完整 CLI 冒烟（prepare→status→start→pause/resume→stop→同 run 重启）。
+- **低预算窗口边界（2026-10-26 追加）**：正式 runner 的检查窗口实测业务时钟
+  （`clock=` 注入或逻辑日快进）不会刷新请求账本的真实 UTC 日、run 窗口或实验上限；
+  账本没有公开 clock 形参，`reserve(now=...)` 只写 token 时间戳，要模拟 UTC 日界
+  只能在测试里替换账本自己的 `_utc_day` 读口，且 `_active_day` 的单调规则使时钟回退
+  也不重置已写下的日计数。同一私有读口注入也用于"Decision 已付费、内容被拒、无
+  Action"之后的新一天：原 run 窗口仍有余额时新 Decision 依法 CONTINUE 同一
+  Activity/作品，旧已采纳 Decision 与旧成功 Action 都不重放；那一轮的 `llm_calls`
+  按既有模型决策轮口径记 1，不是 0。证据与边界见
+  [低预算接续](../../../../docs/engineering/v05-low-budget-continuation-20261026.md)。

@@ -143,3 +143,29 @@ Status: implemented
    source-only 读拒绝，不称真实 Memory 治理或用户收到。证据：
    `tests/test_situation_expression_behavior.py`、`tests/test_v04_sharing_life_chain.py`、
    `scripts/situation_expression_behavior_smoke.py`。
+9. **来源名字与"列表被截断"进入表达视图（2026-10-25，v0.5 第一块）**：`shareable_sources` 的
+   每一行原来只有 `artifact_id` / `kind`，最终 prompt 里来源没有可读名字；`prompt_block` 的
+   `truncated` 又被 adapter 白名单丢掉，模型看不出展示列表不完整。现在只有**同一次已实际读取**
+   能配对时才带 `title`：作品名来自本轮 resume point（标题与 artifact id 同一次返回），阅读材料名
+   来自本轮 `private_material_situation` 的缓存（`reading_artifact_id` 必须对得上）；缺标题或身份
+   不一致就省略，为凑名字再加 owner 读一律不做。`truncated` 真值经 `_bounded_sharing` 透传，
+   只描述这份 sharing 列表；整块仍会被既有 prompt 预算整块裁掉，不宣称最终 payload 保留完整。
+   标题不是版本、不是披露权，不新增受众/通道/披露规则。证据：
+   `tests/test_v05_results_expression_views.py`、`scripts/v05_results_expression_smoke.py`。
+   **两层截断各自如实上报（2026-10-25 收尾）**：此前 `list_shares` 只用自己收到的行数与
+   `MAX_LIST`（同为 100）重算，丢掉 owner `list_projects` 已有的 `truncated`；`prompt_block`
+   又只透传这一层，按 `MAX_PROMPT_SHARES` 截掉 OPEN 草稿时仍报 `False`。现在两处都只修
+   既有字段的准确投影：owner 列表被截 → 分享列表 `truncated=True`（101 条真草稿返回 100 行，
+   `counts.total` 仍是"本答案返回的行"）；6 条 OPEN 草稿按 prompt bound 展示 5 条 →
+   `prompt_block.truncated=True`。缺 `truncated` 的 owner 答案保持 `False`，不发明截断；
+   上限、过滤、排序、读次数与写口未变。证据：同一测试模块的 `RealOwnerShareTruncationTest`
+   （30 秒内真 Supply owner 建 6/101 条草稿）与 B 的独立截断链 7 项 check。
+10. **真实结果换版后的后续选择（2026-10-25，v0.5 第三条）**：正式链把"真实作品版本 →
+    草稿精确绑定那一版 → 作品续写到下一版 → 下一轮请求如实报 `source_current.stale` /
+    `matches_recorded=false`（旧正文仍可读，不伪称删除）→ 主动发送被 owner 拒
+    `stale_source`（零写）→ 新 prepare 绑定新版本 → 只有一条本地 receipt"整条跑通；
+    "来源不可读"（`SOURCE_GOVERNED`，不是 `NOT_FOUND`，sentinel 不出现在请求/答案里）与
+    "草稿被另一个合法 writer 改过"（`conflict`，原因码不是 `SOURCE_*`）是两条独立负控。
+    **零业务源码改动**：现有 owner 合同与既有投影已经覆盖，本轮只补正式证据、正负控与
+    文档。见 [v0.5 第三条](../feature/2026-10-25-v05-result-sharing-continuation.md)
+    与 `docs/engineering/v05-result-sharing-continuation-20261025.md`。

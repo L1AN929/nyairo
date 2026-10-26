@@ -182,6 +182,9 @@ def prompt_block(service: Any, *, limit: int = MAX_PROMPT_SHARES) -> dict[str, A
     Privacy bound stays: only the draft's own text (already bounded by B at 2000 chars) is cut to
     ``MAX_PROMPT_SHARE_TEXT`` for the prompt, the source's full body is never read here, and a
     share whose detail cannot be read is shown with a named ``reason_code`` instead of a guess.
+
+    ``truncated`` reports either real cut: the owner's own bounded list, or this prompt's ``bound``
+    hiding an OPEN draft.  It never claims the whole list was shown when it was not.
     """
 
     if service is None:
@@ -201,14 +204,20 @@ def prompt_block(service: Any, *, limit: int = MAX_PROMPT_SHARES) -> dict[str, A
                            detail=_text((answer or {}).get("detail"), 160))
     data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
     shares: list[dict[str, Any]] = []
+    #: Whether this module's own prompt bound hid an OPEN draft.  Scanning every row is a local
+    #: loop over an answer already paid for; the skipped drafts get no ``read_share``.
+    cut_open = False
     for row in list(data.get("shares") or []):
-        if len(shares) >= bound:
-            break
         if not isinstance(row, Mapping):
             continue
         if str(row.get("state") or "") not in OPEN_STATES:
             # EXPIRED / DROPPED / LOCAL_DELIVERED are never re-offered: a terminal state must not
             # come back as an action the model could take.
+            continue
+        if len(shares) >= bound:
+            # This row *is* open; it is missing only because of ``bound``.  Five rows must not
+            # read as the whole list.
+            cut_open = True
             continue
         entry = {
             "share_id": _text(row.get("share_id"), 96),
@@ -240,7 +249,8 @@ def prompt_block(service: Any, *, limit: int = MAX_PROMPT_SHARES) -> dict[str, A
                                 if isinstance(inbox.get("delivered_count"), int) else None),
             "local_only": True,
         },
-        "truncated": bool(data.get("truncated")),
+        # Either cut is a real incompleteness: the owner's bounded list, or this prompt's own bound.
+        "truncated": bool(data.get("truncated")) or cut_open,
         "unknowns": [],
         # Stated once, in the block itself: a local inbox record is the only delivery this tree has.
         "note": "local_inbox only; no external channel is configured or enabled",

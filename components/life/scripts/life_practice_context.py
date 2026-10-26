@@ -56,6 +56,12 @@ REASON_TRIAL_REFUSED = "PRACTICE_TRIAL_REFUSED"
 REASON_NO_ARTIFACT = "PRACTICE_CREATE_CONFIRMED_NO_ARTIFACT"
 REASON_NO_EVIDENCE = "PRACTICE_TRIAL_WITHOUT_READABLE_EVIDENCE"
 REASON_METHOD_REF_UNKNOWN = "PRACTICE_METHOD_REF_UNKNOWN"
+#: Why a *listed* method carries no readable evaluation this round.  Each is a named fact, never
+#: "this method was never evaluated": a missing answer and a missing trial are different things.
+REASON_DETAIL_UNAVAILABLE = "PRACTICE_METHOD_DETAIL_UNAVAILABLE"
+REASON_DETAIL_HEAD_CHANGED = "PRACTICE_METHOD_HEAD_CHANGED"
+REASON_EVIDENCE_WITHHELD = "PRACTICE_EVIDENCE_WITHHELD"
+REASON_NO_EXPLICIT_TRIAL = "PRACTICE_METHOD_NO_EXPLICIT_TRIAL"
 
 #: What the seam needs from B's service.  A service missing one of these is reported UNUSABLE
 #: (never "empty"): a partial service would silently answer nothing forever.
@@ -100,6 +106,10 @@ DEFAULT_MAX_EXPERIENCES = 4
 DEFAULT_MAX_METHODS = 3
 DEFAULT_EXCERPT_CHARS = 200
 DEFAULT_TEXT_CHARS = 280
+#: One decision round reads at most this many method *details* (never the whole workspace).
+#: The list itself is already bounded to ``DEFAULT_MAX_METHODS``; this is the second bound that
+#: makes "show the recent explicit evaluation" a bounded extra owner read, not a second index.
+MAX_DETAIL_READS = 3
 
 
 def method_ref_for(artifact_id: Any) -> str:
@@ -199,6 +209,8 @@ class PracticeSeam:
         #: Per-artifact head version seen when this round read the method, so a trial write is a
         #: real compare-and-set against the version she actually looked at.
         self.seen_heads: dict[str, str] = {}
+        #: How many governed detail reads the last ``evaluations_for`` made (the round's budget).
+        self.last_detail_reads: int = 0
 
     # -- availability -------------------------------------------------------------------
 
@@ -526,6 +538,92 @@ class PracticeSeam:
         view["method_ref"] = method_ref_for(view.get("artifact_id"))
         return view
 
+    @staticmethod
+    def bounded_trial_view(trial: Any) -> Optional[dict[str, Any]]:
+        """One recorded trial -> the bounded facts a decision may see, or ``None``.
+
+        Only the verdict, the method version the verdict was about, and how many evidence refs
+        it cited.  The trial's ``detail`` is a free-text inference and never travels here, and
+        ``evidence_usable`` was a fact *at record time* -- re-reporting it would look like this
+        round re-confirmed the evidence, which only ``evidence_usable()`` may say.
+        """
+
+        if not isinstance(trial, Mapping):
+            return None
+        outcome = str(trial.get("outcome") or "").strip().upper()
+        if outcome not in VALID_OUTCOMES:
+            return None
+        version = str(trial.get("version_id") or "").strip()
+        ids = trial.get("experience_ids")
+        count = (len([x for x in ids if str(x or "").strip()])
+                 if isinstance(ids, (list, tuple)) else None)
+        return {"outcome": outcome, "version_id": version or None, "evidence_count": count}
+
+    def evaluations_for(self, rows: Optional[Iterable[Mapping[str, Any]]] = None,
+                        *, max_reads: Optional[int] = None) -> dict[str, dict[str, Any]]:
+        """Bounded evaluation views for the methods this round is *actually offering*.
+
+        At most ``max_reads`` (default :data:`MAX_DETAIL_READS`) governed ``read_method`` calls,
+        one per listed row, in the order the round lists them.  A row whose detail belongs to a
+        different head than the listed row is never stitched together: the answer says
+        ``PRACTICE_METHOD_HEAD_CHANGED`` instead of mixing two versions into one snapshot, and
+        no second read is made to "make it agree".  A failed read keeps the readable list row
+        and names the detail as unavailable.  An owner that withholds the evidence gets
+        ``PRACTICE_EVIDENCE_WITHHELD``: the verdict is not recovered from any other path.
+
+        This is a pure read; ``self.last_detail_reads`` reports how many owner reads it made.
+        """
+
+        budget = MAX_DETAIL_READS if max_reads is None else max(0, int(max_reads))
+        source = list(rows if rows is not None else self.last_methods)
+        out: dict[str, dict[str, Any]] = {}
+        self.last_detail_reads = 0
+        self.last_error = ""
+        for row in source:
+            if self.last_detail_reads >= budget:
+                break
+            if not isinstance(row, Mapping):
+                continue
+            artifact_id = str(row.get("artifact_id") or "").strip()
+            if not artifact_id or artifact_id in out:
+                continue
+            offered_head = str(row.get("head_version_id") or "").strip()
+            self.last_detail_reads += 1
+            try:
+                detail = self.read_method(artifact_id)
+            except PracticeSeamError as exc:
+                detail = None
+                self.last_error = ("%s:%s" % (exc.reason_code, exc.detail)
+                                   if exc.detail else exc.reason_code)
+            if detail is None:
+                out[artifact_id] = {"available": False,
+                                    "reason_code": REASON_DETAIL_UNAVAILABLE}
+                continue
+            if detail.get("governance_blocked") or detail.get("content_available") is False:
+                # The owner withheld the document and everything inferred from it.  The trial
+                # verdict lives in that same governed payload, so this round may not show it.
+                out[artifact_id] = {"available": False,
+                                    "reason_code": REASON_EVIDENCE_WITHHELD}
+                continue
+            detail_head = str(detail.get("head_version_id") or "").strip()
+            if offered_head and detail_head and offered_head != detail_head:
+                out[artifact_id] = {"available": False,
+                                    "reason_code": REASON_DETAIL_HEAD_CHANGED}
+                continue
+            view: Optional[dict[str, Any]] = None
+            for trial in reversed([item for item in (detail.get("trials") or [])
+                                   if isinstance(item, Mapping)]):
+                view = self.bounded_trial_view(trial)
+                if view is not None:
+                    break
+            if view is None:
+                out[artifact_id] = {"available": False,
+                                    "reason_code": REASON_NO_EXPLICIT_TRIAL}
+            else:
+                view["available"] = True
+                out[artifact_id] = view
+        return out
+
     def method_by_ref(self, method_ref: Any) -> Optional[dict[str, Any]]:
         """Resolve a Decision's ``method_ref`` inside *this round's* read set only."""
 
@@ -656,7 +754,7 @@ class PracticeSeam:
             "methods": [{key: row.get(key) for key in
                          ("method_ref", "artifact_id", "title", "instruction", "scope",
                           "uncertainty", "method_state", "head_version_id",
-                          "counterexample_count")}
+                          "counterexample_count", "trial_count")}
                         for row in methods],
             "method_refs": [row["method_ref"] for row in methods],
             "note": ("方法是她自己写下的做法草案，只是文档参考，不是权限、可执行代码或人格信念；"
@@ -924,6 +1022,7 @@ __all__ = [
     "KIND_METHOD",
     "KIND_REVIEW",
     "LOSS_METHOD_RETIRED",
+    "MAX_DETAIL_READS",
     "METHOD_REF_PREFIX",
     "METHOD_STATE_RETIRED",
     "OUTCOME_HELPED",
@@ -934,10 +1033,14 @@ __all__ = [
     "PracticeSeamError",
     "REASON_ANSWER_NOT_A_MAPPING",
     "REASON_CREATE_REFUSED",
+    "REASON_DETAIL_HEAD_CHANGED",
+    "REASON_DETAIL_UNAVAILABLE",
     "REASON_ENVELOPE_NOT_OK",
+    "REASON_EVIDENCE_WITHHELD",
     "REASON_METHOD_REF_UNKNOWN",
     "REASON_NO_ARTIFACT",
     "REASON_NO_EVIDENCE",
+    "REASON_NO_EXPLICIT_TRIAL",
     "REASON_SERVICE_MISSING",
     "REASON_SERVICE_UNUSABLE",
     "REASON_TRIAL_REFUSED",

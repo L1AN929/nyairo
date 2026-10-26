@@ -77,6 +77,8 @@ A 写集内（新增 `components/life/scripts/life_memory_service.py`；改 nati
   治理 DELETE/CORRECT 一旦生效，列表/详情/上下文三处同时不透出正文；实例可以**显式**拥有自己的记忆，
   且启用的每一步（备份、只写三个名字、幂等、不重建坏库、不动 run/预算、不启服务）都有用例钉住；
   consumer 的 owner 不再由 handoff 拼写决定；C 拿到了一个有限、可校验的"确证结果"通道。
+  （2026-10-25 起该通道之上增加了结果级 handoff 身份，只影响交接 id 与粒度，不改这里的
+  准入、治理与去重；见 [进度交接的结果级身份](../architecture/2026-10-25-v05-progress-result-handoff-identity.md)。）
 * **代价与已知上限**：① 原实例本轮未调用 `enable_instance_memory`（阶段单要求），生产路径仍是 `UNBOUND`；
   ② Memory 读路径 POSIX-only（M0 store 模块层 `import fcntl`），Windows 只能覆盖未绑定/具名拒绝/零写；
   ③ `context()` 是"全词包含 + 时间倒序"的确定性检索，不是语义搜索；④ 仍是一条经历一个 M0 事件，

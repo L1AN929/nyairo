@@ -118,3 +118,16 @@ Status: implemented
 - 未做：真实 Gemini 运行（父级负责，600 秒 / ≤6 新增 HTTP）、24h soak、全库回归、全树 SHA、
   `py_compile`、物理删除与 `TemporaryDirectory` 清理（夹具目录全部保留）。原实例/配置/Memory/密钥/
   `MANIFEST.json` 与两个历史 fix 脚本未触碰，未提交、未部署。
+- **低预算拒绝面（2026-10-26 追加）**：正式 runner 在预算门先于 `_mark_checked`/cycle
+  返回 `BLOCKED`（detail 具名 `COGNITION_BUDGET_EXHAUSTED`，不产生 cycle outcome、
+  `llm_calls=0`）；Decision 已付费而内容预留被拒时走 cycle 的 `BUDGET_EXHAUSTED`，
+  真实用量在 wake `extra.budget.requests` 与账本 token 里可见。
+- **同轮计数（2026-10-26 修正）**：上面"发后内容被拒"的轮次原先也记 `llm_calls=0`，
+  与既有 [按 route 计数](../bug-fix/2026-10-23-observation-count-rule-noise.md) 的口径
+  （wake 计**模型决策轮/尝试**，不是 HTTP 次数、不是当日累计）不一致：那一轮 Decision
+  请求真的发出并已采纳。修复只在 cycle 的预算拒绝出口按"本轮是否已物化
+  Decision-bound 步骤"映射 0/1（AG-2 在提交 adopted 集成之后才解析 step spec，所以
+  物化即证明决策已付费）；decision 预留本身被拒仍是 0。runner/resident 只透传/累加，
+  本单未改；无新字段、新文案或新重试策略。断步后续（日界后新 Decision 依法续同一
+  Activity/作品）与证据边界见
+  [低预算接续](../../../../docs/engineering/v05-low-budget-continuation-20261026.md)。

@@ -306,6 +306,12 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
             return []
         if isinstance(raw, Mapping):
             raw = list(raw.values())
+        # v0.4 day-life: the same rule the artifact path already keeps applies to a due item /
+        # project option that names an artifact -- an object with a PAUSED/WAITING Activity of its
+        # own is *resume*'s business (LR-4 eligibility + the owner's RESUME), not a fresh START.
+        # Without this the extra path could open a second Activity for the same object and bypass
+        # that eligibility.  Read fresh per pass, exactly like ``_read_points``.
+        paused = self._paused_targets()
         items: list[dict[str, Any]] = []
         for row in raw or []:
             if not isinstance(row, Mapping):
@@ -317,6 +323,11 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
             targets = [str(t) for t in (row.get("target_refs") or []) if str(t)]
             if not targets:
                 self.last_extra_skip_reasons[ref] = "EXTRA_TARGET_MISSING"
+                continue
+            if any(self._bare_id(target) in paused for target in targets):
+                # Reported, never silently dropped: the object still exists and its item is still
+                # due -- what changed is that its way back is resume, not a new start from here.
+                self.last_extra_skip_reasons[ref] = "PAUSED_TARGET_REQUIRES_RESUME"
                 continue
             # No memoisation here: ``discover`` and ``refresh`` both ask the provider, and a
             # candidate still on offer must stay on offer when it is refreshed in the same round.
@@ -684,6 +695,16 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
             # v0.4 stage A: an extra opportunity is alive only while the round's own read still
             # offers it (the item still OPEN and due, or the option still supported).  Re-reading
             # is what makes it withdraw; nothing here remembers a withdrawn item.
+            paused = self._paused_targets()
+            if any(self._bare_id(target) in paused
+                   for target in (candidate.target_refs or ())):
+                # v0.4 day-life: the offer was built while the object was still free; it has since
+                # been paused/put to wait, so this candidate must not be adopted as a fresh START.
+                self.last_extra_skip_reasons[str(candidate.source_ref)] = (
+                    "PAUSED_TARGET_REQUIRES_RESUME")
+                return self.invalidate(candidate, reason_code="PAUSED_TARGET_REQUIRES_RESUME",
+                                       observed_at=obs_iso,
+                                       new_status=CANDIDATE_STATUS_WITHDRAWN)
             offered = self._extra_raw_items(obs_iso)
             fresh = {str(item["source_ref"]): item for item in offered}.get(
                 str(candidate.source_ref))

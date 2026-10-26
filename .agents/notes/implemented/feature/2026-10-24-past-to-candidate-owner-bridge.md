@@ -91,4 +91,7 @@ Memory/Supply 合同、资格生成/消费、前台规则；不自动恢复、�
 
 相关：[有效搁置候选供给](2026-10-24-eligible-parked-candidate-supply.md)、
 [wait-closeout](../feature/2026-10-28-v04-wait-closeout-core.md)、
-[lived-day core continuity](../architecture/2026-11-13-v04-lived-day-core-continuity.md)。
+[lived-day core continuity](../architecture/2026-11-13-v04-lived-day-core-continuity.md)、
+[评价承接到同一作品后续实践](../../../../docs/engineering/v05-practice-continuation-20261025.md)（2026-10-25：
+真实链里另有可续作品 B 且本轮绑定改到 B，每一步仍写候选自带的 A、B 版本不变；这条规则
+没有被改优先级或选择算法）。

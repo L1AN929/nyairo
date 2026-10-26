@@ -230,6 +230,10 @@ class SharingLifeChainTest(unittest.TestCase):
         self.assertEqual(prompt_block.get("channel"), "local_inbox")
         source_ids = {row["artifact_id"] for row in prompt_block.get("sources") or []}
         self.assertIn(self.data["work_artifact_id"], source_ids)
+        # v0.5: the owner's own "this list was cut" fact survives the prompt whitelist (here the
+        # list really was not cut, so the fact is an explicit False -- never silently absent).
+        self.assertIs(prompt_block.get("truncated"), False)
+        self.assertIs(aa._bounded_sharing(prompt_block).get("truncated"), False)
 
         # 2) 正式 Decision：defer（写明她在等什么）。下一轮的 prompt 里必须带着这句话。
         second = self.turn("defer", trigger="share:defer")
