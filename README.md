@@ -87,6 +87,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 - 安装过程会自动准备好 Python 3.13 与运行环境，下载好校验过的版本，并为你建好独立的数据目录；
 - 随后屏幕上会出现设置向导，挑一个你常用的模型供应商（如 OpenAI、DeepSeek 等），填好自己的 API Key 就可以开始。
+- 想让她在本机有自己的日常（启动、看状态、给材料、停止）：按 [日常启动一页说明](docs/DAY_START.zh-CN.md) 三步开始。
 
 ### 常用命令
 
