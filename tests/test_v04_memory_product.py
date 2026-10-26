@@ -609,11 +609,20 @@ class EnableInstanceMemoryTests(unittest.TestCase):
         write_nested(root)
         return root
 
+    def _retained(self, root: Path) -> Path:
+        """A deletion authority outside the instance business root, as the operator hands in."""
+
+        directory = root.parent / (root.name + "-retained")
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / "authority.db"
+
     @owner_bound_only
     def test_enable_creates_a_backed_up_binding_and_starts_nothing(self) -> None:
         root = self._root("v04-mem-enable-")
+        retained = self._retained(root)
         original = (root / "one-day" / "instance.json").read_text(encoding="utf-8")
-        report = phone_life.enable_instance_memory(root, "chiyo", "enable-1")
+        report = phone_life.enable_instance_memory(root, "chiyo", "enable-1",
+                                                   authority_path=retained)
         self.assertTrue(report["ok"], report)
         self.assertTrue(report["created"])
         self.assertFalse(report["reused"])
@@ -624,6 +633,9 @@ class EnableInstanceMemoryTests(unittest.TestCase):
         memory = root / "one-day" / "life" / "memory"
         self.assertTrue((memory / "evidence.db").is_file())
         self.assertTrue((memory / "controls.db").is_file())
+        self.assertFalse((memory / "authority.db").exists(),
+                         "the retained authority must not live inside the instance's business root")
+        self.assertTrue(retained.is_file())
         backups = sorted((root / "one-day").glob("instance.json-backup-*"))
         self.assertEqual(len(backups), 1, backups)
         self.assertEqual(backups[0].read_text(encoding="utf-8"), original)
@@ -631,18 +643,23 @@ class EnableInstanceMemoryTests(unittest.TestCase):
         env = payload["environment"]
         self.assertEqual(env["NYA02_MEMORY_DB"], str(memory / "evidence.db"))
         self.assertEqual(env["NYA02_MEMORY_CONTROLS_DB"], str(memory / "controls.db"))
+        self.assertEqual(env["NYA02_MEMORY_AUTHORITY_DB"], str(retained))
+        self.assertEqual(env["NYA02_MEMORY_AUTHORITY_MIN_SEQ"], "0")
         self.assertEqual(env["NYA02_MEMORY_SUBJECT"], "chiyo")
         self.assertEqual(report["binding"]["owner"], "chiyo")
 
     @owner_bound_only
-    def test_enable_writes_only_the_three_memory_names_and_keeps_run_and_budget(self) -> None:
+    def test_enable_writes_only_the_five_memory_names_and_keeps_run_and_budget(self) -> None:
         root = self._root("v04-mem-enable-env-")
+        retained = self._retained(root)
         before = dict(nested_payload(root)["environment"])
-        report = phone_life.enable_instance_memory(root, "chiyo", "enable-2")
+        report = phone_life.enable_instance_memory(root, "chiyo", "enable-2",
+                                                   authority_path=retained)
         self.assertTrue(report["ok"], report)
         after = dict(nested_payload(root)["environment"])
         added = set(after) - set(before)
         self.assertEqual(added, {"NYA02_MEMORY_DB", "NYA02_MEMORY_CONTROLS_DB",
+                                 "NYA02_MEMORY_AUTHORITY_DB", "NYA02_MEMORY_AUTHORITY_MIN_SEQ",
                                  "NYA02_MEMORY_SUBJECT"})
         for name, value in before.items():
             self.assertEqual(after[name], value, name)
@@ -652,10 +669,13 @@ class EnableInstanceMemoryTests(unittest.TestCase):
     @owner_bound_only
     def test_enable_is_idempotent_and_rewrites_nothing_on_a_second_call(self) -> None:
         root = self._root("v04-mem-enable-idem-")
-        first = phone_life.enable_instance_memory(root, "chiyo", "enable-3")
+        retained = self._retained(root)
+        first = phone_life.enable_instance_memory(root, "chiyo", "enable-3",
+                                                  authority_path=retained)
         self.assertTrue(first["created"])
         before = snapshot(root)
-        second = phone_life.enable_instance_memory(root, "chiyo", "enable-3")
+        second = phone_life.enable_instance_memory(root, "chiyo", "enable-3",
+                                                   authority_path=retained)
         self.assertTrue(second["reused"], second)
         self.assertFalse(second["created"])
         self.assertEqual(second["status"], "READY")
@@ -734,10 +754,21 @@ class EnableInstanceMemoryTests(unittest.TestCase):
         self.assertEqual(snapshot(root), before)
 
     @owner_bound_only
+    def test_enable_requires_a_retained_authority_outside_the_instance(self) -> None:
+        root = self._root("v04-mem-enable-retained-")
+        self.assertFalse(phone_life.enable_instance_memory(root, "chiyo", "enable-a")["ok"])
+        inside = root / "one-day" / "life" / "memory" / "authority.db"
+        report = phone_life.enable_instance_memory(root, "chiyo", "enable-b",
+                                                   authority_path=inside)
+        self.assertEqual("MEMORY_AUTHORITY_PATH_INSIDE_INSTANCE", report["reason"])
+        self.assertFalse(inside.exists())
+
     @owner_bound_only
     def test_memory_health_after_enabling_is_read_only(self) -> None:
         root = self._root("v04-mem-enable-health-")
-        self.assertTrue(phone_life.enable_instance_memory(root, "chiyo", "enable-9")["ok"])
+        retained = self._retained(root)
+        self.assertTrue(phone_life.enable_instance_memory(
+            root, "chiyo", "enable-9", authority_path=retained)["ok"])
         environment = dict(nested_payload(root)["environment"])
         before = snapshot(root)
         state = phone_life.check_memory(environment)

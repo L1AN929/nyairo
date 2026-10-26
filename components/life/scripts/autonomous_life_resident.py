@@ -76,6 +76,10 @@ INSTALL_ROOT_ENV = ("CHIYO_LIFE_INSTALL_ROOT", "NYA02_RESIDENT_INSTALL_ROOT")
 MEMORY_DB_ENV = ("NYA02_MEMORY_DB", "CHIYO_LIFE_MEMORY_DB")
 MEMORY_CONTROLS_ENV = ("NYA02_MEMORY_CONTROLS_DB", "CHIYO_LIFE_MEMORY_CONTROLS_DB")
 MEMORY_SUBJECT_ENV = ("NYA02_MEMORY_SUBJECT", "NYA02_SUBJECT")
+#: The retained deletion authority and its handed-off floor: read from this instance's env, not
+#: from the process's shell, because the resident is assembled in-process with a mapped dict.
+MEMORY_AUTHORITY_ENV = ("NYA02_MEMORY_AUTHORITY_DB", "CHIYO_LIFE_MEMORY_AUTHORITY_DB")
+MEMORY_AUTHORITY_MIN_SEQ_ENV = ("NYA02_MEMORY_AUTHORITY_MIN_SEQ", "CHIYO_LIFE_MEMORY_AUTHORITY_MIN_SEQ")
 MODEL_BASE_URL_ENV = "NYA02_MODEL_BASE_URL"
 #: 显式压缩演示模式（COMPRESSED_DEMO）只由 ``scripts/fast_day.py`` 写入。缺席即普通
 #: 真实时间路径，不加载任何业务时钟。
@@ -712,6 +716,21 @@ class AutonomousLifeResident:
 
     # -- memory boundary (optional, and only when a database is configured) ---------------
 
+    def _memory_authority(self) -> tuple[str, Optional[int]]:
+        """The retained deletion authority this instance recorded, and its handed-off floor.
+
+        Read from ``self.env`` (the mapped instance environment), never from the shell: a
+        resident is assembled in-process with a dict, so ``os.environ`` would miss the binding.
+        An unconfigured instance yields ``("", None)`` and stays on the legacy path.
+        """
+
+        raw = _first(self.env, MEMORY_AUTHORITY_MIN_SEQ_ENV)
+        try:
+            minimum: Optional[int] = int(str(raw)) if raw is not None else None
+        except ValueError:
+            minimum = None  # unreadable handoff = currentness unproven, never zero
+        return (_first(self.env, MEMORY_AUTHORITY_ENV) or "", minimum)
+
     def _memory_ports(self) -> tuple[Any, Any, Any]:
         """The M0 admission consumer, the bounded experience view and the read port.
 
@@ -730,9 +749,11 @@ class AutonomousLifeResident:
             self.last_error = "MEMORY_IMPORT_FAILED: %s: %s" % (type(exc).__name__, exc)
             return None, None, None
         subject = _first(self.env, MEMORY_SUBJECT_ENV) or "chiyo"
+        authority, minimum_seq = self._memory_authority()
         try:
             port = LifeExperiencePort(database, controls_db=_first(self.env, MEMORY_CONTROLS_ENV),
-                                      subject=subject)
+                                      subject=subject, authority_db=authority,
+                                      authority_min_seq=minimum_seq)
         except Exception as exc:
             self.last_error = "MEMORY_PORT_FAILED: %s: %s" % (type(exc).__name__, exc)
             return None, None, None
@@ -762,9 +783,12 @@ class AutonomousLifeResident:
         owner = _first(self.env, MEMORY_SUBJECT_ENV) or "chiyo"
         controls = _first(self.env, MEMORY_CONTROLS_ENV) or memory
         home = str(self.env.get("CHIYO_WORLD_HOME") or self.state_root)
+        authority, minimum_seq = self._memory_authority()
         try:
             ledger = MemoryControlLedger(controls, memory, owner=owner,
-                                         conversation=life_conversation_id(owner))
+                                         conversation=life_conversation_id(owner),
+                                         authority=authority,
+                                         authority_min_seq=minimum_seq)
             return LifeContinuityInputs(
                 binding=ContinuityBinding(
                     subject=owner, home=home, now=_iso(self._clock()),
@@ -774,7 +798,9 @@ class AutonomousLifeResident:
                         "agenda": "agenda:lr4",
                         "artifact": "artifact:supply",
                     }),
-                past_source=LifeExperiencePort(memory, controls_db=controls, subject=owner),
+                past_source=LifeExperiencePort(memory, controls_db=controls, subject=owner,
+                                               authority_db=authority,
+                                               authority_min_seq=minimum_seq),
                 activity_source=getattr(runtime, "activity_read", None),
                 agenda_source=getattr(runtime, "waiting_coordinator", None),
                 governance_probe=lambda: {"healthy": bool(ledger.projection().healthy)})

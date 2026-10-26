@@ -28,9 +28,11 @@ every read path here goes through ``LifeExperiencePort.readiness/search/read``, 
 
 Binding scope
 -------------
-:func:`memory_service_from_env` reads exactly the three names the shipped resident reads
-(``NYA02_MEMORY_DB`` / ``NYA02_MEMORY_CONTROLS_DB`` / ``NYA02_MEMORY_SUBJECT`` and their
-``CHIYO_LIFE_*`` fallbacks).  It never scans for unknown databases, and an owner is always the
+:func:`memory_service_from_env` reads exactly the four names the shipped resident reads
+(``NYA02_MEMORY_DB`` / ``NYA02_MEMORY_CONTROLS_DB`` / ``NYA02_MEMORY_AUTHORITY_DB`` /
+``NYA02_MEMORY_SUBJECT`` and their ``CHIYO_LIFE_*`` fallbacks).  The fourth is the separately
+retained deletion authority: when it is absent the binding keeps its legacy behaviour and is
+never adopted automatically.  It never scans for unknown databases, and an owner is always the
 binding's own -- never inferred from the Supply/Activity domain.
 """
 from __future__ import annotations
@@ -68,6 +70,8 @@ PARTICIPATION = {
 MEMORY_ENV_FALLBACK = {
     "database": ("NYA02_MEMORY_DB", "CHIYO_LIFE_MEMORY_DB"),
     "controls": ("NYA02_MEMORY_CONTROLS_DB", "CHIYO_LIFE_MEMORY_CONTROLS_DB"),
+    "authority": ("NYA02_MEMORY_AUTHORITY_DB", "CHIYO_LIFE_MEMORY_AUTHORITY_DB"),
+    "authority_min_seq": ("NYA02_MEMORY_AUTHORITY_MIN_SEQ", "CHIYO_LIFE_MEMORY_AUTHORITY_MIN_SEQ"),
     "owner": ("NYA02_MEMORY_SUBJECT", "NYA02_SUBJECT"),
 }
 MEMORY_DEFAULT_OWNER = "chiyo"
@@ -108,6 +112,8 @@ def memory_env_names() -> dict[str, tuple[str, ...]]:
     except Exception:  # not importable in this host: the frozen names still hold
         return names
     for key, attribute in (("database", "MEMORY_DB_ENV"), ("controls", "MEMORY_CONTROLS_ENV"),
+                           ("authority", "MEMORY_AUTHORITY_ENV"),
+                           ("authority_min_seq", "MEMORY_AUTHORITY_MIN_SEQ_ENV"),
                            ("owner", "MEMORY_SUBJECT_ENV")):
         value = getattr(resident, attribute, None)
         if isinstance(value, str) and value.strip():
@@ -155,6 +161,7 @@ class LifeMemoryService:
         owner: Optional[str] = None,
         database: Optional[str] = None,
         controls_database: Optional[str] = None,
+        authority_database: Optional[str] = None,
         bind_error: Optional[str] = None,
         source: str = "explicit",
     ) -> None:
@@ -165,6 +172,8 @@ class LifeMemoryService:
             str(getattr(port, "evidence_db", "") or "") or None)
         self.controls_database = str(controls_database) if controls_database else (
             str(getattr(port, "controls_db", "") or "") or None)
+        self.authority_database = str(authority_database) if authority_database else (
+            str(getattr(port, "authority_db", "") or "") or None)
         self.bind_error = str(bind_error) if bind_error else None
         self.source = str(source)
 
@@ -190,6 +199,8 @@ class LifeMemoryService:
             "owner": self.owner,
             "database": self.database,
             "controls_database": self.controls_database,
+            "authority_database": self.authority_database,
+            "authority_configured": bool(self.authority_database),
             "controls_defaulted": bool(
                 self.database and self.controls_database == self.database),
             "source": self.source,
@@ -225,7 +236,9 @@ class LifeMemoryService:
         if status not in (STATUS_READY, STATUS_BLOCKED, STATUS_UNAVAILABLE):
             status = STATUS_UNAVAILABLE
         for key in ("recall_ready", "integrity", "evidence_table", "governance_healthy",
-                    "controls", "controls_defaulted", "database", "controls_database"):
+                    "controls", "controls_defaulted", "database", "controls_database",
+                    "authority_database", "authority_configured", "authority_min_seq",
+                    "authority_operations", "authority_seq"):
             if key in readiness:
                 data[key] = readiness[key]
         data["owner"] = readiness.get("owner") or self.owner
@@ -316,6 +329,7 @@ class LifeMemoryService:
                 "owner": state["data"].get("owner"),
                 "database": state["data"].get("database"),
                 "controls_database": state["data"].get("controls_database"),
+                "authority_database": state["data"].get("authority_database"),
                 "recall_ready": bool(state["data"].get("recall_ready"))}
 
     # -- internals -----------------------------------------------------------------------
@@ -357,21 +371,31 @@ def memory_service_from_env(environment: Optional[Mapping[str, str]] = None) -> 
     names = memory_env_names()
     database, _database_env = _first_bound(env, names["database"])
     controls, _controls_env = _first_bound(env, names["controls"])
+    authority, _authority_env = _first_bound(env, names["authority"])
+    authority_min_seq, _authority_min_seq_env = _first_bound(env, names["authority_min_seq"])
     owner, _owner_env = _first_bound(env, names["owner"])
     if not database:
         return LifeMemoryService(None, owner=None, database=None, controls_database=None,
-                                 source="env")
+                                 authority_database=None, source="env")
     owner = owner or MEMORY_DEFAULT_OWNER
     try:
+        minimum = int(authority_min_seq) if authority_min_seq else None
+    except ValueError:  # an unreadable handoff is "cannot confirm", never zero
+        minimum = None
+    try:
         module = _port_module()
-        port = module.LifeExperiencePort(database, controls_db=controls or None, subject=owner)
+        port = module.LifeExperiencePort(database, controls_db=controls or None,
+                                         subject=owner, authority_db=authority or "",
+                                         authority_min_seq=minimum)
     except Exception as exc:
         return LifeMemoryService(None, owner=owner, database=database,
                                  controls_database=controls or database,
+                                 authority_database=authority or None,
                                  bind_error="%s: %s" % (type(exc).__name__, exc),
                                  source="env")
     return LifeMemoryService(port, owner=owner, database=database,
-                             controls_database=controls or database, source="env")
+                             controls_database=controls or database,
+                             authority_database=authority or None, source="env")
 
 
 __all__ = [

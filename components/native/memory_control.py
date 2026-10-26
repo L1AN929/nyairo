@@ -14,7 +14,10 @@ from pathlib import Path
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
+
+from memory_authority import (MemoryDeletionAuthority, authority_min_seq_from_env,
+                              resolve_authority_path)
 
 
 def readonly(path: Path) -> sqlite3.Connection:
@@ -32,6 +35,13 @@ class MemoryProjection:
     healthy: bool = True
     controls: int = 0
     history_after: str | None = None
+    #: Why a fail-closed projection is unhealthy (``MEMORY_AUTHORITY_UNAVAILABLE`` names the
+    #: retained deletion authority rather than blaming the control ledger).
+    reason: str | None = None
+    detail: str | None = None
+    authority_configured: bool = False
+    authority_operations: int = 0
+    authority_seq: int = 0
 
     def recalls(self, objects: Any) -> tuple[list[Any], list[str]]:
         if not self.healthy:
@@ -41,6 +51,9 @@ class MemoryProjection:
         for obj in objects or ():
             ids = {str(x) for x in getattr(obj, 'source_event_ids', ())}
             if self.controls and not ids:
+                continue
+            turn_id = str(getattr(obj, 'turn_id', '') or '')
+            if turn_id and turn_id in self.blocked_turns:
                 continue
             denied = ids & self.blocked_events
             if denied:
@@ -81,11 +94,35 @@ class MemoryProjection:
 
 
 class MemoryControlLedger:
-    def __init__(self, path: Path | str, evidence: Path | str, *, owner: str, conversation: str):
+    def __init__(self, path: Path | str, evidence: Path | str, *, owner: str, conversation: str,
+                 authority: str | Path | None = None,
+                 authority_min_seq: Optional[int] = None):
         if not owner or not conversation:
             raise ValueError('explicit owner and evidence conversation are required')
         self.path, self.evidence = Path(path), Path(evidence)
         self.owner, self.conversation = str(owner), str(conversation)
+        # An instance that was bound with a retained authority carries its fourth environment
+        # name into every ledger this process builds; an unconfigured (older) instance resolves
+        # to ``None`` and keeps its previous behaviour -- it is never adopted automatically.
+        if authority is None:
+            self.authority: Optional[Path] = resolve_authority_path(self.path)
+            self.authority_min_seq = (authority_min_seq if authority_min_seq is not None
+                                      else authority_min_seq_from_env())
+        elif str(authority) == '':
+            self.authority = None
+            self.authority_min_seq = None
+        else:
+            self.authority = Path(authority)
+            # No floor handed in beside an explicit path means currentness is unproven; the
+            # projection blocks rather than assuming the copy is current.
+            self.authority_min_seq = authority_min_seq
+
+    def _authority(self) -> Optional[MemoryDeletionAuthority]:
+        if self.authority is None:
+            return None
+        return MemoryDeletionAuthority(self.authority, owner=self.owner,
+                                       conversation=self.conversation,
+                                       minimum_seq=self.authority_min_seq)
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,15 +163,25 @@ class MemoryControlLedger:
             raise ValueError('a distinct direct user correction event is required')
         c = readonly(self.evidence)
         try:
-            self._event(c, target)
+            target_event = self._event(c, target)
             if replacement:
                 event = self._event(c, replacement)
                 if event['speaker'] != 'user' or event['source_origin'] != 'USER_VISIBLE_INPUT':
                     raise ValueError('correction must come from direct user input')
+            blocked_ids = sorted({str(row[0]) for row in c.execute(
+                'SELECT event_id FROM evidence_events WHERE conversation_id=? AND turn_id=?',
+                (self.conversation, target_event['turn_id'])).fetchall()})
         finally:
             c.close()
         fingerprint = hashlib.sha256(json.dumps([self.owner, self.conversation, kind,
                                       target, replacement], separators=(',', ':')).encode()).hexdigest()
+        # Authority first: a deletion that cannot be durably recorded outside the rollback-able
+        # control ledger is not reported as successful, and no control row is written for it.
+        authority = self._authority()
+        if kind == 'DELETE' and authority is not None:
+            authority.commit(operation_id=operation_id, target_event=target,
+                             turn_id=str(target_event['turn_id']),
+                             blocked_event_ids=blocked_ids, fingerprint=fingerprint)
         c = sqlite3.connect(self.path, timeout=3)
         try:
             c.execute('BEGIN IMMEDIATE')
@@ -157,7 +204,7 @@ class MemoryControlLedger:
         if parts == ['/memory', 'list']:
             projection = self.projection()
             if not projection.healthy:
-                raise ValueError('control ledger unavailable')
+                raise ValueError(projection.reason or 'control ledger unavailable')
             c = readonly(self.evidence)
             try:
                 rows = c.execute('SELECT event_id,content FROM evidence_events WHERE conversation_id=? '
@@ -187,6 +234,25 @@ class MemoryControlLedger:
 
     def projection(self) -> MemoryProjection:
         out = MemoryProjection()
+        authority = self._authority()
+        authority_projection = None
+        if authority is not None:
+            out.authority_configured = True
+            try:
+                authority_projection = authority.projection()
+            except Exception as exc:  # a probe failure is also "cannot prove"
+                return MemoryProjection(
+                    healthy=False, reason='MEMORY_AUTHORITY_UNAVAILABLE',
+                    authority_configured=True,
+                    detail='%s: %s' % (type(exc).__name__, exc))
+            if not authority_projection.healthy:
+                result = MemoryProjection(
+                    healthy=False,
+                    reason=authority_projection.reason or 'MEMORY_AUTHORITY_UNAVAILABLE',
+                    authority_configured=True)
+                result.authority_operations = authority_projection.operations
+                result.authority_seq = authority_projection.seq
+                return result
         try:
             c = readonly(self.path)
             try:
@@ -217,10 +283,20 @@ class MemoryControlLedger:
                     else:
                         for sibling in siblings:
                             out.replacements.pop(str(sibling['event_id']), None)
+                # Retained deletions are merged after the control rows: they survive an older
+                # control file and cover their whole turn even if the evidence file was restored.
+                epochs = [rows[-1]['created_at']] if rows else []
+                if authority_projection is not None:
+                    out.authority_operations = authority_projection.operations
+                    out.authority_seq = authority_projection.seq
+                    out.blocked_events.update(authority_projection.blocked_events)
+                    out.blocked_turns.update(authority_projection.blocked_turns)
+                    if authority_projection.latest_created_at:
+                        epochs.append(authority_projection.latest_created_at)
                 # Historical output may repeat a forgotten fact. Once a control exists,
                 # project from a fresh conversation epoch; raw stored records stay intact.
-                out.history_after = rows[-1]['created_at'] if rows else None
-                if rows:
+                out.history_after = max(epochs) if epochs else None
+                if out.history_after:
                     # Assistant history is not independent user authority and may repeat a
                     # forgotten fact across turns. Exclude older self-history as a whole.
                     prior = e.execute('SELECT event_id,content,speaker FROM evidence_events '
@@ -232,7 +308,8 @@ class MemoryControlLedger:
                 e.close()
             return out
         except (OSError, sqlite3.Error, ValueError, KeyError):
-            return MemoryProjection(healthy=False)
+            return MemoryProjection(healthy=False, reason='MEMORY_CONTROLS_UNHEALTHY',
+                                    authority_configured=authority is not None)
 
 
 def main() -> None:

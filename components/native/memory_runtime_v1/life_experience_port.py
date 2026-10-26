@@ -46,6 +46,7 @@ from app.evidence import (  # noqa: E402
     new_event_id,
     utc_now,
 )
+from memory_authority import authority_min_seq_from_env, resolve_authority_path  # noqa: E402
 from memory_control import MemoryControlLedger  # noqa: E402
 
 #: Life events live in their own stream, never in a chat conversation.  The M0 schema requires a
@@ -96,6 +97,8 @@ class LifeExperienceRecord:
     source_ref: str
     text: str
     source_event_ids: list[str] = field(default_factory=list)
+    #: M0's own turn id.  A retained deletion covers the whole turn, so this is checked too.
+    turn_id: Optional[str] = None
     activity_ref: Optional[str] = None
     action_ref: Optional[str] = None
     artifact_ref: Optional[str] = None
@@ -166,10 +169,25 @@ class LifeExperiencePort:
         subject: str = "chiyo",
         limit: int = DEFAULT_LIMIT,
         max_chars: int = DEFAULT_MAX_CHARS,
+        authority_db: Optional[str | Path] = None,
+        authority_min_seq: Optional[int] = None,
     ) -> None:
         self.evidence_db = Path(evidence_db)
         self.controls_db = Path(controls_db) if controls_db else self.evidence_db
         self.subject = str(subject)
+        # ``None`` means "resolve the configured fourth name from this process"; ``""`` disables
+        # it explicitly.  An unconfigured instance stays on the legacy path.
+        if authority_db is None:
+            self.authority_db = resolve_authority_path(self.controls_db)
+            self.authority_min_seq = (authority_min_seq if authority_min_seq is not None
+                                      else authority_min_seq_from_env())
+        elif str(authority_db) == "":
+            self.authority_db = None
+            self.authority_min_seq = None
+        else:
+            self.authority_db = Path(authority_db)
+            # Currentness must be handed off with the path; without a floor it stays unproven.
+            self.authority_min_seq = authority_min_seq
         self.limit = max(0, int(limit))
         self.max_chars = max(0, int(max_chars))
 
@@ -184,9 +202,11 @@ class LifeExperiencePort:
     # -- out ---------------------------------------------------------------------------
 
     def _projection(self):
-        ledger = MemoryControlLedger(self.controls_db, self.evidence_db,
-                                     owner=self.subject,
-                                     conversation=life_conversation_id(self.subject))
+        ledger = MemoryControlLedger(
+            self.controls_db, self.evidence_db, owner=self.subject,
+            conversation=life_conversation_id(self.subject),
+            authority=str(self.authority_db) if self.authority_db is not None else "",
+            authority_min_seq=self.authority_min_seq)
         return ledger.projection()
 
     def recent(self, *, limit: Optional[int] = None, since: Optional[str] = None,
@@ -219,6 +239,7 @@ class LifeExperiencePort:
             source_ref=refs.get("life_outcome", str(row.get("primary_source_ref_id"))),
             text=str(row.get("content") or ""),
             source_event_ids=[str(row.get("event_id"))],
+            turn_id=str(row.get("turn_id")) if row.get("turn_id") is not None else None,
             activity_ref=refs.get("activity"),
             action_ref=refs.get("action"),
             artifact_ref=refs.get("artifact"),
@@ -275,6 +296,11 @@ class LifeExperiencePort:
             "database": str(evidence),
             "controls_database": str(controls),
             "controls_defaulted": controls == evidence,
+            "authority_database": str(self.authority_db) if self.authority_db else None,
+            "authority_configured": self.authority_db is not None,
+            "authority_min_seq": self.authority_min_seq,
+            "authority_operations": None,
+            "authority_seq": None,
             "database_exists": False,
             "database_is_file": False,
             "controls_exists": False,
@@ -340,13 +366,24 @@ class LifeExperiencePort:
             return out
         out["governance_healthy"] = bool(getattr(projection, "healthy", False))
         out["controls"] = int(getattr(projection, "controls", 0) or 0)
+        out["authority_operations"] = getattr(projection, "authority_operations", None) \
+            if out["authority_configured"] else None
+        out["authority_seq"] = getattr(projection, "authority_seq", None) \
+            if out["authority_configured"] else None
         if not out["governance_healthy"]:
-            detail = ("the control ledger projection is unhealthy, so nothing at all would be "
-                      "recalled from this Memory")
-            if out["controls_defaulted"]:
-                detail += (" — no separate control ledger is configured, so the M0 database "
-                           "itself is used as the ledger and has no memory_controls table")
-            return self._not_ready(out, "MEMORY_CONTROLS_UNHEALTHY", detail)
+            reason = str(getattr(projection, "reason", None) or "MEMORY_CONTROLS_UNHEALTHY")
+            if reason.startswith("MEMORY_AUTHORITY_"):
+                detail = ("the retained deletion authority cannot prove both which experiences "
+                          "were deleted and that it is the handed-off current base (%s); nothing "
+                          "at all would be recalled from this Memory and a new deletion would be "
+                          "refused" % (reason,))
+            else:
+                detail = ("the control ledger projection is unhealthy, so nothing at all would be "
+                          "recalled from this Memory")
+                if out["controls_defaulted"]:
+                    detail += (" — no separate control ledger is configured, so the M0 database "
+                               "itself is used as the ledger and has no memory_controls table")
+            return self._not_ready(out, reason, detail)
         out.update({"binding_status": READINESS_READY, "reason": None, "detail": None,
                     "recall_ready": True})
         return out
