@@ -122,6 +122,12 @@ Status: implemented
   返回 `BLOCKED`（detail 具名 `COGNITION_BUDGET_EXHAUSTED`，不产生 cycle outcome、
   `llm_calls=0`）；Decision 已付费而内容预留被拒时走 cycle 的 `BUDGET_EXHAUSTED`，
   真实用量在 wake `extra.budget.requests` 与账本 token 里可见。
+- **用户入口（2026-10-26 追加）**：面向新人的 `scripts/nyairo_day.py` 只做薄封装：`start`
+  调本文件的 `demo.serve_instance` 且默认不跑 resident/不发模型；真正的一段模型运行仍走本文件
+  的 `phone.live_day.run_segment`，并由用户显式 `run-day --live-model --duration-seconds
+  --max-new-requests` 触发。`serve_instance` 新增 `reuse_address`（默认 `False`，旧调用不变），
+  只让用户入口在停止后立刻重开同一端口。见
+  [一条命令开始她的日常](2026-10-26-one-command-day-entry.md)。
 - **同轮计数（2026-10-26 修正）**：上面"发后内容被拒"的轮次原先也记 `llm_calls=0`，
   与既有 [按 route 计数](../bug-fix/2026-10-23-observation-count-rule-noise.md) 的口径
   （wake 计**模型决策轮/尝试**，不是 HTTP 次数、不是当日累计）不一致：那一轮 Decision

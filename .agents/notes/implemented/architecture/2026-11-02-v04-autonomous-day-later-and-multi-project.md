@@ -160,3 +160,15 @@ Decision 点名的那份作品走，并新增一个窄的、可拒绝的项目 o
   `scripts/v05_due_parked_target_smoke.py`（35 项，修前 8 红、修后 `SMOKE_OK`），
   说明 [交叉点说明](../../../../docs/engineering/v05-due-parked-target-20261026.md)。
   Decision/内容仍是脚本替身；不证明自然采用、G1、V-C 或 24h。
+
+### 2026-10-26 交叉点：她可以把既有 fitem 排进今天
+
+实现事实补充，原决定不变。「稍后」仍是唯一持有标题/到期的域；v0.5 新增的
+[日计划与外部义务分域](2026-10-26-life-own-day-plan.md) 只在另一个小文档里存
+`fitem:` 引用与业务日，取消/改期继续走这里的 `future_item_actions`。今天排定的事项
+与 operator 义务各有一个不被 review/question 挤掉的预留位，但目标已 PAUSED/WAITING 时
+仍按 `PAUSED_TARGET_REQUIRES_RESUME` 撤回，不新增绕过。`future_item_actions` 同时收紧为
+只接受 `fitem:` ref，义务等其它命名空间具名拒绝（与原 docstring 一致）。兼容性已核：裸 id 仍
+补成 `fitem:`，`fitem:` ref 原样接受，旧 `FutureItems` 记录与旧 Decision 里已存的
+`fitem:oblig:...` 拼写重放/重建仍通过；只有原本会拼成 `fitem:oblig:...` 后再 `NOT_FOUND` 的
+其它 owner 引用被提前具名拒绝，没有改变原本成功的取消/改期输入。

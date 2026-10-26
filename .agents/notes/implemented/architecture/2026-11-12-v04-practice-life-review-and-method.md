@@ -173,3 +173,13 @@ B 的实践工作台（`PersonalPracticeService`：review / method / trial）与
   Supply socket + M0 + 正式 AG-0/AG-1/AG-2/AR-0 冒烟 27 项 check 全绿、`RESULT: PASS`，
   含另一 owner 写者在决策读之后修订做法的 CAS 负控。冒烟的做法草案来自正式 Decision 的
   `method_proposal`（经 AG-1 校验与 cycle 保存），不再预建。决策与内容是脚本替身，不称真实模型采用。
+* **2026-10-26 v0.5 同一件作品接着做**：做法的“属于哪件作品”现在由 owner ref 判定，
+  不再由全局方法列表冒充。`life_work_context.WorkContextReader` 把同一 artifact 的 head/旧版/
+  来历、`artifact_ref` 就是它的可回忆结果、**证据（创建时 experience_ids 或某条 trial 的
+  experience_ids）与这些结果有交集**的做法、以及来源就是它的本地草稿聚合成一份有界只读视图。
+  没有结果时不列任何全局做法（`WORK_CONTEXT_NO_WORK_RESULT_EVIDENCE`）；trial 的
+  `version_id` 明确是方法自己的版本，不是作品版本；读失败逐段具名。这份视图同时进入正式
+  `decision_situation_context` 的 `work` 块、写作 payload 的 `work_context`，以及手机的
+  `work_context` 只读动作；不新增 owner、不新增持久 usage、不改方法写路径。证据：
+  `scripts/same_work_life_demo.py`（真实 Supply/M0/Practice/Sharing + 正式 Decision 链）、
+  `tests/test_life_work_context.py`；Decision/内容仍是脚本替身。

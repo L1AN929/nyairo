@@ -92,3 +92,22 @@ CONTESTED 状态本来就能进入判断。真正丢在两处接缝上的是**�
   `scripts/v05_restart_continuation_smoke.py`；交付说明
   [v05 restart continuation](../../../../docs/engineering/v05-restart-continuation-20261025.md)。
   这不改变本 note 的边界：真实模型自然采用、真实回合延迟与 G1 仍未验。
+
+## 同一件作品的统一读面（2026-10-26）
+
+上面这些读视图各自有界，但调用方仍要自己把“作品/版本/结果/做法/草稿”拼起来。新增
+`components/life/scripts/life_work_context.py`：`WorkContextReader` 只做**聚合**，按
+`artifact_id` 读同一件作品的
+
+* `work` / `versions` / `provenance` —— B 的 `PrivateProjectService`；
+* `results` —— A 的 Memory 可回忆经历，只保留 `artifact_ref` 与该作品相同的行（扫描窗口
+  有界并如实报告）；
+* `methods` —— 只列创建时或某条 trial 的 `experience_ids` 与上述结果有交集的做法；
+  交集为空就不列，不把全局方法认领给作品；trial 的 `version_id` 是方法自己的版本；
+* `drafts` —— `source.artifact_id` 就是该作品的本地草稿（不带正文）。
+
+读失败逐段具名，不是空。它同时被 `autonomous_life_cycle.decision_situation_context`（`work`
+块）、写作 payload（`work_context`）、以及手机 `PhoneService.work_context` /
+`chiyo_phone.work_context` 使用；手机另加 `work_version` 固定读旧版（读取不回滚 head）。
+证据：`scripts/same_work_life_demo.py`、`tests/test_life_work_context.py`。Decision/内容仍是
+脚本替身；不证明真实模型自然采用。
