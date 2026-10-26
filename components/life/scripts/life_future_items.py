@@ -638,6 +638,10 @@ def validate_actions(raw: Any) -> list[dict[str, Any]]:
         if not ref:
             raise FutureItemError("FUTURE_ITEM_ACTION_REF_MISSING")
         if not ref.startswith(ITEM_REF_NAMESPACE):
+            if ":" in ref:
+                # 这条动作只能作用在她自己的 ``fitem:`` 上：外部义务（``oblig:``）、作品、
+                # 任何别的 owner 的对象都不能借 future_item_actions 被取消/改期。
+                raise FutureItemError("FUTURE_ITEM_ACTION_REF_NOT_AN_ITEM", ref[:80])
             ref = ITEM_REF_NAMESPACE + ref
         op = str(row.get("op") or "").strip().lower()
         if op not in ALL_ACTIONS:

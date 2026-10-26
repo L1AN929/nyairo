@@ -134,6 +134,7 @@ from candidate_sources_ag0 import (
 # v0.4 stage A: the future-items domain is the single definition of what a "later item" is; the
 # decision validator borrows it rather than keeping a second, drifting copy of the shape.
 import life_future_items
+import life_day_plan
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +677,10 @@ SCHEMA_FIELD_REASON_CODES = "reason_codes"
 SCHEMA_FIELD_SHORT_RATIONALE = "short_rationale"
 SCHEMA_FIELD_LATER_ITEM = "later_item"
 SCHEMA_FIELD_FUTURE_ITEM_ACTIONS = "future_item_actions"
+#: v0.5 “自己排今天”: the one explicit request to put an **existing** ``fitem:`` into today's
+#: plan.  It is not a schedule and not a completion: the cycle only writes the reference after
+#: the Decision commits, and only for today's business date.
+SCHEMA_FIELD_PLAN_TODAY = "plan_today"
 SCHEMA_FIELD_METHOD_REF = "method_ref"
 SCHEMA_FIELD_METHOD_TRIAL = "method_trial"
 SCHEMA_FIELD_METHOD_PROPOSAL = "method_proposal"
@@ -688,7 +693,7 @@ SCHEMA_FIELDS = frozenset({
     SCHEMA_FIELD_DEFERRED_CANDIDATE_IDS, SCHEMA_FIELD_REASON_CODES, SCHEMA_FIELD_SHORT_RATIONALE,
     SCHEMA_FIELD_LATER_ITEM, SCHEMA_FIELD_FUTURE_ITEM_ACTIONS, SCHEMA_FIELD_METHOD_REF,
     SCHEMA_FIELD_METHOD_TRIAL, SCHEMA_FIELD_METHOD_PROPOSAL, SCHEMA_FIELD_SHARING,
-    SCHEMA_FIELD_REEVALUATION_HINT_REF,
+    SCHEMA_FIELD_REEVALUATION_HINT_REF, SCHEMA_FIELD_PLAN_TODAY,
 })
 
 #: The placeholder a refusal uses when it cannot name a field, and the word a bad value is replaced
@@ -2123,6 +2128,10 @@ class DecisionRecord:
     #: reports its own result.  Absent is ``None`` / ``()``, never an empty invented intent.
     later_item_proposal: Optional[dict[str, Any]] = None
     future_item_actions: tuple[dict[str, Any], ...] = ()
+    #: v0.5: the one explicit "put this existing ``fitem:`` into today" request.  A record of what
+    #: she asked for, never the plan itself: the cycle writes the plan reference after commit and
+    #: reports the store's own answer (including a refusal) per round.
+    day_plan_request: Optional[dict[str, Any]] = None
     #: v0.4 C: the *one* of her own practices this round chose to follow (a bounded handle the
     #: session offered), and -- optionally -- her own bounded verdict on whether it helped.
     #: Neither is authority: a method is document context, and a trial is an evaluation that only
@@ -2289,6 +2298,17 @@ class DecisionRecord:
                     f"future_item_actions is not a valid action list: {exc}",
                     failure_class=FAILURE_CLASS_INVALID_SCHEMA,
                 ) from exc
+        # v0.5: the "put this into today" request is re-validated on every rebuild, so a record
+        # read back from disk can never carry a shape the validator refuses.
+        if self.day_plan_request is not None:
+            try:
+                object.__setattr__(self, "day_plan_request",
+                                   life_day_plan.validate_plan_request(self.day_plan_request))
+            except life_day_plan.DayPlanError as exc:
+                raise DecisionValidationError(
+                    f"day_plan_request is not a valid plan request: {exc}",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                ) from exc
         # v0.4 C: the chosen practice handle and her own bounded verdict are re-validated on every
         # rebuild, so a record read back from disk can never carry a shape the validator refuses.
         if self.method_ref is not None:
@@ -2387,6 +2407,9 @@ class DecisionRecord:
             # already had.  Recorded with the Decision so a rebuilt record keeps the same intent.
             "later_item_proposal": copy.deepcopy(self.later_item_proposal),
             "future_item_actions": [copy.deepcopy(row) for row in self.future_item_actions],
+            # v0.5: what she asked to put into today (or ``None``).  A reference request, not a
+            # plan and not a completion.
+            "day_plan_request": copy.deepcopy(self.day_plan_request),
             # v0.4 C: the practice handle she followed this round and her own bounded verdict on
             # it (if she gave one).  Recorded with the Decision so a rebuilt record keeps intent.
             "method_ref": self.method_ref,
@@ -3123,6 +3146,9 @@ class DecisionOutputValidator:
             # one definition of what an item is, and neither can name another owner's object.
             "later_item",
             "future_item_actions",
+            # v0.5: the one explicit "put this existing item into today" request.  The date is
+            # never model input -- the recording round resolves it from its own business clock.
+            "plan_today",
             # v0.4 C: the one practice she says she is following, and her own bounded verdict on
             # it.  Both are checked against the allow-list this round offered (and a verdict may
             # not name a different practice than the chosen one), so an invented handle is a
@@ -3439,6 +3465,20 @@ class DecisionOutputValidator:
                     schema_field=SCHEMA_FIELD_FUTURE_ITEM_ACTIONS,
                     schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
                 ) from exc
+        # v0.5: "把这一件排进今天" is a *request*, validated by the day-plan domain.  It names an
+        # existing item only; whether that item is really OPEN and whose subject it belongs to is
+        # checked by the cycle at write time (a store refusal is reported, never hidden).
+        plan_today = None
+        if raw_output.get("plan_today") is not None:
+            try:
+                plan_today = life_day_plan.validate_plan_request(raw_output.get("plan_today"))
+            except life_day_plan.DayPlanError as exc:
+                raise DecisionValidationError(
+                    f"plan_today refused by the day-plan domain: {exc}",
+                    failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                    schema_field=SCHEMA_FIELD_PLAN_TODAY,
+                    schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+                ) from exc
 
         # v0.4 C: the practice this Decision follows (optional).  The handle must be one *this
         # round* offered; with no practice workspace consulted, naming one at all is an invented
@@ -3502,6 +3542,9 @@ class DecisionOutputValidator:
             "short_rationale": short_rationale,
             "invalid_rationale_claim_dropped": dropped_claim,
             "later_item": later_item,
+            # v0.5: the validated "put this into today" request (or ``None``).  The cycle writes
+            # the plan reference after the Decision commits; this record is what she asked for.
+            "plan_today": plan_today,
             "method_ref": method_ref,
             "method_trial": method_trial,
             "method_proposal": method_proposal,
@@ -5163,6 +5206,7 @@ class AgencyDecisionService:
             # record "later" and never has to guess what she said.
             later_item_proposal=validated_output.get("later_item"),
             future_item_actions=tuple(validated_output.get("future_item_actions") or ()),
+            day_plan_request=validated_output.get("plan_today"),
             # v0.4 C: the practice this round chose to follow, and her own bounded verdict on it
             # (validated above against what the round really offered).  A method is document
             # context; the trial is an evaluation B's workspace records, never a success claim.

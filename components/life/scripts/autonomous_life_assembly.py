@@ -920,11 +920,20 @@ def assemble_autonomous_life(
     future_items = None
     project_gateway = None
     project_questions = None
+    #: v0.5 “自己排今天”: her own day plan (one small Life state file) and the *read-only* view of
+    #: the operator's obligations.  Both are optional; an unreadable one is reported by the round
+    #: and never turns into "nothing was planned".  The target read is the same Supply port the
+    #: cycle already holds -- it proves an obligation's target is executable now, nothing more.
+    day_plan = None
+    day_obligations = None
     try:
         import life_future_items as lfi
         import life_project_options as lpo
+        import life_day_plan as ldp
 
         future_items = lfi.FutureItems(root, subject_id=supply["subject_id"])
+        day_plan = ldp.DayPlan(root, subject_id=supply["subject_id"])
+        day_obligations = ldp.DayObligations(root, subject_id=supply["subject_id"])
         project_gateway = lpo.resolve_gateway(
             environment=env, subject_id=supply["subject_id"],
             workspace_id=env.get("CHIYO_LIFE_SUPPLY_WORKSPACE_ID"))
@@ -993,6 +1002,11 @@ def assemble_autonomous_life(
         future_items=future_items,
         project_owner=project_gateway,
         project_questions_provider=project_questions,
+        #: v0.5: today's two columns.  ``obligation_target_read`` is the existing owner read; it
+        #: grants nothing and cannot start, resume or complete anything.
+        day_plan=day_plan,
+        day_obligations=day_obligations,
+        obligation_target_read=(lambda ref: port.resume_point(str(ref))),
         private_items_artifact_id=bindings["private_items_artifact_id"],
         # v0.4 research: B's workspace over this exact owner port (or ``None``).  With none, no
         # research option exists and nothing can be created; with one, the decision and writing

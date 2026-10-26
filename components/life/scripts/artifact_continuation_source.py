@@ -126,6 +126,10 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         #: What the last discover()/refresh() saw for the closeout seam, per artifact id.
         self.last_closeout_targets: set[str] = set()
         self.last_closeout_skip_reasons: dict[str, str] = {}
+        #: v0.5: artifact continuation entries dropped because a *reserved today slot* already
+        #: offers the same real executable target.  The closeout entry for that object is a
+        #: different action and is never dropped by this.  Report only.
+        self.last_reserved_dedupe_skips: dict[str, str] = {}
         #: What the last discover()/refresh() refused for that reason, per artifact id (report only).
         self.last_paused_skip_reasons: dict[str, str] = {}
         #: v0.4 research: artifacts the workspace calls material and this source therefore never
@@ -324,7 +328,9 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
             if not targets:
                 self.last_extra_skip_reasons[ref] = "EXTRA_TARGET_MISSING"
                 continue
-            if any(self._bare_id(target) in paused for target in targets):
+            work_ref = str(row.get("work_ref") or "")
+            if (any(self._bare_id(target) in paused for target in targets)
+                    or (work_ref and self._bare_id(work_ref) in paused)):
                 # Reported, never silently dropped: the object still exists and its item is still
                 # due -- what changed is that its way back is resume, not a new start from here.
                 self.last_extra_skip_reasons[ref] = "PAUSED_TARGET_REQUIRES_RESUME"
@@ -347,6 +353,14 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                     "kind": str(row.get("kind") or ""),
                     "extra": str(row.get("kind") or "EXTRA"),
                     "due_at": row.get("due_at"),
+                    #: v0.5: a reserved today slot names the *already validated* real work it
+                    #: would continue.  It stays out of ``target_refs`` (the reserved slot's own
+                    #: ref is the candidate's source), but it is what lets this source drop a
+                    #: second, equivalent continuation entry for the same object.
+                    "reserved": bool(row.get("reserved")),
+                    "work_ref": str(row.get("work_ref") or ""),
+                    "dedupe_refs": [str(ref) for ref in (row.get("dedupe_refs") or ())
+                                    if str(ref)],
                 },
             }
             self.last_extra_items[ref] = item
@@ -424,10 +438,55 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         items: list[dict[str, Any]] = []
         self.last_closeout_targets = self._closeout_targets()
         self.last_closeout_skip_reasons = {}
+        self.last_reserved_dedupe_skips = {}
+        extra_total = len(extra_items)
+        reserved_targets: set[str] = set()
+        reserved_refs: set[str] = set()
+        for extra_item in extra_items:
+            detail = (extra_item.get("detail")
+                      if isinstance(extra_item.get("detail"), Mapping) else {})
+            if not detail.get("reserved"):
+                continue
+            if detail.get("work_ref"):
+                bare = self._bare_id(detail.get("work_ref"))
+                if bare:
+                    reserved_targets.add(bare)
+            for ref in detail.get("dedupe_refs") or ():
+                reserved_refs.add(str(ref))
+        deduped = 0
+        if reserved_refs:
+            kept_extra: list[dict[str, Any]] = []
+            for extra_item in extra_items:
+                detail = (extra_item.get("detail")
+                          if isinstance(extra_item.get("detail"), Mapping) else {})
+                ref = str(extra_item.get("source_ref") or "")
+                if not detail.get("reserved") and ref in reserved_refs:
+                    # A normal due item / option for the same item the reserved slot already
+                    # carries.  Keep the reserved row (its kind and basis are the association),
+                    # drop the second spelling of the same executable offer.
+                    self.last_reserved_dedupe_skips[ref] = (
+                        "RESERVED_ITEM_ALREADY_OFFERED")
+                    deduped += 1
+                    continue
+                kept_extra.append(extra_item)
+            extra_items = kept_extra
         for point in points[: self.per_source_cap]:
             self.last_resume_points[point.artifact_id] = point
+            bare = self._bare_id(point.artifact_id)
+            closeout_offered = bare in self.last_closeout_targets
+            if bare in reserved_targets:
+                # v0.5: the reserved today slot (obligation / self-planned item) already offers
+                # this exact work for START.  A second ordinary continuation entry for the same
+                # real executable target is not a second choice -- it is one choice spelled
+                # twice.  The *closeout* entry is a different legal action and stays.
+                self.last_reserved_dedupe_skips[str(point.artifact_id)] = (
+                    "RESERVED_TARGET_ALREADY_OFFERED")
+                deduped += 1
+                if closeout_offered:
+                    items.append(self._closeout_item_for(point, obs_iso))
+                continue
             items.append(self._item_for(point, obs_iso))
-            if self._bare_id(point.artifact_id) in self.last_closeout_targets:
+            if closeout_offered:
                 # v0.4 C: the same object, offered as *wrapping up* rather than continuing.  A
                 # second item (not a second source and not a second owner) is what lets the
                 # Decision choose between "keep working" and "finish this", which is exactly the
@@ -435,7 +494,7 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                 items.append(self._closeout_item_for(point, obs_iso))
         items.extend(extra_items)
         return items, self._snapshot_ref(len(items)), {
-            "discovered": len(points) + len(extra_items),
+            "discovered": max(0, len(points) + extra_total - deduped),
             "emitted": len(items),
             "rejected": 0,
         }
@@ -563,6 +622,18 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
             return False, "REVISION_INVALID"
         return True, None
 
+    @staticmethod
+    def extra_candidate_id(source_ref: Any, revision: int = 1) -> str:
+        """The deterministic candidate id an extra personal opportunity becomes.
+
+        A later read-only obligation scan rebuilds this from a committed Decision (the Decision
+        stores the candidate id, not the popt payload), so this is the one pure spelling of the
+        identity instead of a second copy at the read seam.
+        """
+
+        identity = f"{SOURCE_PERSONAL_OPPORTUNITY}:{source_ref}:v{int(revision)}"
+        return f"cand:{sha256_hex(identity)[:16]}"
+
     def _extra_candidate(self, item: Mapping[str, Any], *, obs_iso: str,
                          snap_ref: str) -> CandidateRecord:
         """One candidate for a due item / project option (0 LLM, no second source kind)."""
@@ -570,7 +641,7 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         ref = str(item["source_ref"])
         revision = int(item.get("source_revision") or 1)
         target_refs = [str(r) for r in (item.get("target_refs") or [])]
-        cand_id = f"cand:{sha256_hex(f'{self.source_kind}:{ref}:v{revision}')[:16]}"
+        cand_id = self.extra_candidate_id(ref, revision)
         sem_id = f"semcand:{sha256_hex(f'{GLOBAL_SUBJECT_ID}:{self.source_kind}:{ref}')[:16]}"
         return CandidateRecord(
             candidate_id=cand_id,

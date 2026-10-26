@@ -116,6 +116,10 @@ import activity_progress_completion_lr5 as lr5
 #: seams: they read owners, they never decide and they never authorize an Activity verb.
 import life_future_items as lfi
 import life_project_options as lpo
+#: v0.5 “自己排今天”: the Life-owned day plan (written only by her committed Decision) and the
+#: operator-owned obligations (read-only here).  Neither is an owner verb; both are bounded reads
+#: plus one plan write after the Decision commits.
+import life_day_plan as ldp
 #: v0.4 research: the bounded read/compose seam onto B's research workspace.  It carries no
 #: marker definition of its own (that stays B's) and it is never an experience provider: the
 #: research text it returns is *document* context the owner really holds.
@@ -138,6 +142,10 @@ import life_body_context as lbc
 #: It never sends anything itself and never claims an external delivery; it turns one Decision
 #: request into exactly one owner call and reports the owner's own answer.
 import life_sharing_context as lsc
+#: v0.5 “同一件作品接着做”: one read-only aggregation of the same work's head / old versions /
+#: provenance / owner-confirmed results / evidence-linked methods / local drafts.  It owns nothing:
+#: every block is a bounded read of an existing owner, and association is decided by owner refs.
+import life_work_context as lwc
 
 READING_PAGE_MARKER = "%%PAGE%%"
 #: rc1-C: the Activity shape of one bounded page read.  Named here (and used by
@@ -1045,6 +1053,14 @@ class AutonomousLifeCycle:
         project_owner: Any = None,
         project_questions_provider: Optional[Callable[[], list[dict[str, Any]]]] = None,
         max_project_options: Optional[int] = None,
+        #: v0.5 “自己排今天”: the Life-owned plan store (``life_day_plan.DayPlan``) and the
+        #: operator-owned obligations reader (``life_day_plan.DayObligations``).  Both optional;
+        #: with neither wired the round behaves exactly as before and offers no reserved slot.
+        #: ``obligation_target_read`` is the existing Supply read (a resume point), used to prove
+        #: an obligation's target is really executable *now* -- it grants nothing.
+        day_plan: Any = None,
+        day_obligations: Any = None,
+        obligation_target_read: Optional[Callable[[str], Any]] = None,
         #: v0.4 research: B's ``ResearchWorkspaceService`` instance (or ``None``).  It is wrapped
         #: in A's bounded seam, so this cycle can *see* real material hits and real research
         #: results and can ask it to create one research work when a Decision selects that option
@@ -1221,6 +1237,23 @@ class AutonomousLifeCycle:
         self.future_items = future_items
         self.project_gateway = project_owner
         self.project_questions_provider = project_questions_provider
+        #: v0.5: the day plan (her own) and the obligations (operator's, read-only here), plus the
+        #: existing Supply read that proves an obligation target is executable now.  With none
+        #: wired nothing is invented and no reserved slot exists.
+        self.day_plan = day_plan
+        self.day_obligations = day_obligations
+        self.obligation_target_read = obligation_target_read
+        self.last_day_plan: Optional[dict[str, Any]] = None
+        self.last_day_plan_writes: list[dict[str, Any]] = []
+        self.last_day_plan_error: Optional[str] = None
+        self._round_reserved_options: list[dict[str, Any]] = []
+        self._round_obligation_withheld: list[dict[str, Any]] = []
+        #: 只存在于本进程的“哪个义务已经被哪一次 owner 回执确证”的内存投影；不写回 operator
+        #: 的文档。  同根重装配后的结果不靠它：``_persisted_obligation_evidence`` 只从已存在的
+        #: Action / Decision / owner 回执重读。
+        self._day_obligation_evidence: dict[str, dict[str, Any]] = {}
+        self._persisted_obligation_cache_day: Optional[str] = None
+        self._persisted_obligation_cache: dict[str, dict[str, Any]] = {}
         self.max_project_options = (int(max_project_options) if max_project_options is not None
                                     else lpo.MAX_OPTIONS)
         #: The last read views (report only): the items the clock has reached, the project options
@@ -1257,6 +1290,12 @@ class AutonomousLifeCycle:
         self.last_practice_context: Optional[dict[str, Any]] = None
         self._round_methods: list[dict[str, Any]] = []
         self._round_practice_context: Optional[dict[str, Any]] = None
+        #: v0.5 same-work context: one aggregation per round for the work this round continues.
+        #: It is a read-only view (``life_work_context``); a failed read is reported, never guessed.
+        self._work_context_reader: Optional[Any] = None
+        self._round_work_context: Optional[dict[str, Any]] = None
+        self._round_work_context_key: Optional[tuple[str, str]] = None
+        self.last_work_context: Optional[dict[str, Any]] = None
         #: v0.5: this round's bounded evaluation views for the offered methods and the flag that
         #: makes the extra owner detail reads happen at most once per decision round.
         self._round_practice_evaluations: dict[str, dict[str, Any]] = {}
@@ -2491,6 +2530,10 @@ class AutonomousLifeCycle:
         moved between them.
         """
 
+        #: v0.5: the persisted obligation evidence is re-read once per round, after any new
+        #: Action the previous round committed.  Keeping it across rounds would hide a completion.
+        self._persisted_obligation_cache_day = None
+        self._persisted_obligation_cache = {}
         begin = getattr(self.artifact_port, "begin_round", None)
         if callable(begin):
             begin(observed_at)
@@ -3598,6 +3641,30 @@ class AutonomousLifeCycle:
              "scope": str(option.get("scope") or "")[:200],
              "uncertainty": str(option.get("uncertainty") or "")[:120]}
             for option in self._round_project_options][:4]
+        #: v0.5 “自己排今天”: the two columns of today.  ``today_plan`` is what she has already put
+        #: there (projected from the item's own current state); ``today_obligations`` is what was
+        #: given from outside, with its read-only result projection.  Neither is a task list and
+        #: neither grants anything: an obligation can be declined by simply doing something else.
+        plan_view = self.today_plan_view(now=now)
+        ctx["today_plan"] = [
+            {"plan_ref": str(row.get("plan_ref") or "")[:80],
+             "date": str(row.get("date") or "")[:10],
+             "item_ref": str(row.get("item_ref") or "")[:80],
+             "title": str(row.get("title") or "")[:120],
+             "due_at": str(row.get("due_at") or "")[:40],
+             "status": str(row.get("status") or "")[:24],
+             "due": bool(row.get("due"))}
+            for row in (plan_view.get("entries") or ())][:3]
+        obligations = self.obligations_view(now=now)
+        ctx["today_obligations"] = [
+            {"obligation_ref": str(row.get("obligation_ref") or "")[:80],
+             "date": str(row.get("date") or "")[:10],
+             "title": str(row.get("title") or "")[:120],
+             "due_at": str(row.get("due_at") or "")[:40],
+             "target_ref": str(row.get("target_ref") or "")[:80],
+             "result": str(row.get("result") or "")[:24],
+             "due": bool(row.get("due"))}
+            for row in (obligations.get("entries") or ())][:4]
         #: v0.4 research: the material hits she can really read and the research results she already
         #: holds (bounded, with their own provenance and source checks).  Both are *document*
         #: context read through the owner -- never a memory and never a claim of currency.
@@ -3606,6 +3673,11 @@ class AutonomousLifeCycle:
         #: now (each with its handle).  This is what makes a review choosable and a method nameable;
         #: nothing here is a permission, an executable step or a persona trait.
         ctx["practice"] = self.practice_decision_context()
+        #: v0.5 same-work: the work this round continues, with its head/old versions, provenance,
+        #: owner-confirmed results, the methods whose evidence really points back at those results,
+        #: and the local drafts sourced from it.  Association is by owner refs only; a work with
+        #: no readable result says so instead of borrowing an unrelated method.
+        ctx["work"] = self.work_context_view()
         reading = self.private_material_situation() or {}
         if isinstance(reading, Mapping) and reading:
             material = reading.get("material") if isinstance(reading.get("material"), Mapping) else {}
@@ -3694,6 +3766,223 @@ class AutonomousLifeCycle:
             self.last_error = f"FUTURE_ITEMS_READ_FAILED: {type(exc).__name__}: {exc}"[:200]
             return []
 
+    # -- v0.5 自己排今天：日计划 / 义务 / 今日预留位 -----------------------------------
+
+    def business_day(self, now: Optional[str] = None) -> str:
+        """本回合的业务日（+08:00），由本域业务 clock 换算；不看墙钟。"""
+
+        moment = self._now() if now is None else (ldp.parse_instant(now) or self._now())
+        return ldp.business_date(moment)
+
+    def _future_item_reader(self, item_ref: Any) -> Optional[dict[str, Any]]:
+        store = self.future_items
+        if store is None:
+            return None
+        row = store.get(item_ref)
+        return row.to_dict() if row is not None else None
+
+    def _obligation_target_point(self, target_ref: str) -> Any:
+        reader = self.obligation_target_read
+        if reader is None:
+            # No read seam: the obligation cannot be shown executable *now*.  Reported by
+            # ``reserved_options`` as NOT_EXECUTABLE, never guessed.
+            return None
+        return reader(str(target_ref))
+
+    def today_plan_view(self, *, now: Optional[str] = None) -> dict[str, Any]:
+        """她今天自己排的事，按所引用事项的当前状态只读投影（读面零写）。"""
+
+        store = self.day_plan
+        if store is None:
+            return {"status": "NOT_WIRED", "date": None, "entries": []}
+        day = self.business_day(now)
+        try:
+            rows = ldp.project_plan_entries(store.for_date(day),
+                                            futures_lookup=self._future_item_reader)
+        except Exception as exc:
+            self.last_day_plan_error = f"{type(exc).__name__}: {exc}"[:200]
+            return {"status": "READ_FAILED",
+                    "reason_code": str(getattr(exc, "reason_code", type(exc).__name__))[:80],
+                    "date": day, "entries": []}
+        moment = self._now() if now is None else (ldp.parse_instant(now) or self._now())
+        for row in rows:
+            due = ldp.parse_instant(row.get("due_at"))
+            row["due"] = bool(due and due <= moment)
+        view = {"status": "OK", "date": day, "entries": rows}
+        self.last_day_plan = view
+        return view
+
+    def _persisted_obligation_evidence_for(
+            self, entries: list[dict[str, Any]], *, day: str
+    ) -> dict[str, dict[str, Any]]:
+        """Re-read obligation results from the persistent Action/Decision/owner records.
+
+        Nothing here is a new store: the AR-0 Action ledger, the AG-1 Decision record and the
+        Action's own owner receipt already exist.  The only association computed here is the
+        deterministic candidate id the obligation's reserved ``popt:`` slot would have become --
+        the Decision stores that candidate id, so the chain can be proven without writing a
+        second mapping.  A read failure is reported, never turned into completion.
+        """
+
+        action_read = getattr(self.runtime, "action_read", None)
+        decision_read = getattr(self.runtime, "decision_read", None)
+        if action_read is None or decision_read is None:
+            return {}
+        try:
+            return ldp.persisted_obligation_evidence(
+                entries, day=day,
+                action_lister=getattr(action_read, "list_actions", None),
+                decision_getter=getattr(decision_read, "get_decision", None),
+                receipt_lister=getattr(action_read, "list_receipts", None),
+                candidate_id_for=ArtifactContinuationSource.extra_candidate_id)
+        except Exception as exc:  # a failed read must not become "done" or "pending"
+            self.last_day_plan_error = ("OBLIGATION_EVIDENCE_READ_FAILED: "
+                                        f"{type(exc).__name__}: {exc}")[:200]
+            return {str(row.get("obligation_ref")): {
+                "status": ldp.OBLIGATION_RESULT_UNKNOWN,
+                "evidence_path": ldp.EVIDENCE_PATH_PERSISTED,
+                "reason_code": "OBLIGATION_EVIDENCE_READ_FAILED",
+            } for row in entries if row.get("obligation_ref")}
+
+    def _persisted_obligation_evidence(self, *, day: str) -> dict[str, dict[str, Any]]:
+        if self._persisted_obligation_cache_day == day:
+            return dict(self._persisted_obligation_cache)
+        reader = self.day_obligations
+        if reader is None:
+            return {}
+        try:
+            entries = reader.for_date(day)
+        except Exception:
+            return {}
+        evidence = self._persisted_obligation_evidence_for(entries, day=day)
+        self._persisted_obligation_cache_day = day
+        self._persisted_obligation_cache = dict(evidence)
+        return dict(evidence)
+
+    def obligations_view(self, *, now: Optional[str] = None) -> dict[str, Any]:
+        """今天的外部义务与只读结果投影；文档不可读是具名错误，不当空表。
+
+        ``DONE`` may come from this round's own receipt *or* be re-read from the already
+        persisted Action/Decision/owner receipt after a same-root reassembly.  The current
+        round's own receipt wins when both are present (it is the fresher settlement).
+        """
+
+        reader = self.day_obligations
+        if reader is None:
+            return {"status": "NOT_WIRED", "date": None, "entries": []}
+        day = self.business_day(now)
+        try:
+            evidence = self._persisted_obligation_evidence(day=day)
+            evidence.update(self._day_obligation_evidence)
+            return ldp.obligation_result_view(
+                reader, date=day, now=now or self._now_iso(), evidence=evidence)
+        except Exception as exc:
+            self.last_day_plan_error = f"{type(exc).__name__}: {exc}"[:200]
+            return {"status": "READ_FAILED",
+                    "reason_code": str(getattr(exc, "reason_code", type(exc).__name__))[:80],
+                    "date": day, "entries": []}
+
+    def _today_reserved_options(self, *, now: Optional[str] = None
+                                ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """今天的两类预留位（最多各 1 条）；读失败具名，绝不编一条来补位。"""
+
+        if self.day_plan is None and self.day_obligations is None:
+            return [], []
+        day = self.business_day(now)
+        plan_entries: list[dict[str, Any]] = []
+        obligations: list[dict[str, Any]] = []
+        withheld: list[dict[str, Any]] = []
+        if self.day_plan is not None:
+            try:
+                plan_entries = self.day_plan.for_date(day)
+            except Exception as exc:
+                self.last_day_plan_error = f"{type(exc).__name__}: {exc}"[:200]
+                withheld.append({"kind": ldp.KIND_SELF_PLANNED,
+                                 "reason_code": str(getattr(exc, "reason_code",
+                                                            type(exc).__name__))[:80]})
+        if self.day_obligations is not None:
+            try:
+                obligations = self.day_obligations.for_date(day)
+            except Exception as exc:
+                self.last_day_plan_error = f"{type(exc).__name__}: {exc}"[:200]
+                withheld.append({"kind": ldp.KIND_OBLIGATION,
+                                 "reason_code": str(getattr(exc, "reason_code",
+                                                            type(exc).__name__))[:80]})
+            else:
+                #: v0.5: a completion already confirmed by the persistent Action/Decision/owner
+                #: records is not offered as an executable slot again -- even in a brand-new
+                #: cycle on the same root.  ``UNKNOWN`` is deliberately *not* filtered here:
+                #: this change adds no new blocking rule for an unsettled obligation.
+                persisted = self._persisted_obligation_evidence_for(obligations, day=day)
+                self._persisted_obligation_cache_day = day
+                self._persisted_obligation_cache = dict(persisted)
+                done_refs = {ref for ref, row in persisted.items()
+                             if str(row.get("status") or "") == ldp.OBLIGATION_RESULT_DONE}
+                if done_refs:
+                    kept: list[dict[str, Any]] = []
+                    for row in obligations:
+                        ref = str(row.get("obligation_ref") or "")
+                        if ref in done_refs:
+                            withheld.append({
+                                "kind": ldp.KIND_OBLIGATION, "ref": ref,
+                                "target_ref": str(row.get("target_ref") or ""),
+                                "reason_code": "OBLIGATION_ALREADY_DONE"})
+                            continue
+                        kept.append(row)
+                    obligations = kept
+        try:
+            options, more = ldp.reserved_options(
+                plan_entries=plan_entries, obligations=obligations,
+                now=now or self._now_iso(), futures_lookup=self._future_item_reader,
+                target_reader=self._obligation_target_point,
+                paused_targets=self._paused_activity_targets())
+        except Exception as exc:
+            self.last_day_plan_error = f"{type(exc).__name__}: {exc}"[:200]
+            return [], withheld + [{"kind": "RESERVED",
+                                    "reason_code": str(getattr(exc, "reason_code",
+                                                               type(exc).__name__))[:80]}]
+        return options, withheld + list(more or ())
+
+    def _apply_day_plan_writes(self, decision_record: Any,
+                               observed_at: str) -> list[dict[str, Any]]:
+        """把提交 Decision 里"排进今天"的请求写成一条计划引用（一个 owner 写，逐条报告）。"""
+
+        request = getattr(decision_record, "day_plan_request", None)
+        writes: list[dict[str, Any]] = []
+        if request is None:
+            self.last_day_plan_writes = writes
+            return writes
+        store = self.day_plan
+        if store is None:
+            writes.append({"op": "plan_today", "status": "REFUSED",
+                           "reason_code": "DAY_PLAN_NOT_WIRED",
+                           "item_ref": request.get("item_ref")})
+            self.last_day_plan_writes = writes
+            return writes
+        item_ref = str(request.get("item_ref") or "")
+        try:
+            item = self._future_item_reader(item_ref)
+            if item is None:
+                raise ldp.DayPlanError("DAY_PLAN_ITEM_UNREADABLE", item_ref[:80])
+            result = store.plan(
+                item, date=self.business_day(observed_at),
+                decision_ref=getattr(decision_record, "decision_id", ""),
+                now=observed_at)
+            entry = dict(result.get("entry") or {})
+            writes.append({"op": "plan_today", "status": "APPLIED",
+                           "created": bool(result.get("created")),
+                           "deduplicated": bool(result.get("deduplicated")),
+                           "plan_ref": entry.get("plan_ref"),
+                           "item_ref": entry.get("item_ref"),
+                           "date": entry.get("date")})
+        except Exception as exc:
+            writes.append({"op": "plan_today", "status": "REFUSED",
+                           "reason_code": str(getattr(exc, "reason_code",
+                                                      type(exc).__name__))[:80],
+                           "item_ref": item_ref})
+        self.last_day_plan_writes = writes
+        return writes
+
     def project_options(self, *, now: Optional[str] = None,
                         due_items: Optional[Sequence[Mapping[str, Any]]] = None
                         ) -> list[dict[str, Any]]:
@@ -3703,6 +3992,12 @@ class AutonomousLifeCycle:
         not actually create would be a menu of things that fail when chosen.
         """
 
+        #: v0.5: today's two reserved slots are read first.  They do not need the project owner
+        #: (an obligation is carried out on an existing artifact), and with no plan/obligation
+        #: wired the list is empty and everything below is exactly as before.
+        reserved, withheld = self._today_reserved_options(now=now)
+        self._round_reserved_options = list(reserved)
+        self._round_obligation_withheld = list(withheld)
         gateway = self.project_gateway
         project_available = bool(gateway is not None
                                  and getattr(gateway, "available", lambda: False)())
@@ -3715,9 +4010,10 @@ class AutonomousLifeCycle:
         #: an unavailable seam contributes nothing, and no experience means no review option.
         practice_available = self.practice_available()
         if not (project_available or research_available or practice_available):
-            self.last_project_options = []
+            self.last_project_options = list(reserved)
+            self._round_project_options = list(reserved)
             self._round_methods = []
-            return []
+            return list(reserved)
         questions: list[dict[str, Any]] = []
         provider = self.project_questions_provider
         if provider is not None:
@@ -3752,7 +4048,8 @@ class AutonomousLifeCycle:
             research_available=research_available,
             experiences=experiences,
             practice_available=practice_available,
-            limit=self.max_project_options)
+            limit=self.max_project_options,
+            reserved=reserved)
         # The source reads this in the same round, so the candidates and this report agree.
         self._round_project_options = options
         self.last_project_options = options
@@ -3796,6 +4093,13 @@ class AutonomousLifeCycle:
                 "target_refs": [str(option.get("option_ref"))],
                 "title": option.get("title"),
                 "kind": option.get("kind"),
+                #: v0.5: the reserved today slots carry the *real* work they already validated,
+                #: so the artifact source can keep one executable entry per target instead of
+                #: offering the same continuation twice (obligation + ordinary artifact).
+                "reserved": bool(option.get("reserved")),
+                "work_ref": str(option.get("work_ref") or ""),
+                "dedupe_refs": [str(ref) for ref in (option.get("dedupe_refs") or ())],
+                "revision": int(option.get("revision") or 1),
             })
         return out
 
@@ -3821,7 +4125,17 @@ class AutonomousLifeCycle:
 
     def _decision_chose_project(self, decision_record: Any) -> bool:
         ref = self._selected_extra_ref(decision_record)
-        return bool(ref and ref.startswith(lpo.OPTION_REF_NAMESPACE))
+        if not (ref and ref.startswith(lpo.OPTION_REF_NAMESPACE)):
+            return False
+        option = self._option_for_ref(ref) or {}
+        #: v0.5: a reserved slot that names a real work target is a *continuation* of that work,
+        #: not the creation of a new project.  A self-planned item without a work target still
+        #: behaves exactly like the ordinary project option it replaces.
+        if str(option.get("kind") or "") == ldp.KIND_OBLIGATION:
+            return False
+        if option.get("reserved") and option.get("work_ref"):
+            return False
+        return True
 
     def _option_for_ref(self, option_ref: Any) -> Optional[dict[str, Any]]:
         wanted = str(option_ref or "")
@@ -4475,6 +4789,87 @@ class AutonomousLifeCycle:
 
         return [str(row.get("method_ref")) for row in self._round_methods if row.get("method_ref")]
 
+    def work_context_reader(self) -> Optional[Any]:
+        """The same-work read surface, or ``None`` when this instance has no owner to read.
+
+        It borrows the project service this cycle already uses for the earlier-version read, the
+        round's own practice seam, B's sharing owner and A's Memory service.  Nothing is created
+        or migrated; a missing half is reported by the reader itself, never filled in here.
+        """
+
+        if self._work_context_reader is not None:
+            return self._work_context_reader
+        if not (self.artifact_port and self.workspace_id and self.artifact_grant_id):
+            return None
+        try:
+            projects = self._project_service_for_earlier_versions()
+        except Exception as exc:
+            self.last_work_context = {
+                "state": lwc.STATE_UNAVAILABLE,
+                "reason_code": "WORK_CONTEXT_PROJECTS_UNUSABLE",
+                "detail": "%s: %s" % (type(exc).__name__, str(exc)[:120]),
+            }
+            return None
+        # A separate seam over the *same* owner service and Memory: the aggregation must not
+        # overwrite this round's own ``last_methods`` / ``seen_heads``, which the Decision's
+        # allow-list and the trial CAS are built from.
+        practice = lpc.PracticeSeam(getattr(self.practice, "service", None),
+                                    memory=getattr(self.practice, "memory", None))
+        self._work_context_reader = lwc.WorkContextReader(
+            projects=projects,
+            practice=practice,
+            sharing=self.sharing_service,
+            memory=getattr(self.practice, "memory", None),
+        )
+        return self._work_context_reader
+
+    def work_context_view(self, artifact_id: Any = "", *,
+                          version_id: Any = "") -> dict[str, Any]:
+        """This round's bounded same-work context (one owner-aggregated read, cached per round).
+
+        The target is the work this round really continues (``selected_artifact_id``) unless a
+        caller names one.  With no bound work the answer is a named ``NO_BOUND_WORK`` -- never the
+        newest project, never another artifact.  A read failure keeps its own reason code.
+        """
+
+        target = str(artifact_id or "").strip() or str(self.selected_artifact_id() or "").strip()
+        key = (target, str(version_id or "").strip())
+        if self._round_work_context is not None and self._round_work_context_key == key:
+            return self._round_work_context
+        if not target:
+            view: dict[str, Any] = {
+                "schema_version": lwc.SCHEMA_VERSION,
+                "artifact_id": "",
+                "state": lwc.STATE_NO_BOUND_WORK,
+                "reason_code": "WORK_CONTEXT_NO_BOUND_WORK",
+                "note": "这一轮没有绑定作品，因此没有作品上下文。",
+            }
+        else:
+            reader = self.work_context_reader()
+            if reader is None:
+                view = {
+                    "schema_version": lwc.SCHEMA_VERSION,
+                    "artifact_id": target,
+                    "state": lwc.STATE_UNAVAILABLE,
+                    "reason_code": "WORK_CONTEXT_NOT_WIRED",
+                    "note": "这个实例没有接上作品上下文所需的 owner 读口。",
+                }
+            else:
+                try:
+                    view = reader.read(target, version_id=version_id)
+                except Exception as exc:
+                    view = {
+                        "schema_version": lwc.SCHEMA_VERSION,
+                        "artifact_id": target,
+                        "state": lwc.STATE_UNAVAILABLE,
+                        "reason_code": "WORK_CONTEXT_READ_FAILED",
+                        "detail": "%s: %s" % (type(exc).__name__, str(exc)[:160]),
+                    }
+        self.last_work_context = view
+        self._round_work_context = view
+        self._round_work_context_key = key
+        return view
+
     def practice_writing_context(self, artifact_id: Any = "") -> Optional[dict[str, Any]]:
         """The bounded practice document context one writing prompt may carry (or ``None``).
 
@@ -4515,6 +4910,13 @@ class AutonomousLifeCycle:
             payload["research_context"] = research_context
         if practice_context:
             payload["practice_context"] = practice_context
+        #: v0.5 same-work: the writer sees exactly what this work's own context holds -- its old
+        #: versions, the results really produced on it, the methods whose evidence points back at
+        #: those results, and its local drafts.  No association is invented: the block carries its
+        #: own state, and only a readable one is passed.
+        work_context = self.work_context_view(artifact_id)
+        if str(work_context.get("state") or "") in (lwc.STATE_OK, lwc.STATE_PARTIAL):
+            payload["work_context"] = work_context
         earlier_versions = self._earlier_versions_context(artifact_id)
         if earlier_versions:
             payload["earlier_versions"] = earlier_versions
@@ -4586,6 +4988,13 @@ class AutonomousLifeCycle:
             item = next((row for row in self._round_future_items
                          if str(row.get("item_ref")) == ref), None)
             return self._future_item_artifact_ref(item or {})
+        if ref.startswith(lpo.OPTION_REF_NAMESPACE):
+            #: v0.5: a reserved slot that names a real work target continues *that* object; an
+            #: option without one answers ``None`` and the caller keeps the project path.
+            option = self._option_for_ref(ref) or {}
+            work_ref = str(option.get("work_ref") or "")
+            if work_ref:
+                return work_ref
         if ref.startswith("artifact:"):
             return ref
         if (str(candidate.get("candidate_kind") or "") == "CONTINUE_CURRENT"
@@ -4769,6 +5178,15 @@ class AutonomousLifeCycle:
         }
         found["project_options"] = [str(option.get("option_ref"))
                                     for option in self._round_project_options]
+        #: v0.5: the two reserved slots and the named reason when one was withheld.  Refs/kinds
+        #: only -- no private text; this is a report, not a grant.
+        found["today_plan"] = {
+            "date": self.business_day(now),
+            "reserved_refs": [str(option.get("option_ref"))
+                              for option in self._round_reserved_options],
+            "withheld": [dict(row) for row in self._round_obligation_withheld],
+            "error": self.last_day_plan_error,
+        }
         if self.project_gateway is not None:
             found["project_owner"] = self.project_gateway.availability()
         # v0.4 research: whether a workspace is wired, and what (bounded) the workspace says it
@@ -4793,7 +5211,7 @@ class AutonomousLifeCycle:
         found["has_material"] = bool(
             found["foreground_activity"] or found["continuable_artifact"] or observed
             or found.get("reading_material") or self._round_future_items
-            or self._round_project_options
+            or self._round_project_options or self._round_reserved_options
             or int((found.get("parked_candidates") or {}).get("count") or 0) > 0)
         return found
 
@@ -5134,6 +5552,24 @@ class AutonomousLifeCycle:
         parts["due_items"] = [str(item.get("item_ref")) for item in self._round_future_items]
         parts["project_options"] = [str(option.get("option_ref"))
                                     for option in self._round_project_options]
+        #: v0.5: today's plan and obligations are part of the situation -- a changed set is a
+        #: reason to consider again, while the same set stays quiet.  Read directly (a bounded
+        #: small file); a failed read is already reported by ``project_options`` and contributes
+        #: no refs here rather than pretending the set is empty.
+        plan_refs: list[str] = []
+        if self.day_plan is not None:
+            try:
+                plan_refs = [str(row.get("plan_ref") or "")
+                             for row in self.day_plan.for_date(self.business_day())]
+            except Exception:
+                plan_refs = []
+        parts["day_plan"] = plan_refs
+        parts["today_obligations"] = [str(option.get("option_ref") or "")
+                                      for option in self._round_reserved_options]
+        #: Note: the *open* "later" list is deliberately NOT a situation part.  A newly proposed
+        #: item that is not due changes nothing she can act on yet (``plan_today`` only supplies
+        #: a slot once its own due time arrives), and adding it here would turn every proposal
+        #: into an extra request -- the exact bounded silence this ledger exists to keep.
         # v0.4 research: what the workspace really holds -- the readable materials *at their
         # revisions* and the research heads *with the source checks the owner reported*.  A
         # re-imported / archived / unreadable material or a new research head is a new situation,
@@ -5405,6 +5841,9 @@ class AutonomousLifeCycle:
         #: handle is legal unless this round offered it and no verdict is pending on entry.
         self._round_methods = []
         self._round_practice_context = None
+        self._round_work_context = None
+        self._round_work_context_key = None
+        self.last_work_context = None
         self._round_practice_evaluations = {}
         self._round_practice_evaluated = False
         self._round_step_spec_built = False
@@ -5531,7 +5970,13 @@ class AutonomousLifeCycle:
         foreground_status = str(foreground_record.get("status") or "")
         has_foreground = ((foreground_status != "WAITING") if foreground_status
                           else bool(material.get("foreground_activity")))
-        artifact_available = resume_point is not None
+        #: v0.5: today's reserved slot may name a real work target even when the bound/latest
+        #: selection is empty.  Counting it as an artifact adoption path is what lets the
+        #: ``_RoutedAdoptionSpec`` use the *work* shape for that Decision instead of the reading /
+        #: project fallback; the step builder still asks the owner for a resumable point.
+        reserved_work_available = any(str(option.get("work_ref") or "")
+                                      for option in self._round_reserved_options)
+        artifact_available = resume_point is not None or reserved_work_available
         world_available = bool(self.last_world_opportunities)
         #: The work object the *running* Activity itself names (its owner's own target refs), or
         #: ``None``.  It is a projection, not a permission: the step builder still asks the owner
@@ -5966,6 +6411,9 @@ class AutonomousLifeCycle:
             "decision_route": (getattr(record, "decision_route", None)
                                or dec_res.get("decision_route")),
             "decision": getattr(record, "decision", None),
+            # v0.5: the committed Decision's own id travels with the round, so the step receipt
+            # and the obligation result projection bind to *this* Decision instead of guessing.
+            "decision_id": getattr(record, "decision_id", None),
             "reason_codes": list(getattr(record, "reason_codes", []) or []),
             "short_rationale": getattr(record, "short_rationale", None),
             "selected_candidate_ref": getattr(record, "selected_candidate_ref", None),
@@ -6000,6 +6448,10 @@ class AutonomousLifeCycle:
         # the artifact the Decision actually named, so a second or third project can be continued
         # without the one bound at start-up deciding the round.
         base["future_item_writes"] = self._apply_future_item_writes(record, obs)
+        #: v0.5: the one explicit "put this item into today" request the Decision committed.
+        #: Written only now (after commit), only for today's business date, and its refusal is
+        #: reported per row -- nothing silently schedules anything.
+        base["day_plan_writes"] = self._apply_day_plan_writes(record, obs)
         # v0.4 sharing: the Decision may have asked for *one* sharing step.  It is a narrow
         # life-side effect, so it is settled here -- after the Decision committed, before the
         # round's own step runs -- and it never changes which work this round routes to.  Only the
@@ -9013,6 +9465,11 @@ class AutonomousLifeCycle:
             base["method_created"] = dict(self.last_method_created)
         if self.last_practice_error:
             base["practice_error"] = str(self.last_practice_error)[:200]
+        # v0.5 same-work: the bounded context this round really read (or the named reason it
+        # could not).  Reported on every exit path after it was read; a round that exited before
+        # any read reports nothing rather than the previous round's view.
+        if self.last_work_context:
+            base["work_context"] = dict(self.last_work_context)
         # E09.2: charge the budget here, not at the call sites, so every entry point
         # (timer, event wake, run-once) is charged identically.  A real cognition call
         # is spent whether or not it produced an action, and a failed real request is
@@ -9052,6 +9509,27 @@ class AutonomousLifeCycle:
         # version id is only ever a ref an owner handed back; with no such evidence the answer is
         # ``None`` (unknown), never a guess and never "0 means healthy".
         base["owner_evidence"] = self._owner_evidence(base, outcome)
+        #: v0.5: what today's plan and the obligations really look like after this round.  The
+        #: obligation *result* is only bound from this round's own owner step receipt; a round
+        #: without one leaves the entry PENDING/UNKNOWN, and the operator's document is never
+        #: written by Life.
+        observed = str(base.get("observed_at") or self._now_iso())
+        if self.day_obligations is not None:
+            try:
+                ldp.record_obligation_receipt(
+                    self._day_obligation_evidence, self.day_obligations,
+                    date=self.business_day(observed),
+                    receipt=base.get("step_receipt") or {})
+            except Exception as exc:  # a failed binding is reported, never a completion
+                base["today_obligation_binding_error"] = (
+                    f"{type(exc).__name__}: {exc}"[:160])
+        try:
+            base["today_plan"] = self.today_plan_view(now=observed)
+            base["today_obligations"] = self.obligations_view(now=observed)
+        except Exception as exc:  # read failures are named; they never fail the round
+            base["day_plan_error"] = f"{type(exc).__name__}: {exc}"[:160]
+        if self.last_day_plan_error:
+            base["day_plan_error"] = str(self.last_day_plan_error)[:200]
         # One round is over: the next wake must read the owners again, never reuse
         # this round's answers (even if it happens to carry the same instant).
         self.end_round_reads()

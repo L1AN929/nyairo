@@ -414,6 +414,11 @@ SITUATION_KEYS = (
     #: same set stays quiet, exactly like the World opportunity *set* does.  Sorted refs only --
     #: no item text ever enters the fingerprint.
     "due_items", "project_options",
+    #: v0.5 “自己排今天”: a changed day plan or a changed reserved-obligation set is a new
+    #: situation.  Sorted refs only -- no title, no body, no text.  Note: the *open* "later" list
+    #: is not here on purpose; a not-yet-due proposal is not something she can act on yet, and
+    #: making it reopen every settled question would break the bounded silence.
+    "day_plan", "today_obligations",
     #: v0.4 research: the readable materials *at their revisions* and the research heads *with the
     #: source checks the owner reported*.  A re-imported or archived material, an unreadable
     #: document or a new research head is therefore a new situation, while a mere clock tick is

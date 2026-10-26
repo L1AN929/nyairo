@@ -341,7 +341,9 @@ def build_options(*, questions: Optional[Iterable[Mapping[str, Any]]] = None,
                   research_available: bool = False,
                   experiences: Optional[Iterable[Mapping[str, Any]]] = None,
                   practice_available: bool = False,
-                  limit: int = MAX_OPTIONS) -> list[dict[str, Any]]:
+                  limit: int = MAX_OPTIONS,
+                  reserved: Optional[Iterable[Mapping[str, Any]]] = None
+                  ) -> list[dict[str, Any]]:
     """Build at most ``limit`` project options, deterministically ordered (0 LLM).
 
     A source that is empty produces nothing: no option is invented to fill a quota.  A seed that
@@ -358,6 +360,13 @@ def build_options(*, questions: Optional[Iterable[Mapping[str, Any]]] = None,
     **one** review option -- a review of what she can still read back, whose ``experiences`` are
     exactly those rows.  No experience means no review option at all: "write about a past you
     cannot read" is not a choice, it is a trap.
+
+    ``reserved`` are the day's own two slots (at most one self-planned item and one obligation,
+    both already validated by ``life_day_plan``).  They are appended **after** the ordinary
+    review -> question -> due list, which is still cut to ``limit`` exactly as before; the
+    effective ceiling is ``limit + len(reserved)``.  A reserved row that names the same
+    underlying object/option as an ordinary row (``dedupe_refs``) is dropped, so "two categories"
+    can never become two Actions for one target.
     """
 
     existing_titles = {
@@ -453,7 +462,33 @@ def build_options(*, questions: Optional[Iterable[Mapping[str, Any]]] = None,
             note="due_at=%s" % (item.get("due_at") or ""),
         ).to_dict())
 
-    return options[:max(0, int(limit))]
+    regular = options[:max(0, int(limit))]
+    reserved_rows = [dict(row) for row in (reserved or ()) if isinstance(row, Mapping)]
+    if not reserved_rows:
+        return regular
+    occupied: set[str] = set()
+    for option in regular:
+        for key in ("basis_ref", "material_ref"):
+            value = option.get(key)
+            if value:
+                occupied.add(str(value))
+        for ref in option.get("source_refs") or ():
+            occupied.add(str(ref))
+    seen_refs = {str(option.get("option_ref") or "") for option in regular}
+    appended: list[dict[str, Any]] = []
+    for row in reserved_rows:
+        ref = str(row.get("option_ref") or "")
+        if not ref or ref in seen_refs:
+            continue
+        dedupe = [str(value) for value in (row.get("dedupe_refs") or ()) if str(value)]
+        if any(value in occupied for value in dedupe):
+            # The same thing is already offered by an ordinary option; a second copy would let
+            # one target appear under two categories.
+            continue
+        seen_refs.add(ref)
+        occupied.update(dedupe)
+        appended.append(row)
+    return regular + appended
 
 
 def projects_report(records: Optional[Iterable[Mapping[str, Any]]]) -> list[dict[str, Any]]:
