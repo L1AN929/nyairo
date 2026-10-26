@@ -32,6 +32,10 @@
   GET 是纯读（宿主/来源闸门，零写）；写要 CSRF、请求体白名单，CAS 由 owner 判定。
   客户端永远不在 body 里声明 artifact id（id 只在路径里），也不声明 workspace/grant。
 
+``GET /api/phone/today`` 是纯读：按业务时钟当天（缺失才退回系统时钟，并具名）列出当天开始的
+Activity（开始时间 / 做了什么 / 结果）和当天产生的作品版本（作品名 + 版本号）；活动权威读不到
+时回具名 ``unavailable``，不回一个看起来「她今天什么都没做」的空成功。
+
 信封与 HTTP 码的映射见 ``docs/engineering/v04-phone-api-contract.md`` §5；世界/身体/房间字段与
 动词参数只按 C 的契约（``docs/engineering/v04-world-body-contract.md`` +
 ``docs/engineering/rc1-room-living-contract.md``）转发，本层不重算任何 owner 事实。
@@ -337,6 +341,11 @@ _PROJECT_VERSION_PATH = re.compile(
     r"^/api/phone/projects/([A-Za-z0-9._:\-]{1,200})/versions/([A-Za-z0-9._:\-]{1,200})$")
 _PROJECT_PROVENANCE_PATH = re.compile(
     r"^/api/phone/projects/([A-Za-z0-9._:\-]{1,200})/provenance$")
+#: v0.5 same-work: one bounded, read-only aggregation of the same work's head/old versions,
+#: provenance, owner-confirmed results, evidence-linked methods and local drafts.  Read-only and
+#: host/origin guarded like every other private-artifact read; it sends and writes nothing.
+_PROJECT_CONTEXT_PATH = re.compile(
+    r"^/api/phone/projects/([A-Za-z0-9._:\-]{1,200})/context$")
 #: ``/api/phone/album/<artifact_id>`` is one imported picture; ``/image`` is its real bytes.
 #: The image path is matched first so it can never be read as an artifact id.  The id is the
 #: owner's own protocol string, matched and never rewritten.
@@ -455,11 +464,14 @@ class PhoneHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, address: tuple[str, int], *, service: phone_service.PhoneService,
                  csrf_token: str, log_path: Optional[Path] = None,
-                 supervisor: Optional[Any] = None) -> None:
+                 supervisor: Optional[Any] = None, reuse_address: bool = False) -> None:
         if not isinstance(service, phone_service.PhoneService):
             raise TypeError("PhoneHTTPServer needs a PhoneService")
         if not isinstance(csrf_token, str) or not csrf_token:
             raise ValueError("csrf_token required")
+        # 默认仍是不复用（旧行为）；只有用户入口在“停止后立刻重新打开同一端口”时显式打开。
+        # SO_REUSEADDR 在 Linux 上只放过 TIME_WAIT，不会让第二个活着的 listener 抢同一端口。
+        self.allow_reuse_address = bool(reuse_address)
         self.service = service
         self.csrf_token = csrf_token
         self.log_path = Path(log_path) if log_path else None
@@ -682,6 +694,17 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/living":
                 self._get_living(service)
                 return
+            # What she has actually done today (the business clock's day), plus today's work
+            # versions.  A pure read over the Activity authority and the project owner: it
+            # writes nothing and never turns "unreadable" into "nothing happened".
+            if path == f"{API_PREFIX}/today":
+                self._get_today(service)
+                return
+            # 今天她自己排的事、外部义务与可证执行状态。同一套 host/origin 守护；纯读，
+            # 不启动服务、不写结果 store。``/today`` 的既有形状与行为完全不变。
+            if path == f"{API_PREFIX}/today/arrangements":
+                self._get_today_arrangements(service)
+                return
             if path == f"{API_PREFIX}/notes":
                 self._send(200, service.notes())
                 return
@@ -732,6 +755,9 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             # Her own projects: a guarded pure read (the list carries no text; the detail does).
             if path == f"{API_PREFIX}/projects":
                 self._get_projects(service)
+                return
+            if _PROJECT_CONTEXT_PATH.match(path):
+                self._get_project_context(service, _PROJECT_CONTEXT_PATH.match(path).group(1))
                 return
             if _PROJECT_PATH.match(path):
                 self._get_project(service, _PROJECT_PATH.match(path).group(1))
@@ -1369,6 +1395,35 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             supervisor=getattr(self.server, "supervisor", None), live=True)
         self._send(200, {"ok": True, "status": "ok", "data": view})
 
+    def _get_today(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/today``: 她今天已经发生的活动与作品版本，只读。
+
+        与 ``/living`` 同一套 host/origin 守护：这一段同样是她的私人事实。读取只碰
+        ``canonical_life_state.json``、业务时钟文件和既有项目 owner，不启动任何服务。
+        """
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        self._send_or_map(service.today())
+
+    def _get_today_arrangements(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/today/arrangements``: 计划/义务/执行状态，只读。
+
+        与 ``/today`` 同一套 host/origin 守护：计划标题、义务标题与 Activity 标题都是
+        她的私人事实。读取只碰既有 Life 文档、canonical 权威与 owner 读口；不启动任何服务，
+        也不写结果表。它只接受一个路径，多一个 query 就是对客户端 bug 的静默猜测，直接拒绝。
+        """
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.today_arrangements())
+
     def _living_supervisor(self) -> Optional[Any]:
         return getattr(self.server, "supervisor", None)
 
@@ -1927,6 +1982,22 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             self._send(*guard)
             return
         self._send_or_map(service.project_provenance(_project_id(artifact_id)))
+
+    def _get_project_context(self, service: phone_service.PhoneService,
+                             artifact_id: str) -> None:
+        """``GET .../context``: the same work's bounded, read-only context.
+
+        Head and old versions, where a sourced work came from, the owner-confirmed results whose
+        ``artifact_ref`` is this work, the methods whose evidence really points back at those
+        results (with their latest explicit verdict), and the local drafts sourced from it.
+        Association is by owner ref only.  Nothing here writes, sends or authorises, and the list
+        answer carries no draft text.
+        """
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        self._send_or_map(service.work_context(artifact_id))
 
     def _post_project_derived(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/projects/derived``: one **new** work with a recorded source.
@@ -3127,13 +3198,15 @@ def _world_params(action: str, value: Any) -> dict[str, Any]:
 
 def create_server(service: phone_service.PhoneService, *, csrf_token: str, port: int = 0,
                   log_path: Optional[Path] = None,
-                  supervisor: Optional[Any] = None) -> PhoneHTTPServer:
+                  supervisor: Optional[Any] = None,
+                  reuse_address: bool = False) -> PhoneHTTPServer:
     """Bind one loopback server.  The host is not a caller choice."""
 
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
         raise ValueError("port must be an integer in 0..65535")
     return PhoneHTTPServer(("127.0.0.1", int(port)), service=service,
-                           csrf_token=csrf_token, log_path=log_path, supervisor=supervisor)
+                           csrf_token=csrf_token, log_path=log_path, supervisor=supervisor,
+                           reuse_address=bool(reuse_address))
 
 
 __all__ = [

@@ -38,6 +38,7 @@ import os
 import socket
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -88,6 +89,21 @@ STATUS_UNKNOWN = "unknown"
 STATUS_UNAVAILABLE = "unavailable"
 STATUS_DISABLED = "disabled"
 STATUS_NOT_FOUND = "not_found"
+
+#: ``GET /api/phone/today``：她今天已经发生的事，纯读。
+#: 日期按 +08:00 分界——与 Activity 记录自己的写入时区（``activity_compat.BJT``）同一日界，
+#: 免得一份记录按 UTC 另算一天。业务时钟存在时以它的逻辑时刻为准，缺失/损坏才退回系统时钟，
+#: 并在回答里具名说明，绝不把「读不到」说成「今天什么都没做」。
+TODAY_SCHEMA = "phone.today.v1"
+TODAY_TIMEZONE = "+08:00"
+TODAY_TZ = timezone(timedelta(hours=8))
+#: 一次读取最多看这么多件作品；超出的部分如实标 truncated，不假装她今天只写了这么多。
+TODAY_MAX_WORKS = 50
+#: 每件作品只看最近一页版本元数据（今天产生的版本几乎总在最近页）。
+TODAY_VERSION_PAGE = 20
+CANONICAL_ACTIVITY_FILENAME = "canonical_life_state.json"
+BUSINESS_CLOCK_DIRNAME = "fastday"
+BUSINESS_CLOCK_FILENAME = "fastday_clock.json"
 
 MAX_OPERATION_KEY = 128
 MAX_TITLE = 80
@@ -212,6 +228,67 @@ def unavailable(reason_code: str, **data: Any) -> dict[str, Any]:
 
 def rejected(reason_code: str, **data: Any) -> dict[str, Any]:
     return envelope(False, STATUS_REJECTED, data, reason_code)
+
+
+def today_moment(value: Any) -> Optional[datetime]:
+    """把一条记录里的时间戳读成 ``+08:00`` 的时刻；读不懂就是 ``None``，从不猜。
+
+    两个 owner 的写法不一样：Activity 记录是 ISO 字符串，作品版本是 epoch 秒。两种都认，
+    无时区的 ISO 按 UTC 解释（那是存储方的约定），最后统一换算到她的日界。
+    """
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).astimezone(TODAY_TZ)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(TODAY_TZ)
+
+
+def today_iso(value: Any) -> Optional[str]:
+    moment = today_moment(value)
+    return moment.isoformat(timespec="seconds") if moment is not None else None
+
+
+def today_business_day(state_root: Path | str) -> dict[str, Any]:
+    """今天这个「业务日」由什么时钟决定——答案自带来源，读不到时钟不静默混钟。
+
+    业务时钟（``fastday/fastday_clock.json``）是压缩日里唯一的时间权威；它不存在（普通实例
+    从未开过压缩日）或损坏时，才退回系统时钟，并保留具名原因。两种情况都不写任何文件。
+    """
+
+    path = Path(str(state_root)) / BUSINESS_CLOCK_DIRNAME / BUSINESS_CLOCK_FILENAME
+    reason: Optional[str] = None
+    payload: Any = None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        reason = "BUSINESS_CLOCK_ABSENT"
+    except (OSError, ValueError):
+        reason = "BUSINESS_CLOCK_UNREADABLE"
+    if isinstance(payload, Mapping):
+        moment = (today_moment(payload.get("logical_checkpoint"))
+                  or today_moment(payload.get("logical_anchor")))
+        if moment is not None:
+            return {"source": "business_clock", "reason_code": None,
+                    "logical_at": moment.isoformat(timespec="seconds"),
+                    "day": moment.date().isoformat(),
+                    "run_id": payload.get("run_id"), "domain_id": payload.get("domain_id")}
+        reason = "BUSINESS_CLOCK_CORRUPT"
+    moment = datetime.now(tz=TODAY_TZ).replace(microsecond=0)
+    return {"source": "system_clock", "reason_code": reason,
+            "logical_at": moment.isoformat(timespec="seconds"),
+            "day": moment.date().isoformat(), "run_id": None, "domain_id": None}
 
 
 #: The room blocks C may publish on its own World snapshot.  P never derives one of them: a block
@@ -1234,6 +1311,249 @@ class PhoneService:
                 "source_gate": answer.get("source_gate"),
                 "reason_code": answer.get("reason_code") or "",
                 "private_text_included": False}
+
+    def work_context(self, artifact_id: str) -> dict[str, Any]:
+        """``GET .../projects/<id>/context``: 同一件作品的有界只读上下文。
+
+        它把已经存在的四个 owner 读口按同一件作品聚合一次：作品 head 与旧版/来历
+        （``private_project_service`` 的 Supply 读）、真实结果（A 的 Memory 可回忆经历，
+        只保留 ``artifact_ref`` 就是这件作品的）、证据指回这些结果的做法与最近一次显式评价
+        （B 的实践工作台，trial 的版本是方法自己的版本）、以及来源就是这件作品的本地草稿
+        （B 的分享 owner，列表不带正文）。关联只认 owner ref，交集为空就不列；读不到是具名
+        失败，不是空。它不写任何东西，也不发送任何草稿。
+        """
+
+        target = str(artifact_id or "").strip()
+        if not target:
+            return unavailable("WORK_ARTIFACT_ID_REQUIRED")
+        try:
+            projects = self._projects_service()
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return unavailable("PROJECTS_UNAVAILABLE", error_type=type(exc).__name__)
+        try:
+            from life_practice_context import PracticeSeam
+            from life_work_context import WorkContextReader
+
+            practice = PracticeSeam(self._practice_service())
+            try:
+                sharing = self._sharing_service()
+            except Exception:
+                sharing = None
+            context = WorkContextReader(
+                projects=projects, practice=practice, sharing=sharing,
+                memory=self._memory_service()).read(target)
+        except Exception as exc:
+            return unavailable("WORK_CONTEXT_UNAVAILABLE", error_type=type(exc).__name__)
+        if not isinstance(context, Mapping):
+            return unavailable("WORK_CONTEXT_ANSWER_INVALID")
+        return {
+            "ok": True,
+            "status": STATUS_OK,
+            "artifact_id": context.get("artifact_id") or target,
+            "context": dict(context),
+            # 只投影有界摘录与方法说明，没有任何完整正文；草稿列表也不带正文。
+            "private_text_included": False,
+            "bounded_excerpt": True,
+            "local_only": True,
+            "delivered_to_user": False,
+        }
+
+    # -- 「今天」：她已经发生的事（纯读） -------------------------------------------------
+
+    def _today_state_root(self) -> Optional[Path]:
+        """这个手机实例自己的 Life 状态根；没有嵌套实例就是 ``None``（不猜目录）。"""
+
+        from . import life as phone_life
+
+        try:
+            root = phone_life.phone_root(self.root)
+            nested = phone_life.read_nested_life(root)
+            if nested is None:
+                return None
+            return phone_life.life_state_root(root, nested)
+        except Exception:
+            return None
+
+    def _today_activities(self, state_root: Path, day: str
+                          ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """当天开始的 Activity，从权威自己的 ``canonical_life_state.json`` 读。
+
+        这份文件保留每一条 Activity（终态的也在，只清前台指针），所以「今天做过的」就是
+        按每条自己的 ``started_at`` 落在当天的那几条。读不到就返回具名原因 + 空列表，
+        绝不把「读不到」报成「没做事」。``status`` 就是结果（ACTIVE/PAUSED/WAITING/
+        COMPLETED/ABANDONED），终态另带 owner 自己的原因码。
+        """
+
+        path = Path(str(state_root)) / CANONICAL_ACTIVITY_FILENAME
+        source: dict[str, Any] = {"state": "ok", "source": CANONICAL_ACTIVITY_FILENAME,
+                                  "reason_code": None, "detail": None}
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            source.update({"state": "unavailable", "reason_code": "CANONICAL_STATE_ABSENT"})
+            return [], source
+        except OSError as exc:
+            source.update({"state": "unavailable", "reason_code": "CANONICAL_STATE_UNREADABLE",
+                           "detail": type(exc).__name__})
+            return [], source
+        try:
+            data: Any = json.loads(raw)
+        except ValueError:
+            source.update({"state": "unavailable", "reason_code": "CANONICAL_STATE_CORRUPT"})
+            return [], source
+        activities = data.get("activities") if isinstance(data, Mapping) else None
+        if not isinstance(activities, Mapping):
+            source.update({"state": "unavailable", "reason_code": "CANONICAL_STATE_CORRUPT",
+                           "detail": "activities"})
+            return [], source
+        rows: list[dict[str, Any]] = []
+        for ref, act in activities.items():
+            if not isinstance(act, Mapping):
+                continue
+            started = today_moment(act.get("started_at"))
+            if started is None or started.date().isoformat() != day:
+                continue
+            rows.append({
+                "ref": str(ref),
+                "title": str(act.get("title") or ""),
+                "kind": str(act.get("activity_kind") or ""),
+                "status": str(act.get("status") or ""),
+                "started_at": started.isoformat(timespec="seconds"),
+                "ended_at": today_iso(act.get("ended_at")),
+                "terminal_reason_code": act.get("terminal_reason_code"),
+            })
+        rows.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("ref") or "")))
+        source["count"] = len(rows)
+        source["activities_without_started_at"] = sum(
+            1 for act in activities.values()
+            if isinstance(act, Mapping) and today_moment(act.get("started_at")) is None)
+        return rows, source
+
+    def _today_work_versions(self, day: str
+                             ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """当天 owner 记录的版本：作品名 + 版本号，逐件经 ``private_project_service`` 读。
+
+        作品清单本身就是 owner 的（阅读材料、私人事项、相册已在清单里排除）；每件只看最近
+        一页版本元数据。owner 不可用时这一段如实标不可用，活动的部分照常返回——两段互不冒充。
+        """
+
+        source: dict[str, Any] = {"state": "ok", "reason_code": None, "detail": None,
+                                  "truncated": False, "unreadable_works": []}
+        try:
+            service = self._projects_service()
+            listed = service.list_projects(limit=TODAY_MAX_WORKS + 1)
+        except PhoneUnavailable as exc:
+            source.update({"state": "unavailable", "reason_code": exc.reason_code})
+            return [], source
+        except Exception as exc:
+            source.update({"state": "unavailable", "reason_code": "PROJECTS_UNAVAILABLE",
+                           "detail": type(exc).__name__})
+            return [], source
+        if not listed.get("ok"):
+            source.update({"state": "unavailable",
+                           "reason_code": str(listed.get("reason_code")
+                                              or "PROJECTS_UNAVAILABLE")})
+            return [], source
+        projects = [dict(row) for row in (listed.get("projects") or [])
+                    if isinstance(row, Mapping)]
+        rows: list[dict[str, Any]] = []
+        for project in projects[:TODAY_MAX_WORKS]:
+            artifact_id = str(project.get("artifact_id") or "")
+            if not artifact_id:
+                continue
+            try:
+                history = service.read_project_history(artifact_id, limit=TODAY_VERSION_PAGE)
+            except Exception as exc:  # 一件读不到不影响其它件，也不当成「今天没写」
+                source["unreadable_works"].append(
+                    {"artifact_id": artifact_id, "detail": type(exc).__name__})
+                continue
+            if not history.get("ok"):
+                source["unreadable_works"].append(
+                    {"artifact_id": artifact_id,
+                     "reason_code": str(history.get("reason_code") or "PROJECT_VERSIONS_UNAVAILABLE")})
+                continue
+            for entry in history.get("entries") or []:
+                if not isinstance(entry, Mapping):
+                    continue
+                created = today_moment(entry.get("created_at"))
+                if created is None or created.date().isoformat() != day:
+                    continue
+                rows.append({
+                    "artifact_id": artifact_id,
+                    "title": str(project.get("title") or ""),
+                    "version_id": str(entry.get("version_id") or ""),
+                    "version_number": entry.get("version_number"),
+                    "created_at": created.isoformat(timespec="seconds"),
+                })
+        rows.sort(key=lambda row: (str(row.get("created_at") or ""),
+                                   str(row.get("artifact_id") or "")))
+        source["truncated"] = bool(listed.get("truncated")) or len(projects) > TODAY_MAX_WORKS
+        source["count"] = len(rows)
+        return rows, source
+
+    def today(self) -> dict[str, Any]:
+        """``GET /api/phone/today``：她今天（业务时钟当天）已经发生的事。纯读，零写。
+
+        两段：当天开始的 Activity（开始时间 / 做了什么 / 结果），以及当天产生的作品版本
+        （作品名 + 版本号）。什么都没做就是两个空列表——不编一条凑数；状态根读不到则是
+        具名的 unavailable，而不是一个看起来像「她今天很安静」的成功回答。
+        """
+
+        state_root = self._today_state_root()
+        if state_root is None:
+            return unavailable("TODAY_LIFE_STATE_UNBOUND",
+                               note="没有可读的 Life 实例；不把读不到说成她今天什么都没做")
+        clock = today_business_day(state_root)
+        day = str(clock.get("day") or "")
+        activities, activity_source = self._today_activities(state_root, day)
+        works, work_source = self._today_work_versions(day)
+        if activity_source.get("state") != "ok":
+            # 「她今天做了什么」的核心权威读不到：这里必须说不可用，不能回一个空列表
+            # 让她看起来安静了一天。作品段照常附带，但它替代不了活动权威。
+            return unavailable(str(activity_source.get("reason_code") or "TODAY_UNAVAILABLE"),
+                               day=day, timezone=TODAY_TIMEZONE, clock=clock,
+                               works=works, sources={"activities": activity_source,
+                                                     "works": work_source},
+                               note="活动权威读不到；这不等于她今天什么都没做")
+        return {
+            "ok": True,
+            "status": STATUS_OK,
+            "data": {
+                "schema": TODAY_SCHEMA,
+                "day": day,
+                # 分日依据：一条 Activity 落在哪天，看它自己记录的 started_at。
+                "day_basis": "activity_started_at",
+                "timezone": TODAY_TIMEZONE,
+                "clock": clock,
+                "activities": activities,
+                "activity_count": len(activities),
+                "works": works,
+                "work_count": len(works),
+                "sources": {"activities": activity_source, "works": work_source},
+                "read_only": True,
+            },
+        }
+
+    def today_arrangements(self) -> dict[str, Any]:
+        """``GET /api/phone/today/arrangements``：今天自选计划、外部义务与可证执行状态。
+
+        纯读：只读 ``life_day_plan`` 两域、canonical Activity 和既有 Action/Decision/owner
+        回执读口。它不启动服务、不调用模型、不写任何结果 store；读不到来源就具名不可用，
+        不把「读不到」变成「今天没有安排」。
+        """
+
+        from . import own_day_read
+
+        state_root = self._today_state_root()
+        if state_root is None:
+            return unavailable("TODAY_LIFE_STATE_UNBOUND",
+                               note="没有可读的 Life 实例；不把读不到说成今天没有安排")
+        clock = today_business_day(state_root)
+        return own_day_read.arrangements_envelope(
+            state_root=state_root, subject_id=self.subject, clock=clock)
+
 
     def create_derived_project(self, *, title: str, content: str, source_artifact_id: str,
                                source_version_id: str, purpose: str, note: str = "",

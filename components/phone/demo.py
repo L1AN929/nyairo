@@ -956,6 +956,7 @@ def serve_instance(
     stop_event: Optional[threading.Event] = None,
     announce: bool = True,
     supervisor: Optional[Any] = None,
+    reuse_address: bool = False,
 ) -> dict[str, Any]:
     """Start the two child owners, bind loopback HTTP, serve until a stop signal.
 
@@ -1021,7 +1022,7 @@ def serve_instance(
         csrf_token = secrets.token_hex(32)
         server = create_server(service, csrf_token=csrf_token, port=port,
                                log_path=root_path / "logs" / "serve.log",
-                               supervisor=supervisor)
+                               supervisor=supervisor, reuse_address=bool(reuse_address))
         bound_port = int(server.server_address[1])
         announcement = {
             "ok": True,

@@ -351,6 +351,13 @@ receipt_id?}]`、`data.pending_count`。
   自主 Decision。
 * 结果未知：工具返回 `status:"unknown"` 并给出 `operation_key`；再次调用必须先
   `action:"operation"` 对账，**不自动换 key 重发**。
+* **同一件作品接着做（v0.5）**：两个只读动作，沿用同一条 `private_artifacts` 显式许可。
+  * `work_context`（`artifact_id`）→ `GET /api/phone/projects/<id>/context`：同一件作品的有界
+    上下文 —— head、旧版与来历、`artifact_ref` 就是这件作品的可回忆结果、证据指回这些结果的
+    做法与最近一次显式评价（trial 的版本是方法自己的版本）、来源就是它的本地草稿。关联只认
+    owner ref；没有证据的部分如实为空（不是"从全局挑一个方法"）；草稿列表不带正文，也不发送。
+  * `work_version`（`artifact_id` + `version_id`）→ `GET /api/phone/projects/<id>/versions/<vid>`：
+    固定读一个旧版。读取不是回滚：head 与其它版本都不变。
 
 ## 8. 不做什么
 

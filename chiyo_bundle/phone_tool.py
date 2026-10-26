@@ -3,8 +3,8 @@
 
 它不拥有真相，也不是第二个手机服务：
 
-* 读钱包/笔记/收藏/阅读/虚拟商店/**实体日用店**/物品/世界 → ``GET /api/phone/*``（世界快照与
-  实体店货架都是只读的）；
+* 读钱包/笔记/收藏/阅读/虚拟商店/**实体日用店**/物品/世界，以及**今天已经发生的事与今天的
+  安排** → ``GET /api/phone/*``（世界快照与实体店货架都是只读的）；
 * 显式购买/使用/写笔记/存收藏/移动/拿放/换姿势/休息/**柜台购买/布置自有家具/开关自己的灯** →
   同一条 HTTP 面上的 ``POST``，带 ``X-CSRF-Token``；
 * 阅读工作台另有五个动作：``reading_material``（只读一页真实正文）、``reading_import``（显式导入
@@ -59,6 +59,10 @@ READ_ACTIONS = {
     "store": "/api/phone/store",
     "inventory": "/api/phone/inventory",
     "world": "/api/phone/world",
+    # 她今天已经发生的活动/作品版本，以及今天的计划/义务/执行状态。两条都是既有的纯读 HTTP 面：
+    # 只读 Activity 权威、Life 文档与 owner 回执，不启动服务、不写结果、不调用模型。
+    "today": "/api/phone/today",
+    "today_arrangements": "/api/phone/today/arrangements",
 }
 WRITE_ACTIONS = ("note_save", "reference_save", "purchase", "store_purchase", "use",
                  "world_action", "reading_import", "reading_position", "reading_annotate")
@@ -67,14 +71,22 @@ WRITE_ACTIONS = ("note_save", "reference_save", "purchase", "store_purchase", "u
 #: World/body commands are a different surface: they already require ``write_enabled``, and a
 #: snapshot carries where she is, not her private notes.  The reading workbench is the most
 #: private face of all -- the text she is reading, where she stopped and what she wrote about it.
+#: "What she did today" and "what she arranged today" carry her own activity/work titles and her
+#: self-planned or obligatory items, so they belong to the same private-artifact permit; the
+#: permit is not widened, only these two surfaces join the existing one.
 PRIVATE_ARTIFACT_ACTIONS = frozenset({
     "notes", "references", "reading", "note_save", "reference_save", "purchase", "store_purchase",
     "use",
     "reading_material", "reading_import", "reading_position", "reading_annotate",
     "reading_operation",
+    "today", "today_arrangements",
+    # 同一件作品的有界上下文（旧版/来历/真实结果/相关做法与评价/本地草稿）：它读的是她的私人
+    # 作品与经历摘录，因此和其余私人档案读面共用同一条显式许可，不新增权限面。
+    "work_context", "work_version",
 })
 ACTIONS = tuple(sorted(READ_ACTIONS)) + WRITE_ACTIONS + ("operation", "world_operation",
-                                                         "reading_operation")
+                                                         "reading_operation", "work_context",
+                                                         "work_version")
 
 #: The World verbs a local owner may ask for.  The first five are the frozen v0.4 set (C's
 #: contract §3.1); ``ARRANGE`` and ``TOGGLE_FIXTURE`` are this round's room verbs, exactly as C's
@@ -126,6 +138,9 @@ _WORLD_STATE_CHOICES = {
     "TOGGLE_FIXTURE": frozenset({"on", "off"}),
 }
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+#: The characters an owner artifact id may use in a path (same set the phone server matches).
+OWNER_ID_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")
 TIMEOUT_SECONDS = 10.0
 
 PHONE_TOOL_SCHEMA = {
@@ -133,13 +148,19 @@ PHONE_TOOL_SCHEMA = {
     "description": (
         "打开她自己那部本地虚拟手机：读钱包余额与真实流水、笔记、收藏、阅读位置、虚拟商店目录、"
         "实体日用店的货架与营业状态、自己的物品，以及她所在的世界（位置、能去哪、身上的东西、"
-        "姿势与身体信号、已到货的自有家具、房间灯）；也可以显式提交一条操作（写笔记、存收藏、"
+        "姿势与身体信号、已到货的自有家具、房间灯）；today 读她今天真正发生的活动与作品版本，"
+        "today_arrangements 读今天的计划、义务与可证执行状态（PLANNED 只表示排进了今天、义务 "
+        "PENDING 只表示还没有 owner 回执、执行 UNKNOWN 表示没有可证证据，都不是「还没开始」"
+        "或「失败了」）；也可以显式提交一条操作（写笔记、存收藏、"
         "手机虚拟店购买、实体店柜台购买、使用属于自己的物件、在世界里移动/拿放/换姿势/休息/"
         "布置自有家具/开关自己的灯）。"
         "阅读工作台另有五个动作：reading_material 只读一页真实正文；reading_import 把操作者显式给"
         "的文本写进这台实例已绑定的阅读材料（旧版本由 Supply 保留）；reading_position 显式保存停点"
         "（先真实读该页再落位置，回到前页也合法）；reading_annotate 对已取得的那一版那一页写私人笔记"
         "（kind=note）或诚实的没读懂（kind=unclear）；reading_operation 按原 operation_key 对账。"
+        "work_context 按 owner 的 artifact_id 只读同一件作品的有界上下文：head 与旧版/来历、"
+        "artifact_ref 就是这件作品的真实结果、证据指回这些结果的做法与最近一次显式评价、"
+        "以及来源就是它的本地草稿（不带正文、不发送）；没有证据的部分如实为空。"
         "所有数字与状态都来自真实 owner，工具不会补零、不会猜价格，也不会把失败说成成功："
         "购买成功不等于已到货，布置成功不等于已经可用，保存停点不等于读懂了（understanding 恒 UNKNOWN）。"
         "移动/拿放/姿势/休息/布置/开关灯必须给出 operation_key 并原样复用；若返回 status=unknown，"
@@ -153,12 +174,18 @@ PHONE_TOOL_SCHEMA = {
                 "type": "string",
                 "enum": list(ACTIONS),
                 "description": (
-                    "wallet/notes/references/reading/reading_material/shop/store/inventory/world 为"
-                    "只读；note_save/reference_save/purchase/store_purchase/use/world_action/"
+                    "wallet/notes/references/reading/reading_material/shop/store/inventory/world/"
+                    "today/today_arrangements 为只读；"
+                    "note_save/reference_save/purchase/store_purchase/use/world_action/"
                     "reading_import/reading_position/reading_annotate 为显式写；operation/"
                     "world_operation/reading_operation 用 operation_key 对账（原 key，不换键重试）。"
                 ),
             },
+            "artifact_id": {"type": "string", "maxLength": 200,
+                            "description": ("作品 id（work_context / work_version）：必须是 owner "
+                                            "自己的协议字符串，只读，不写、不发送")},
+            "version_id": {"type": "string", "maxLength": 200,
+                           "description": "要固定读取的旧版本 id（work_version，只读不回滚）"},
             "title": {"type": "string", "maxLength": 80, "description": "笔记标题（note_save）"},
             "body": {"type": "string", "maxLength": 4000, "description": "笔记正文（note_save）"},
             "note_id": {"type": "string", "maxLength": 128, "description": "要修订的笔记 id（可选）"},
@@ -262,6 +289,10 @@ _FIELD_BY_ACTION = {
     "reading_annotate": frozenset({"action", "kind", "page", "source_revision", "title", "body",
                                    "note", "expected_head", "operation_key"}),
     "reading_operation": frozenset({"action", "operation_key"}),
+    # 同一件作品的有界只读上下文：只认 owner 自己的 artifact id，不接受路径/URL/标题。
+    "work_context": frozenset({"action", "artifact_id"}),
+    # 固定读同一件作品的一个旧版（读取不是回滚：head 不变）。
+    "work_version": frozenset({"action", "artifact_id", "version_id"}),
 }
 
 
@@ -709,7 +740,66 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
         if action in READ_ACTIONS:
             code, doc = _request(settings, "GET", READ_ACTIONS[action])
             result = _summary(doc)
-            message = "已读取。" if doc.get("ok") else "读取失败，服务说明了原因。"
+            if not doc.get("ok"):
+                message = "读取失败，服务说明了原因。"
+            elif action == "today":
+                message = ("已读取她今天真正发生的活动与作品版本（只读）；读不到是具名的不可用，"
+                           "不是「今天什么都没做」。")
+            elif action == "today_arrangements":
+                # 计划/义务/执行是三层不同的证据，不能压成一句「做没做」。
+                message = ("已读取今天的计划、义务与执行状态：定义状态 PLANNED 只表示排进了今天，"
+                           "不是「还没开始」；义务 PENDING 只表示还没有 owner 回执，不是失败；"
+                           "执行状态 UNKNOWN 表示没有可证的执行证据，不是没做。")
+            else:
+                message = "已读取。"
+            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+                           http_status=code, result=result)
+
+        if action == "work_context":
+            # 同一件作品的有界只读上下文：不写、不发送、不启动服务，也不把别的作品/方法文档
+            # 认领成它的结果。id 必须是 owner 自己的协议字符串（不是路径/URL）。
+            artifact_id = str(args.get("artifact_id") or "").strip()
+            if not artifact_id:
+                return _result(False, "rejected", "work_context 需要 artifact_id。",
+                               reason_code="WORK_ARTIFACT_ID_REQUIRED")
+            if len(artifact_id) > 200 or not set(artifact_id) <= OWNER_ID_CHARS:
+                return _result(False, "rejected",
+                               "artifact_id 不是 owner 自己的协议 id（不接受路径或 URL）。",
+                               reason_code="WORK_ARTIFACT_ID_INVALID")
+            code, doc = _request(settings, "GET",
+                                 "/api/phone/projects/%s/context" % artifact_id)
+            result = _summary(doc)
+            if not doc.get("ok"):
+                message = "这件作品的上下文读不到；服务说明了原因（读不到不是空）。"
+            else:
+                message = ("已读取这件作品的有界上下文（只读）：版本与来历、指向它的真实结果、"
+                           "证据指回这些结果的做法与最近一次评价、以它为来源的本地草稿。"
+                           "没有证据的部分如实为空，草稿不会被发送。")
+            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+                           http_status=code, result=result)
+
+        if action == "work_version":
+            # 固定读一个旧版：这是读取，不是回滚。head 与所有版本都由 owner 自己回答。
+            artifact_id = str(args.get("artifact_id") or "").strip()
+            version_id = str(args.get("version_id") or "").strip()
+            if not artifact_id or not version_id:
+                return _result(False, "rejected",
+                               "work_version 需要 artifact_id 和 version_id。",
+                               reason_code="WORK_VERSION_ID_REQUIRED")
+            for value in (artifact_id, version_id):
+                if len(value) > 200 or not set(value) <= OWNER_ID_CHARS:
+                    return _result(False, "rejected",
+                                   "id 不是 owner 自己的协议 id（不接受路径或 URL）。",
+                                   reason_code="WORK_VERSION_ID_INVALID")
+            code, doc = _request(settings, "GET", "/api/phone/projects/%s/versions/%s"
+                                 % (artifact_id, version_id))
+            result = _summary(doc)
+            if not doc.get("ok"):
+                message = "这一版读不到；服务说明了原因（读不到不是空，也没有改写 head）。"
+            elif ((doc.get("version") or {}).get("derived_text_withheld")):
+                message = "这一版的来源已被扣留：正文不投影，版本事实仍然可见。"
+            else:
+                message = "已固定读取这一版（只读）；head 没有回滚，其它版本也没有被改写。"
             return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
                            http_status=code, result=result)
 

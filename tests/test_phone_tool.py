@@ -205,6 +205,36 @@ class PhoneToolTest(unittest.TestCase):
         references = self.call("references")
         self.assertIn("items", references["result"])
 
+    # -- today: what actually happened, and what was arranged -------------------------
+
+    def test_today_reads_are_registered_as_private_read_actions(self) -> None:
+        schema = phone_tool.PHONE_TOOL_SCHEMA
+        actions = schema["parameters"]["properties"]["action"]["enum"]
+        for action in ("today", "today_arrangements"):
+            self.assertIn(action, actions)
+            self.assertIn(action, phone_tool.READ_ACTIONS)
+            # Her own activity/work titles and her plan/obligation titles are private facts.
+            self.assertIn(action, phone_tool.PRIVATE_ARTIFACT_ACTIONS)
+            self.assertNotIn(action, phone_tool.WRITE_ACTIONS)
+        self.assertEqual(phone_tool.READ_ACTIONS["today"], "/api/phone/today")
+        self.assertEqual(phone_tool.READ_ACTIONS["today_arrangements"],
+                         "/api/phone/today/arrangements")
+        # Both are path-only reads: no query, no field, nothing to submit.
+        self.assertEqual(self.call("today", page=1)["reason_code"], "UNKNOWN_FIELD")
+        self.assertEqual(self.call("today_arrangements", day="2026-10-26")["reason_code"],
+                         "UNKNOWN_FIELD")
+
+    def test_today_reads_reach_the_real_service_and_keep_the_envelope(self) -> None:
+        self.write_config(self.phone_section())
+        for action in ("today", "today_arrangements"):
+            result = self.call(action)
+            self.assertNotIn(result.get("reason_code"),
+                             ("UNKNOWN_ACTION", "PHONE_TOOL_ERROR"), result)
+            self.assertIn("result", result, result)
+            # The service's own envelope, verbatim -- and its CSRF token never leaves.
+            self.assertIn("ok", result["result"], result)
+            self.assertNotIn("csrf_token", result["result"])
+
     # -- real writes -----------------------------------------------------------------
 
     def test_purchase_and_use_really_land_in_the_economy_and_the_substrate(self) -> None:
@@ -324,7 +354,7 @@ class PhoneToolTest(unittest.TestCase):
 
     def test_restricted_memory_keeps_private_artifacts_behind_a_second_permit(self) -> None:
         self.write_config(self.phone_section(), memory=True)
-        for action in ("notes", "references", "reading"):
+        for action in ("notes", "references", "reading", "today", "today_arrangements"):
             result = self.call(action)
             self.assertEqual(result["reason_code"], "PHONE_PRIVATE_ARTIFACTS_NOT_PERMITTED", action)
         save = self.call("note_save", title="记忆受限", body="不该落地",

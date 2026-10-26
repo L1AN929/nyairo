@@ -6,7 +6,7 @@
     python scripts/phone.py life-preflight --instance /abs/root
     python scripts/phone.py life-run --instance /abs/root --once
     python scripts/phone.py enable-instance-memory --instance /abs/root --owner chiyo \
-        --operation-key enable-memory-1
+        --operation-key enable-memory-1 --authority-db /abs/outside/authority.db
 
 ``life-preflight`` / ``life-run`` 是本轮"主体用自己的材料"的**无界面**入口：它们复用
 ``components/phone/life.py``，把手机实例的 live 绑定映射给现有 Life runtime。preflight 纯读
@@ -274,7 +274,7 @@ def cmd_life_run(argv: list[str]) -> int:
 
 
 def cmd_enable_instance_memory(argv: list[str]) -> int:
-    """Explicitly give **one** phone instance its own Memory (evidence + separate ledger)."""
+    """Explicitly give **one** phone instance its own Memory (evidence + ledger + deletion authority)."""
 
     from components.phone import life
 
@@ -285,10 +285,15 @@ def cmd_enable_instance_memory(argv: list[str]) -> int:
                         help="the Memory owner to bind (default: the resident's own default)")
     parser.add_argument("--operation-key", required=True, dest="operation_key",
                         help="an explicit operation identity for this opt-in write")
+    parser.add_argument("--authority-db", default=None, dest="authority_db",
+                        help="the retained deletion authority file, outside this instance's "
+                             "business root (no default: an inside-the-instance copy would be "
+                             "rolled back with the instance's own backup)")
     args = parser.parse_args(argv)
     try:
         report = life.enable_instance_memory(Path(args.instance), args.owner,
-                                             args.operation_key)
+                                             args.operation_key,
+                                             authority_path=args.authority_db)
     except Exception as exc:  # never echo paths/keys; keep the class name only
         _emit({"ok": False, "status": "error",
                "reason_code": "ENABLE_INSTANCE_MEMORY_FAILED",

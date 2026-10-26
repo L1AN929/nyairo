@@ -95,12 +95,14 @@ PHONE_LIVE_FIELDS = {
     "world_body_socket": ("WORLD_BODY_SOCKET",),
 }
 
-#: ``autonomous_life_resident`` 自己读的那几个名字（``:69-71``：``MEMORY_DB_ENV`` /
-#: ``MEMORY_CONTROLS_ENV`` / ``MEMORY_SUBJECT_ENV``）。真正解析时从模块里取，取不到才退回这些
-#: 字面量——本层绝不发明第五种拼法，也不猜任何默认路径。
+#: ``autonomous_life_resident`` 自己读的那几个名字（``MEMORY_DB_ENV`` / ``MEMORY_CONTROLS_ENV`` /
+#: ``MEMORY_AUTHORITY_ENV`` / ``MEMORY_SUBJECT_ENV``）。真正解析时从模块里取，取不到才退回这些
+#: 字面量——本层绝不发明第五种拼法，也不猜任何默认路径。未配置 authority 的旧实例保持原路径。
 MEMORY_ENV_FALLBACK = {
     "database": ("NYA02_MEMORY_DB", "CHIYO_LIFE_MEMORY_DB"),
     "controls": ("NYA02_MEMORY_CONTROLS_DB", "CHIYO_LIFE_MEMORY_CONTROLS_DB"),
+    "authority": ("NYA02_MEMORY_AUTHORITY_DB", "CHIYO_LIFE_MEMORY_AUTHORITY_DB"),
+    "authority_min_seq": ("NYA02_MEMORY_AUTHORITY_MIN_SEQ", "CHIYO_LIFE_MEMORY_AUTHORITY_MIN_SEQ"),
     "owner": ("NYA02_MEMORY_SUBJECT", "NYA02_SUBJECT"),
 }
 #: ``_memory_ports`` / ``_continuity_source`` 在没有 ``NYA02_MEMORY_SUBJECT`` 时用的字面量。
@@ -675,6 +677,8 @@ def memory_env_names() -> dict[str, tuple[str, ...]]:
     except Exception:  # the Life scripts are not importable here: the frozen names still hold
         return names
     for key, attribute in (("database", "MEMORY_DB_ENV"), ("controls", "MEMORY_CONTROLS_ENV"),
+                           ("authority", "MEMORY_AUTHORITY_ENV"),
+                           ("authority_min_seq", "MEMORY_AUTHORITY_MIN_SEQ_ENV"),
                            ("owner", "MEMORY_SUBJECT_ENV")):
         value = getattr(resident, attribute, None)
         if isinstance(value, str) and value.strip():
@@ -701,9 +705,10 @@ def _readonly_sqlite(path: Path | str):
     return sqlite3.connect(Path(str(path)).resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
 
 
-def _memory_probe(database: Path, controls: Path, *, owner: str, conversation: str
-                  ) -> dict[str, Any]:
-    """Read-only facts about the two configured files.  No owner constructor, no DDL, no write.
+def _memory_probe(database: Path, controls: Path, *, owner: str, conversation: str,
+                  authority: Optional[Path] = None,
+                  authority_min_seq: Optional[int] = None) -> dict[str, Any]:
+    """Read-only facts about the configured files.  No owner constructor, no DDL, no write.
 
     ``EvidenceStore(...)`` would ``mkdir`` the parent, run migrations and ``chmod`` the file, and a
     ledger ``initialize()`` would create tables; neither is acceptable in a preflight.  This opens
@@ -726,6 +731,13 @@ def _memory_probe(database: Path, controls: Path, *, owner: str, conversation: s
         "life_outcomes": None,
         "governance_healthy": None,
         "controls": None,
+        "authority_exists": None,
+        "authority_is_file": None,
+        "authority_healthy": None,
+        "authority_operations": None,
+        "authority_seq": None,
+        "authority_reason": None,
+        "authority_min_seq": authority_min_seq if authority is not None else None,
         "error": None,
     }
     for key, path in (("database", database), ("controls", controls)):
@@ -735,6 +747,14 @@ def _memory_probe(database: Path, controls: Path, *, owner: str, conversation: s
             continue
         facts[key + "_exists"] = True
         facts[key + "_is_file"] = stat.S_ISREG(info.st_mode)
+    if authority is not None:
+        try:
+            info = Path(authority).lstat()
+        except OSError:
+            pass
+        else:
+            facts["authority_exists"] = True
+            facts["authority_is_file"] = stat.S_ISREG(info.st_mode)
     if not (facts["database_is_file"] and facts["controls_is_file"]):
         return facts
     try:
@@ -759,10 +779,21 @@ def _memory_probe(database: Path, controls: Path, *, owner: str, conversation: s
         connection.close()
     try:
         _native_paths()
+        from memory_authority import MemoryDeletionAuthority
         from memory_control import MemoryControlLedger
 
-        projection = MemoryControlLedger(controls, database, owner=owner,
-                                         conversation=conversation).projection()
+        if authority is not None:
+            authority_state = MemoryDeletionAuthority(
+                authority, owner=owner, conversation=conversation,
+                minimum_seq=authority_min_seq).projection()
+            facts["authority_healthy"] = bool(authority_state.healthy)
+            facts["authority_operations"] = authority_state.operations
+            facts["authority_seq"] = authority_state.seq
+            facts["authority_reason"] = authority_state.reason
+        projection = MemoryControlLedger(
+            controls, database, owner=owner, conversation=conversation,
+            authority=str(authority) if authority is not None else "",
+            authority_min_seq=authority_min_seq).projection()
     except Exception as exc:
         facts["error"] = "GOVERNANCE_PROBE_FAILED: %s: %s" % (type(exc).__name__, exc)
         return facts
@@ -795,13 +826,16 @@ def check_memory(environment: Mapping[str, str], *, phone: Optional[Mapping[str,
     identities are reported (``owner`` / ``phone_subject``) and ``subject_matches_phone`` is always
     ``None`` = NOT_COMPARABLE.
 
-    Nothing is created, migrated or written; the two files are only ever opened ``mode=ro``.
+    Nothing is created, migrated or written; the files are only ever opened ``mode=ro``.
     ``probe`` exists so a test can simulate an unavailable probe without touching the real one.
     """
 
     names = memory_env_names()
     database, database_env = _first_bound(environment, names["database"])
     controls, controls_env = _first_bound(environment, names["controls"])
+    authority, authority_env = _first_bound(environment, names["authority"])
+    authority_min_seq, authority_min_seq_env = _first_bound(environment,
+                                                            names["authority_min_seq"])
     owner, owner_env = _first_bound(environment, names["owner"])
     owner = owner or MEMORY_DEFAULT_OWNER
     #: The phone's own ``subject`` is the **Supply workspace** identity; the Memory persona is a
@@ -822,6 +856,17 @@ def check_memory(environment: Mapping[str, str], *, phone: Optional[Mapping[str,
         "controls_database": None,
         "controls_env": None,
         "controls_defaulted": False,
+        "authority_database": authority,
+        "authority_env": authority_env,
+        "authority_configured": authority is not None,
+        "authority_exists": None,
+        "authority_is_file": None,
+        "authority_healthy": None,
+        "authority_operations": None,
+        "authority_seq": None,
+        "authority_reason": None,
+        "authority_min_seq": authority_min_seq,
+        "authority_min_seq_env": authority_min_seq_env,
         "owner": owner,
         "owner_env": owner_env,
         "owner_defaulted": owner_env is None,
@@ -882,13 +927,20 @@ def check_memory(environment: Mapping[str, str], *, phone: Optional[Mapping[str,
         conversation = str(life_conversation_id(owner))
     out["conversation"] = conversation
 
+    authority_path = Path(authority) if authority else None
+    try:
+        minimum_seq = int(authority_min_seq) if authority_min_seq else None
+    except ValueError:  # an unreadable handoff is "cannot confirm", never zero
+        minimum_seq = None
     try:
         if probe is not None:
             facts = dict(probe(Path(database), controls_path, owner=owner,
-                               conversation=conversation))
+                               conversation=conversation, authority=authority_path,
+                               authority_min_seq=minimum_seq))
         else:
             facts = _memory_probe(Path(database), controls_path, owner=owner,
-                                  conversation=conversation)
+                                  conversation=conversation, authority=authority_path,
+                                  authority_min_seq=minimum_seq)
     except Exception as exc:
         out["detail"] = ("the memory health probe did not answer (%s: %s); the binding is "
                          "recorded but its health is unverified" % (type(exc).__name__, exc))
@@ -904,6 +956,12 @@ def check_memory(environment: Mapping[str, str], *, phone: Optional[Mapping[str,
     out["life_outcomes"] = facts.get("life_outcomes")
     out["governance_healthy"] = facts.get("governance_healthy")
     out["controls"] = facts.get("controls")
+    out["authority_exists"] = facts.get("authority_exists")
+    out["authority_is_file"] = facts.get("authority_is_file")
+    out["authority_healthy"] = facts.get("authority_healthy")
+    out["authority_operations"] = facts.get("authority_operations")
+    out["authority_seq"] = facts.get("authority_seq")
+    out["authority_reason"] = facts.get("authority_reason")
     out["error"] = facts.get("error")
 
     def refused(reason: str, detail: str) -> dict[str, Any]:
@@ -938,6 +996,19 @@ def check_memory(environment: Mapping[str, str], *, phone: Optional[Mapping[str,
     if not facts.get("m0_table_present"):
         return refused("MEMORY_DB_SCHEMA_MISMATCH",
                        "the configured database has no evidence_events table, so it is not M0")
+    if authority is not None:
+        if not facts.get("authority_exists"):
+            return refused("MEMORY_AUTHORITY_DB_MISSING",
+                           "the configured deletion authority does not exist: %s" % (authority,))
+        if not facts.get("authority_is_file"):
+            return refused("MEMORY_AUTHORITY_DB_NOT_A_FILE",
+                           "the configured deletion authority is not a regular file: %s"
+                           % (authority,))
+        if facts.get("authority_healthy") is not True:
+            return refused(str(facts.get("authority_reason") or "MEMORY_AUTHORITY_UNAVAILABLE"),
+                           "the retained deletion authority cannot prove both its chain and that "
+                           "it is the handed-off current base, so nothing at all would be recalled "
+                           "from this Memory and a new deletion would be refused")
     if facts.get("governance_healthy") is not True:
         detail = ("the control ledger projection is unhealthy, so the runtime would recall "
                   "nothing at all from this Memory")
@@ -958,6 +1029,9 @@ MEMORY_DIRNAME = "memory"
 #: The pair ``run_resident.sh`` / ``run_resident_soak.sh`` already use under ``memory/``.
 MEMORY_EVIDENCE_FILENAME = "evidence.db"
 MEMORY_CONTROLS_FILENAME = "controls.db"
+#: The separately retained deletion authority has **no** filename default: it must be handed in
+#: from outside the instance business root (``enable_instance_memory(authority_path=...)``), so
+#: an instance backup/restore never carries it along.
 SCHEMA_ENABLE_INSTANCE_MEMORY = "phone.life.enable-instance-memory.v1"
 
 
@@ -971,6 +1045,14 @@ def _utc_stamp() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _path_within(path: Path, parent: Path) -> bool:
+    """``True`` when ``path`` is ``parent`` or below it (case-insensitive on Windows)."""
+
+    child = os.path.normcase(os.path.realpath(str(path)))
+    root = os.path.normcase(os.path.realpath(str(parent)))
+    return child == root or child.startswith(root + os.sep)
 
 
 def _backup_config(path: Path) -> Path:
@@ -1016,24 +1098,49 @@ def _memory_constructors() -> tuple[Callable[..., Any], Callable[..., Any], Call
     return EvidenceStore, MemoryControlLedger, life_conversation_id
 
 
+def _authority_constructor() -> Callable[..., Any]:
+    """The retained deletion authority's own class, imported only for an explicit write."""
+
+    _native_paths()
+    try:
+        from memory_authority import MemoryDeletionAuthority
+    except Exception as exc:
+        raise PhoneLifeError("MEMORY_AUTHORITY_UNAVAILABLE: %s: %s"
+                             % (type(exc).__name__, exc)) from exc
+    return MemoryDeletionAuthority
+
+
 def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
                            operation_key: Optional[str] = None, *,
+                           authority_path: Optional[Path | str] = None,
                            store_factory: Optional[Callable[..., Any]] = None,
                            ledger_factory: Optional[Callable[..., Any]] = None,
-                           conversation_fn: Optional[Callable[[str], str]] = None
+                           conversation_fn: Optional[Callable[[str], str]] = None,
+                           authority_factory: Optional[Callable[..., Any]] = None
                            ) -> dict[str, Any]:
     """Explicitly give **this** instance its own Memory: one M0 store plus a separate ledger.
 
-    只在这个函数被显式调用时写盘，而且只写三处：新建的 ``<install>/memory/evidence.db``、
-    独立的 ``memory/controls.db``、以及该实例 Life 环境里那三个 Memory 名字。配置先备份
-    （``instance.json-backup-<utc stamp>``）。run_id / 请求预算 / 历史一律不碰，也不启动任何服务。
+    只在这个函数被显式调用时写盘：新建的 ``<install>/memory/evidence.db``、独立的
+    ``memory/controls.db``、**调用者显式给出的业务根之外**的删除底账，以及该实例 Life 环境里
+    那几个 Memory 名字。配置先备份（``instance.json-backup-<utc stamp>``）。run_id / 请求预算 /
+    历史一律不碰，也不启动任何服务。
+
+    删除底账（``authority_path``）**没有默认值**：它必须由操作者放在该实例自己的
+    backup/restore 集之外（例如独立的保留目录或另一块受管盘），这样只恢复实例业务根时不会把
+    它一起覆盖。受信下限由正常删除流程自己维护：新建空库时在底账旁保留 ``<authority>.floor.json``
+    的 seq 0，之后每次 DELETE 成功都先推进该文件，操作者**不需要每次删除后手改数字**。可选的
+    显式下限 ``NYA02_MEMORY_AUTHORITY_MIN_SEQ`` 仍作为操作者交接值，生效下限取两者较大值；可用
+    ``python components/native/memory_authority.py --db <path> --owner <owner>
+    --conversation <conversation>`` 读取当前 ``seq`` / ``head_digest``。**同机换目录只脱离实例
+    备份域，不等于抵抗整机回滚**；没有受信下限、下限文件损坏/不可写、或副本低于下限，读取与
+    新删除都具名阻断。旧库缺可信下限时不会被初始化成 0 来洗掉未知历史。
 
     四条硬边界：
 
     * **幂等**：已经记录了显式绑定时不新建、不覆盖、不重建；只做一次只读健康检查后如实报告。
     * **不接管半套文件**：``memory/`` 下有文件却没记录绑定 → 具名拒绝，绝不"顺手"收编。
-    * **不重置 run/预算**：只写 ``NYA02_MEMORY_DB`` / ``NYA02_MEMORY_CONTROLS_DB`` /
-      ``NYA02_MEMORY_SUBJECT``（resident 真正读的那三个名字），其余字段原样保留。
+    * **不重置 run/预算**：只写那几个 Memory 名字（数据库、账本、底账、受信下限、owner），
+      其余字段原样保留。未显式启用的旧实例不会被自动纳管，也不迁移其底账位置。
     * **不启动服务**：``processes_started=0``、``service_started=False``；``restart_required``
       说明正在跑的 resident 需要由操作者自己重启才会用上新绑定。
 
@@ -1086,12 +1193,20 @@ def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
     environment = dict(nested.get("environment") or {})
     existing, existing_env = _first_bound(environment, names["database"])
     existing_controls, controls_env = _first_bound(environment, names["controls"])
+    existing_authority, authority_env = _first_bound(environment, names["authority"])
+    existing_authority_min_seq, authority_min_seq_env = _first_bound(
+        environment, names["authority_min_seq"])
     existing_owner, owner_env = _first_bound(environment, names["owner"])
     requested = str(owner or "").strip()
 
     # -- an already explicit binding: report, never overwrite, never rebuild ------------------
     if existing:
         bound_owner = existing_owner or MEMORY_DEFAULT_OWNER
+        try:
+            reused_min_seq = (int(existing_authority_min_seq)
+                              if existing_authority_min_seq else None)
+        except ValueError:  # reported as recorded; health will call currentness unproven
+            reused_min_seq = existing_authority_min_seq
         report.update({
             "owner": bound_owner,
             "reused": True,
@@ -1100,10 +1215,15 @@ def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
                 "owner": bound_owner,
                 "database": existing,
                 "controls_database": existing_controls or existing,
+                "authority_database": existing_authority,
+                "authority_min_seq": reused_min_seq,
                 "database_env": existing_env,
                 "controls_env": controls_env,
+                "authority_env": authority_env,
+                "authority_min_seq_env": authority_min_seq_env,
                 "owner_env": owner_env,
                 "controls_defaulted": existing_controls is None,
+                "authority_configured": existing_authority is not None,
                 "explicit": True,
             },
         })
@@ -1117,7 +1237,9 @@ def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
             "ok": str(state.get("status")) == READY,
             "health": {key: state.get(key) for key in
                        ("status", "reason", "recall_ready", "degraded", "blocking",
-                        "life_outcomes", "governance_healthy", "controls")},
+                        "life_outcomes", "governance_healthy", "controls",
+                        "authority_configured", "authority_healthy", "authority_min_seq",
+                        "authority_operations", "authority_reason")},
             "detail": ("an explicit Memory binding is already recorded for this instance; nothing "
                        "was created, overwritten or rebuilt — a healthy one is not rebuilt and an "
                        "unhealthy one is reported, not replaced"),
@@ -1132,7 +1254,10 @@ def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
     directory = memory_root(root_path, nested)
     evidence = directory / MEMORY_EVIDENCE_FILENAME
     controls = directory / MEMORY_CONTROLS_FILENAME
-    if evidence.exists() or controls.exists():
+    #: No default: the retained authority must live outside this instance's business root.
+    authority_file = Path(authority_path).expanduser() if authority_path is not None else None
+    if evidence.exists() or controls.exists() or (
+            authority_file is not None and authority_file.exists()):
         return refused("MEMORY_FILES_EXIST_UNBOUND",
                        "files already exist under %s but this instance records no Memory binding; "
                        "refusing to adopt or overwrite them" % (directory,))
@@ -1148,8 +1273,20 @@ def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
             store_factory = store_factory or genuine_store
             ledger_factory = ledger_factory or genuine_ledger
             conversation_fn = conversation_fn or genuine_conversation
+        if authority_factory is None:
+            authority_factory = _authority_constructor()
     except PhoneLifeError as exc:
         return refused("MEMORY_STORE_UNAVAILABLE", str(exc), status=UNAVAILABLE)
+    if authority_file is None:
+        return refused("MEMORY_AUTHORITY_PATH_REQUIRED",
+                       "the retained deletion authority has no default location: pass "
+                       "--authority-db pointing outside this instance's business root, so the "
+                       "instance's own backup/restore never overwrites the base ledger")
+    if _path_within(authority_file, root_path):
+        return refused("MEMORY_AUTHORITY_PATH_INSIDE_INSTANCE",
+                       "the retained deletion authority must live outside the instance business "
+                       "root (%s); a file inside it would be rolled back together with the "
+                       "instance's own data" % (root_path,))
     try:
         backup = _backup_config(instance_file)
     except (OSError, PhoneLifeError) as exc:
@@ -1161,23 +1298,31 @@ def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
         store_factory(evidence)
         ledger_factory(controls, evidence, owner=target_owner,
                        conversation=str(conversation_fn(target_owner))).initialize()
+        authority_factory(authority_file, owner=target_owner,
+                          conversation=str(conversation_fn(target_owner))).initialize()
     except Exception as exc:
-        report["written"] = [str(path) for path in (evidence, controls) if path.exists()]
+        report["written"] = [str(path) for path in (evidence, controls, authority_file)
+                             if path.exists()]
         return refused("MEMORY_CREATE_FAILED", "%s: %s" % (type(exc).__name__, exc),
                        status=UNAVAILABLE)
 
     updated = dict(environment)
     updated[names["database"][0]] = str(evidence)
     updated[names["controls"][0]] = str(controls)
+    updated[names["authority"][0]] = str(authority_file)
+    #: Only a genuinely new empty base gets the zero baseline (initialization also retains the
+    #: sibling floor file at 0).  Later DELETEs advance that floor themselves; the operator never
+    #: has to edit this number after a deletion.
+    updated[names["authority_min_seq"][0]] = "0"
     updated[names["owner"][0]] = target_owner
     payload = dict(nested)
     payload["environment"] = updated
     try:
         written_file = _write_instance_file(nested_path, payload)
     except OSError as exc:
-        report["written"] = [str(evidence), str(controls)]
+        report["written"] = [str(evidence), str(controls), str(authority_file)]
         return refused("CONFIG_WRITE_FAILED", "%s: %s" % (type(exc).__name__, exc))
-    report["written"] = [str(evidence), str(controls), str(written_file)]
+    report["written"] = [str(evidence), str(controls), str(authority_file), str(written_file)]
 
     state = check_memory(updated, phone=phone)
     report.update({
@@ -1190,15 +1335,21 @@ def enable_instance_memory(root: Path | str, owner: Optional[str] = None,
             "owner": target_owner,
             "database": str(evidence),
             "controls_database": str(controls),
+            "authority_database": str(authority_file),
+            "authority_min_seq": 0,
             "database_env": names["database"][0],
             "controls_env": names["controls"][0],
+            "authority_env": names["authority"][0],
+            "authority_min_seq_env": names["authority_min_seq"][0],
             "owner_env": names["owner"][0],
             "controls_defaulted": False,
+            "authority_configured": True,
             "explicit": True,
         },
         "health": {key: state.get(key) for key in
                    ("status", "reason", "recall_ready", "degraded", "blocking",
-                    "life_outcomes", "governance_healthy", "controls")},
+                    "life_outcomes", "governance_healthy", "controls",
+                    "authority_configured", "authority_healthy", "authority_operations")},
         "exit_code": EXIT_OK if str(state.get("status")) == READY else EXIT_BLOCKED,
     })
     if not report["ok"]:
