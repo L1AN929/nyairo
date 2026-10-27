@@ -1,7 +1,8 @@
 {
   "entries": {
     "cafe": {
-      "description": "工作日白天营业的咖啡店。",
+      "description": "工作日白天营业的咖啡店。柜台后面立着一块手写菜单牌；本街区没有接入饮品售卖，只能坐下或看看，不能点单。",
+      "menu_note": "菜单牌上写着：手冲咖啡、红茶。这里没有接入饮品售卖，店员不在，柜台不接单，不能点单。",
       "title": "街角咖啡店"
     },
     "home": {
@@ -16,8 +17,19 @@
       "description": "有长椅和树的街区公园。",
       "title": "小公园"
     },
+    "reading_material": {
+      "author": "陶渊明（东晋）",
+      "content": "晋太元中，武陵人捕鱼为业。缘溪行，忘路之远近。忽逢桃花林，夹岸数百步，中无杂树，芳草鲜美，落英缤纷。渔人甚异之。复前行，欲穷其林。",
+      "excerpt_note": "开篇节选，不是全文；东晋原作，公版；由 operator 提供，不是她的创作或选择。",
+      "license": "public-domain",
+      "provided_by": "operator",
+      "source": "https://zh.wikisource.org/zh-hans/%E6%A1%83%E8%8A%B1%E6%BA%90%E8%A8%98",
+      "title": "陶渊明《桃花源记》开篇",
+      "work": "桃花源记"
+    },
     "reading_point": {
-      "description": "可以坐下来读书的角落。",
+      "description": "书店里可以坐下来读一会儿的角落，有一张阅读桌和一排书架。书架上摊着一本公版书，可以在这里读一页。",
+      "shelf_note": "书架上摊着陶渊明《桃花源记》开篇的公版节选；可以在这里读一页，不需要买下它。",
       "title": "书店阅读角"
     },
     "street_corner": {

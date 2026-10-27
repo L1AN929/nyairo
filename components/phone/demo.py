@@ -1110,6 +1110,13 @@ def serve_instance(
     tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
     room_living: bool = False,
     world_intent_gate: Optional[str] = None,
+    #: Explicit compressed-day business clock (a ``demo_business_clock`` file).  The World
+    #: child and the phone's World/economy facades read the same file; ``None`` keeps the
+    #: production wall clock for both.  The file is read on every call, so an operator can
+    #: move the demo's logical moment; real safety/timeouts never use it.
+    business_clock: Optional[Path | str] = None,
+    clock_domain: Optional[str] = None,
+    clock_run_id: Optional[str] = None,
     stop_event: Optional[threading.Event] = None,
     announce: bool = True,
     supervisor: Optional[Any] = None,
@@ -1142,7 +1149,23 @@ def serve_instance(
                            generation=generation)
     world = _world_child(root_path, instance, tick_seconds=float(tick_seconds),
                          room_living=bool(room_living),
-                         world_intent_gate=world_intent_gate)
+                         world_intent_gate=world_intent_gate,
+                         business_clock=business_clock,
+                         clock_domain=clock_domain,
+                         clock_run_id=clock_run_id)
+    world_clock = None
+    if str(business_clock or "").strip():
+        life_scripts = str(REPO_ROOT / "components" / "life" / "scripts")
+        if life_scripts not in sys.path:
+            sys.path.insert(0, life_scripts)
+        import demo_business_clock as dbc
+
+        client = dbc.BusinessClockClient(
+            business_clock,
+            expected_domain=(str(clock_domain or "").strip() or None),
+            expected_run_id=(str(clock_run_id or "").strip() or None))
+        client.load()
+        world_clock = client.now
     world_home = Path(str(instance["world_home"]))
     children: list[ChildService] = [supply, world]
     server = None
@@ -1179,6 +1202,7 @@ def serve_instance(
         service = phone_service.PhoneService(
             live_instance,
             feature_overrides=ROOM_LIVING_FEATURES if room_living else None,
+            world_clock=world_clock,
         )
         csrf_token = secrets.token_hex(32)
         server = create_server(service, csrf_token=csrf_token, port=port,
@@ -1199,6 +1223,8 @@ def serve_instance(
             # effective ones; nothing here is written back into the instance's features).
             "room_living": bool(room_living),
             "world_intent_gate": world_intent_gate,
+            "business_clock": str(business_clock) if business_clock else None,
+            "clock_domain": str(clock_domain) if clock_domain else None,
         }
         if retired:
             announcement["retired_sockets"] = retired

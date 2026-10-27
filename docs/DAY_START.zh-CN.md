@@ -71,6 +71,31 @@ python3 scripts/nyairo_day.py import --root "$HOME/nyairo-day" --file ./演示�
 - `import`：把 UTF-8 文本导入成她的阅读材料，由真实 owner 建件并回读。**给材料不等于强迫她读**；服务正在运行时，新绑定下次 `start` 后生效。
 - 刚建好、还没跑过一天时，「今天」「安排」会明确返回 `CANONICAL_STATE_ABSENT`（读不到就说读不到，不假装成空白的一天）；「作品」与阅读材料读口正常。
 
+### 街区包自带的内容（营业时间、阅读材料、真实店面）
+
+`daily_neighborhood_v1` 的 `content.json` 自带一份公版阅读材料
+（陶渊明《桃花源记》开篇，东晋原作，operator 提供，不是 AI 生成，也不是全文）。
+用 `--world-package daily_neighborhood_v1` 新建实例时，`init` 会通过真实 Supply owner
+把它建成阅读 artifact 并绑定；包内没有 `reading_material` 时不预置材料。给材料不等于强迫她读。
+
+- 咖啡店按包里的营业规则开门/关门；柜台菜单牌是店里的真实内容，但这个街区包
+  **没有接入饮品售卖**，不能点单，也没有“喝过就舒服”的奖励。
+- 书店阅读角按 10–20 点营业；营业时可以通过手机阅读工作台真实读取那份公版正文的一页，
+  保存停点，`understanding` 始终是 `UNKNOWN`。阅读不需要买下书，也不是完整书店买卖。
+- 实体家居店仍走既有经济 owner 的柜台购买；经济目录不是库存，库存未建模。
+- 世界包只列了静态 `weather_candidates`，没有按规则演进的天气源；本入口不把
+  `configured_v1` 的 `clear` 默认当成已观测天气。
+
+想机械复现“同一街区早晨 OPEN / 晚间 CLOSED，营业时读一页真实正文，闭店购买被拒，
+同根重开保留”的零产品模型演示：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/neighborhood_time_shops_demo.py
+```
+
+演示用显式的业务时钟文件机械模拟 10:30 和 20:30 JST（不是真实等待），
+决定是脚本替身，不是模型选择；它只调用仓库里真实的 World/经济/Supply owner。
+
 ## 她的日记
 
 她想写的时候，会通过 `chiyo_phone` 自己写一条：`diary_write`（正文 + 一个 `operation_key`），

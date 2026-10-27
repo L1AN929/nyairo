@@ -248,13 +248,13 @@ class DailyNeighborhoodTest(unittest.TestCase):
         cases = [
             ((2026, 10, 16, 7, 59), "CLOSED", "OUTSIDE_OPEN_HOURS", []),
             ((2026, 10, 16, 8, 0), "OPEN", "WITHIN_OPEN_HOURS",
-             ["SIT_AT_CAFE", "BUY_DRINK", "LOOK_AROUND"]),
+             ["SIT_AT_CAFE", "LOOK_AT_MENU", "LOOK_AROUND"]),
             ((2026, 10, 16, 17, 59), "OPEN", "WITHIN_OPEN_HOURS",
-             ["SIT_AT_CAFE", "BUY_DRINK", "LOOK_AROUND"]),
+             ["SIT_AT_CAFE", "LOOK_AT_MENU", "LOOK_AROUND"]),
             ((2026, 10, 16, 18, 0), "CLOSED", "OUTSIDE_OPEN_HOURS", []),
             ((2026, 10, 17, 13, 0), "CLOSED", "WEEKEND_CLOSED", []),
             ((2026, 10, 19, 9, 0), "OPEN", "WITHIN_OPEN_HOURS",
-             ["SIT_AT_CAFE", "BUY_DRINK", "LOOK_AROUND"]),
+             ["SIT_AT_CAFE", "LOOK_AT_MENU", "LOOK_AROUND"]),
         ]
         for (year, month, day, hour, minute), status, reason, affordances in cases:
             with self.subTest(at=f"{year}-{month}-{day} {hour}:{minute:02d}"):

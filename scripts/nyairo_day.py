@@ -343,6 +343,47 @@ def _model_configured(environment: Optional[Mapping[str, str]] = None) -> dict[s
         return {"configured": False, "detail": type(exc).__name__}
 
 
+def _package_reading_material(world_package: Optional[str]) -> dict[str, Any]:
+    """The selected package's own public reading material, if it declares one.
+
+    The world package is the content source: ``content.json`` may carry a
+    ``reading_material`` entry (title/author/source/content).  A new root gets
+    that text as a real Supply artifact through the existing ``prepare_demo``
+    path.  Nothing is fetched from the network and no material is invented here;
+    a package without the entry keeps the previous behaviour (no material).
+    """
+
+    empty = {"title": "", "content": None, "source": None}
+    if not world_package:
+        return empty
+    from components.phone import demo
+
+    try:
+        package_dir = demo.resolve_world_package(world_package)
+        document = json.loads((Path(package_dir) / "content.json").read_text(
+            encoding="utf-8"))
+    except Exception:
+        return empty
+    if not isinstance(document, Mapping):
+        return empty
+    entries = document.get("entries")
+    entry = entries.get("reading_material") if isinstance(entries, Mapping) else None
+    if not isinstance(entry, Mapping):
+        return empty
+    title = str(entry.get("title") or "").strip()
+    content = entry.get("content")
+    if not title or not isinstance(content, str) or not content.strip():
+        return empty
+    return {
+        "title": title[:200],
+        "content": content,
+        "source": entry.get("source") or None,
+        "work": entry.get("work") or None,
+        "author": entry.get("author") or None,
+        "excerpt_note": entry.get("excerpt_note") or None,
+    }
+
+
 def _is_instance(root: Path) -> bool:
     from components.phone import service as phone_service
 
@@ -400,14 +441,17 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         # demo.prepare_demo 只接受“不存在”的新根；空目录也拒绝，避免悄悄占用别人的目录。
         raise RuntimeError("ROOT_EXISTS")
 
+    reading = _package_reading_material(world_package)
     prepared = demo.prepare_demo(
         root, with_world=True,
-        # 不预置合成阅读材料、不预置占位作品：她的第一份材料和第一件作品由她自己产生，
-        # 或者由操作者用 import 显式给一份（给材料不等于强迫她读）。
-        reading_title="", reading_content=None, seed_work_artifact=False,
+        # 阅读材料只来自所选世界包自己的 content.json；没有声明就不预置。
+        # 不预置占位作品：她的第一件作品由她自己产生，或由操作者 import 显式给。
+        reading_title=reading["title"], reading_content=reading["content"],
+        seed_work_artifact=False,
         run_id=run_id,
         world_package=world_package,
         lived_needs=lived_needs)
+    prepared["package_reading_material"] = reading
     package_identity = dict(prepared.get("world_package") or {})
     body_dir = Path(str(prepared["world_home"])) / "data" / "body"
     lived_report = None
@@ -453,6 +497,10 @@ def _prepare_text(report: Mapping[str, Any]) -> str:
                                       package.get("world_id")))
     else:
         lines.append("街区：入口生成的默认世界（没有显式选包）")
+    reading = dict((report.get("prepared") or {}).get("package_reading_material") or {})
+    if reading.get("title"):
+        lines.append("阅读材料：%s（来自世界包内容，公版/操作者提供；给材料不等于强迫她读）"
+                     % reading.get("title"))
     needs = dict(config.get("lived_needs") or {})
     if needs.get("enabled"):
         lines.append("虚拟身体：已启用（饿 %.2f / 渴 %.2f / 如厕 %.2f，0 表示不渴不饿）"

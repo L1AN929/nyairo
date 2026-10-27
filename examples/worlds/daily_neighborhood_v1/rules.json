@@ -7,8 +7,8 @@
           "description": "在店里坐一会儿"
         },
         {
-          "affordance_id": "BUY_DRINK",
-          "description": "在柜台点一杯饮品（消费由饮食 owner 负责）"
+          "affordance_id": "LOOK_AT_MENU",
+          "description": "看柜台上手写的菜单牌（这里没有接入饮品售卖，不能点单）"
         },
         {
           "affordance_id": "LOOK_AROUND",
@@ -76,11 +76,11 @@
       "affordances": [
         {
           "affordance_id": "BROWSE_BOOKS",
-          "description": "在书架前翻一翻"
+          "description": "在书架前看看摊开的公版书"
         },
         {
           "affordance_id": "READ_HERE",
-          "description": "在阅读桌边读一会儿（不需要产出）"
+          "description": "在阅读桌边读一页自己的阅读材料（不需要买下它）"
         }
       ],
       "close_hour": 20,

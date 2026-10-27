@@ -468,6 +468,11 @@ class PhoneService:
         environment: Optional[Mapping[str, str]] = None,
         feature_overrides: Optional[Mapping[str, str]] = None,
         clock: Optional[Any] = None,
+        #: Explicit business clock for the World/economy/reading facades (compressed-day
+        #: demos).  ``None`` keeps each facade's own wall-clock default; when given it must
+        #: return a timezone-aware ``datetime``.  This is the same moment the World child was
+        #: started with, so the phone and the owner cannot disagree about opening hours.
+        world_clock: Optional[Any] = None,
         shopping: Optional[Any] = None,
         world: Optional[Any] = None,
         #: Injected reading workbench (B's ``ReadingWorkspaceService``); ``None`` = build it here
@@ -508,6 +513,7 @@ class PhoneService:
         base.update(features)
         self.environment = base
         self._clock = clock or (lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        self._world_clock = world_clock
         self._shopping = shopping
         self._world = world
         self._reading = reading
@@ -936,12 +942,16 @@ class PhoneService:
         factory = getattr(module, "PhoneReading", None)
         if factory is None:
             raise PhoneUnavailable("LIFE_PHONE_READING_UNAVAILABLE", "NO_FACADE")
+        reading_clock = None
+        if self._world_clock is not None:
+            reading_clock = lambda: self._world_clock().isoformat()
         self._reading = factory(
             self._port(),
             reading_artifact_id=self.reading_artifact_id,
             private_items_artifact_id=self.private_items_artifact_id,
             workspace_id=self.workspace_id,
             grant_id=self.artifact_grant_id,
+            clock=reading_clock,
         )
         return self._reading
 
@@ -1030,6 +1040,7 @@ class PhoneService:
             local_owner_uid=os.getuid(),
             subject=self.subject,
             gateway_socket=self.world_body_socket,
+            clock=self._world_clock,
         )
         return self._shopping
 
@@ -1107,6 +1118,7 @@ class PhoneService:
             local_owner_uid=os.getuid(),
             subject=self.subject,
             gateway_socket=self.world_body_socket,
+            clock=self._world_clock,
         )
         return self._world
 

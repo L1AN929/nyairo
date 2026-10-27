@@ -1,14 +1,14 @@
 {
-  "files": {
-    "ambient.json": "f520112c71f537fb11f6c8a8b7ec66e01f4991d1195c1993983c392376e64fd5",
-    "content.json": "1584c2c7dd86f0ee0744625e63bcca92cdd5f7d1d54f28f2631a8620ee130c72",
-    "npcs.json": "fe099c1ed6c3975288d4f058bc90328aeb4ba979bde056026f08c70a6d13de80",
-    "objects.json": "99cabe0d377cc7139924ebb1807d1d243b5e4ef541365884fa9c3a73e866833f",
-    "rules.json": "035704f4dafb6883842796b1aafcef1c62d03210325b2571720760a81e987ef6",
-    "scene.json": "b3b4b666f73219c7536c3312d30940cc5d4174238346540cf5beda3a1837ec50",
-    "topology.json": "8dcefea30ecacf9152a8318f384de978855378fe460d04d0f20d98fc5759668f",
-    "world.json": "a881bbb1d77e0cb84b1cd075b0a71ffc0cf50babd8592457b38b82e810adb0d5"
-  },
-  "package_schema": "worldgen.package.v1",
-  "schema_version": "worldgen.manifest.v1"
+ "files": {
+  "ambient.json": "f520112c71f537fb11f6c8a8b7ec66e01f4991d1195c1993983c392376e64fd5",
+  "content.json": "c7c90d4ce41a7a889896408c46c477942b958fca5111997e3a62bfb740b37487",
+  "npcs.json": "fe099c1ed6c3975288d4f058bc90328aeb4ba979bde056026f08c70a6d13de80",
+  "objects.json": "99cabe0d377cc7139924ebb1807d1d243b5e4ef541365884fa9c3a73e866833f",
+  "rules.json": "e3f0f688dcf25daa372410495997b8a38aa496faa381dc74aa5c0ebe3d393174",
+  "scene.json": "b3b4b666f73219c7536c3312d30940cc5d4174238346540cf5beda3a1837ec50",
+  "topology.json": "8dcefea30ecacf9152a8318f384de978855378fe460d04d0f20d98fc5759668f",
+  "world.json": "a881bbb1d77e0cb84b1cd075b0a71ffc0cf50babd8592457b38b82e810adb0d5"
+ },
+ "package_schema": "worldgen.package.v1",
+ "schema_version": "worldgen.manifest.v1"
 }
