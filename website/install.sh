@@ -3,7 +3,7 @@
 set -euo pipefail
 
 main() {
-  local version=v0.5.0
+  local version=v0.5.1
   local archive_sha
   local prefix="${HOME:?}/.local/share/nyairo" profile="$HOME/.nyairo" owner=local-owner
   local setup=1 launch=1
