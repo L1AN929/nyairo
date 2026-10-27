@@ -1,33 +1,24 @@
 {
  "schema": "agent.task-continuity.v1",
- "revision": 401,
- "updated_at": "2026-10-26T21:14:41+08:00",
- "goal": "Unified launch delivered; local0.5 release awaits direct approval",
- "phase": "LOCAL_RELEASE_APPROVAL_PENDING",
- "stop_point": "simple-launch exited0 with start/status/import/stop/reopen result. No live model run; fresh today reads503 honestly. Release script commit-only; new features dirty under HEAD17f69e2. No commit/version/package authorization yet.",
+ "revision": 421,
+ "updated_at": "2026-10-27T11:13:00+08:00",
+ "goal": "Normal new-instance entry and real phone-tool action usable",
+ "phase": "LIVING_ENTRY_DELIVERED",
+ "stop_point": "Parent living_entry_demo b81l0831l exit0: actual init/start, phone_handler world/body/wallet, HTTP POSE seated applied, stop/restart same root retains package/profile/pose/wallet, final_stop0; no product calls. Synthetic initial thirst and scripted choice, no natural model claim. Not in original0.5 archive.",
  "next_actions": [
-  "Wait direct approval for0.5.0 local version update+source commit+package; no tag/push/deploy/external send."
+  "Preserve delivered tree and wait next authorized outline feature; no real models or camera repeats, no old green reruns."
  ],
- "next_command": "NONE; release approval pending",
- "do_not_repeat": [
-  "no old roots/no forced activity/no v3/no rerun/no multistep BODY"
- ],
+ "next_command": "NONE; entry feature delivered, no automatic real day or package",
  "boundaries": [
-  "parent dispatch/acceptance only; unique worker per write set",
-  "no secrets/private prose/prompt output; no commit/push/deploy/delete",
-  "no old roots/default/config/Memory guard/usage changes; no outbound; product only approved new-root day cap20"
+  "parent dispatch/acceptance only, one writer per write set",
+  "no secrets/private prose; no delete/commit/push/package/deploy/outbound",
+  "no old roots or user service/default permission changes; all real product calls paused; no cap20 day authorization"
  ],
  "repository": {
   "path": "D:/nyairo-rc1-body-backend",
   "branch": "work/rc1-phone-world-body",
-  "head": "17f69e22ec3959c20de8228aebbf3766494cc8a8",
-  "dirty": "Preserve relay original phone server23/service254 and test_phone_today; new read increment only; all other dirty retained",
-  "local_commits": [
-   "17f69e22ec3959c20de8228aebbf3766494cc8a8",
-   "ac8e7d578790e97021e118b9e4ee0b405f5b305d",
-   "493fdf74c28971f0969f5b29cabd5974e5812f11",
-   "3091617ac3778227a776b3ac0a5930c40c4d828a"
-  ],
+  "head": "37f99310080b9a991588bbdda5435b074557aef2",
+  "dirty": "Uncommitted diary/camera/body/world/normal-entry changes; retained memsearch/artifacts, original0.5 package excludes increments",
   "push_status": "relay reports GitHub main fast-forward1057bad->17f69e2 pushed; parent did not access remote",
   "remote_work_branch": "relay reports c8262ad; do not touch"
  },
@@ -38,11 +29,11 @@
    "old_historical": 14,
    "b_reserved": 7,
    "shared_reserved": 94,
-   "remaining": 206,
+   "remaining": 205,
    "no_refund": true,
    "c_reserved": 5,
    "d_reserved": 6,
-   "snapshot": "m final9+historical85",
+   "snapshot": "94 confirmed reservations +1 pending unknown hold; remaining205 conservatively, raw camera ledger0; no refund",
    "e_reserved": 11,
    "f_reserved": 12,
    "g_reserved": 1,
@@ -51,7 +42,9 @@
    "j_reserved": 4,
    "k_reserved": 5,
    "l_reserved": 15,
-   "m_reserved": 9
+   "m_reserved": 9,
+   "pending_unknown_attempts": 1,
+   "conservative_occupied": 95
   },
   "instances": "all roots preserved/stopped; no old root access or rerun",
   "unclosed": "G1未闭合/Memory V-C恢复FAIL/understanding UNKNOWN/24h未做，保留"
@@ -66,15 +59,14 @@
    "sha256": "77945ceb49a03af4bd0e6f85303a128f0a4c4fb7882b77e4262d1ba5dff7898a"
   }
  ],
- "open_edit": "none",
  "delegated_approval": {
-  "source": "direct user2026-10-26",
-  "expires_at": "2026-10-27T01:00:00+08:00",
+  "source": "direct user20261027 authorization, outline over relay implementation",
+  "expires_at": "2026-10-27T17:00:00+08:00",
   "relay_session": "local_34510d4b-4e13-40e6-a17f-6e6636f3b128",
   "scope": "design-v2 chapter18 continuing scope; designated relay accepted within same tools and explicit prohibitions",
-  "exceptions": "new contracts/product rules/outbound/Memory/defaults/old roots need direct approval; one product day approved",
+  "exceptions": "no delete/over-budget/outbound/old-root/default safety changes; no cap20 day; real calls paused",
   "invariants": "no permission escalation/no forced behaviour/no rerun",
-  "state": "direct user renewed until01:00; no new product run or safety exceptions"
+  "state": "valid today; direct user decides scope, worker technical details follow v2"
  },
  "timeout_policy": {
   "ordinary_seconds": 3600,
@@ -82,106 +74,53 @@
   "max_turns": 300
  },
  "current_authorization": {
-  "source": "direct user explicit VC approval",
-  "scope": "new independent control ledger, authority-first, read blocking when unavailable/freshness unproven; new managed instances only; no real model",
-  "expires_at": "2026-10-27T01:00:00+08:00",
+  "source": "direct user20261027 I authorize, mainly follow outline",
+  "scope": "Chinese camera; then body hunger/thirst/fatigue/elimination per v2 noncompulsory; optional real camera judgment <=3 shared requests",
+  "expires_at": "2026-10-27T17:00:00+08:00",
   "no_product_calls": true,
   "no_external_sends": true,
   "no_usage_store": true,
   "no_memory_guard_change": false,
-  "state": "VC offline implementation approved"
+  "state": "entry delivered, valid17:00 outline scope, all real product calls paused"
  },
- "history_index": {
-  "source": "NOW374; reports375-380 A6/B2 accepted, B history unknown; no reruns",
-  "anchors": "Old anchor STOP retained; assembly now includes approved own-day wiring; no reset/refresh",
-  "budget": "historical85 plus m9 equals94/300"
+ "body_build": {
+  "task": ".agents/worker-runs/20261027-body-lived-needs-task.md",
+  "status": "accepted_optional_mechanism",
+  "basis": "v2 S02 and original7714-7722, direct user optional body direction; not relay forced schedule",
+  "parent": "b9clilfl3 exit0/DEMO_OK, injected downtime36000 skipped",
+  "finish_task": ".agents/worker-runs/20261027-body-lived-needs-finish-task.md",
+  "limits": "scripted Decision/initial profile; no natural adoption/G1/24h, extra21 reds baseline not parent proved"
  },
- "live_day": {
-  "status": "completed_once_parent_readonly_closed",
-  "result": "docs/engineering/v05-fastday-m-20261026-result.md",
-  "evidence": ".agents/worker-runs/20261026-fastday-m-parent-evidence.json",
-  "budget": "m9 plus historical85=94/300; no refund/restart",
-  "limits": "No outing/next-day/G1/V-C/24h; leaseUNKNOWN; two settlement failures; safe metadata only"
+ "autonomous_camera": {
+  "task": ".agents/worker-runs/20261027-autonomous-camera-once-task.md",
+  "status": "CLOSED_FAILED_OR_UNVERIFIED",
+  "budget_baseline": 94,
+  "max_new_requests": 3,
+  "no_force": true,
+  "result": ".agents/worker-runs/20261027-autonomous-camera-run-result.json",
+  "api_calls_reported": 1,
+  "ledger_reserved": 0,
+  "pending_hold": 1,
+  "services": "both previews stopped",
+  "rerun": "forbidden",
+  "close_result": ".agents/worker-runs/20261027-autonomous-camera-result.md",
+  "parent_offline": "4 tests0.002s OK, helpers/attempt guard only; no live repaired transport proof",
+  "cause": "harness attempts0 bypassed retry body, outer counter still1; no transport evidence",
+  "failure_history": "close worker maxturn20 exit1; landed artifacts retained, not full worker success"
  },
- "v05_due_cross": {
-  "status": "accepted_bounded",
-  "task": ".agents/worker-runs/20261026-v05-due-parked-target-task.md",
-  "A": "tests.test_v05_due_parked_target",
-  "B": "scripts/v05_due_parked_target_smoke.py",
-  "parent": "A6 22.523s/B35exit0",
-  "evidence": ".agents/worker-runs/20261026-v05-due-parked-target-parent-final.md"
+ "world_outing": {
+  "task": ".agents/worker-runs/20261027-world-outing-task.md",
+  "status": "accepted_owner_facade_chain",
+  "model_requests": 0,
+  "result": ".agents/worker-runs/20261027-world-outing-result.md",
+  "parent": "bctkcpygi exit0, wallet9300/placement living retained",
+  "limits": "scripted/injectedclock/virtual wallet, no phone_handler/natural/G1/24h; extra reds baseline not parent verified"
  },
- "v05_restore_options": {
-  "status": "bounded recovery delivered, normal DELETE auto advances retained floor",
-  "task": ".agents/worker-runs/20261026-vc-recovery-build-task.md",
-  "demo": "scripts/vc_recovery_demo.py",
-  "limits": "authority and floor independently retained outside instance; joint rollback excluded; old roots untouched; not global VC guarantee",
-  "direct_task": ".agents/worker-runs/20261026-vc-direct-task.md",
-  "finish_task": ".agents/worker-runs/20261026-vc-currentness-task.md"
- },
- "v05_low_budget": {
-  "status": "accepted_bounded_offline",
-  "parent": "A1 18.801s/B40 exit0",
-  "evidence": ".agents/worker-runs/20261026-v05-low-budget-final-parent-result.md",
-  "limits": "private UTC patch not real day; no rerun"
- },
- "commit_plan": {
-  "status": "peer committed locally; later reported main push",
-  "document": "docs/engineering/v05-commit-plan-20261026.md",
-  "limits": "13 ignored-evidence links unresolved; no parent git write"
- },
- "parallel_next": {
-  "A_status": "accepted_A6_B2",
-  "B_status": "INCONCLUSIVE_HISTORY",
-  "external_scope": "relay phone original5tests handed over, preserve code"
- },
- "evidence": [
-  {
-   "path": ".agents/worker-runs/20261026-own-day-final-parent-result.md"
-  },
-  {
-   "path": ".agents/worker-runs/20261026-own-day-final-parent-a.log"
-  },
-  {
-   "path": ".agents/worker-runs/20261026-own-day-final-parent-b.log"
-  }
- ],
- "resume_issue": "Missing evidence corrected380; old anchors STOP retained, never reset/refresh.",
- "today_priority": {
-  "status": "historical format STOP resolved by explicit approval; own-day accepted387"
- },
- "own_day_build": {
-  "task": ".agents/worker-runs/20261026-own-day-build-task.md",
-  "A": "tests.test_v05_own_day",
-  "B": "scripts/v05_own_day_smoke.py",
-  "status": "accepted_bounded_offline",
-  "direct_task": ".agents/worker-runs/20261026-own-day-direct-task.md",
-  "failure": ".agents/worker-runs/20261026-163329-own-day-build.log",
-  "finish_task": ".agents/worker-runs/20261026-own-day-finish-task.md",
-  "parent": "final A58 11.248s/B15 exit0",
-  "result": ".agents/worker-runs/20261026-own-day-final-parent-result.md"
- },
- "phone_read": {
-  "task": ".agents/worker-runs/20261026-phone-own-day-read-task.md",
-  "A": "tests.test_phone_today tests.test_phone_own_day_read",
-  "B": "scripts/phone_own_day_read_smoke.py",
-  "status": "accepted_actual_tool_calls",
-  "actions": [
-   "today",
-   "today_arrangements"
-  ],
-  "limits": "Private artifacts permission retained; no resident/live model/crash claim"
- },
- "same_work": {
-  "task": ".agents/worker-runs/20261026-same-work-life-task.md",
-  "demo": "scripts/same_work_life_demo.py",
-  "status": "accepted_actual_demo",
-  "result": "same work v1->v4,2results/1method,local delivery1,no external send"
- },
- "simple_launch": {
-  "task": ".agents/worker-runs/20261026-simple-launch-task.md",
-  "status": "delivered_zero_model_flow",
-  "no_product_calls": true,
-  "result": ".agents/worker-runs/20261026-simple-launch-result.md"
+ "entry_build": {
+  "task": ".agents/worker-runs/20261027-living-entry-task.md",
+  "status": "accepted_actual_normal_entry_phone_handler",
+  "result": ".agents/worker-runs/20261027-living-entry-result.md",
+  "parent": "b81l0831l exit0, init/start/stop/restart/final_stop0",
+  "limits": "scripted pose and synthetic thirst .72, no real cognition; prior socket red not parent baseline verified, no full suite claim"
  }
 }
