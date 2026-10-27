@@ -94,6 +94,9 @@ VERBS = (
     "REST",
     "ARRANGE",
     "TOGGLE_FIXTURE",
+    # Explicit virtual lived-needs facility use; the gateway only exposes it for
+    # an instance with a lived-needs profile, and the declaration still decides.
+    "TOILET",
 )
 
 #: Per-verb exact parameter names.  Anything else is refused, so a client cannot
@@ -108,6 +111,7 @@ PARAM_SPEC: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "REST": (("state",), ("mode",)),
     "ARRANGE": (("object_id", "target"), ()),
     "TOGGLE_FIXTURE": (("object_id", "state"), ()),
+    "TOILET": (("facility_id",), ()),
 }
 
 #: Anything that looks like identity, permission or a body value.
@@ -242,8 +246,12 @@ class PhoneWorld:
         local_owner_uid: Any,
         subject: str = "chiyo",
         gateway_socket: Any = None,
+        #: Explicit business clock (compressed-day demo).  ``None`` keeps wall time;
+        #: every owner answer still comes from the service/gateway, never from here.
+        clock: Any = None,
     ):
         self.environment: dict[str, str] = dict(environment or {})
+        self._clock = clock
         self._auth_error: Optional[str] = None
         try:
             raw_home = Path(str(hermes_home)).expanduser()
@@ -302,6 +310,8 @@ class PhoneWorld:
     # -- owner reads (all zero-write) -------------------------------------
 
     def _now(self) -> datetime:
+        if self._clock is not None:
+            return self._clock()
         return datetime.now(timezone.utc)
 
     def _world(self):
@@ -1210,15 +1220,19 @@ class PhoneWorld:
                     "bands_only": True,
                     "raw_values_exposed": False,
                     "rest_evidence": None,
+                    "needs": None,
                 }
             )
             return block
 
         recovery = None
         exposed: list[dict[str, Any]] = []
+        needs = None
         if available_signals:
             payload = signals["result"]
             recovery = payload.get("recovery")
+            raw_needs = payload.get("needs")
+            needs = (dict(raw_needs) if isinstance(raw_needs, Mapping) else None)
             for signal in (payload.get("signals") or [])[:MAX_SIGNALS]:
                 if not isinstance(signal, Mapping):
                     continue
@@ -1248,7 +1262,8 @@ class PhoneWorld:
                 "bands_only": True,
                 "raw_values_exposed": False,
                 "rest_evidence": self._rest_evidence(live, location),
-                "note": "pose 是 World 的测量；recovery/bands 是 Body 的投影；这里没有裸浮点",
+                "needs": needs,
+                "note": "pose 是 World 的测量；recovery/bands/needs 是 Body 的投影；这里没有裸浮点",
             }
         )
         return block

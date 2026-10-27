@@ -24,6 +24,11 @@
       "from": "street_corner",
       "to": "cafe",
       "walk_seconds": 120
+    },
+    {
+      "from": "street_front",
+      "to": "home_goods_store",
+      "walk_seconds": 150
     }
   ],
   "locations": [
@@ -62,7 +67,8 @@
       "reachable": [
         "home",
         "street_corner",
-        "reading_point"
+        "reading_point",
+        "home_goods_store"
       ],
       "rooms": [],
       "zone_id": "residential"
@@ -141,6 +147,28 @@
           "description": "一张阅读桌和一排书架，坐着读不用产出任何东西。",
           "name": "阅读区",
           "room_id": "reading_room"
+        }
+      ],
+      "zone_id": "shops"
+    },
+    {
+      "area_id": "main",
+      "description": "街区里的一间小家居店，靠墙的货架上摆着坐垫、台灯和小件家具。",
+      "kind": "store",
+      "location_id": "home_goods_store",
+      "map": {
+        "x": 20,
+        "y": 20
+      },
+      "name": "街区家居店",
+      "reachable": [
+        "street_front"
+      ],
+      "rooms": [
+        {
+          "description": "一排货架和一张收银柜台，白天开门。",
+          "name": "店内",
+          "room_id": "main"
         }
       ],
       "zone_id": "shops"

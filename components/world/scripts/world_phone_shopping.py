@@ -47,6 +47,7 @@ import os
 import socket
 import sys
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -330,8 +331,12 @@ class PhoneShopping:
         local_owner_uid: Any,
         subject: str = "chiyo",
         gateway_socket: Any = None,
+        #: Explicit business clock (the compressed-day demo's one moment).  ``None``
+        #: keeps the production wall clock; the owner still re-reads every fact.
+        clock: Any = None,
     ):
         self.environment: dict[str, str] = dict(environment or {})
+        self._clock = clock
         self._auth_error: Optional[str] = None
         try:
             raw_home = Path(str(hermes_home)).expanduser()
@@ -386,6 +391,13 @@ class PhoneShopping:
         if self._auth_error is None:
             return None
         return _fail(STATUS_REJECTED, self._auth_error)
+
+    def _now(self) -> datetime:
+        """The one instant this facade reads the owner at."""
+
+        if self._clock is not None:
+            return self._clock()
+        return datetime.now(timezone.utc)
 
     # -- reads ------------------------------------------------------------
 
@@ -473,7 +485,8 @@ class PhoneShopping:
             return blocked
         try:
             projection = economy.store_shop_projection(
-                hermes_home=self.hermes_home, environment=self.environment
+                hermes_home=self.hermes_home, environment=self.environment,
+                now=self._now(),
             )
         except economy.PropertyEconomyError:
             return _fail(STATUS_UNAVAILABLE, "ECONOMY_STATE_ERROR")
@@ -568,6 +581,7 @@ class PhoneShopping:
                 local_owner=context,
                 hermes_home=self.hermes_home,
                 environment=self.environment,
+                now=self._now(),
             )
         except economy.PropertyEconomyError:
             return _fail(STATUS_UNAVAILABLE, "ECONOMY_STATE_ERROR")

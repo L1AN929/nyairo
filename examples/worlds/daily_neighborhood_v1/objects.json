@@ -83,6 +83,27 @@
       "name": "书架",
       "note": "靠墙的一排书架。",
       "object_id": "shelf_reading"
+    },
+    {
+      "kind": "plant",
+      "location_id": "park",
+      "name": "花圃",
+      "note": "步道边的一小片花圃，开着几丛秋菊；只能看，不能摘。",
+      "object_id": "flowerbed_park"
+    },
+    {
+      "kind": "cabinet",
+      "location_id": "home_goods_store",
+      "name": "货架",
+      "note": "货架上摆着坐垫、台灯和小书架，价格写在标签上。",
+      "object_id": "home_goods_store_shelf"
+    },
+    {
+      "kind": "table",
+      "location_id": "home_goods_store",
+      "name": "收银柜台",
+      "note": "柜台上有收银的小盒子。",
+      "object_id": "home_goods_store_counter"
     }
   ],
   "schema_version": "worldgen.objects.v1"

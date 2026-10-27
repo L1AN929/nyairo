@@ -1,12 +1,12 @@
 {
   "files": {
     "ambient.json": "f520112c71f537fb11f6c8a8b7ec66e01f4991d1195c1993983c392376e64fd5",
-    "content.json": "37e104aad245734424b9ab64da85fd5e9568a1e3e280441994963be259236c16",
+    "content.json": "1584c2c7dd86f0ee0744625e63bcca92cdd5f7d1d54f28f2631a8620ee130c72",
     "npcs.json": "fe099c1ed6c3975288d4f058bc90328aeb4ba979bde056026f08c70a6d13de80",
-    "objects.json": "ef7474c571023c67915fdb04d851e41bd82694235c57d9b14860f9e3218f111d",
-    "rules.json": "e5a02d3ea1504a23e9a0ce45a73eec8e26d189e12c2c1e9af6e0ced856b29b61",
-    "scene.json": "769bb197d176612bcdfc03cb6c634757dda7af656efc6140fae919da1689568c",
-    "topology.json": "18b287ed7bc3564c92b49a130cff739e09ebade4ac76b4c898a82696455088d6",
+    "objects.json": "99cabe0d377cc7139924ebb1807d1d243b5e4ef541365884fa9c3a73e866833f",
+    "rules.json": "035704f4dafb6883842796b1aafcef1c62d03210325b2571720760a81e987ef6",
+    "scene.json": "b3b4b666f73219c7536c3312d30940cc5d4174238346540cf5beda3a1837ec50",
+    "topology.json": "8dcefea30ecacf9152a8318f384de978855378fe460d04d0f20d98fc5759668f",
     "world.json": "a881bbb1d77e0cb84b1cd075b0a71ffc0cf50babd8592457b38b82e810adb0d5"
   },
   "package_schema": "worldgen.package.v1",

@@ -61,6 +61,35 @@
         ]
       }
     },
+    "home_goods_store": {
+      "areas": [
+        {
+          "area_id": "main",
+          "kind": "room",
+          "name": "店内"
+        },
+        {
+          "area_id": "counter",
+          "kind": "room",
+          "name": "柜台"
+        }
+      ],
+      "connections": [
+        {
+          "from": "main",
+          "to": "counter"
+        }
+      ],
+      "entrance": "main",
+      "furniture_map": {
+        "counter": [
+          "home_goods_store_counter"
+        ],
+        "main": [
+          "home_goods_store_shelf"
+        ]
+      }
+    },
     "park": {
       "areas": [
         {
@@ -74,7 +103,8 @@
       "furniture_map": {
         "park_path": [
           "bench_park",
-          "tree_park"
+          "tree_park",
+          "flowerbed_park"
         ]
       }
     },
@@ -237,6 +267,54 @@
       "x": 1.0,
       "y": 1.0
     },
+    "flowerbed_park": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "plant",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "home_goods_store_counter": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "table",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
+    "home_goods_store_shelf": {
+      "actions": [],
+      "asset_id": "",
+      "behavior": "static",
+      "capacity": 0,
+      "initial_status": "ok",
+      "interaction": "none",
+      "kind": "cabinet",
+      "portable": false,
+      "servings": 0,
+      "visual": {
+        "shape": "box"
+      },
+      "x": 1.0,
+      "y": 1.0
+    },
     "reading_table": {
       "actions": [],
       "asset_id": "",
@@ -348,6 +426,14 @@
       "doors": [],
       "enabled": true,
       "entry": "bedroom",
+      "floors": [],
+      "walls": [],
+      "windows": []
+    },
+    "home_goods_store": {
+      "doors": [],
+      "enabled": true,
+      "entry": "main",
       "floors": [],
       "walls": [],
       "windows": []

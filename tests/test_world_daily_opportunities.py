@@ -180,7 +180,8 @@ class DailyNeighborhoodTest(unittest.TestCase):
         self.assertEqual(self.package.world_id, "daily_neighborhood_v1")
         self.assertEqual(
             sorted(self.package.locations),
-            ["cafe", "home", "park", "reading_point", "street_corner", "street_front"],
+            ["cafe", "home", "home_goods_store", "park", "reading_point",
+             "street_corner", "street_front"],
         )
         kinds = {key: value["kind"] for key, value in self.package.locations.items()}
         self.assertEqual(kinds["home"], "home")

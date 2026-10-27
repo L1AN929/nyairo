@@ -38,6 +38,21 @@
       "open_hour": null,
       "weekdays_only": false
     },
+    "home_goods_store": {
+      "affordances": [
+        {
+          "affordance_id": "BROWSE_STORE",
+          "description": "在货架前看看实际在卖的东西"
+        },
+        {
+          "affordance_id": "LOOK_AROUND",
+          "description": "在店里看看周围"
+        }
+      ],
+      "close_hour": 20,
+      "open_hour": 10,
+      "weekdays_only": false
+    },
     "park": {
       "affordances": [
         {

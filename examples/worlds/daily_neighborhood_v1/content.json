@@ -8,6 +8,10 @@
       "description": "一间带书桌和床的卧室。",
       "title": "千代的家"
     },
+    "home_goods_store": {
+      "description": "卖坐垫、台灯和小件家具的实体店，柜台当场结账，买下的东西送回家里。",
+      "title": "街区家居店"
+    },
     "park": {
       "description": "有长椅和树的街区公园。",
       "title": "小公园"
