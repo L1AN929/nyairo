@@ -56,3 +56,10 @@ Status: implemented
   （actual `/album/artifact:abc/image` vs expected `/api/phone/album/artifact:abc/image`），
   恢复后绿。该 harness 不加载图片、不做布局，浏览器网络与像素仍由父级复验。
 * 预览夹具 `scripts/phone_album_owner_fixture.py` 每次运行绑定新 generation socket，停止不删旧 socket；新根与同根重启 `--check` 均为 `album_count=0`、exit 0；既有目录缺少有效 `instance.json` 时 exit 2 拒绝；同根重启只更新 `supply_socket` 绑定，不重 seed。真实浏览器文件选择、预览、保存与刷新由监工独立验收。
+
+## 2026-10-26 补充：手机拍照复用本相册导入
+
+本清单格式、owner、四个 op 与读取/写入门保持不变。新增的手机拍照（`camera`）只是生成一张图，
+再走同一 `import_album_image`；相册行与详情由手机侧额外标注 `generated_locally` /
+`source_label="local_generated"`，owner 清单仍是 `user_import / self_declared`，不往旧不可变
+清单里加字段。边界与验证见 `2026-10-26-phone-camera.md`。

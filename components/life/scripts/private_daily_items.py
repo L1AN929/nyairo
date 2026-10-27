@@ -22,6 +22,9 @@
 * **主观未懂标记**：``mark_unclear`` 是**另一条**记录，和位置分开存放。
 * **收藏**：``save_reference`` 只存指针（source_id/版本/label），``read=False``、
   ``content_fetched=False``；它既不取全文，也不把来源变成已读。
+* **日记**：``add_diary`` 只写她自己的文字，条目带真实写入时间；正文只经 ``full_text``
+  显式取出，元数据只含时间/字数/修订数，没有摘要或派生标题。日记是独立 item_type，普通
+  笔记面（``ITEM_MEMO``）与项目面都不会把它带出来。
 * **收件**：``receive_item`` 的字段只能来自调用方给出的明确接收记录（``receipt_ref``）；
   ``co_presence`` 恒为 ``False``——一条普通消息的到达不等于完整共处。
 * **撤权/失效**：``mark_source_unavailable`` 之后，该来源的正文/摘要一律拒绝（
@@ -83,10 +86,11 @@ ITEM_SOURCE_ACQUISITION = "source_acquisition"
 ITEM_READING_POSITION = "reading_position"
 ITEM_UNCLEAR_MARKER = "unclear_marker"
 ITEM_INBOX = "inbox_item"
+ITEM_DIARY = "diary_entry"
 
 ITEM_TYPES: tuple[str, ...] = (
     ITEM_MEMO, ITEM_SAVED_REFERENCE, ITEM_SOURCE_ACQUISITION,
-    ITEM_READING_POSITION, ITEM_UNCLEAR_MARKER, ITEM_INBOX,
+    ITEM_READING_POSITION, ITEM_UNCLEAR_MARKER, ITEM_INBOX, ITEM_DIARY,
 )
 
 #: The write kind used for the observation-link update.  It is not an item type: it updates an
@@ -102,6 +106,7 @@ _ID_PREFIX: dict[str, str] = {
     ITEM_READING_POSITION: "pos",
     ITEM_UNCLEAR_MARKER: "unclear",
     ITEM_INBOX: "inbox",
+    ITEM_DIARY: "diary",
     #: Not an item type of its own: the key kind for the observation-link write.
     _KIND_OBSERVED_LINK: "obs",
 }
@@ -118,6 +123,9 @@ REFERENCE_SAVED = "SAVED"
 #: Hard bound on any private excerpt kept in the document.  Over-long evidence is refused, never
 #: silently truncated (a truncated excerpt would be a quiet lie about what was actually obtained).
 MAX_EXCERPT_CHARS = 480
+
+#: 一条日记正文的上限。超长拒绝，绝不截断（截断会把没写完的话说成写完了）。
+MAX_DIARY_CHARS = 8000
 
 #: The fields an optional reading anchor may carry.  An anchor is structural metadata (which real
 #: page a note or a stop point belongs to), never private text and never a claim of understanding.
@@ -160,6 +168,8 @@ _METADATA_FIELDS: dict[str, tuple[str, ...]] = {
     ITEM_UNCLEAR_MARKER: ("source_id", "source_revision", "position", "marked_at"),
     ITEM_INBOX: ("receipt_ref", "from_ref", "kind", "received_at", "state", "read_at",
                  "read_evidence_ref", "co_presence"),
+    # 日记只暴露写入时间、字数和修订次数；正文不在元数据白名单里。
+    ITEM_DIARY: ("created_at", "updated_at", "revisions", "chars"),
 }
 
 #: The private text field of each item type, if it has one.  Types absent here hold no text at all.
@@ -168,6 +178,7 @@ _PRIVATE_TEXT_FIELD: dict[str, str] = {
     ITEM_UNCLEAR_MARKER: "note",
     ITEM_INBOX: "summary",
     ITEM_SOURCE_ACQUISITION: "excerpt",
+    ITEM_DIARY: "body",
 }
 
 
@@ -1168,6 +1179,8 @@ class PrivateDailyItems:
             row["has_note"] = bool(item.get("note"))
         elif item_type == ITEM_INBOX:
             row["has_summary"] = bool(item.get("summary"))
+        elif item_type == ITEM_DIARY:
+            row["has_text"] = bool(item.get("body"))
         elif item_type == ITEM_READING_POSITION:
             needs, reason = _needs_reread(document, item)
             row["needs_reread"] = needs
@@ -1437,6 +1450,46 @@ class PrivateDailyItems:
 
         return self._commit(ITEM_MEMO, ("revise", memo_id, clean_body), mutate,
                             operation_key=operation_key)
+
+    # -- diary (her own words, written when she chooses) ----------------------------------
+
+    def add_diary(self, *, body: str, diary_id: Optional[str] = None,
+                  operation_key: Optional[str] = None, now: Optional[str] = None,
+                  expected_head: Optional[str] = None) -> WriteResult:
+        """Write one diary entry with its own real timestamp.
+
+        A diary entry is write-once: there is no revise path here, so one entry cannot silently
+        rewrite an earlier day.  ``diary_id`` is supplied by the caller (the phone facade keys it
+        by operation key), which keeps "the same intent retried" on one entry while two different
+        intents with the same words stay two entries.  The entry holds only its own text and the
+        time it was written -- no summary, no derived title and no Memory hand-off.
+        """
+        stamp = now or self._now()
+        clean_body = _require_text(body, "body")
+        if len(clean_body) > MAX_DIARY_CHARS:
+            raise PrivateItemsContractRefused(
+                f"DIARY_TOO_LONG:{len(clean_body)}>{MAX_DIARY_CHARS}")
+        clean_diary = None if diary_id is None else _require_text(diary_id, "diary_id")
+
+        def mutate(document: dict[str, Any], auto_id: str) -> tuple[dict[str, Any], bool, str]:
+            item_id = clean_diary or auto_id
+            if item_id in document["items"]:
+                existing = document["items"][item_id]
+                # 同一个 key 只能重放同一条文字；换成另一段话就是换意图，不能静默说"已保存"。
+                if (str(existing.get("item_type") or "") != ITEM_DIARY
+                        or str(existing.get("body") or "") != clean_body):
+                    raise PrivateItemsContractRefused(
+                        "DIARY_OPERATION_KEY_REUSED:%s" % item_id)
+                return document, False, item_id
+            _insert(document, item_id, {
+                "item_id": item_id, "item_type": ITEM_DIARY, "diary_id": item_id,
+                "body": clean_body, "chars": len(clean_body),
+                "created_at": stamp, "updated_at": stamp, "revisions": 1,
+            })
+            return document, True, item_id
+
+        return self._commit(ITEM_DIARY, ("diary", clean_diary or "", clean_body), mutate,
+                            operation_key=operation_key, expected_head=expected_head)
 
     # -- saved references (never fetch, never mark read) ----------------------------------
 
@@ -1752,12 +1805,14 @@ __all__ = [
     "ITEM_READING_POSITION",
     "ITEM_UNCLEAR_MARKER",
     "ITEM_INBOX",
+    "ITEM_DIARY",
     "ITEM_TYPES",
     "INBOX_UNREAD",
     "INBOX_READ",
     "UNDERSTANDING_UNKNOWN",
     "REFERENCE_SAVED",
     "MAX_EXCERPT_CHARS",
+    "MAX_DIARY_CHARS",
     "MAX_READING_OPERATIONS",
     "READING_ANCHOR_FIELDS",
     "READING_OPERATIONS_FIELD",

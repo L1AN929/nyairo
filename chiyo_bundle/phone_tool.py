@@ -63,9 +63,14 @@ READ_ACTIONS = {
     # 只读 Activity 权威、Life 文档与 owner 回执，不启动服务、不写结果、不调用模型。
     "today": "/api/phone/today",
     "today_arrangements": "/api/phone/today/arrangements",
+    # 她的日记目录：只列写入时间与字数，正文要单独 diary_read。
+    "diary": "/api/phone/diary",
+    # 她的私人相册目录：时间、说明与来源，不带图片字节（看图走手机的图片地址）。
+    "album": "/api/phone/album",
 }
 WRITE_ACTIONS = ("note_save", "reference_save", "purchase", "store_purchase", "use",
-                 "world_action", "reading_import", "reading_position", "reading_annotate")
+                 "world_action", "reading_import", "reading_position", "reading_annotate",
+                 "diary_write", "camera")
 #: Actions that read or write her private artifacts (or a private-artifact derivative).  Under a
 #: restricted memory profile these need the separate ``phone.private_artifacts`` permit.
 #: World/body commands are a different surface: they already require ``write_enabled``, and a
@@ -83,16 +88,20 @@ PRIVATE_ARTIFACT_ACTIONS = frozenset({
     # 同一件作品的有界上下文（旧版/来历/真实结果/相关做法与评价/本地草稿）：它读的是她的私人
     # 作品与经历摘录，因此和其余私人档案读面共用同一条显式许可，不新增权限面。
     "work_context", "work_version",
+    # 日记正文是她自己的私人文字：目录可只看时间/字数，但写与读正文都属于私人档案面。
+    "diary", "diary_read", "diary_write",
 })
 ACTIONS = tuple(sorted(READ_ACTIONS)) + WRITE_ACTIONS + ("operation", "world_operation",
                                                          "reading_operation", "work_context",
-                                                         "work_version")
+                                                         "work_version", "diary_read",
+                                                         "album_image")
 
 #: The World verbs a local owner may ask for.  The first five are the frozen v0.4 set (C's
 #: contract §3.1); ``ARRANGE`` and ``TOGGLE_FIXTURE`` are this round's room verbs, exactly as C's
 #: ``PhoneWorld.VERBS`` / ``PARAM_SPEC`` name them.  P never renames a verb: the owner's snapshot
 #: ``actions.verbs`` and its reason codes stay the authority.
-WORLD_ACTIONS = ("MOVE", "PICK_UP", "PLACE", "POSE", "REST", "ARRANGE", "TOGGLE_FIXTURE")
+WORLD_ACTIONS = ("MOVE", "PICK_UP", "PLACE", "POSE", "REST", "ARRANGE", "TOGGLE_FIXTURE",
+                 "TOILET")
 _WORLD_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "MOVE": (frozenset({"destination_location_id"}), frozenset({"destination_location_id"})),
     "PICK_UP": (frozenset({"object_id", "slot_id"}), frozenset({"object_id", "slot_id"})),
@@ -102,6 +111,8 @@ _WORLD_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     # C's own table: one owned instance plus its target / the absolute fixture state.
     "ARRANGE": (frozenset({"object_id", "target"}), frozenset({"object_id", "target"})),
     "TOGGLE_FIXTURE": (frozenset({"object_id", "state"}), frozenset({"object_id", "state"})),
+    # Explicit virtual facility use: one declared facility id, nothing else.
+    "TOILET": (frozenset({"facility_id"}), frozenset({"facility_id"})),
 }
 _ARRANGE_TARGET_KINDS = frozenset({"room", "surface"})
 #: Never an input: identity, elapsed time and body values belong to the owners alone.
@@ -154,6 +165,17 @@ PHONE_TOOL_SCHEMA = {
         "或「失败了」）；也可以显式提交一条操作（写笔记、存收藏、"
         "手机虚拟店购买、实体店柜台购买、使用属于自己的物件、在世界里移动/拿放/换姿势/休息/"
         "布置自有家具/开关自己的灯）。"
+        "日记只有一个入口：diary 读目录（只有写入时间、字数和日期，不带正文），diary_read 按 "
+        "entry_id 读某一条的正文，diary_write 用 body 写下一条她自己的文字（必须给 operation_key，"
+        "同一 key 重试落在同一条；日期由手机自己的业务时间记录，不由调用方填写）。"
+        "相册有三个入口：album 读目录（时间、说明与来源，不带图片字节），album_image 按 "
+        "artifact_id 读一张图的说明与来源，camera 用她自己的 scene（画面描述）与 caption（一句"
+        "说明）在本机生成一张图并存进相册（必须给 operation_key；这是本机生成的图像，不是真实"
+        "相机照片，也不是她亲眼所见；同一 key 重试只读回原图，不再生成第二张）。"
+        "camera 的 scene 可以用中文写：手机侧的本机转换器会把它转成生成模型能看懂的英文标签，"
+        "她的中文原话与实际英文提示词都会留在相册详情里；转换失败会明确拒绝，不会把中文原样"
+        "送去生成，也不会用固定模板冒充。拍什么、写什么说明由她自己决定，也可以选择不拍，"
+        "没有拍照配额。"
         "阅读工作台另有五个动作：reading_material 只读一页真实正文；reading_import 把操作者显式给"
         "的文本写进这台实例已绑定的阅读材料（旧版本由 Supply 保留）；reading_position 显式保存停点"
         "（先真实读该页再落位置，回到前页也合法）；reading_annotate 对已取得的那一版那一页写私人笔记"
@@ -187,7 +209,15 @@ PHONE_TOOL_SCHEMA = {
             "version_id": {"type": "string", "maxLength": 200,
                            "description": "要固定读取的旧版本 id（work_version，只读不回滚）"},
             "title": {"type": "string", "maxLength": 80, "description": "笔记标题（note_save）"},
-            "body": {"type": "string", "maxLength": 4000, "description": "笔记正文（note_save）"},
+            "body": {"type": "string", "maxLength": 4000,
+                     "description": "笔记正文（note_save）或一条日记的正文（diary_write）"},
+            "scene": {"type": "string", "maxLength": 800,
+                      "description": ("她给的画面描述（camera）：写下想拍到的画面本身，"
+                                      "不是文件名、路径或网址。中文就行，手机侧本机转换器会把它"
+                                      "转成生成模型能看懂的英文标签；原中文与实际英文都存进"
+                                      "相册详情")},
+            "entry_id": {"type": "string", "maxLength": 200,
+                         "description": "日记条目 id（diary_read）：必须是 diary 目录给出的 owner id"},
             "note_id": {"type": "string", "maxLength": 128, "description": "要修订的笔记 id（可选）"},
             "expected_head": {"type": "string", "maxLength": 128,
                               "description": "写入基准的 owner head（可选，防并发覆盖）"},
@@ -293,6 +323,14 @@ _FIELD_BY_ACTION = {
     "work_context": frozenset({"action", "artifact_id"}),
     # 固定读同一件作品的一个旧版（读取不是回滚：head 不变）。
     "work_version": frozenset({"action", "artifact_id", "version_id"}),
+    # 日记：写一条她自己的文字；读某一条的正文（目录用只读 action=diary）。
+    # operation_key 必须显式给出：同一次写入重试落在同一条，不同日期写同样的话是两条。
+    "diary_write": frozenset({"action", "body", "operation_key"}),
+    "diary_read": frozenset({"action", "entry_id"}),
+    # 相册：一张图一条说明（详情只读）；拍照是本机按她的画面描述生成一张图，再由相册
+    # 正式保存。scene/caption 由她显式给出，operation_key 必须复用原键，重试不再生成第二张。
+    "album_image": frozenset({"action", "artifact_id"}),
+    "camera": frozenset({"action", "scene", "caption", "operation_key"}),
 }
 
 
@@ -424,13 +462,18 @@ def _authorize(settings: Mapping[str, Any], kwargs: Mapping[str, Any]) -> None:
 
 def _request(settings: Mapping[str, Any], method: str, path: str,
              body: Optional[Mapping[str, Any]] = None, *,
-             csrf: Optional[str] = None) -> tuple[int, dict[str, Any]]:
+             csrf: Optional[str] = None,
+             actor: Optional[str] = None) -> tuple[int, dict[str, Any]]:
     data = None if body is None else json.dumps(dict(body), ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(str(settings["base_url"]) + path, data=data, method=method)
     request.add_header("Accept", "application/json")
     if data is not None:
         request.add_header("Content-Type", "application/json")
-        request.add_header("X-Phone-Actor", "model")
+    if data is not None or actor:
+        # Existing attribution, used verbatim: the subject's own tool path declares itself so a
+        # private body read is distinguishable from the operator's ordinary page read.  It is a
+        # declaration, not a local-admin boundary (the tool docs say so).
+        request.add_header("X-Phone-Actor", str(actor or "model"))
     if csrf:
         request.add_header("X-CSRF-Token", str(csrf))
     try:
@@ -700,6 +743,17 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
         elif set(args) != {"action"}:
             return _result(False, "rejected", "只读动作只接受 action。",
                            reason_code="UNKNOWN_FIELD")
+        # 日记写入必须显式给 key：同一次写入重试要落在同一条，不能由工具按正文自动折叠。
+        if action == "diary_write" and not str(args.get("operation_key") or "").strip():
+            return _result(False, "rejected",
+                           "diary_write 需要显式的 operation_key：同一次写入重试必须复用原 key。",
+                           reason_code="OPERATION_KEY_REQUIRED")
+        # 拍照也要显式 key：同一次意图重试必须落在同一张图，不能靠 scene 完全相同来猜。
+        if action == "camera" and not str(args.get("operation_key") or "").strip():
+            return _result(False, "rejected",
+                           "camera 需要显式的 operation_key：同一次拍照重试必须复用原 key，"
+                           "否则会为本机生成第二张图。",
+                           reason_code="OPERATION_KEY_REQUIRED")
 
         settings = load_settings(kwargs)
         _authorize(settings, kwargs)
@@ -750,6 +804,13 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 message = ("已读取今天的计划、义务与执行状态：定义状态 PLANNED 只表示排进了今天，"
                            "不是「还没开始」；义务 PENDING 只表示还没有 owner 回执，不是失败；"
                            "执行状态 UNKNOWN 表示没有可证的执行证据，不是没做。")
+            elif action == "diary":
+                message = ("已读取日记目录：只有写入时间、字数和日期，不带正文；"
+                           "要读正文用 diary_read 指定 entry_id。")
+            elif action == "album":
+                message = ("已读取相册目录：每张图的时间、说明与来源；这里不带图片字节，"
+                           "看图用手机自己的图片地址（album_image 读说明与来源）。"
+                           "generated_locally=true 的是本机按她的描述生成的图，不是真实相机照片。")
             else:
                 message = "已读取。"
             return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
@@ -802,6 +863,53 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 message = "已固定读取这一版（只读）；head 没有回滚，其它版本也没有被改写。"
             return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
                            http_status=code, result=result)
+
+        if action == "diary_read":
+            # 读一条日记的正文：这是她自己那部手机的私人读面。entry_id 只接受 owner 自己的
+            # diary id，不接受路径/URL；请求带既有的 actor 声明，operator 普通页面读不到正文。
+            entry_id = str(args.get("entry_id") or "").strip()
+            if not entry_id:
+                return _result(False, "rejected", "diary_read 需要 entry_id。",
+                               reason_code="DIARY_ENTRY_ID_REQUIRED")
+            if len(entry_id) > 200 or not set(entry_id) <= OWNER_ID_CHARS:
+                return _result(False, "rejected",
+                               "entry_id 不是 owner 自己的日记 id（不接受路径或 URL）。",
+                               reason_code="DIARY_ENTRY_ID_INVALID")
+            code, doc = _request(settings, "GET", "/api/phone/diary/" + entry_id,
+                                 actor="model")
+            result = _summary(doc)
+            entry = doc.get("entry") if isinstance(doc.get("entry"), Mapping) else {}
+            if not doc.get("ok"):
+                message = "这一条日记读不到；服务说明了原因（读不到不是空）。"
+            elif doc.get("body_withheld") is True:
+                message = "这一条只拿到了时间与字数，正文没有随这次读取返回。"
+            else:
+                message = "已读取这一条日记的正文（只读，没有改动任何条目）。"
+            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+                           http_status=code, entry=entry, result=result)
+
+        if action == "album_image":
+            # 一张图的说明与来源：只读；artifact_id 必须是相册目录给出的 owner id。
+            artifact_id = str(args.get("artifact_id") or "").strip()
+            if not artifact_id:
+                return _result(False, "rejected", "album_image 需要 artifact_id。",
+                               reason_code="ALBUM_IMAGE_ID_REQUIRED")
+            if len(artifact_id) > 200 or not set(artifact_id) <= OWNER_ID_CHARS:
+                return _result(False, "rejected",
+                               "artifact_id 不是 owner 自己的相册 id（不接受路径或 URL）。",
+                               reason_code="ALBUM_IMAGE_ID_INVALID")
+            code, doc = _request(settings, "GET", "/api/phone/album/" + artifact_id)
+            result = _summary(doc)
+            image = doc.get("image") if isinstance(doc.get("image"), Mapping) else {}
+            if not doc.get("ok"):
+                message = "这张图读不到；服务说明了原因（读不到不是空）。"
+            elif image.get("generated_locally") is True:
+                message = ("已读取这一张的说明与来源（只读）：这是本机生成的图像，"
+                           "不是真实相机拍到的照片。")
+            else:
+                message = "已读取这一张的说明与来源（只读）。"
+            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+                           http_status=code, image=image, result=result)
 
         if action == "operation":
             key = str(args.get("operation_key") or "").strip()
@@ -860,6 +968,17 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 body["note_id"] = args["note_id"]
             if args.get("expected_head"):
                 body["expected_head"] = args["expected_head"]
+        elif action == "diary_write":
+            # 她自己的文字：没有标题、没有摘要、没有第二次模型生成。日期由手机服务自己的
+            # 业务时间记录，调用方不能自带时间。
+            path = "/api/phone/diary"
+            body = {"body": args.get("body"), "operation_key": key}
+        elif action == "camera":
+            # 她的画面描述 + 她写的一句说明：本机生成一张图，再走既有相册正式保存。
+            # 服务地址、模型与生成参数都在手机侧；这里只传她的文字与自己的幂等键。
+            path = "/api/phone/camera"
+            body = {"scene": args.get("scene"), "caption": args.get("caption"),
+                    "operation_key": key}
         elif action == "reference_save":
             path = "/api/phone/references"
             body = {"source_id": args.get("source_id"),
@@ -943,6 +1062,35 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 message = "owner 拒绝了这次店内购买，什么都没改（未扣款、未交付）。"
             elif status in ("unavailable", "disabled"):
                 message = "实体店/经济 owner 当前不可用或关闭，购买没有确认。"
+            else:
+                message = "结果未知：不要换 key 重发，先按 operation_key 对账。"
+        if action == "diary_write":
+            if status == "applied":
+                message = "这一条日记已经保存；时间由手机自己的业务时间记录，没有生成摘要。"
+            elif status == "already_applied":
+                message = "同一次写入此前已经保存，没有写第二条。"
+            elif status == "rejected":
+                message = "owner 拒绝了这次写入，没有记下任何文字。"
+            elif status in ("unavailable", "disabled"):
+                message = "日记 owner 当前不可用或关闭，这次写入没有确认。"
+            else:
+                message = "结果未知：不要换 key 重发，先按 operation_key 对账。"
+        if action == "camera":
+            if status == "applied":
+                message = ("这张图已经在本机生成，并由相册正式保存；它是本机生成的图像，"
+                           "不是真实相机照片，也不是她亲眼所见。她的中文画面原话和实际送去"
+                           "生成的英文提示词都记在相册详情里。")
+            elif status == "already_applied":
+                message = "同一次拍照此前已经保存：直接读回原图，没有再生成第二张。"
+            elif status == "rejected":
+                message = ("这次拍照被拒绝（本机生成服务可能正忙，或画面/说明不合规），"
+                           "什么都没有保存。")
+            elif status in ("unavailable", "disabled"):
+                if str(doc.get("reason_code") or "").startswith("CAMERA_TRANSLATION_"):
+                    message = ("画面没能转成生成模型能懂的英文标签（本机转换器不可用或输出"
+                               "不合规），这次没有生成、也没有保存。")
+                else:
+                    message = "本机生成服务或相册当前不可用，这次拍照没有确认保存。"
             else:
                 message = "结果未知：不要换 key 重发，先按 operation_key 对账。"
         if action in ("reading_import", "reading_position", "reading_annotate"):

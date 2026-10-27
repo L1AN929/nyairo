@@ -53,7 +53,7 @@ INSTANCE_FILENAME = "instance.json"
 SCHEMA_INSTANCE = "phone.instance.v1"
 KIND_INSTANCE = "phone_local_instance"
 
-APPS: tuple[str, ...] = ("notes", "references", "reading", "wallet", "shop", "store",
+APPS: tuple[str, ...] = ("notes", "diary", "references", "reading", "wallet", "shop", "store",
                          "inventory", "body", "world", "projects", "shares", "contact",
                          "shared_practice")
 
@@ -79,7 +79,10 @@ WORLD_SNAPSHOT_BLOCKS: tuple[str, ...] = (
 #: a band or any value of its own -- and never a raw float.
 BODY_VIEW_FIELDS: tuple[str, ...] = (
     "pose", "orientation", "pose_source", "recovery", "signals", "signals_status",
-    "signals_source", "bands_only", "raw_values_exposed", "rest_evidence", "note",
+    "signals_source", "bands_only", "raw_values_exposed", "rest_evidence",
+    # Optional virtual lived-need bands; absent/None for every instance without
+    # an explicit profile.
+    "needs", "note",
 )
 
 STATUS_OK = "applied"
@@ -108,6 +111,8 @@ BUSINESS_CLOCK_FILENAME = "fastday_clock.json"
 MAX_OPERATION_KEY = 128
 MAX_TITLE = 80
 MAX_BODY = 4000
+#: 一条日记的上限与 ``private_daily_items.MAX_DIARY_CHARS`` 同值；超长拒绝，绝不截断。
+MAX_DIARY_BODY = 8000
 MAX_SOURCE_ID = 200
 MAX_SOURCE_REVISION = 120
 MAX_LABEL = 60
@@ -684,6 +689,144 @@ class PhoneService:
             result["data"]["detail"] = outcome.detail
         return result
 
+    # -- diary (her own words; metadata by default, text only explicitly) -----------------
+
+    def diary_list(self) -> dict[str, Any]:
+        """The diary index: write times, lengths and a count.  **No body text, no preview.**
+
+        The operator's ordinary read is this list.  A diary entry is a different item type from
+        a memo, so the notes screen (which asks for ``ITEM_MEMO`` only) cannot carry it.
+        """
+        from private_daily_items import ITEM_DIARY
+
+        try:
+            items = self._items()
+            rows = list(enumerate(items.items(ITEM_DIARY)))
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return _supply_failure(exc)
+        # Newest first.  The timestamp is the real write time; the insertion index is only a
+        # tie-break for two entries written within the same clock tick.
+        rows.sort(key=lambda pair: (str(pair[1].get("created_at") or ""), pair[0]), reverse=True)
+        entries: list[dict[str, Any]] = []
+        dates: list[str] = []
+        for _index, row in rows:
+            created_at = str(row.get("created_at") or "")
+            entry = {
+                "id": str(row.get("item_id") or ""),
+                "created_at": created_at or None,
+                "chars": int(row.get("chars") or 0),
+                "revisions": int(row.get("revisions") or 0),
+                "has_text": bool(row.get("has_text")),
+            }
+            entries.append(entry)
+            day = created_at[:10]
+            if day and day not in dates:
+                dates.append(day)
+        return {
+            "ok": True,
+            "status": STATUS_OK,
+            "count": len(entries),
+            "entries": entries,
+            "dates": dates,
+            "latest_at": entries[0]["created_at"] if entries else None,
+            "artifact_id": self.private_items_artifact_id,
+            "private_text_included": False,
+        }
+
+    def diary_read(self, entry_id: str, *, include_text: bool) -> dict[str, Any]:
+        """One diary entry.  The body is returned only when the caller asked for text.
+
+        ``include_text=False`` is the operator's default: the entry's id, time and length are
+        real facts, while the body is withheld by name (not shown as an empty quote).  Only the
+        subject's own tool path asks for text, and the HTTP layer decides that from the existing
+        actor declaration -- never from a request-body ``role`` field.
+        """
+        from private_daily_items import ITEM_DIARY, PrivateItemsContractRefused
+
+        try:
+            items = self._items()
+            try:
+                item = items.item(entry_id)
+            except PrivateItemsContractRefused:
+                return envelope(False, STATUS_NOT_FOUND, {}, "DIARY_ENTRY_NOT_FOUND")
+            if str(item.get("item_type") or "") != ITEM_DIARY:
+                # The diary id space is not a second read path for memos or reading annotations.
+                return envelope(False, STATUS_NOT_FOUND, {}, "DIARY_ENTRY_NOT_FOUND")
+            meta = {
+                "id": str(item.get("item_id") or ""),
+                "created_at": item.get("created_at"),
+                "chars": int(item.get("chars") or 0),
+                "revisions": int(item.get("revisions") or 0),
+            }
+            if not include_text:
+                return {
+                    "ok": True,
+                    "status": STATUS_OK,
+                    "entry": meta,
+                    "body_withheld": True,
+                    "reason_code": "DIARY_BODY_WITHHELD",
+                    "private_text_included": False,
+                }
+            body = items.full_text(entry_id)
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return _supply_failure(exc)
+        entry = dict(meta)
+        entry["body"] = body
+        return {
+            "ok": True,
+            "status": STATUS_OK,
+            "entry": entry,
+            "body_withheld": False,
+            "private_text_included": True,
+        }
+
+    def diary_write(self, *, body: str, operation_key: str) -> dict[str, Any]:
+        """Write one diary entry as her own text.  No model call, no summary, no Memory write.
+
+        One operation key = one entry id, so a retry with the original key lands on the same
+        entry instead of writing the same day twice.  Two different keys stay two entries even
+        when the words are identical -- writing the same sentence on another day is not a retry.
+        """
+        from private_daily_items import PrivateItemsContractRefused
+
+        try:
+            items = self._items()
+            entry_id = "diary:" + hashlib.sha256(
+                ("phone|diary|" + str(operation_key)).encode("utf-8")).hexdigest()[:16]
+            outcome = items.add_diary(body=body, diary_id=entry_id,
+                                      operation_key=operation_key, now=self._clock())
+            item = items.item(entry_id)
+        except PrivateItemsContractRefused as exc:
+            # 同一个 key 换了文字，或正文越界：这是明确拒绝，不是"已保存"。
+            code = str(exc).split(":", 1)[0] or "DIARY_WRITE_REFUSED"
+            return rejected(code.upper())
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:
+            return _supply_failure(exc)
+        fresh_head, version_number = self._head()
+        status = STATUS_OK if outcome.applied else STATUS_ALREADY
+        result = {
+            "ok": True,
+            "status": status,
+            "data": {
+                "id": entry_id,
+                "created_at": item.get("created_at"),
+                "chars": int(item.get("chars") or 0),
+                "head": fresh_head,
+                "version_number": version_number,
+                "owner_status": outcome.owner_status,
+                "effect_state": outcome.effect_state,
+            },
+        }
+        if outcome.detail:
+            result["data"]["detail"] = outcome.detail
+        return result
+
     def references(self) -> dict[str, Any]:
         from private_daily_items import ITEM_SAVED_REFERENCE
 
@@ -1037,13 +1180,16 @@ class PhoneService:
             return unavailable("BODY_VIEW_UNAVAILABLE")
         view = dict(answer["result"] or {})
         location = view.get("location") if isinstance(view.get("location"), Mapping) else {}
-        return envelope(True, STATUS_OK, {
+        data = {
             "pose": view.get("pose"),
             "orientation": view.get("orientation"),
             "location": {k: location.get(k) for k in ("place_id", "area_id")},
             "world_revision": view.get("world_revision"),
             "source": "world_body_gateway.get_snapshot",
-        })
+        }
+        if isinstance(view.get("lived_needs"), Mapping):
+            data["needs"] = dict(view["lived_needs"])
+        return envelope(True, STATUS_OK, data)
 
     def world_summary(self, result: Mapping[str, Any]) -> dict[str, Any]:
         """A summary built only from C's own blocks: nothing is filled in when it is missing."""
@@ -1764,6 +1910,11 @@ class PhoneService:
         rows = answer.get("images")
         images = [row for row in (self._album_row(entry) for entry in (rows or []))
                   if row is not None]
+        marks = self._camera_records()
+        for image in images:
+            generated = marks.get(image["artifact_id"])
+            image["generated_locally"] = generated is not None
+            image["source_label"] = "local_generated" if generated is not None else "user_import"
         return {
             "ok": True,
             "status": STATUS_OK,
@@ -1787,6 +1938,19 @@ class PhoneService:
         row = self._album_row(answer.get("image"))
         if row is None:
             return unavailable("ALBUM_ANSWER_INVALID")
+        generated = self._camera_records().get(row["artifact_id"])
+        row["generated_locally"] = generated is not None
+        row["source_label"] = "local_generated" if generated is not None else "user_import"
+        if generated is not None:
+            # Her original words and the exact English prompt that was actually sent, so the
+            # album detail can show both.  Old captures without them stay None -- never invented.
+            scene = generated.get("scene")
+            prompt = generated.get("generation_prompt")
+            translation = generated.get("translation")
+            row["scene"] = scene if isinstance(scene, str) else None
+            row["generation_prompt"] = prompt if isinstance(prompt, str) else None
+            row["translation"] = (dict(translation) if isinstance(translation, Mapping)
+                                  else None)
         return {"ok": True, "status": STATUS_OK, "artifact_id": row["artifact_id"],
                 "image": row, "private_media_included": False}
 
@@ -1828,6 +1992,208 @@ class PhoneService:
         except Exception as exc:
             return unavailable("ALBUM_UNAVAILABLE", error_type=type(exc).__name__)
         return _album_write_answer(answer, "ALBUM_IMPORT_REFUSED")
+
+    # -- the local camera: one generated picture, then the *existing* album import ---------
+
+    def _picture_lab(self):
+        """The one loopback picture runtime, built from this instance's own environment."""
+        lab = getattr(self, "_camera_generator", None)
+        if lab is None:
+            from .camera import LocalPictureLab
+
+            lab = LocalPictureLab(environment=self.environment)
+            self._camera_generator = lab
+        return lab
+
+    def _scene_translator(self):
+        """The one local Chinese->English tag converter, built from this instance's environment.
+
+        It is a technical converter, not her cognition: it only renders the scene she already
+        gave, and a failure is a named refusal -- never a silent fallback to the Chinese text.
+        """
+        translator = getattr(self, "_camera_translator", None)
+        if translator is None:
+            from .camera import SceneTranslator
+
+            translator = SceneTranslator(environment=self.environment)
+            self._camera_translator = translator
+        return translator
+
+    def _camera_index_path(self) -> Path:
+        return self.root / "phone" / "camera.jsonl"
+
+    def _camera_rows(self) -> list[dict[str, Any]]:
+        """The phone's own append-only capture index.  It is attribution, never a second owner.
+
+        A missing or unreadable file is an empty index, not a fabrication: the pictures still
+        live in the Supply owner and are still listed from there.
+        """
+        try:
+            lines = self._camera_index_path().read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        rows: list[dict[str, Any]] = []
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(row, dict) and isinstance(row.get("key"), str):
+                rows.append(row)
+        return rows
+
+    def _camera_records(self) -> dict[str, dict[str, Any]]:
+        """``artifact_id -> the most recent capture record`` for source labelling."""
+        records: dict[str, dict[str, Any]] = {}
+        for row in self._camera_rows():
+            artifact_id = row.get("artifact_id")
+            if isinstance(artifact_id, str) and artifact_id:
+                records[artifact_id] = row
+        return records
+
+    def _camera_record(self, key: str) -> Optional[dict[str, Any]]:
+        found: Optional[dict[str, Any]] = None
+        for row in self._camera_rows():
+            if row.get("key") == key:
+                found = row
+        return found
+
+    def _camera_record_append(self, row: Mapping[str, Any]) -> bool:
+        path = self._camera_index_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(dict(row), ensure_ascii=False, sort_keys=True) + "\n")
+        except OSError:
+            return False
+        return True
+
+    def camera_capture(self, *, scene: str, caption: str,
+                       operation_key: str) -> dict[str, Any]:
+        """One local picture from her scene text, saved through the existing album import.
+
+        The operation key is the phone's idempotency handle for the *whole* capture: before any
+        generation the existing index is consulted, so an ordinary retry with the original key
+        never asks the GPU for a second expensive picture.  The album import gets a derived key,
+        keeping camera captures apart from explicit imports of the caller's own files.
+        """
+        from .camera import CameraRefused, MAX_CAPTION_CHARS, MAX_SCENE_CHARS
+
+        text = scene if isinstance(scene, str) else ""
+        text = text.strip()
+        words = caption if isinstance(caption, str) else ""
+        words = words.strip()
+        key = str(operation_key)
+        if not text or len(text) > MAX_SCENE_CHARS or "\x00" in text:
+            return rejected("CAMERA_SCENE_INVALID")
+        if not words or len(words) > MAX_CAPTION_CHARS or "\x00" in words or "\r" in words:
+            return rejected("CAMERA_CAPTION_INVALID")
+
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        existing = self._camera_record(key)
+        if existing is not None:
+            if existing.get("scene_sha256") != digest or existing.get("caption") != words:
+                return rejected("CAMERA_OPERATION_KEY_REUSED")
+            artifact_id = str(existing.get("artifact_id") or "")
+            detail = self.album_detail(artifact_id) if artifact_id else unavailable(
+                "CAMERA_PHOTO_UNREADABLE")
+            if detail.get("ok") is not True:
+                return unavailable("CAMERA_PHOTO_NO_LONGER_READABLE", artifact_id=artifact_id)
+            stored_scene = existing.get("scene")
+            stored_prompt = existing.get("generation_prompt")
+            stored_translation = existing.get("translation")
+            return envelope(True, STATUS_ALREADY, {
+                "artifact_id": artifact_id,
+                "caption": words,
+                "operation_key": key,
+                "album_operation_key": existing.get("album_operation_key"),
+                "generated_locally": True,
+                "generated": False,
+                "reused": True,
+                "scene": stored_scene if isinstance(stored_scene, str) else None,
+                "generation_prompt": (stored_prompt if isinstance(stored_prompt, str) else None),
+                "translation": (dict(stored_translation)
+                                if isinstance(stored_translation, Mapping) else None),
+                "image": detail.get("image"),
+            })
+
+        # Her Chinese scene is rendered into the tag-style English this checkpoint follows.  This
+        # is a converter, not a second author: the original text is kept and a failed conversion
+        # refuses the capture (no picture, nothing saved) instead of feeding Chinese to the GPU.
+        try:
+            translation = self._scene_translator().prompt_for(text)
+        except CameraRefused as exc:
+            hard = exc.reason_code in {
+                "CAMERA_TRANSLATOR_BUSY", "CAMERA_TRANSLATOR_URL_INVALID",
+                "CAMERA_SCENE_INVALID",
+            }
+            answer = {"detail": exc.detail} if exc.detail else {}
+            return (rejected(exc.reason_code, **answer) if hard
+                    else unavailable(exc.reason_code, **answer))
+        except Exception as exc:
+            return unavailable("CAMERA_TRANSLATION_UNAVAILABLE",
+                               error_type=type(exc).__name__)
+        if not isinstance(translation, Mapping):
+            return unavailable("CAMERA_TRANSLATION_UNAVAILABLE",
+                               detail="translator_answer_invalid")
+        prompt = str(translation.get("prompt") or "")
+        if not prompt:
+            return unavailable("CAMERA_TRANSLATION_UNAVAILABLE", detail="empty_prompt")
+
+        try:
+            data, content_type = self._picture_lab().generate(prompt)
+        except CameraRefused as exc:
+            hard = exc.reason_code in {
+                "CAMERA_BUSY", "CAMERA_SCENE_INVALID", "CAMERA_URL_MISSING",
+                "CAMERA_URL_NOT_LOOPBACK", "CAMERA_URL_INVALID", "CAMERA_REDIRECT_REFUSED",
+            }
+            answer = {"detail": exc.detail} if exc.detail else {}
+            return (rejected(exc.reason_code, **answer) if hard
+                    else unavailable(exc.reason_code, **answer))
+        except Exception as exc:
+            return unavailable("CAMERA_GENERATION_FAILED", error_type=type(exc).__name__)
+
+        album_key = "camera:" + hashlib.sha256(
+            ("phone|camera|" + key).encode("utf-8")).hexdigest()[:16]
+        imported = self.album_import(caption=words, content_type=content_type,
+                                     data=base64.b64encode(data).decode("ascii"),
+                                     operation_key=album_key)
+        if imported.get("ok") is not True:
+            # The picture was generated, but it was not saved.  Say so; never claim a photo.
+            return imported
+        payload = imported.get("data") if isinstance(imported.get("data"), Mapping) else {}
+        artifact_id = str(payload.get("artifact_id") or "")
+        recorded = self._camera_record_append({
+            "at": self._clock(),
+            "key": key,
+            "scene_sha256": digest,
+            "scene": text,
+            "generation_prompt": prompt,
+            "translation": {"translated": bool(translation.get("translated")),
+                            "source": str(translation.get("source") or "")},
+            "caption": words,
+            "artifact_id": artifact_id,
+            "album_operation_key": album_key,
+            "content_type": content_type,
+            "media": payload.get("media"),
+        })
+        return envelope(True, STATUS_OK, {
+            "artifact_id": artifact_id,
+            "caption": words,
+            "scene": text,
+            "generation_prompt": prompt,
+            "translation": {"translated": bool(translation.get("translated")),
+                            "source": str(translation.get("source") or "")},
+            "content_type": content_type,
+            "media": payload.get("media"),
+            "version_id": payload.get("version_id"),
+            "operation_key": key,
+            "album_operation_key": album_key,
+            "generated_locally": True,
+            "generated": True,
+            "reused": False,
+            "index_recorded": recorded,
+        })
 
     # -- shares (B's LifeSharingService; P forwards, it decides nothing) -------------------
 
@@ -2628,6 +2994,15 @@ class PhoneService:
         references = self.references() if items_up else unavailable("SUPPLY_UNAVAILABLE")
         reading = self.reading() if items_up else unavailable("SUPPLY_UNAVAILABLE")
         apps["notes"] = summarise("notes", notes)
+        # 日记在普通状态里只报数量/日期：正文不在这一层，也不做摘要或派生标题。
+        diary = self.diary_list() if items_up else unavailable("SUPPLY_UNAVAILABLE")
+        diary_entry = summarise("diary", diary)
+        if diary.get("ok"):
+            diary_entry["data"]["item_count"] = int(diary.get("count") or 0)
+            diary_entry["data"]["latest_at"] = diary.get("latest_at")
+            diary_entry["data"]["dates"] = list(diary.get("dates") or [])
+            diary_entry["data"]["private_text_included"] = False
+        apps["diary"] = diary_entry
         apps["references"] = summarise("references", references)
         apps["reading"] = summarise("reading", reading)
         apps["wallet"] = summarise("wallet", self.wallet())
@@ -2863,6 +3238,7 @@ __all__ = [
     "LIGHT_BLOCK_NAME",
     "MATERIAL_SOURCE_KINDS",
     "MAX_BODY",
+    "MAX_DIARY_BODY",
     "MAX_LABEL",
     "MAX_MATERIAL_LIMIT",
     "MAX_MATERIAL_ORIGIN",

@@ -94,6 +94,9 @@ IDENTITY_FIELDS = frozenset({
 })
 
 NOTES_FIELDS = frozenset({"title", "body", "operation_key", "expected_head", "note_id"})
+#: ``POST /api/phone/diary``: one entry of her own words.  The operation key is required: a diary
+#: write is an explicit act, and the original key is what makes a retry land on the same entry.
+DIARY_WRITE_FIELDS = frozenset({"body", "operation_key"})
 REFERENCE_FIELDS = frozenset({"source_id", "source_revision", "label", "operation_key"})
 PURCHASE_FIELDS = frozenset({"catalog_item_id", "operation_key"})
 USE_FIELDS = frozenset({"item_instance_id", "operation_key"})
@@ -137,6 +140,11 @@ PROJECT_VERSIONS_QUERY_FIELDS = frozenset({"limit", "before"})
 #: file name, an owner, an authority or a subject.
 ALBUM_IMPORT_FIELDS = frozenset({"caption", "content_type", "data", "operation_key"})
 ALBUM_CONTENT_TYPES = frozenset({"image/png", "image/jpeg"})
+#: ``POST /api/phone/camera`` -- one local picture from her own scene text.  The client names the
+#: scene it wants, the caption she wrote and its own idempotency key; never a picture, a path, a
+#: URL, a model, a runtime address or bytes.
+CAMERA_CAPTURE_FIELDS = frozenset({"scene", "caption", "operation_key"})
+MAX_CAMERA_SCENE = 800
 
 #: ``/api/phone/shares`` -- the share surface (B's ``LifeSharingService``, forwarded by P).  The
 #: client names the source it saw in ``GET /shares/sources``, its own explicit short text (or an
@@ -351,6 +359,11 @@ _PROJECT_CONTEXT_PATH = re.compile(
 #: owner's own protocol string, matched and never rewritten.
 _ALBUM_IMAGE_PATH = re.compile(r"^/api/phone/album/([A-Za-z0-9._:\-]{1,200})/image$")
 _ALBUM_PATH = re.compile(r"^/api/phone/album/([A-Za-z0-9._:\-]{1,200})$")
+#: ``/api/phone/diary/<entry_id>``: one diary entry.  The id is the owner's own diary id
+#: (``diary:<hex>``), matched and never rewritten.  The body is only included when the caller
+#: is the subject's own tool path (``X-Phone-Actor: model``); the default operator read gets
+#: metadata with the body withheld by name.
+_DIARY_PATH = re.compile(r"^/api/phone/diary/([A-Za-z0-9._:\-]{1,200})$")
 LOG = logging.getLogger("chiyo.phone.http")
 
 #: ``GET /api/phone/materials/<artifact_id>``: a material id, matched exactly as the owner
@@ -708,6 +721,14 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/notes":
                 self._send(200, service.notes())
                 return
+            # Her diary index: write times and lengths only.  One entry's body is a separate
+            # read below, and only the subject's own tool path asks for text.
+            if path == f"{API_PREFIX}/diary":
+                self._get_diary_list(service)
+                return
+            if _DIARY_PATH.match(path):
+                self._get_diary_entry(service, _DIARY_PATH.match(path).group(1))
+                return
             if path == f"{API_PREFIX}/references":
                 self._send(200, service.references())
                 return
@@ -877,6 +898,9 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/notes":
                 self._post_note(service)
                 return
+            if path == f"{API_PREFIX}/diary":
+                self._post_diary(service)
+                return
             if path == f"{API_PREFIX}/references":
                 self._post_reference(service)
                 return
@@ -905,6 +929,11 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             # no second write path; the picture bytes reach only the Supply owner.
             if path == f"{API_PREFIX}/album/images":
                 self._post_album_import(service)
+                return
+            # The phone camera: one local generation from her scene text, saved through the same
+            # album import.  No model cognition, no automatic capture, no second storage.
+            if path == f"{API_PREFIX}/camera":
+                self._post_camera(service)
                 return
             # Her own projects: explicit title/text, one CAS head, one archived project.
             if path == f"{API_PREFIX}/projects":
@@ -1558,6 +1587,43 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
 
     # -- mutations -----------------------------------------------------------------------
 
+    def _get_diary_list(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/diary``: the index only -- times, lengths and a count."""
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        self._send(200, service.diary_list())
+
+    def _get_diary_entry(self, service: phone_service.PhoneService, entry_id: str) -> None:
+        """``GET /api/phone/diary/<id>``: one entry, body only for the subject's own tool path.
+
+        The actor is the existing ``X-Phone-Actor`` declaration this server already records
+        (missing / unknown = the operator).  A request-body ``role`` is never read; the default
+        operator answer is metadata with ``body_withheld: true``, so an ordinary phone read
+        cannot quietly turn into the diary's text.
+        """
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        include_text = self._actor() == phone_service.ACTOR_MODEL
+        self._send_or_map(service.diary_read(entry_id, include_text=include_text))
+
+    def _post_diary(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/diary``: one entry of her own words, with her own real time."""
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(DIARY_WRITE_FIELDS)
+        body = _clean_body(payload.get("body"), phone_service.MAX_DIARY_BODY)
+        key = _operation_key(payload.get("operation_key"))
+        result = service.diary_write(body=body, operation_key=key)
+        service.record_operation(actor=self._actor(), action="diary", operation_key=key,
+                                 result=result)
+        self._send_or_map(result)
+
     def _post_note(self, service: phone_service.PhoneService) -> None:
         guard = self._guard_mutation()
         if guard is not None:
@@ -1841,6 +1907,33 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
                                       data=data, operation_key=key)
         service.record_operation(actor=self._actor(), action="album:import",
                                  operation_key=key, result=result)
+        self._send_or_map(result)
+
+    def _post_camera(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/camera``: one local picture from her scene text.
+
+        This is the only camera write.  The runtime address, the model and the generation
+        parameters are the phone's own; the body can name neither.  The picture is saved by the
+        existing album import -- a camera capture is not a second media store.
+        """
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(CAMERA_CAPTURE_FIELDS)
+        scene = _clean_body(payload.get("scene"), MAX_CAMERA_SCENE)
+        caption = payload.get("caption")
+        if not isinstance(caption, str):
+            raise PhoneRequestError("CAPTION_REQUIRED")
+        caption = caption.strip()
+        if len(caption) > MAX_ALBUM_CAPTION:
+            raise PhoneRequestError("CAPTION_TOO_LONG")
+        if any(ch in caption for ch in ("\x00", "\r")):
+            raise PhoneRequestError("CAPTION_INVALID")
+        key = _operation_key(payload.get("operation_key"))
+        result = service.camera_capture(scene=scene, caption=caption, operation_key=key)
+        service.record_operation(actor=self._actor(), action="camera", operation_key=key,
+                                 result=result)
         self._send_or_map(result)
 
     def _get_projects(self, service: phone_service.PhoneService) -> None:
