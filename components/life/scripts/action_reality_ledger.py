@@ -1768,7 +1768,7 @@ class WorldActionAdapter(ActionAdapterProtocol):
         # target (``life_daily_action_targets``), so the single-target contract above is untouched
         # and no verb here gains a free-form ``params`` mapping.  The World's own allowlist, the
         # gateway's exposure and the Resolver still decide whether the verb may commit.
-        if verb not in {"MOVE", "POSE", "CONSUME", "REST", "PICK_UP", "PLACE"}:
+        if verb not in {"MOVE", "POSE", "CONSUME", "REST", "PICK_UP", "PLACE", "TOILET"}:
             raise ContractViolationError(f"unsupported WORLD_ACTION verb={verb!r}")
         if not isinstance(target, str) or not target.strip():
             raise ContractViolationError("WORLD_ACTION requires non-empty 'target'")

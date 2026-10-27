@@ -73,11 +73,11 @@ INTENT_STATUSES = (
 #: (`world_action_resolver.REST_MODES` also has `sleep_like`), so the narrowness
 #: lives here as an explicit rule instead of depending on what an emitter chose
 #: to offer.
-EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST")
+EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST", "TOILET")
 
 #: M15 §19: the production allowlist is explicit.  A future verb does NOT gain
 #: permission by being added to the resolver; it must be added here on purpose.
-ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST")
+ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST", "TOILET")
 
 #: The one REST shape this bridge admits.  These are *admission* sets, not a
 #: copy of the owner's vocabulary: `sleep_like` is refused here on purpose until
@@ -86,6 +86,10 @@ REST_VERB = "REST"
 REST_STATES = ("start", "stop")
 REST_MODES = ("rest",)
 REST_PARAMS = ("mode", "state")
+
+#: Explicit virtual facility use: exactly one declared facility id.
+TOILET_VERB = "TOILET"
+TOILET_PARAMS = ("facility_id",)
 
 #: kept for compatibility with older callers/tests; M15 emptied it.
 BLOCKED_VERBS: tuple[str, ...] = ()
@@ -142,6 +146,21 @@ def validate_verb_params(verb: str, params: Any) -> dict[str, Any]:
     if not isinstance(params, Mapping):
         raise ActionIntentError("params must be an object for verb %s" % verb)
     values = dict(params)
+    if verb == TOILET_VERB:
+        unknown = sorted(set(values) - set(TOILET_PARAMS))
+        if unknown:
+            raise ActionIntentError(
+                "TOILET params has unknown fields: %s (admitted: %s)"
+                % (unknown, list(TOILET_PARAMS)))
+        missing = sorted(set(TOILET_PARAMS) - set(values))
+        if missing:
+            raise ActionIntentError(
+                "TOILET params is incomplete: facility_id is required")
+        facility_id = str(values["facility_id"]).strip()
+        if not facility_id or len(facility_id) > 128:
+            raise ActionIntentError(
+                "TOILET facility_id must be bounded non-empty text")
+        return {"facility_id": facility_id}
     if verb != REST_VERB:
         return values
 

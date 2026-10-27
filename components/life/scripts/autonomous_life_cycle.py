@@ -305,8 +305,8 @@ CONSUME_VERB = "CONSUME"
 BODYACT_REF_PREFIX = "bodyact:"
 POSE_VERB = "POSE"
 REST_VERB = "REST"
-POSE_VERB = "POSE"
-REST_VERB = "REST"
+#: Explicit virtual facility use (only an opt-in lived-needs instance offers it).
+TOILET_VERB = "TOILET"
 #: The Activity shape of one body step.  W's targets are per-parameter, so the shape is one
 #: bounded target state rather than a journey.
 BODY_ACTION_ACTIVITY_KIND = "BODY_ACTION_AT_OBSERVED_PLACE"
@@ -3242,11 +3242,15 @@ class AutonomousLifeCycle:
                 column = body
             value = view.get("observed_at")
             observed = str(value) if value else None
+        live_body = ((self.last_live_context or {}).get("body")
+                     if isinstance(self.last_live_context, Mapping) else None)
+        needs = (live_body.get("needs") if isinstance(live_body, Mapping) else None)
         context = lbc.build(
             body_column=column,
             rest=self._world_rest_availability(),
             recovery=self._body_recovery_facts(),
             observed_at=observed_at or observed,
+            needs=needs,
         )
         self.last_body_context = context
         return context
@@ -8251,7 +8255,7 @@ class AutonomousLifeCycle:
         # v0.4 day-life / W: a pose or a rest session is not an arrival.  Its own classifier reads
         # the World owner's own observation (the snapshot for POSE, the REST session state for REST)
         # and only then hands LR-5 the fact the completion contract names.
-        if status == "SUCCEEDED" and verb in {POSE_VERB, REST_VERB}:
+        if status == "SUCCEEDED" and verb in {POSE_VERB, REST_VERB, TOILET_VERB}:
             return self._classify_body_action(base, verb=verb, action=action)
         # v0.4 lived day: her everyday hand work.  "The owner accepted the command" is not the fact
         # -- the placement/hand state the World reports *after* the action is, and B's contract says
@@ -8373,6 +8377,21 @@ class AutonomousLifeCycle:
                 return dict(entry)
         return None
 
+    def _world_toilet_availability(self) -> Optional[Mapping[str, Any]]:
+        """The World owner's own ``TOILET`` entry from the latest observation.
+
+        The entry's ``current.toilet_band`` is the Body's own qualitative answer
+        *after* the use; ``None`` means it cannot be known.
+        """
+
+        available = getattr(self.world_opportunity_provider, "last_available_actions", None)
+        if not isinstance(available, Mapping):
+            return None
+        for entry in available.get("actions") or []:
+            if isinstance(entry, Mapping) and str(entry.get("verb") or "") == "TOILET":
+                return dict(entry)
+        return None
+
     def _fresh_world_body_observation(self) -> dict[str, Any]:
         """Re-read the World owner's own state **after** the action, through the same seam.
 
@@ -8427,7 +8446,8 @@ class AutonomousLifeCycle:
                 detail="the executed body step names no parsable body action target")
         fresh = self._fresh_world_body_observation()
         fact = module.body_action_observed_fact(
-            parsed, fresh["snapshot"], rest_availability=fresh["rest_availability"])
+            parsed, fresh["snapshot"], rest_availability=fresh["rest_availability"],
+            toilet_availability=self._world_toilet_availability())
         base["body_action"] = {
             "verb": str(parsed.get("verb") or verb),
             "target_ref": target_ref,

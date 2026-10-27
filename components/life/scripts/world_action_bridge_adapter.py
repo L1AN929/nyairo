@@ -66,7 +66,7 @@ WORLD_BRIDGE_DIR_ENV = "NYAIRO_WORLD_BRIDGE_DIR"
 #: one encoded ``dailyact:`` target (``life_daily_action_targets``).  This adapter decodes
 #: both at submission time -- the AR-0 payload keeps its single-target shape, and no verb
 #: ever gains a free-form ``params`` mapping that the caller could fill in.
-SUPPORTED_VERBS = ("MOVE", "CONSUME", "POSE", "REST", "PICK_UP", "PLACE")
+SUPPORTED_VERBS = ("MOVE", "CONSUME", "POSE", "REST", "PICK_UP", "PLACE", "TOILET")
 
 #: Verbs whose whole parameter set lives inside the encoded target.
 BODY_ACTION_VERBS = body_actions.BODY_ACTION_VERBS

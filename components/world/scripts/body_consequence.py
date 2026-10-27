@@ -54,7 +54,7 @@ KIND_PENDING = "pending_body_consequence"
 #: F: ``CONSUME`` is here only for the small physical manipulation of the
 #: operation itself.  It is explicitly *not* an intake/nutrition class and grants
 #: no recovery, comfort or satiety: see ``CONSUME_LOAD_NOTE``.
-SUPPORTED_ACTIONS = ("MOVE", "POSE", "REST", "PICK_UP", "PLACE", "CONSUME")
+SUPPORTED_ACTIONS = ("MOVE", "POSE", "REST", "PICK_UP", "PLACE", "CONSUME", "TOILET")
 
 #: Movement / posture duration.  The world owner *can* now supply a real
 #: duration (a measured walk, or the world topology's own route seconds); the
@@ -92,6 +92,9 @@ EFFORT_BY_ACTION = {
     "PLACE": "light",
     "REST": "light",
     "CONSUME": "light",
+    # A virtual facility use is the same order of small manipulation as
+    # PICK_UP/PLACE; it carries no medical or privacy claim.
+    "TOILET": "light",
 }
 
 #: Versioned, minimal assumption for a consumption operation: the physical act of
@@ -310,6 +313,7 @@ def build_consequence(
     object_id: Optional[str] = None,
     applied_at: Optional[str] = None,
     elapsed_seconds: Optional[float] = None,
+    lived_needs_enabled: bool = False,
 ) -> dict[str, Any]:
     """Derive the body input from a canonical result.  Facts in, facts out.
 
@@ -416,13 +420,14 @@ def build_consequence(
                     "posture_covered_by_movement:%.3fs" % interval
                 )
 
-    elif action in ("PICK_UP", "PLACE", "CONSUME"):
+    elif action in ("PICK_UP", "PLACE", "CONSUME", "TOILET"):
         # a small manipulation: resource context, deliberately tiny load so the
         # runtime can decide whether it is even enough to form a transition.
         # For CONSUME this is the physical act of the operation -- the same order
         # of magnitude as picking one portion up -- never a meal duration and
-        # never an intake/nutrition input.
-        seconds = CONSUME_OPERATION_SECONDS if action == "CONSUME" else 2.0
+        # never an intake/nutrition input.  TOILET is the same order of virtual
+        # facility action; it carries no medical or privacy content.
+        seconds = CONSUME_OPERATION_SECONDS if action in ("CONSUME", "TOILET") else 2.0
         item = {
             "class": "PHYSICAL_RESULT",
             "movement_duration_seconds": seconds,
@@ -471,6 +476,17 @@ def build_consequence(
         mode = str(result.get("recovery_mode") or "rest")
         state = str(result.get("recovery_state") or "start")
         inputs.append({"class": "RECOVERY", "mode": mode, "state": state})
+
+    # Virtual lived-needs relief is *only* what the World declaration named.
+    # A v1 body has no needs block, so it gets no such input (old behaviour).
+    if lived_needs_enabled:
+        import body_lived_needs as bln
+
+        relief = bln.relief_from_result(result)
+        if relief:
+            inputs.extend(relief)
+            record["lived_need_effects"] = {
+                item["need"]: item["amount"] for item in relief}
 
     if not inputs:
         record["state"] = CONSEQUENCE_STATE_SKIPPED
@@ -751,6 +767,7 @@ def apply_for_execution(
                 if unattributable
                 else _elapsed_since(runtime_state.get("last_advanced_at"), at)
             ),
+            lived_needs_enabled=isinstance(runtime_state.get("lived_needs"), Mapping),
         )
         if unattributable:
             record["notes"].append(

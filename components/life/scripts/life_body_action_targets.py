@@ -63,19 +63,23 @@ justify the lying-pose + declared-surface preconditions the owner already enforc
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 #: The target namespace this module owns.  Every other prefix is somebody else's.
 BODY_ACTION_REF_PREFIX = "bodyact:"
 
 POSE_VERB = "POSE"
 REST_VERB = "REST"
+#: Explicit virtual facility use (only an opt-in lived-needs instance exposes it).
+TOILET_VERB = "TOILET"
 #: The verbs this encoding can express completely.
-BODY_ACTION_VERBS = (POSE_VERB, REST_VERB)
+BODY_ACTION_VERBS = (POSE_VERB, REST_VERB, TOILET_VERB)
 
 POSE_ACTION = "pose"
 REST_ACTION = "rest"
-BODY_ACTION_ACTIONS = (POSE_ACTION, REST_ACTION)
+TOILET_ACTION = "toilet"
+TOILET_USE = "use"
+BODY_ACTION_ACTIONS = (POSE_ACTION, REST_ACTION, TOILET_ACTION)
 
 #: Owner posture vocabulary (copied, see the module docstring).
 POSES = ("standing", "seated", "lying", "transitioning")
@@ -93,10 +97,14 @@ REST_MODES = ("rest",)
 #: (``activity_progress_completion_lr5.POLICY_WORLD_FACT_V1``); no new policy version.
 FACT_KEY_BODY_POSE = "world_body_pose_ref"
 FACT_KEY_BODY_RECOVERY = "world_body_recovery_ref"
+FACT_KEY_BODY_TOILET = "world_body_toilet_ref"
 
 FACT_PREFIX = "world_fact:body:"
 POSE_FACT = FACT_PREFIX + "pose:%s:%s"
 RECOVERY_FACT = FACT_PREFIX + "recovery:%s"
+TOILET_FACT = FACT_PREFIX + "need:toilet:%s"
+TOILET_RELIEVED = "relieved"
+TOILET_NEEDED = "needed"
 #: The two recovery *session* states the gateway reports (``_rest_availability``).
 RECOVERY_STATE_ACTIVE = "active"
 RECOVERY_STATE_INACTIVE = "inactive"
@@ -118,6 +126,7 @@ SOURCE_AVAILABLE_ACTIONS = "world_gateway.get_available_actions"
 EFFECT_POSE_CHANGED = "body_pose_changed"
 EFFECT_RECOVERY_STARTED = "recovery_session_started"
 EFFECT_RECOVERY_STOPPED = "recovery_session_stopped"
+EFFECT_LIVED_NEED_RELIEVED = "lived_need_relieved"
 
 
 class BodyActionTargetError(ValueError):
@@ -164,6 +173,17 @@ def encode_rest_target(state: str, mode: str = "rest") -> str:
     return "%s%s:%s:%s" % (BODY_ACTION_REF_PREFIX, REST_ACTION, state_text, mode_text)
 
 
+def encode_toilet_target(facility_id: str) -> str:
+    """``bodyact:toilet:use:<facility_id>`` -- one declared facility, quoted."""
+
+    facility_text = str(facility_id or "").strip()
+    if not facility_text or len(facility_text) > 128:
+        raise BodyActionTargetError(
+            "facility_id must be bounded non-empty text (got %r)" % (facility_text,))
+    return "%s%s:%s:%s" % (BODY_ACTION_REF_PREFIX, TOILET_ACTION, TOILET_USE,
+                           quote(facility_text, safe=""))
+
+
 def parse_body_action_target(ref: Any) -> Optional[dict[str, Any]]:
     """Split a ``bodyact:`` ref back into the owner's exact parameters.
 
@@ -194,6 +214,22 @@ def parse_body_action_target(ref: Any) -> Optional[dict[str, Any]]:
         raise BodyActionTargetError(
             "%r names action %r; this encoding carries %s"
             % (text, action, list(BODY_ACTION_ACTIONS)))
+
+    if action == TOILET_ACTION:
+        if first != TOILET_USE:
+            raise BodyActionTargetError(
+                "%r: the only toilet action is %r" % (text, TOILET_USE))
+        facility_id = unquote(second).strip()
+        if not facility_id or len(facility_id) > 128:
+            raise BodyActionTargetError(
+                "%r: facility_id must be bounded non-empty text" % (text,))
+        return {
+            "verb": TOILET_VERB,
+            "target": text,
+            "params": {"facility_id": facility_id},
+            "fact_key": FACT_KEY_BODY_TOILET,
+            "expected_value": TOILET_FACT % TOILET_RELIEVED,
+        }
 
     if action == POSE_ACTION:
         if first not in POSES:
@@ -231,6 +267,8 @@ def body_action_effect_predicates(parsed: Mapping[str, Any]) -> list[str]:
 
     if parsed["verb"] == POSE_VERB:
         return [EFFECT_POSE_CHANGED]
+    if parsed["verb"] == TOILET_VERB:
+        return [EFFECT_LIVED_NEED_RELIEVED]
     state = str((parsed.get("params") or {}).get("state") or "")
     return [EFFECT_RECOVERY_STARTED if state == "start" else EFFECT_RECOVERY_STOPPED]
 
@@ -322,6 +360,7 @@ def body_action_observed_fact(
     snapshot: Any,
     *,
     rest_availability: Any = None,
+    toilet_availability: Any = None,
 ) -> dict[str, Any]:
     """What the canonical World observation says about *this* action, purely.
 
@@ -368,6 +407,20 @@ def body_action_observed_fact(
         elif state in RECOVERY_STATES_CLOSED:
             value = RECOVERY_FACT % RECOVERY_STATE_INACTIVE
         source = SOURCE_AVAILABLE_ACTIONS
+    elif verb == TOILET_VERB:
+        current = (toilet_availability.get("current")
+                   if isinstance(toilet_availability, Mapping) else None)
+        raw_band = (current.get("toilet_band")
+                    if isinstance(current, Mapping) else None)
+        band = str(raw_band or "").strip().lower() or None
+        observed = {"toilet_band": band}
+        # Only the owner's own band can answer; a missing band is unknown and
+        # can never satisfy the completion contract.
+        if band == "none":
+            value = TOILET_FACT % TOILET_RELIEVED
+        elif band:
+            value = TOILET_FACT % TOILET_NEEDED
+        source = SOURCE_AVAILABLE_ACTIONS
     else:  # pragma: no cover - parse_body_action_target only returns the two verbs
         raise BodyActionTargetError("unknown body action verb %r" % (verb,))
 
@@ -386,11 +439,13 @@ __all__ = [
     "BODY_ACTION_REF_PREFIX",
     "BODY_ACTION_VERBS",
     "BodyActionTargetError",
+    "EFFECT_LIVED_NEED_RELIEVED",
     "EFFECT_POSE_CHANGED",
     "EFFECT_RECOVERY_STARTED",
     "EFFECT_RECOVERY_STOPPED",
     "FACT_KEY_BODY_POSE",
     "FACT_KEY_BODY_RECOVERY",
+    "FACT_KEY_BODY_TOILET",
     "FACT_PREFIX",
     "ORIENTATIONS",
     "OWNER_REST_MODES",
@@ -407,11 +462,18 @@ __all__ = [
     "REST_VERB",
     "SOURCE_AVAILABLE_ACTIONS",
     "SOURCE_SNAPSHOT",
+    "TOILET_ACTION",
+    "TOILET_FACT",
+    "TOILET_NEEDED",
+    "TOILET_RELIEVED",
+    "TOILET_USE",
+    "TOILET_VERB",
     "body_action_effect_predicates",
     "body_action_observed_fact",
     "build_body_action_step",
     "encode_pose_target",
     "encode_rest_target",
+    "encode_toilet_target",
     "is_body_action_target",
     "parse_body_action_target",
 ]

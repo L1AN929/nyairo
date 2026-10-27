@@ -213,6 +213,13 @@ def _bound_body(raw: Any) -> dict[str, Any]:
         out["hands"] = hands
     if "hands_known" in raw:
         out["hands_known"] = bool(raw.get("hands_known"))
+    raw_needs = raw.get("needs")
+    if isinstance(raw_needs, Mapping):
+        needs = {str(name): _text(band, 24)
+                 for name, band in list(raw_needs.items())[:MAX_ENTRIES]
+                 if _text(band, 24)}
+        if needs:
+            out["needs"] = needs
     return out
 
 
@@ -324,6 +331,11 @@ def _fallback_from_observation(provider: Any, *, limit: int,
         body["pose"] = _text(observation["pose"], 40)
     if observation.get("orientation"):
         body["orientation"] = _text(observation["orientation"], 40)
+    raw_needs = observation.get("lived_needs")
+    if isinstance(raw_needs, Mapping):
+        body["needs"] = {str(name): _text(band, 24)
+                         for name, band in list(raw_needs.items())[:MAX_ENTRIES]
+                         if _text(band, 24)}
     raw_hands = observation.get("hands")
     if isinstance(raw_hands, Mapping):
         hands = []

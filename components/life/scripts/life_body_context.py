@@ -246,6 +246,9 @@ def empty_context(reason_code: str, *, detail: str = "") -> dict[str, Any]:
         "capacity": CAPACITY_UNKNOWN,
         "burden": [],
         "easing": [],
+        #: Optional virtual lived-need bands (hunger/thirst/toilet).  ``None``
+        #: for every instance without an explicit profile.
+        "needs": None,
         "recovery": {
             "session": RECOVERY_SESSION_UNKNOWN,
             "state": None,
@@ -283,6 +286,7 @@ def build(
     rest: Optional[Mapping[str, Any]] = None,
     recovery: Optional[Mapping[str, Any]] = None,
     observed_at: Optional[str] = None,
+    needs: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Compile the body column A already read into the bounded body-situation block.
 
@@ -370,6 +374,10 @@ def build(
         "capacity_ref": _text(capacity_ref, 96) or None,
         # Qualitative bands only: what the owner noticed, not a number.
         "burden": burden,
+        # Optional virtual needs (only for an explicitly enabled instance); the
+        # band is the owner's own, and ``None`` is "this body has no such state".
+        "needs": ({str(name): str(band) for name, band in needs.items()}
+                  if isinstance(needs, Mapping) else None),
         # Improvements are *not* a recovery claim; the field name says so on purpose.
         "easing": easing,
         "recovery": {

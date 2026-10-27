@@ -123,6 +123,8 @@ class WorldBodyService:
         self.war, self.wbb, self.wbs, self.wel = war, wbb, wbs, wel
 
         self.body_store = br.BodyStore(config.body_dir)
+        #: True only when this instance carries an explicit lived-needs profile.
+        self.lived_needs_enabled = False
         self.consequence_ledger = bcon.ConsequenceLedger(config.body_dir / "consequences.jsonl")
         self.execution_ledger = wel.ExecutionLedger(config.ledger_path)
         # The Resolver must see the *service's* runtime identity, not whatever
@@ -285,6 +287,16 @@ class WorldBodyService:
 
         # 7. body ----------------------------------------------------------
         self.body_bootstrapped = False
+        # Optional virtual lived needs: only an instance whose operator wrote an
+        # explicit ``lived_needs_profile.json`` gets body.runtime.v2.  Every
+        # other instance stays exactly v1 (no key, no drift, no relief).
+        import body_lived_needs as bln
+
+        try:
+            needs_profile = bln.load_profile(self.body_store.root)
+        except Exception as error:
+            raise StartupRefused("LIVED_NEEDS_PROFILE_INVALID", str(error)) from error
+        self.lived_needs_enabled = needs_profile is not None
         if self.body_store.runtime_path.exists():
             try:
                 body, migrated = self.body_store.load_runtime_with_migration()
@@ -292,16 +304,29 @@ class WorldBodyService:
                 raise StartupRefused("BODY_SCHEMA_UNKNOWN", str(error)) from error
             if body is None:
                 raise StartupRefused("BODY_SCHEMA_UNKNOWN", "runtime state vanished")
+            if needs_profile is not None and body.get("lived_needs") is None:
+                # Explicit opt-in upgrade: same somatic values, same version,
+                # only the new block is added.  Never done for a v1 instance
+                # without the profile file.
+                body = self.br.upgrade_to_v2(
+                    body, bln.initial_state(needs_profile))
+                self.body_store.save_runtime(body)
+                migrated = True
         else:
-            body = self.br.initial_runtime(at=self._moment())
+            body = self.br.initial_runtime(
+                at=self._moment(),
+                lived_needs=(bln.initial_state(needs_profile)
+                             if needs_profile is not None else None),
+            )
             self.body_store.save_runtime(body)
             self.body_bootstrapped = True
             migrated = False
         if self.body_store.load_profile() is None:
             self.body_store.save_profile(self.br.build_profile())
         self.body_state = body
-        step("body", "body_id=%s version=%s bootstrapped=%s migrated=%s"
-             % (body["body_id"], body["version"], self.body_bootstrapped, migrated))
+        step("body", "body_id=%s version=%s bootstrapped=%s migrated=%s lived_needs=%s"
+             % (body["body_id"], body["version"], self.body_bootstrapped, migrated,
+                self.lived_needs_enabled))
 
         # 8. continuity / migration (fail closed on unknown schema) --------
         migration = self.bct.migrate_all(cfg.world_home)
@@ -322,6 +347,13 @@ class WorldBodyService:
         catch_up = self._advance_due(force=True)
         self.startup_catch_up = catch_up
         step("catch_up", "advanced=%s" % (catch_up or {}).get("advanced"))
+
+        # 10b. lived-needs live window ------------------------------------
+        # The window is anchored at this start and never backfilled: a restart
+        # after ten hours records the gap as skipped, it does not make her
+        # hungry.  (Somatic catch-up above is the pre-existing v1 behaviour.)
+        needs_window = self._advance_lived_needs_window()
+        step("lived_needs", "%s" % (needs_window or {"reason": "DISABLED"}))
 
         # 11. canonical activation ----------------------------------------
         mode = self.bread.resolve_mode(dict(os.environ))
@@ -653,6 +685,9 @@ class WorldBodyService:
             "fixture",
             "arranged",
             "rest_surface_id",
+            "facility_id",
+            "facility_kind",
+            "lived_need_effects",
         ):
             if result.get(_key) is not None:
                 payload[_key] = result[_key]
@@ -754,6 +789,61 @@ class WorldBodyService:
             "elapsed_seconds": round(elapsed, 3),
             "wrote": True,
             "catch_up": result.get("catch_up"),
+        }
+
+    def _advance_lived_needs_window(self) -> Optional[dict[str, Any]]:
+        """Grow lived needs only over an interval this service witnessed.
+
+        The anchor is ``lived_needs.last_live_at``, written by the owner.  A
+        normal tick gap (<= ``LIVE_WINDOW_MAX_GAP_SECONDS``) is accounted; a
+        longer gap -- stopped process, suspend, restart, or a clock rewind --
+        is recorded as skipped/unknown and levels are left as they were, so
+        downtime is never backfilled.  Reads never call this.
+        """
+
+        if not self.lived_needs_enabled:
+            return None
+        state = self.body_state
+        if not isinstance(state, dict):
+            return None
+        block = state.get("lived_needs")
+        if not isinstance(block, dict):
+            return None
+        import body_lived_needs as bln
+
+        moment = self._moment()
+        outcome = bln.advance_live_window(block, now=moment)
+        reason = str(outcome.get("reason") or "")
+        counted = float(outcome.get("counted_seconds") or 0.0)
+        skipped = float(outcome.get("skipped_seconds") or 0.0)
+        # Keep the window open until it is worth one write; the next tick just
+        # widens it (the persisted anchor is untouched).
+        if (reason == "LIVE_WINDOW" and skipped <= 0.0
+                and counted < bln.LIVE_ADVANCE_SETTLE_SECONDS):
+            return None
+        before = state
+        after = dict(state)
+        after["lived_needs"] = outcome["state"]
+        self.body_state = after
+        transition = self.br.build_transition(
+            before,
+            after,
+            at=moment,
+            cause_class=self.br.CAUSE_TIME_ADVANCE,
+            input_summary={"lived_needs_live_window": {
+                "reason": reason,
+                "counted_seconds": round(counted, 3),
+                "skipped_seconds": round(skipped, 3),
+            }},
+        )
+        self.body_store.append_transition(transition)
+        self.body_store.save_runtime(after)
+        self.counters["writes"] += 1
+        return {
+            "reason": reason,
+            "counted_seconds": round(counted, 3),
+            "skipped_seconds": round(skipped, 3),
+            "wrote": True,
         }
 
     # -- v0.4: the owner tick is the only arrival writer --------------------
@@ -946,6 +1036,10 @@ class WorldBodyService:
         pending = self._settle_pending_movements()
         deliveries = self._settle_deliveries()
         work = self._advance_due()
+        # Lived needs accumulate on their own live-window anchor: they must not
+        # depend on a recovery session being open, and they must not reuse the
+        # somatic cursor (which may skip an idle interval).
+        needs = self._advance_lived_needs_window()
         environment = None
         if not (work and work.get("wrote")):
             environment = self._settle_environment()
@@ -958,6 +1052,8 @@ class WorldBodyService:
             report["deliveries"] = deliveries
         if work:
             report["advance"] = work
+        if needs:
+            report["lived_needs"] = needs
         if environment:
             report["environment"] = environment
         if not report:
@@ -1258,7 +1354,7 @@ class WorldBodyService:
         import body_signal as bsi
 
         signal = bsi.produce_signals(state, occurred_at=self._moment()) if state else None
-        return {
+        result = {
             "body_id": state.get("body_id"),
             "version": state.get("version"),
             "recovery": {
@@ -1269,6 +1365,10 @@ class WorldBodyService:
             "signal": signal,
             "raw_values_exposed": False,
         }
+        if isinstance(signal, Mapping) and signal.get("needs") is not None:
+            # Bands only; the numeric level never leaves the Body owner.
+            result["needs"] = dict(signal["needs"])
+        return result
 
     def ledger_summary(self) -> dict[str, Any]:
         chain = self.execution_ledger.chain_status()

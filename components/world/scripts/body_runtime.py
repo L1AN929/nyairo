@@ -44,9 +44,14 @@ from typing import Any, Iterator, Optional
 
 SCHEMA_PROFILE = "body.profile.v1"
 SCHEMA_RUNTIME = "body.runtime.v1"
+#: v2 adds one optional, explicitly-enabled block (``lived_needs``).  A v1
+#: instance keeps exactly its old shape and behaviour; only an instance whose
+#: operator wrote ``lived_needs_profile.json`` is upgraded.  See
+#: ``body_lived_needs`` for the profile/state contract.
+SCHEMA_RUNTIME_V2 = "body.runtime.v2"
 SCHEMA_TRANSITION = "body.transition.v1"
 RUNTIME_VERSION = "embodiment.runtime.v1"
-SUPPORTED_RUNTIME_SCHEMAS = (SCHEMA_RUNTIME,)
+SUPPORTED_RUNTIME_SCHEMAS = (SCHEMA_RUNTIME, SCHEMA_RUNTIME_V2)
 SUPPORTED_PROFILE_SCHEMAS = (SCHEMA_PROFILE,)
 
 KIND_PROFILE = "body_profile"
@@ -224,6 +229,7 @@ CAUSE_TIME_ADVANCE = "TIME_ADVANCE"
 CAUSE_RECOVERY = "RECOVERY"
 CAUSE_ENVIRONMENT = "ENVIRONMENT_INPUT"
 CAUSE_PHYSICAL = "PHYSICAL_RESULT"
+CAUSE_LIVED_NEEDS = "LIVED_NEED_RELIEF"
 CAUSE_MIGRATION = "MIGRATION"
 CAUSE_RECONCILIATION = "RECONCILIATION"
 CAUSE_CLASSES = (
@@ -231,6 +237,7 @@ CAUSE_CLASSES = (
     CAUSE_RECOVERY,
     CAUSE_ENVIRONMENT,
     CAUSE_PHYSICAL,
+    CAUSE_LIVED_NEEDS,
     CAUSE_MIGRATION,
     CAUSE_RECONCILIATION,
 )
@@ -238,6 +245,8 @@ CAUSE_CLASSES = (
 INPUT_CLASS_ENVIRONMENT = "ENVIRONMENT"
 INPUT_CLASS_PHYSICAL = "PHYSICAL_RESULT"
 INPUT_CLASS_RECOVERY = "RECOVERY"
+#: v2 only: an explicit, World-declared effect of a real eat/drink/use action.
+INPUT_CLASS_LIVED_NEEDS = "LIVED_NEED_RELIEF"
 INPUT_CLASSES = (INPUT_CLASS_ENVIRONMENT, INPUT_CLASS_PHYSICAL, INPUT_CLASS_RECOVERY)
 
 EFFORT_CLASSES = {"light": 0.5, "moderate": 1.0, "heavy": 1.8}
@@ -262,6 +271,7 @@ _RUNTIME_KEYS = frozenset(
         "signal_latch",
     }
 )
+_RUNTIME_V2_KEYS = frozenset(set(_RUNTIME_KEYS) | {"lived_needs"})
 _PROFILE_KEYS = frozenset(
     {
         "schema_version",
@@ -515,10 +525,11 @@ def validate_recovery(value: Any) -> dict[str, Any]:
 
 
 def initial_runtime(
-    *, body_id: str = BODY_ID, at: Optional[Any] = None
+    *, body_id: str = BODY_ID, at: Optional[Any] = None,
+    lived_needs: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     moment = _instant(at, "at") if at is not None else None
-    return {
+    state: dict[str, Any] = {
         "schema_version": SCHEMA_RUNTIME,
         "kind": KIND_RUNTIME,
         "runtime_version": RUNTIME_VERSION,
@@ -530,14 +541,52 @@ def initial_runtime(
         "recovery": _idle_recovery(),
         "signal_latch": {},
     }
+    if lived_needs is not None:
+        import body_lived_needs as bln
+
+        state["schema_version"] = SCHEMA_RUNTIME_V2
+        state["lived_needs"] = bln.validate_state(lived_needs)
+    return state
+
+
+def upgrade_to_v2(
+    state: Mapping[str, Any], lived_needs: Mapping[str, Any]
+) -> dict[str, Any]:
+    """The one sanctioned v1 -> v2 step for an *explicitly enabled* instance.
+
+    Somatic values, recovery, version and the persisted cursor are carried
+    through unchanged; only the new block is added.  Nothing is reset and no
+    past experience is invented.
+    """
+
+    import body_lived_needs as bln
+
+    current = validate_runtime(state)
+    if current["schema_version"] == SCHEMA_RUNTIME_V2:
+        upgraded = dict(current)
+        upgraded["lived_needs"] = bln.validate_state(lived_needs)
+        return validate_runtime(upgraded)
+    upgraded = dict(current)
+    upgraded["schema_version"] = SCHEMA_RUNTIME_V2
+    upgraded["lived_needs"] = bln.validate_state(lived_needs)
+    return validate_runtime(upgraded)
 
 
 def validate_runtime(state: Any) -> dict[str, Any]:
-    if not isinstance(state, Mapping) or set(state) != _RUNTIME_KEYS:
-        raise BodyRuntimeError("runtime state must have exactly the v1 fields")
-    if state["schema_version"] not in SUPPORTED_RUNTIME_SCHEMAS:
+    if not isinstance(state, Mapping):
+        raise BodyRuntimeError("runtime state must be an object")
+    schema = state.get("schema_version")
+    if schema not in SUPPORTED_RUNTIME_SCHEMAS:
         raise BodySchemaError(
-            f"runtime schema {state['schema_version']!r} is not supported"
+            f"runtime schema {schema!r} is not supported"
+        )
+    if schema == SCHEMA_RUNTIME:
+        expected_keys = _RUNTIME_KEYS
+    else:
+        expected_keys = _RUNTIME_V2_KEYS
+    if set(state) != expected_keys:
+        raise BodyRuntimeError(
+            "runtime state must have exactly the %s fields" % schema
         )
     if state["kind"] != KIND_RUNTIME:
         raise BodyRuntimeError("runtime kind is not supported")
@@ -558,8 +607,8 @@ def validate_runtime(state: Any) -> dict[str, Any]:
     def _optional_iso(value: Any, label: str) -> Optional[str]:
         return None if value is None else _iso(_instant(value, label))
 
-    return {
-        "schema_version": SCHEMA_RUNTIME,
+    result = {
+        "schema_version": schema,
         "kind": KIND_RUNTIME,
         "runtime_version": _text(state["runtime_version"], "runtime_version", maximum=64),
         "body_id": _text(state["body_id"], "body_id"),
@@ -570,6 +619,11 @@ def validate_runtime(state: Any) -> dict[str, Any]:
         "recovery": validate_recovery(state["recovery"]),
         "signal_latch": {str(k): bool(v) for k, v in sorted(latch_raw.items())},
     }
+    if schema == SCHEMA_RUNTIME_V2:
+        import body_lived_needs as bln
+
+        result["lived_needs"] = bln.validate_state(state["lived_needs"])
+    return result
 
 
 def migrate_runtime(raw: Any) -> tuple[dict[str, Any], bool]:
@@ -596,11 +650,19 @@ _FORBIDDEN_INPUT_CLASSES = {
 }
 
 
-def normalize_inputs(inputs: Any) -> list[dict[str, Any]]:
-    """Validate the legal input set.  An activity label is not a body fact."""
+def normalize_inputs(inputs: Any, *, allow_lived_needs: bool = False) -> list[dict[str, Any]]:
+    """Validate the legal input set.  An activity label is not a body fact.
+
+    ``LIVED_NEED_RELIEF`` is legal only for a body whose instance explicitly
+    opted into ``body.runtime.v2``; every v1 instance keeps exactly the three
+    original input classes.
+    """
 
     if inputs is None:
         return []
+    allowed_classes = INPUT_CLASSES + (
+        (INPUT_CLASS_LIVED_NEEDS,) if allow_lived_needs else ()
+    )
     if isinstance(inputs, Mapping):
         inputs = [inputs]
     if not isinstance(inputs, Sequence) or isinstance(inputs, (str, bytes)):
@@ -620,9 +682,9 @@ def normalize_inputs(inputs: Any) -> list[dict[str, Any]]:
             raise BodyRuntimeError(
                 f"inputs[{index}].class {label!r} is not a legal body input"
             )
-        if kind not in INPUT_CLASSES:
+        if kind not in allowed_classes:
             raise BodyRuntimeError(
-                f"inputs[{index}].class must be one of {list(INPUT_CLASSES)}"
+                f"inputs[{index}].class must be one of {list(allowed_classes)}"
             )
 
         if kind == INPUT_CLASS_ENVIRONMENT:
@@ -676,6 +738,11 @@ def normalize_inputs(inputs: Any) -> list[dict[str, Any]]:
                 )
             normalized.append(item)
 
+        elif kind == INPUT_CLASS_LIVED_NEEDS:
+            import body_lived_needs as bln
+
+            normalized.append(bln.normalize_relief_input(entry))
+
         else:  # RECOVERY
             allowed = {"class", "mode", "state"}
             unknown = set(entry) - allowed
@@ -722,6 +789,8 @@ def _cause_classes(inputs: Sequence[Mapping[str, Any]]) -> list[str]:
         causes.append(CAUSE_RECOVERY)
     if INPUT_CLASS_ENVIRONMENT in kinds:
         causes.append(CAUSE_ENVIRONMENT)
+    if INPUT_CLASS_LIVED_NEEDS in kinds:
+        causes.append(CAUSE_LIVED_NEEDS)
     if INPUT_CLASS_PHYSICAL in kinds:
         causes.append(CAUSE_PHYSICAL)
     causes.append(CAUSE_TIME_ADVANCE)
@@ -763,12 +832,30 @@ def advance(
             f"interval exceeds the bounded advance of {MAX_HOURS_PER_ADVANCE}h"
         )
 
-    normalized = normalize_inputs(inputs)
+    lived_needs_before = state.get("lived_needs")
+    normalized = normalize_inputs(
+        inputs, allow_lived_needs=lived_needs_before is not None)
     causes = _cause_classes(normalized)
 
     physical = [i for i in normalized if i["class"] == INPUT_CLASS_PHYSICAL]
     environment = [i for i in normalized if i["class"] == INPUT_CLASS_ENVIRONMENT]
     recovery = [i for i in normalized if i["class"] == INPUT_CLASS_RECOVERY]
+    relief = [i for i in normalized if i["class"] == INPUT_CLASS_LIVED_NEEDS]
+
+    # Virtual lived needs: this advance only carries the explicit relief.  Time
+    # drift is owned by the service's live window (``advance_live_window``), so
+    # a long ``from_time -> to_time`` gap -- a restart, a sleep, a replay -- is
+    # never read as elapsed need.  A stopped process is not "starved" later.
+    lived_needs_after = None
+    need_deltas: dict[str, float] = {}
+    if lived_needs_before is not None:
+        import body_lived_needs as bln
+
+        lived_needs_after, need_deltas = bln.apply_advance(
+            lived_needs_before,
+            hours=0.0,
+            relief=relief,
+        )
 
     load_units = sum(_load_units(item) for item in physical)
     posture_hours = sum(_posture_strain_hours(item) for item in physical)
@@ -896,9 +983,15 @@ def advance(
 
     changed = any(abs(after[name] - before[name]) > CHANGE_EPSILON for name in SOMATIC_VARIABLES)
     changed = changed or _detach(recovery_state) != _detach(state["recovery"])
+    if lived_needs_after is not None:
+        changed = changed or any(
+            abs(lived_needs_after["levels"][name]
+                - state["lived_needs"]["levels"][name]) > CHANGE_EPSILON
+            for name in lived_needs_after["levels"]
+        )
 
     updated = {
-        "schema_version": SCHEMA_RUNTIME,
+        "schema_version": state["schema_version"],
         "kind": KIND_RUNTIME,
         "runtime_version": state["runtime_version"],
         "body_id": state["body_id"],
@@ -909,11 +1002,13 @@ def advance(
         "recovery": recovery_state,
         "signal_latch": _detach(state["signal_latch"]),
     }
+    if lived_needs_after is not None:
+        updated["lived_needs"] = lived_needs_after
     updated = validate_runtime(updated)
 
     return {
         "kind": "body_advance_result",
-        "schema_version": SCHEMA_RUNTIME,
+        "schema_version": state["schema_version"],
         "runtime_version": state["runtime_version"],
         "body_id": state["body_id"],
         "from_time": _iso(start),
@@ -926,6 +1021,7 @@ def advance(
             "physical_events": len(physical),
             "environment_events": len(environment),
             "recovery_events": len(recovery),
+            "lived_need_relief_events": len(relief),
             "load_units": round(load_units, 9),
             "posture_strain_hours": round(posture_hours, 9),
         },
@@ -934,6 +1030,11 @@ def advance(
         "after": after,
         "recovery_before": _detach(state["recovery"]),
         "recovery_after": _detach(recovery_state),
+        "lived_needs_before": _detach(lived_needs_before) if lived_needs_before else None,
+        "lived_needs_after": _detach(lived_needs_after) if lived_needs_after else None,
+        "lived_need_deltas": {
+            name: round(value, 9) for name, value in sorted(need_deltas.items())
+        },
         "state": updated,
     }
 
@@ -1037,7 +1138,7 @@ def build_transition(
         "before_state_ref": _digest(before),
         "after_state_ref": _digest(after),
     }
-    return {
+    record = {
         "kind": KIND_TRANSITION,
         "schema_version": SCHEMA_TRANSITION,
         "transition_id": "body-transition:" + _digest(identity)[:32],
@@ -1058,6 +1159,11 @@ def build_transition(
         "recovery_before": _detach(before["recovery"]),
         "recovery_after": _detach(after["recovery"]),
     }
+    if before.get("lived_needs") is not None:
+        record["lived_needs_before"] = _detach(before["lived_needs"])
+    if after.get("lived_needs") is not None:
+        record["lived_needs_after"] = _detach(after["lived_needs"])
+    return record
 
 
 def validate_transition(record: Any) -> dict[str, Any]:

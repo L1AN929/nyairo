@@ -84,6 +84,7 @@ GATEWAY_LOCAL_OWNER_VERBS = (
     "REST",
     "ARRANGE",
     "TOGGLE_FIXTURE",
+    "TOILET",
 )
 GATEWAY_LOCAL_OWNER_SOURCE = "local_owner_phone"
 GATEWAY_LOCAL_OWNER_AUTHORITY = "local_owner_phone"
@@ -524,6 +525,66 @@ class GatewaySurface:
                 "rest_surface": surface_id,
             },
         }
+    def _toilet_availability(self) -> dict[str, Any]:
+        """Declared virtual facilities here, and whether the Body reports a need.
+
+        Three facts only, each from its owner: the World declaration names a
+        facility at this place, the place's own rhythm says OPEN, and the Body
+        owner (opt-in v2) reports a toilet band.  A v1 instance has no needs
+        block, so this entry stays ``available: false`` and carries no
+        candidate -- old roots see no new action.
+        """
+
+        empty = {"available": False, "blocked_reason": None, "detail": None,
+                 "candidates": [], "current": {"place_id": None, "toilet_band": None}}
+        try:
+            import body_lived_needs as bln
+            import world_lived_need_facilities as facilities
+        except Exception:  # pragma: no cover - module missing means no facility concept
+            return dict(empty, blocked_reason="LIVED_NEEDS_UNAVAILABLE")
+
+        state = self.service.body_state or {}
+        bands = bln.bands(state)
+        if bands is None:
+            return dict(empty, blocked_reason="LIVED_NEEDS_NOT_ENABLED",
+                        detail="this instance has no explicit lived-needs profile")
+        band = str(bands.get("toilet") or "none")
+        if band == "none":
+            return dict(empty, blocked_reason="TOILET_NOT_NEEDED",
+                        detail="the Body reports no toilet need right now",
+                        current={"place_id": None, "toilet_band": band})
+
+        world = self._world_live() or {}
+        here = (world.get("location") or {}).get("place_id")
+        candidates: list[dict[str, Any]] = []
+        reason: Optional[str] = None
+        detail: Optional[str] = None
+        for facility_id, declaration in facilities.load_declarations(
+                self.service.config.world_home).items():
+            verdict = facilities.facility_verdict(
+                facility_id=facility_id, declaration=declaration,
+                current_place=here, now=self.service._moment(),
+                environment=self.service.config.environment)
+            if not verdict["allowed"]:
+                reason = reason or str(verdict["reason_code"])
+                detail = detail or str(verdict.get("detail") or "")
+                continue
+            candidates.append({
+                "facility_id": facility_id,
+                "facility_kind": str(declaration.get("facility_kind") or ""),
+                "lived_need_effects": dict(verdict["effects"]),
+                "label": str(declaration.get("label") or facility_id)[:80],
+            })
+        return {
+            "available": bool(candidates),
+            "blocked_reason": None if candidates else (
+                reason or "NO_DECLARED_TOILET_HERE"),
+            "detail": None if candidates else (
+                detail or "no declared toilet facility at this place"),
+            "candidates": candidates,
+            "current": {"place_id": here, "toilet_band": band},
+        }
+
     # ---- F: consumable projection (read-only, no ticket, no body) ---------
     def _economy_facts(self) -> dict[str, Any]:
         """Property-economy facts for this home: absent / present / unreadable.
@@ -717,7 +778,7 @@ class GatewaySurface:
                 "slot_id": placement.get("slot_id"),
                 "in_hand": placement.get("kind") == "hand",
             })
-        return {
+        snapshot = {
             "kind": KIND_GATEWAY_API,
             "schema_version": SCHEMA_GATEWAY_API,
             "world_id": world.get("world_id"),
@@ -733,6 +794,18 @@ class GatewaySurface:
             "includes_test_objects": self.include_test_objects,
             "full_world_json_exposed": False,
         }
+        # Optional virtual lived needs: qualitative bands only, and only for an
+        # instance that explicitly opted in.  A v1 snapshot keeps exactly its
+        # old keys.
+        try:
+            import body_lived_needs as bln
+
+            needs = bln.bands(service.body_state or {})
+        except Exception:  # noqa: BLE001
+            needs = None
+        if needs is not None:
+            snapshot["lived_needs"] = needs
+        return snapshot
 
     def get_observation(self) -> dict[str, Any]:
         """The bounded observation the chat may be grounded on (section 13)."""
@@ -784,7 +857,7 @@ class GatewaySurface:
             )
         else:
             recovery["progress_band"] = None
-        return {
+        payload = {
             "kind": KIND_GATEWAY_API,
             "schema_version": SCHEMA_GATEWAY_API,
             "available": True,
@@ -794,6 +867,12 @@ class GatewaySurface:
             "bands_only": True,
             "raw_values_exposed": False,
         }
+        # Optional virtual lived needs: qualitative bands only, and only for an
+        # explicitly enabled instance (``None``/absent for every v1 body).
+        needs = summary.get("needs")
+        if isinstance(needs, Mapping):
+            payload["needs"] = dict(needs)
+        return payload
     def get_environment(self) -> dict[str, Any]:
         """The derived room environment of the current place/area (read-only).
 
@@ -1027,6 +1106,7 @@ class GatewaySurface:
         pick_up = self._pick_up_availability(held=held)
         consume = self._consume_availability()
         rest = self._rest_availability()
+        toilet = self._toilet_availability()
         room_living = self._room_living_availability()
 
         actions: list[dict[str, Any]] = [
@@ -1105,6 +1185,29 @@ class GatewaySurface:
                     "sleep_like_is_a_mode_not_a_daily_task": True,
                     "body_effect": "recovery session state only; no hunger, "
                                    "nutrition, healing or scheduled sleep",
+                },
+            },
+            {
+                # Explicit virtual lived-needs facility.  Only an instance with
+                # an enabled lived-needs profile sees this entry at all, and only
+                # facilities the World really declares at the current place are
+                # candidates.  No privacy text, no inventory, no medical claim.
+                "verb": "TOILET",
+                "available": bool(toilet["available"]),
+                "params": {"facility_id": "string"},
+                "requires": ["world.location", "body.lived_needs"],
+                "blocked_reason": toilet["blocked_reason"],
+                "detail": toilet["detail"],
+                "candidates": toilet["candidates"],
+                "current": toilet["current"],
+                "contract": {
+                    "declaration": "state/world_object_capabilities.json"
+                                   "#lived_need_facilities",
+                    "one_virtual_facility_use": True,
+                    "not_a_consumption": True,
+                    "no_privacy_text": True,
+                    "body_effect": "explicit lived_need_effects only; not a human "
+                                   "physiological claim",
                 },
             },
             {

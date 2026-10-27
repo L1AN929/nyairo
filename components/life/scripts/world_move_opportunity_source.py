@@ -86,6 +86,7 @@ MOVE_VERB = "MOVE"
 CONSUME_VERB = "CONSUME"
 POSE_VERB = body_actions.POSE_VERB
 REST_VERB = body_actions.REST_VERB
+TOILET_VERB = body_actions.TOILET_VERB
 #: v0.4 B: the *hand* verbs.  They need two parameters each (``object_id`` + ``slot_id``;
 #: ``object_id`` + a whole placement target), so they travel as one encoded ``dailyact:``
 #: target too (``life_daily_action_targets``) and the AR-0 payload shape is untouched.
@@ -376,6 +377,63 @@ def observed_body_action_opportunities(
             verb=REST_VERB, suffix=state,
             perception_ref="percept:gateway-available-actions:%s:r%s" % (place, revision),
         ))
+    return opportunities
+
+
+def observed_toilet_opportunities(
+    observation: Mapping[str, Any],
+    *,
+    available_actions: Optional[Mapping[str, Any]],
+    occurred_at: str,
+    observed_at: str,
+    valid_for_seconds: int = DEFAULT_VALIDITY_SECONDS,
+) -> list[dict[str, Any]]:
+    """One opportunity per declared virtual facility the owner exposes *now*.
+
+    The entry exists only for an instance with an explicit lived-needs profile
+    (the gateway's own ``TOILET`` verdict).  This module never decides that she
+    needs it, which facility exists, or that using it is a good idea.
+    """
+
+    place = _place_of(observation)
+    revision = _revision_of(observation)
+    world_id = observation.get("world_id")
+    if place is None or revision is None or not isinstance(available_actions, Mapping):
+        return []
+    entry = next((row for row in available_actions.get("actions") or []
+                  if isinstance(row, Mapping) and row.get("verb") == TOILET_VERB), None)
+    if not entry or entry.get("available") is not True:
+        return []
+
+    valid_from, valid_until = _validity_window(observed_at, valid_for_seconds)
+    occurred = ag0._require_iso(occurred_at, "occurred_at")
+    opportunities: list[dict[str, Any]] = []
+    for offered in entry.get("candidates") or []:
+        if not isinstance(offered, Mapping):
+            continue
+        facility_id = str(offered.get("facility_id") or "").strip()
+        if not facility_id:
+            continue
+        try:
+            target = body_actions.encode_toilet_target(facility_id)
+        except body_actions.BodyActionTargetError:
+            continue
+        suffix = hashlib.sha256(facility_id.encode("utf-8")).hexdigest()[:24]
+        opportunities.append({
+            "opportunity_id": "wopp:toilet:%s:r%s:%s" % (place, revision, suffix),
+            "perception_ref": "percept:gateway-available-actions:%s:r%s" % (place, revision),
+            "world_revision_ref": "wrev:%s:r%s" % (world_id or "world", revision),
+            "target_refs": [target],
+            "valid_from": valid_from,
+            "valid_until": valid_until,
+            "occurred_at": occurred,
+            "observed_at": valid_from,
+            "observed": True,
+            "status": "AVAILABLE",
+            "revision": 1,
+            "subject_id": ag0.GLOBAL_SUBJECT_ID,
+            "location_ref": "place:%s" % place,
+        })
     return opportunities
 
 
@@ -918,7 +976,8 @@ HANDS_USABLE_POSES = ("standing", "seated")
 #: payload as ``order_basis: kind_group_presentation``; it is not a ranking, not a score
 #: and not a default pick, and within a group the observation's own emission order holds.
 CONTEXT_KIND_ORDER = (
-    PICK_UP_VERB, PLACE_VERB, STAY_VERB, CONSUME_VERB, MOVE_VERB, POSE_VERB, REST_VERB,
+    PICK_UP_VERB, PLACE_VERB, STAY_VERB, CONSUME_VERB, TOILET_VERB, MOVE_VERB,
+    POSE_VERB, REST_VERB,
 )
 #: How many unknowns one context may name (a bounded list, not a log).
 MAX_CONTEXT_UNKNOWNS = 8
@@ -990,6 +1049,9 @@ def _body_context(observation: Mapping[str, Any]) -> dict[str, Any]:
             holding.append(object_id)
         else:
             free_slots.append(slot)
+    needs_raw = observation.get("lived_needs")
+    needs = ({str(key): str(value) for key, value in needs_raw.items()}
+             if isinstance(needs_raw, Mapping) else None)
     return {
         "pose": pose,
         "orientation": orientation,
@@ -1000,6 +1062,10 @@ def _body_context(observation: Mapping[str, Any]) -> dict[str, Any]:
         "holding": holding,
         # ``None`` when the pose is unknown: an unreadable posture is not "cannot hold".
         "hands_usable": (pose in HANDS_USABLE_POSES) if pose else None,
+        # Optional virtual lived needs, as owner bands only.  ``None`` for every
+        # instance without an explicit profile (old roots unchanged).
+        "needs": needs,
+        "needs_known": needs is not None,
     }
 
 
@@ -1095,7 +1161,7 @@ def _duration_seconds(entry: Mapping[str, Any]) -> tuple[Optional[float], Option
         if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
             return float(seconds), "stay_descriptor"
         return None, None
-    if verb in (PICK_UP_VERB, PLACE_VERB, CONSUME_VERB):
+    if verb in (PICK_UP_VERB, PLACE_VERB, CONSUME_VERB, TOILET_VERB):
         return HAND_MANIPULATION_SECONDS, DURATION_SOURCE_OWNER
     if verb == POSE_VERB:
         return POSTURE_SECONDS, DURATION_SOURCE_OWNER
@@ -1273,6 +1339,10 @@ def _context_opportunity(
     elif verb == CONSUME_VERB:
         label = "用掉「%s」" % (object_label or object_id or "这一份")
         description = "用掉这一份（一次一份）；这里不做营养或饱足的判断。"
+    elif verb == TOILET_VERB:
+        label = "用一下这里的设施"
+        description = ("使用这个世界包在此处声明过的设施；只改变虚拟身体需求，"
+                       "不生成任何隐私内容，也不是人体生理主张。")
     elif verb == STAY_VERB:
         seconds = entry.get("stay_seconds")
         affordance = entry.get("affordance") or ""
@@ -1532,6 +1602,13 @@ class WorldMoveOpportunityProvider:
             observed_at=moment,
             valid_for_seconds=self.valid_for_seconds,
         )
+        toilet = observed_toilet_opportunities(
+            snapshot.data,
+            available_actions=available_actions,
+            occurred_at=moment,
+            observed_at=moment,
+            valid_for_seconds=self.valid_for_seconds,
+        )
         # v0.4 B: the surfaces really present where she is, from the owner's own
         # environment projection.  ``None`` means "the owner did not answer this round",
         # which is different from "there is no surface": the context reports it as an
@@ -1550,9 +1627,10 @@ class WorldMoveOpportunityProvider:
             else "SURFACES_NOT_EXPOSED_BY_OWNER")
         self.last_observed_at = moment
         self.last_opportunity_view = opportunity_view(
-            move + consume + stay + body + daily, self.last_catalog, available_actions)
+            move + consume + stay + body + toilet + daily,
+            self.last_catalog, available_actions)
         self.last_reason = None
-        return move + consume + stay + body + daily
+        return move + consume + stay + body + toilet + daily
 
     # -- plumbing ----------------------------------------------------------
 
@@ -1807,9 +1885,11 @@ __all__ = [
     "STAY_REF_PREFIX",
     "STAY_SECONDS_BY_AFFORDANCE",
     "STAY_VERB",
+    "TOILET_VERB",
     "WorldMoveOpportunityProvider",
     "observed_body_action_opportunities",
     "observed_consume_opportunities",
+    "observed_toilet_opportunities",
     "observed_daily_action_opportunities",
     "observed_move_opportunities",
     "observed_stay_opportunities",

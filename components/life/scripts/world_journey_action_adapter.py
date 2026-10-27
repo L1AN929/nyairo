@@ -75,7 +75,7 @@ SUPPORTED_VERBS = ("MOVE",)
 #: command are instant owner mutations, not journeys, and they reach the Resolver only
 #: through that formal chain (the bridge decodes their encoded ``bodyact:`` target).
 DELEGATED_VERBS = ("CONSUME", body_actions.POSE_VERB, body_actions.REST_VERB,
-                   *daily_actions.DAILY_ACTION_VERBS)
+                   body_actions.TOILET_VERB, *daily_actions.DAILY_ACTION_VERBS)
 
 DEPARTED_REF = "world:journey:%s:departed"
 ARRIVED_REF = "world:journey:%s:arrived:r%s"

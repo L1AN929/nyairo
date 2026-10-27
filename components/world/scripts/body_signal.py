@@ -220,6 +220,15 @@ def produce_signals(
     for signal in signals:
         assert_no_forbidden_fields(signal)
 
+    # Optional virtual lived needs: qualitative bands only, never a raw level.
+    # ``None`` for every v1 instance, so the old signal set is unchanged.
+    try:
+        import body_lived_needs as bln
+
+        needs = bln.bands(state)
+    except Exception:  # noqa: BLE001 - no module/profile means no needs block
+        needs = None
+
     return {
         "kind": "body_signal_set",
         "schema_version": SCHEMA_SIGNAL,
@@ -228,6 +237,7 @@ def produce_signals(
         "runtime_version": state["runtime_version"],
         "latch": latch,
         "signals": signals,
+        "needs": needs,
     }
 
 

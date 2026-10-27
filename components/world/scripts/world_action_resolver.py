@@ -194,6 +194,8 @@ ACTIONS = (
     "REST",
     "ARRANGE",
     "TOGGLE_FIXTURE",
+    # Explicit virtual lived-needs facility action (opt-in profile only).
+    "TOILET",
 )
 
 #: v0.4: the verbs one explicit *local owner* command may carry.  ``CONSUME``
@@ -210,6 +212,7 @@ LOCAL_OWNER_ACTIONS = (
     "REST",
     "ARRANGE",
     "TOGGLE_FIXTURE",
+    "TOILET",
 )
 
 #: REST is a command, not a timer.  ``body_runtime`` owns the recovery state
@@ -841,6 +844,7 @@ class WorldResolver:
             "REST": self._resolve_rest,
             "ARRANGE": self._resolve_arrange,
             "TOGGLE_FIXTURE": self._resolve_toggle_fixture,
+            "TOILET": self._resolve_toilet,
         }[normalized["action"]]
 
         try:
@@ -1744,6 +1748,99 @@ class WorldResolver:
         result["rest_surface_id"] = surface_id
         result["pose"] = pose
         return result
+
+    def _resolve_toilet(
+        self, normalized: Mapping[str, Any], *, crash_after: Optional[str]
+    ) -> dict[str, Any]:
+        """Use one *declared* virtual facility.  World facts in, a commit out.
+
+        This is not a consumption (nothing disappears), not a medical action and
+        not a privacy record: the World side proves the declaration names this
+        place and that the place is open; the only effect is the explicit
+        ``lived_need_effects`` block travelling to the Body owner.
+        """
+
+        module, state, blocked = self._substrate_gate(normalized)
+        if blocked is not None:
+            return blocked
+
+        _require_params(normalized["params"], {"facility_id"})
+        finished, _frame = self._replay_frame(normalized)
+        if finished is not None:
+            return finished
+
+        try:
+            facility_id = _text(normalized["params"].get("facility_id"),
+                                "facility_id", maximum=128)
+        except ResolverError as error:
+            return _reject(
+                normalized, "rejected", CODE_INVALID_PROPOSAL, reason_code=str(error)
+            )
+
+        live = self._dependencies()
+        stale = self._stale_keys(normalized["observed_dependencies"], live)
+        if stale:
+            return _reject(
+                normalized, "rejected", CODE_STALE_STATE,
+                reason_code="stale_dependency",
+                dependencies=live, stale_dependencies=stale,
+            )
+
+        before = module.read_model(state)
+        world = self._world_state() or {}
+        here = (world.get("location") or {}).get("place_id")
+        try:
+            import world_lived_need_facilities as facilities
+
+            verdict = facilities.facility_verdict(
+                facility_id=facility_id,
+                declaration=facilities.declaration_of(
+                    facility_id, self.hermes_home),
+                current_place=here,
+                now=self._clock(),
+                environment=self.environment,
+            )
+        except Exception:  # noqa: BLE001 - an unreadable declaration is a refusal
+            return _reject(
+                normalized, "rejected", CODE_WORLD_UNAVAILABLE,
+                reason_code="FACILITY_DECLARATION_UNAVAILABLE",
+                before=before, dependencies=live,
+            )
+        if not verdict["allowed"]:
+            return _reject(
+                normalized, "rejected", CODE_NOT_ALLOWED,
+                reason_code="%s: %s" % (verdict["reason_code"], verdict["detail"]),
+                before=before, dependencies=live,
+            )
+
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="prepared", reason_code="toilet_prepared",
+                before=before, dependencies=live,
+            )
+        )
+        if crash_after == CRASH_AFTER_PREPARED:
+            raise ResolverCrash("crash after prepared (test)")
+
+        after = module.read_model(self._substrate() or state)
+        self.ledger.append_unlocked(
+            self._entry(
+                normalized, status="committed", reason_code="toilet_committed",
+                before=before, after=after, dependencies=live,
+                world_mutation_refs=["facility:%s=used" % facility_id],
+                body_consequence_refs=["lived_need:toilet:%s" % facility_id],
+            )
+        )
+        result = _result(
+            normalized, status="applied", code=CODE_OK,
+            reason_code="toilet_committed", before=before, after=after,
+            dependencies=live, ledger_status="committed",
+        )
+        result["facility_id"] = facility_id
+        result["facility_kind"] = "toilet"
+        result["lived_need_effects"] = dict(verdict["effects"])
+        return result
+
     # -- ARRANGE / TOGGLE_FIXTURE (v0.4 room-living) ----------------------
 
     def _room_environment(self):
@@ -2318,6 +2415,13 @@ class WorldResolver:
         # execution without re-deriving anything (read-only evidence).
         result["object_id"] = object_id
         result["consumption_receipt"] = stored
+        # Explicit, World-declared virtual need relief.  Absent declaration ->
+        # absent key: the old "CONSUME is never nutrition" rule is unchanged.
+        import body_lived_needs as bln
+
+        effects = bln.declaration_effects(verdict.get("declaration"))
+        if effects:
+            result["lived_need_effects"] = effects
         if verdict.get("purchase_voucher") is not None:
             result["purchase_voucher"] = dict(verdict["purchase_voucher"])
         if normalized["authority"] == AUTHORITY_LOCAL_OWNER_PHONE:

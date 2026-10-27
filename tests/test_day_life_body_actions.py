@@ -419,7 +419,7 @@ class BodyActionContractTests(unittest.TestCase):
         # 而不是被拒（拿放的动词表由 B 的 ``life_daily_action_targets`` 拥有，这里直接引用，不复制）。
         self.assertEqual(wja.SUPPORTED_VERBS, ("MOVE",))
         self.assertEqual(set(wja.DELEGATED_VERBS),
-                         {"CONSUME", "POSE", "REST",
+                         {"CONSUME", "POSE", "REST", "TOILET",
                           *daily_actions.DAILY_ACTION_VERBS})
 
     def test_rest_param_contract_is_narrow_at_the_submission_boundary(self) -> None:
