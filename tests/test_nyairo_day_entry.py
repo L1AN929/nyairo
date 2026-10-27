@@ -102,6 +102,70 @@ class NyairoDayEntryTest(unittest.TestCase):
             json.dumps({"schema": entry.SCHEMA_MANAGED}), encoding="utf-8")
         self.assertTrue(entry._is_managed(root))
 
+    def test_init_accepts_package_and_lived_needs_with_neutral_defaults(self) -> None:
+        entry = _entry()
+        args = entry.build_parser().parse_args([
+            "init", "--root", "/root/nyairo-day",
+            "--world-package", "daily_neighborhood_v1", "--lived-needs"])
+        self.assertEqual(args.world_package, "daily_neighborhood_v1")
+        self.assertTrue(args.lived_needs)
+        self.assertEqual(entry._lived_needs_from_args(args),
+                         {"enabled": True, "hunger": 0.0, "thirst": 0.0, "toilet": 0.0})
+        values = entry.build_parser().parse_args([
+            "init", "--root", "/root/nyairo-day", "--lived-needs",
+            "--lived-needs-thirst", "0.72"])
+        self.assertEqual(entry._lived_needs_from_args(values)["thirst"], 0.72)
+
+    def test_lived_needs_values_require_the_enabling_switch(self) -> None:
+        entry = _entry()
+        args = entry.build_parser().parse_args([
+            "init", "--root", "/root/nyairo-day", "--lived-needs-thirst", "0.5"])
+        with self.assertRaises(RuntimeError) as caught:
+            entry._lived_needs_from_args(args)
+        self.assertIn("LIVED_NEEDS_INVALID", str(caught.exception))
+
+    def test_out_of_range_initial_need_is_refused(self) -> None:
+        entry = _entry()
+        with self.assertRaises(RuntimeError):
+            entry._normalize_lived_needs({"hunger": 1.5, "thirst": 0.0, "toilet": 0.0})
+
+    def test_example_package_name_resolves(self) -> None:
+        from components.phone import demo
+
+        path = demo.resolve_world_package("daily_neighborhood_v1")
+        self.assertTrue((path / "world.json").exists())
+        identity = demo.world_package_identity(path)
+        self.assertEqual(identity["world_id"], "daily_neighborhood_v1")
+
+    def test_existing_root_refuses_a_different_package_or_profile(self) -> None:
+        entry = _entry()
+        marker = {"world_package": {"world_id": "daily_neighborhood_v1"},
+                  "lived_needs": {"enabled": True, "hunger": 0.0,
+                                  "thirst": 0.72, "toilet": 0.0}}
+        self.assertIsNone(entry._config_conflict(
+            marker, world_package="daily_neighborhood_v1",
+            lived_needs={"hunger": 0.0, "thirst": 0.72, "toilet": 0.0}))
+        self.assertEqual(entry._config_conflict(
+            marker, world_package=None,
+            lived_needs={"hunger": 0.0, "thirst": 0.3, "toilet": 0.0}),
+            "NEED_NEW_ROOT_FOR_LIVED_NEEDS")
+        self.assertEqual(entry._config_conflict(
+            {"world_package": {"world_id": "something_else"},
+             "lived_needs": {}}, world_package="daily_neighborhood_v1",
+            lived_needs=None), "NEED_NEW_ROOT_FOR_WORLD_PACKAGE")
+
+    def test_explicit_run_switches_win_over_the_recorded_choice(self) -> None:
+        entry = _entry()
+        args = entry.build_parser().parse_args(["start", "--root", "/root/nyairo-day"])
+        self.assertIsNone(args.room_living)
+        self.assertIsNone(args.world_actions)
+        self.assertTrue(entry._resolve_run_switch(args, "room_living", True))
+        args_on = entry.build_parser().parse_args([
+            "start", "--root", "/root/nyairo-day", "--no-room-living",
+            "--world-actions"])
+        self.assertFalse(entry._resolve_run_switch(args_on, "room_living", True))
+        self.assertTrue(entry._resolve_run_switch(args_on, "world_actions", False))
+
 
 if __name__ == "__main__":
     unittest.main()

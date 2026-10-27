@@ -55,3 +55,7 @@ Supply/World、再起手机面、然后另开命令跑 resident；失败原因�
 - 验证：`tests/test_nyairo_day_entry.py` 7 例；WSL 新根实跑 `start`（自动 init）、`status`、
   `phone`、`import`（owner 回读）、`stop`→同根 `start`（材料/run/账本不变），详见
   `.agents/worker-runs/20261026-simple-launch-result.md`。未跑真实模型日，未提交/部署。
+- 2026-10-27 增补：`init` / 首次 `start` 可显式选 `--world-package` 与 `--lived-needs`，
+  `start` 另有按进程树的 `--room-living` / `--world-actions`；创建选择固定在实例 marker，
+  已有 root 换包/改初值会返回具名原因要求新目录。见
+  [日常入口街区与身体](2026-10-27-living-entry-neighborhood-and-body.md)。

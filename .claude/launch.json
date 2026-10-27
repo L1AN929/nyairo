@@ -29,6 +29,20 @@
         "cd /mnt/d/nyairo-rc1-body-backend && { set -a; [ -f /root/.nyairo-model.env ] && . /root/.nyairo-model.env; set +a; }; exec env PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/usable_day.py serve --root /root/nyairo-day-20261022 --port 3831"
       ],
       "port": 3831
+    },
+    {
+      "name": "camera-translator",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-B", "scripts/camera_local_runtime.py", "translator"],
+      "url": "http://127.0.0.1:18190",
+      "port": 18190
+    },
+    {
+      "name": "camera-sd",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-B", "scripts/camera_local_runtime.py", "sd"],
+      "url": "http://127.0.0.1:7860",
+      "port": 7860
     }
   ]
 }

@@ -46,6 +46,7 @@ from typing import Any, Mapping, Optional
 REPO_ROOT = Path(__file__).resolve().parents[1]
 for _entry in (str(REPO_ROOT), str(REPO_ROOT / "components"),
                str(REPO_ROOT / "components" / "life" / "scripts"),
+               str(REPO_ROOT / "components" / "world" / "scripts"),
                str(REPO_ROOT / "scripts")):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)
@@ -110,6 +111,12 @@ HUMAN_REASONS = {
     "REQUEST_CAP_INVALID": "新请求数必须是大于 0 的整数。",
     "MEMORY_BINDING_BROKEN": "这个实例记录了 Memory，但现在读不了；先按日志修好 Memory，再运行。",
     "CROSS_BINDING_CONFLICT": "手机实例和 Life 实例的记录互相矛盾；先停服务核对，不能强行运行。",
+    "WORLD_PACKAGE_MISSING": "找不到这个街区包；写 examples/worlds 下的包名，或一个完整的包目录。",
+    "WORLD_PACKAGE_UNREADABLE": "这个街区包读不了（world.json 缺失或坏了）；换一个包。",
+    "NEED_NEW_ROOT_FOR_WORLD_PACKAGE": "这个实例已经绑定了一个街区；换街区要建一个新目录，不会原地迁移。",
+    "NEED_NEW_ROOT_FOR_LIVED_NEEDS": "这个实例的虚拟身体档案已经定下（或从未启用）；改初始值要建一个新目录。",
+    "LIVED_NEEDS_INVALID": "虚拟身体初值必须是 0 到 1 之间的数字（0 表示不渴不饿）。",
+    "FOREGROUND_NEEDS_CTRL_C": "这个服务是在前台运行的；请回到那个窗口按 Ctrl-C 停止。",
 }
 
 
@@ -144,6 +151,95 @@ def _is_managed(root: Path) -> bool:
     """Did *this* entry create the instance?  A foreign instance is never adopted."""
 
     return _read_json(_managed_path(root)).get("schema") == SCHEMA_MANAGED
+
+
+def _managed_config(root: Path) -> dict[str, Any]:
+    """The entry's own bounded config: package identity, profile, run switches."""
+
+    record = _read_json(_managed_path(root))
+    return {
+        "world_package": dict(record.get("world_package") or {}),
+        "lived_needs": dict(record.get("lived_needs") or {}),
+        "room_living": bool(record.get("room_living")),
+        "world_actions": bool(record.get("world_actions")),
+    }
+
+
+def _normalize_lived_needs(value: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+    """Explicit 0..1 initial values only; ``None`` means the v1 body (no profile)."""
+
+    if value is None:
+        return None
+    out: dict[str, Any] = {"enabled": True}
+    for name in ("hunger", "thirst", "toilet"):
+        raw = value.get(name, 0.0)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise RuntimeError("LIVED_NEEDS_INVALID:%s" % name)
+        number = float(raw)
+        if not (0.0 <= number <= 1.0):
+            raise RuntimeError("LIVED_NEEDS_INVALID:%s" % name)
+        out[name] = number
+    return out
+
+
+def _lived_needs_from_args(args: argparse.Namespace) -> Optional[dict[str, Any]]:
+    if not getattr(args, "lived_needs", False):
+        if any(getattr(args, name, None) is not None for name in
+               ("lived_needs_hunger", "lived_needs_thirst", "lived_needs_toilet")):
+            # Explicit values without the enabling switch would be silently ignored.
+            raise RuntimeError("LIVED_NEEDS_INVALID:add --lived-needs to enable the profile")
+        return None
+    value = {
+        "hunger": getattr(args, "lived_needs_hunger", None) or 0.0,
+        "thirst": getattr(args, "lived_needs_thirst", None) or 0.0,
+        "toilet": getattr(args, "lived_needs_toilet", None) or 0.0,
+    }
+    return _normalize_lived_needs(value)
+
+
+def _resolve_run_switch(args: argparse.Namespace, name: str, stored: Any) -> bool:
+    """An explicit on/off wins; otherwise the entry's last recorded choice applies."""
+
+    value = getattr(args, name, None)
+    if value is None:
+        return bool(stored)
+    return bool(value)
+
+
+def _persist_run_switches(root: Path, *, room_living: bool, world_actions: bool) -> None:
+    path = _managed_path(root)
+    record = _read_json(path)
+    if not record:
+        return
+    record.update({"room_living": bool(room_living),
+                   "world_actions": bool(world_actions)})
+    _write_json(path, record)
+
+
+def _same_world_package(existing: Mapping[str, Any], requested: Any) -> bool:
+    """Compare the package's own id, not the directory it happens to live in."""
+
+    if not requested:
+        return True
+    from components.phone import demo
+
+    identity = demo.world_package_identity(demo.resolve_world_package(str(requested)))
+    return str(identity.get("world_id") or "") == str(existing.get("world_id") or "")
+
+
+def _config_conflict(marker: Mapping[str, Any], *, world_package: Optional[str],
+                     lived_needs: Optional[Mapping[str, Any]]) -> Optional[str]:
+    if world_package and not _same_world_package(
+            dict(marker.get("world_package") or {}), world_package):
+        return "NEED_NEW_ROOT_FOR_WORLD_PACKAGE"
+    stored_needs = dict(marker.get("lived_needs") or {})
+    if lived_needs is not None:
+        if not stored_needs or not stored_needs.get("enabled"):
+            return "NEED_NEW_ROOT_FOR_LIVED_NEEDS"
+        for name in ("hunger", "thirst", "toilet"):
+            if float(stored_needs.get(name, -1.0)) != float(lived_needs.get(name, -2.0)):
+                return "NEED_NEW_ROOT_FOR_LIVED_NEEDS"
+    return None
 
 
 def _log_path(root: Path) -> Path:
@@ -198,6 +294,16 @@ def _human(code: str, detail: str = "") -> str:
     return "没有成功%s。" % tail if tail else "没有成功。"
 
 
+def _reason_of(exc: BaseException) -> str:
+    """The owner's own uppercase prefix, if the exception carries one."""
+
+    text = str(exc)
+    head = text.split(":", 1)[0].strip()
+    if head and head.isupper():
+        return head
+    return type(exc).__name__
+
+
 def _refuse(reason: str, detail: str = "", *, text: Optional[str] = None,
             as_json: bool = False, extra: Optional[Mapping[str, Any]] = None) -> int:
     payload: dict[str, Any] = {"ok": False, "status": "BLOCKED", "reason": reason,
@@ -248,8 +354,16 @@ def _is_instance(root: Path) -> bool:
 
 
 def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
-                     run_id: Optional[str] = None) -> dict[str, Any]:
-    """Prepare exactly one new instance, or reuse the one already at ``root``."""
+                     run_id: Optional[str] = None,
+                     world_package: Optional[str] = None,
+                     lived_needs: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+    """Prepare exactly one new instance, or reuse the one already at ``root``.
+
+    Package/profile are *creation* choices: an existing managed root accepts the
+    same package/profile (no rewrite) and refuses a different one with a named
+    "use a new root" reason.  Room-living / local-action switches are run-time
+    choices and live in the same small marker, not in world/body data.
+    """
 
     from components.phone import demo, life as phone_life, service as phone_service
 
@@ -259,13 +373,22 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
                     "reason": "INSTANCE_NOT_CREATED_BY_THIS_ENTRY",
                     "detail": "an existing instance without this entry's managed marker is "
                               "never adopted, migrated or given a new Memory"}
+        marker = _managed_config(root)
+        conflict = _config_conflict(marker, world_package=world_package,
+                                    lived_needs=lived_needs)
+        if conflict:
+            return {"ok": False, "status": "BLOCKED", "root": str(root), "created": False,
+                    "reason": conflict,
+                    "detail": "creation choices are fixed for an existing root; "
+                              "use a brand-new directory"}
         reloaded = phone_service.load_instance(root)
         memory = phone_life.enable_instance_memory(
             root, None, MEMORY_OPERATION_KEY,
             authority_path=authority or _default_authority(root))
         return {"ok": str(memory.get("status")) == "READY",
                 "status": "ALREADY_PREPARED", "root": str(root),
-                "created": False, "phone": dict(reloaded), "memory": memory}
+                "created": False, "phone": dict(reloaded), "memory": memory,
+                "config": marker}
 
     if not root.is_absolute():
         raise RuntimeError("ROOT_NOT_ABSOLUTE")
@@ -282,18 +405,35 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         # 不预置合成阅读材料、不预置占位作品：她的第一份材料和第一件作品由她自己产生，
         # 或者由操作者用 import 显式给一份（给材料不等于强迫她读）。
         reading_title="", reading_content=None, seed_work_artifact=False,
-        run_id=run_id)
+        run_id=run_id,
+        world_package=world_package,
+        lived_needs=lived_needs)
+    package_identity = dict(prepared.get("world_package") or {})
+    body_dir = Path(str(prepared["world_home"])) / "data" / "body"
+    lived_report = None
+    if lived_needs:
+        from body_lived_needs_enable import enable_profile
+
+        lived_report = enable_profile(
+            body_dir, hunger=float(lived_needs["hunger"]),
+            thirst=float(lived_needs["thirst"]), toilet=float(lived_needs["toilet"]),
+            note="nyairo_day explicit virtual profile; not a human measurement")
     target_authority = authority or _default_authority(root)
     # 先留归管标记：即使 Memory 这一步失败，重试 start 也只修 Memory，不会重建实例、不会接管别人的根。
     _write_json(_managed_path(root), {
         "schema": SCHEMA_MANAGED, "created_at": _now_iso(), "root": str(root),
         "memory_authority": str(target_authority),
+        "world_package": package_identity,
+        "lived_needs": dict(lived_needs or {}),
+        "room_living": False, "world_actions": False,
         "note": "this instance was created by scripts/nyairo_day.py; foreign instances are never adopted",
     })
     memory = phone_life.enable_instance_memory(
         root, None, MEMORY_OPERATION_KEY, authority_path=target_authority)
     return {"ok": str(memory.get("status")) == "READY", "status": "PREPARED", "root": str(root),
             "created": True, "prepared": prepared, "memory": memory,
+            "lived_needs": lived_report,
+            "config": _managed_config(root),
             "phone": phone_service.load_instance(root)}
 
 
@@ -301,11 +441,25 @@ def _prepare_text(report: Mapping[str, Any]) -> str:
     root = str(report.get("root") or "")
     memory = dict(report.get("memory") or {})
     binding = dict(memory.get("binding") or {})
+    config = dict(report.get("config") or {})
     lines = []
     if report.get("created"):
         lines.append("实例已准备好：%s" % root)
     else:
         lines.append("这个目录已经是实例：%s（没有重建、没有覆盖）" % root)
+    package = dict(config.get("world_package") or {})
+    if package.get("world_id"):
+        lines.append("街区：%s（%s）" % (package.get("name") or package.get("world_id"),
+                                      package.get("world_id")))
+    else:
+        lines.append("街区：入口生成的默认世界（没有显式选包）")
+    needs = dict(config.get("lived_needs") or {})
+    if needs.get("enabled"):
+        lines.append("虚拟身体：已启用（饿 %.2f / 渴 %.2f / 如厕 %.2f，0 表示不渴不饿）"
+                     % (needs.get("hunger", 0.0), needs.get("thirst", 0.0),
+                        needs.get("toilet", 0.0)))
+    else:
+        lines.append("虚拟身体：未启用（旧 v1 身体，没有饿/渴/如厕）")
     if str(memory.get("status")) == "READY":
         lines.append("Memory：已启用（owner %s）" % (memory.get("owner") or "chiyo"))
         if binding.get("authority_database"):
@@ -337,10 +491,13 @@ def cmd_init(args: argparse.Namespace) -> int:
         return _refuse("MEMORY_AUTHORITY_PATH_REQUIRED", "删除底账要写绝对路径",
                        as_json=bool(getattr(args, "json", False)))
     try:
-        report = _ensure_instance(root, authority=authority, run_id=args.run_id)
+        lived_needs = _lived_needs_from_args(args)
+        report = _ensure_instance(
+            root, authority=authority, run_id=args.run_id,
+            world_package=getattr(args, "world_package", None),
+            lived_needs=lived_needs)
     except Exception as exc:
-        reason = str(exc) if str(exc).isupper() else type(exc).__name__
-        return _refuse(reason, str(exc), as_json=bool(getattr(args, "json", False)))
+        return _refuse(_reason_of(exc), str(exc), as_json=bool(getattr(args, "json", False)))
     if str(report.get("reason") or "").startswith("INSTANCE_"):
         return _refuse(str(report.get("reason")), str(report.get("detail") or ""),
                        as_json=bool(getattr(args, "json", False)))
@@ -398,7 +555,61 @@ def _urls(port: int) -> dict[str, str]:
         "今天": base + "/api/phone/today",
         "安排": base + "/api/phone/today/arrangements",
         "作品": base + "/api/phone/projects",
+        "世界": base + "/api/phone/world",
+        "钱包": base + "/api/phone/wallet",
+        "物品": base + "/api/phone/inventory",
+        "实体店": base + "/api/phone/store",
+        "身体档位（在状态里）": base + "/api/phone/state",
     }
+
+
+def _body_bands(root: Path) -> Optional[dict[str, Any]]:
+    """Read-only Body bands (never raw levels); ``None`` when the profile is off."""
+
+    try:
+        from components.phone import service as phone_service
+
+        instance = phone_service.load_instance(root)
+        world_home = Path(str(instance.get("world_home") or ""))
+    except Exception:
+        return None
+    try:
+        import body_lived_needs as bln
+        import body_runtime as br
+
+        state = br.BodyStore(world_home / "data" / "body").load_runtime()
+        if state is None:
+            return {"enabled": True, "bands": {}, "note": "profile 已写；服务启动后会生成 v2 身体"}
+        bands = bln.bands(state)
+        if bands is None:
+            return None
+        return {"enabled": True, "bands": bands}
+    except Exception as exc:
+        return {"enabled": True, "bands": {}, "reason": type(exc).__name__}
+
+
+def _config_lines(root: Path) -> list[str]:
+    config = _managed_config(root)
+    package = dict(config.get("world_package") or {})
+    needs = dict(config.get("lived_needs") or {})
+    lines = []
+    if package.get("world_id"):
+        lines.append("街区：%s（%s）" % (package.get("name") or package.get("world_id"),
+                                      package.get("world_id")))
+    else:
+        lines.append("街区：默认生成世界")
+    bands = _body_bands(root)
+    if needs.get("enabled"):
+        bands_text = "；".join("%s=%s" % (name, band)
+                               for name, band in sorted((bands or {}).get("bands", {}).items()))
+        lines.append("虚拟身体：已启用%s" % (("（%s）" % bands_text) if bands_text else ""))
+    else:
+        lines.append("虚拟身体：未启用（v1，没有饿/渴/如厕）")
+    lines.append("本地动作：%s；房间链：%s" % (
+        "显式开启" if config.get("world_actions") else "关闭（默认 gate off）",
+        "显式开启" if config.get("room_living") else "关闭"))
+    lines.append("手机工具：chiyo_phone 的 world / store / inventory / wallet（身体档位在 world 的 body.needs）")
+    return lines
 
 
 def _start_text(root: Path, port: int, *, already: bool) -> str:
@@ -406,6 +617,7 @@ def _start_text(root: Path, port: int, *, already: bool) -> str:
     lines.append("  实例：%s" % root)
     for name, url in _urls(port).items():
         lines.append("  %s：%s" % (name, url))
+    lines.extend(_config_lines(root))
     lines.append("")
     lines.append("看状态：python3 scripts/nyairo_day.py status --root %s" % root)
     lines.append("给材料：python3 scripts/nyairo_day.py import --root %s --file 你的材料.txt" % root)
@@ -416,7 +628,8 @@ def _start_text(root: Path, port: int, *, already: bool) -> str:
     return "\n".join(lines)
 
 
-def _serve_forever(root: Path, port: int) -> int:
+def _serve_forever(root: Path, port: int, *, room_living: bool = False,
+                   world_actions: bool = False) -> int:
     """The child process: the existing ``demo.serve_instance`` plus a clean stop event."""
 
     import threading
@@ -440,11 +653,26 @@ def _serve_forever(root: Path, port: int) -> int:
             "schema": SCHEMA_READY, "pid": os.getpid(), "port": int(announcement["port"]),
             "url": announcement.get("url"), "ready_at": _now_iso(),
         })
+        # The foreground process owns the same bounded service record as the
+        # background one, so status can see it and a later stop can close it
+        # out cleanly (the process itself is stopped by Ctrl-C/SIGTERM).
+        _write_json(_record_path(root), {
+            "schema": SCHEMA_RECORD, "pid": os.getpid(), "port": int(announcement["port"]),
+            "root": str(root), "started_at": _now_iso(), "status": "RUNNING",
+            "ready_at": _now_iso(), "url": announcement.get("url"),
+            "model_enabled": False, "room_living": bool(room_living),
+            "world_actions": bool(world_actions), "foreground": True,
+            "log": str(_log_path(root)),
+        })
         sys.stdout.write("服务就绪，尚未开始自主活动。\n")
         sys.stdout.flush()
 
+    gate = "canonical" if world_actions else None
     try:
         demo.serve_instance(root, port=int(port), stop_event=stop, on_ready=_on_ready,
+                            room_living=bool(room_living),
+                            # 本地工具动作只在显式要求时对**本进程树**开启；默认 off 不变。
+                            world_intent_gate=gate,
                             # 用户入口允许“停止后立刻重新打开同一端口”：只放过 TIME_WAIT，
                             # 不会让第二个活着的服务抢同一端口。旧调用方默认仍是不复用。
                             reuse_address=True)
@@ -476,14 +704,21 @@ def _serve_forever(root: Path, port: int) -> int:
     return EXIT_OK
 
 
-def _spawn_background(root: Path, port: int) -> tuple[Optional[subprocess.Popen], str]:
+def _spawn_background(root: Path, port: int, *, room_living: bool = False,
+                      world_actions: bool = False
+                      ) -> tuple[Optional[subprocess.Popen], str]:
     log_path = _log_path(root)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     handle = log_path.open("a", encoding="utf-8")
+    command = [sys.executable, "-B", str(Path(__file__).resolve()), "_serve",
+               "--root", str(root), "--port", str(port)]
+    if room_living:
+        command.append("--room-living")
+    if world_actions:
+        command.append("--world-actions")
     try:
         child = subprocess.Popen(
-            [sys.executable, "-B", str(Path(__file__).resolve()), "_serve",
-             "--root", str(root), "--port", str(port)],
+            command,
             stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT,
             cwd=str(REPO_ROOT), start_new_session=True, close_fds=True)
     finally:
@@ -491,6 +726,7 @@ def _spawn_background(root: Path, port: int) -> tuple[Optional[subprocess.Popen]
     _write_json(_record_path(root), {
         "schema": SCHEMA_RECORD, "pid": child.pid, "port": int(port), "root": str(root),
         "started_at": _now_iso(), "status": "STARTING", "model_enabled": False,
+        "room_living": bool(room_living), "world_actions": bool(world_actions),
         "log": str(log_path),
     })
     return child, str(log_path)
@@ -532,34 +768,49 @@ def cmd_start(args: argparse.Namespace) -> int:
     authority = (Path(args.memory_authority).expanduser()
                  if getattr(args, "memory_authority", None) else None)
     try:
-        prepared = _ensure_instance(root, authority=authority)
+        lived_needs = _lived_needs_from_args(args)
+        prepared = _ensure_instance(
+            root, authority=authority,
+            world_package=getattr(args, "world_package", None),
+            lived_needs=lived_needs)
     except Exception as exc:
-        reason = str(exc) if str(exc).isupper() else type(exc).__name__
-        return _refuse(reason, str(exc), as_json=json_output)
+        return _refuse(_reason_of(exc), str(exc), as_json=json_output)
     if prepared.get("created"):
         sys.stdout.write(_prepare_text(prepared) + "\n\n")
         sys.stdout.flush()
     if not prepared.get("ok"):
         memory = dict(prepared.get("memory") or {})
         reason = str(prepared.get("reason") or memory.get("reason") or "MEMORY_NOT_READY")
+        text = None
+        if reason.startswith("NEED_NEW_ROOT"):
+            text = _human(reason)
+        elif not reason.startswith("INSTANCE_"):
+            text = ("实例目录已经建好，但 Memory 没有启用；先按上面的原因修好，"
+                    "可以换一个实例外的底账路径：start --memory-authority /绝对/路径")
         return _refuse(reason, str(prepared.get("detail") or memory.get("detail") or ""),
-                       as_json=json_output,
-                       text=_human(reason) if reason.startswith("INSTANCE_")
-                       else "实例目录已经建好，但 Memory 没有启用；先按上面的原因修好，"
-                            "可以换一个实例外的底账路径：start --memory-authority /绝对/路径")
+                       as_json=json_output, text=text)
+
+    config = dict(prepared.get("config") or _managed_config(root))
+    room_living = _resolve_run_switch(args, "room_living", config.get("room_living"))
+    world_actions = _resolve_run_switch(args, "world_actions", config.get("world_actions"))
 
     port = int(getattr(args, "port", None) or DEFAULT_PORT)
     if _port_open(port):
         return _refuse("PORT_IN_USE",
                        "端口 %d 已经被另一个服务占用；换一个 --port，或先停掉旧服务。" % port,
                        as_json=json_output)
+    # The run switches are this entry's own small preference: record them before
+    # serving so a same-root restart (including foreground Ctrl-C) keeps them.
+    _persist_run_switches(root, room_living=room_living, world_actions=world_actions)
 
     if getattr(args, "foreground", False):
         sys.stdout.write("正在启动（前台；Ctrl-C 停止）…\n")
         sys.stdout.flush()
-        return _serve_forever(root, port)
+        return _serve_forever(root, port, room_living=room_living,
+                              world_actions=world_actions)
 
-    child, log_path = _spawn_background(root, port)
+    child, log_path = _spawn_background(root, port, room_living=room_living,
+                                        world_actions=world_actions)
     if not _wait_ready(child, root, port):
         tail = _log_tail(log_path)
         record = _read_json(_record_path(root))
@@ -582,7 +833,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                        extra={"log": log_path})
     record = _read_json(_record_path(root))
     record.update({"status": "RUNNING", "ready_at": _now_iso(),
-                   "url": _urls(port)["手机页面"], "model_enabled": False})
+                   "url": _urls(port)["手机页面"], "model_enabled": False,
+                   "room_living": bool(room_living),
+                   "world_actions": bool(world_actions)})
     _write_json(_record_path(root), record)
     _emit(record, as_json=json_output, text=_start_text(root, port, already=False))
     return EXIT_OK
@@ -615,6 +868,10 @@ def cmd_stop(args: argparse.Namespace) -> int:
         _emit(record, as_json=json_output,
               text="服务已经不在了。下次继续：python3 scripts/nyairo_day.py start --root %s" % root)
         return EXIT_OK
+    if record.get("foreground") and not _own_service(pid, root):
+        return _refuse("FOREGROUND_NEEDS_CTRL_C",
+                       "the recorded service runs in the foreground",
+                       as_json=json_output)
     if os.name != "posix" or not _own_service(pid, root):
         return _refuse("STOP_REFUSED",
                        "记录里的进程不是本入口为这个目录启动的，不会去动它。",
@@ -831,6 +1088,7 @@ def _status_text(root: Path, view: Mapping[str, Any], today: Mapping[str, Any],
         lines.append("Memory：%s（recall_ready=%s，经历 %s 条）" % (
             memory.get("binding_status"), memory.get("recall_ready"),
             memory.get("experience_count")))
+    lines.extend(_config_lines(root))
     lines.extend(_ledger_lines(view))
     next_at = (view.get("next") or {}).get("check_window_at")
     if next_at:
@@ -866,6 +1124,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                "root": str(root), "service": running or None,
                "view": view, "today": today, "arrangements": arrangements,
                "projects": projects, "reading": reading,
+               "config": _managed_config(root), "body": _body_bands(root),
                "model_configured": _model_configured().get("configured"),
                "model_called": False}
     _emit(payload, as_json=json_output, text=None if json_output else text)
@@ -873,10 +1132,29 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def _phone_text(root: Path, port: int, today: Mapping[str, Any],
-                arrangements: Mapping[str, Any], projects: Mapping[str, Any]) -> str:
+                arrangements: Mapping[str, Any], projects: Mapping[str, Any],
+                state: Optional[Mapping[str, Any]] = None) -> str:
     lines = ["AI 手机读口（都是只读，打开不会让她行动）："]
     for name, url in _urls(port).items():
         lines.append("  %s：%s" % (name, url))
+    apps = dict((state or {}).get("apps") or {})
+    world_app = dict(apps.get("world") or {})
+    world_data = dict(world_app.get("data") or {})
+    location = dict(world_data.get("location") or {})
+    if world_data:
+        lines.append("世界：%s（%s；%s）" % (
+            location.get("name") or location.get("place_id") or "读不到位置",
+            world_data.get("world_id") or "unknown world",
+            world_app.get("status") or "unknown"))
+    body_app = dict(apps.get("body") or {})
+    body_data = dict(body_app.get("data") or {})
+    needs = body_data.get("needs")
+    if isinstance(needs, Mapping) and needs:
+        lines.append("身体档位：%s" % "；".join("%s=%s" % (name, band)
+                                              for name, band in sorted(needs.items())))
+    elif body_app:
+        lines.append("身体档位：%s" % ("未启用（v1）" if body_app.get("status") == "available"
+                                     else "读不到（%s）" % (body_app.get("status") or "unknown")))
     if today.get("ok"):
         data = dict(today.get("data") or {})
         lines.append("今天：%s，活动 %s 件，作品版本 %s 件" % (
@@ -901,6 +1179,7 @@ def _phone_text(root: Path, port: int, today: Mapping[str, Any],
         lines.append("作品：%d 件%s" % (len(rows), ("（%s）" % names) if names else ""))
     else:
         lines.append("作品：读不到（%s）" % (projects.get("reason_code") or "UNKNOWN"))
+    lines.extend(_config_lines(root))
     return "\n".join(lines)
 
 
@@ -917,11 +1196,19 @@ def cmd_phone(args: argparse.Namespace) -> int:
     today = _today_read(root, port)
     arrangements = _arrangements_read(root, port)
     projects = _projects_read(root, port)
+    try:
+        state = _http_json(port, "/api/phone/state", timeout=10.0)
+        # The CSRF token is for the page, not for an operator readout.
+        state.pop("csrf_token", None)
+    except Exception:
+        state = {}
     payload = {"ok": True, "root": str(root), "port": port, "urls": _urls(port),
                "today": today, "arrangements": arrangements, "projects": projects,
+               "state": state, "config": _managed_config(root),
                "model_called": False}
     _emit(payload, as_json=json_output,
-          text=None if json_output else _phone_text(root, port, today, arrangements, projects))
+          text=None if json_output else _phone_text(root, port, today, arrangements, projects,
+                                                    state))
     return EXIT_OK
 
 
@@ -1093,6 +1380,22 @@ def cmd_run_day(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------------------------
 
 
+def _add_creation_options(parser: argparse.ArgumentParser) -> None:
+    """Choices that are baked into a *new* instance (an existing root refuses changes)."""
+
+    parser.add_argument("--world-package", default=None, dest="world_package",
+                        help="explicit world package: a name under examples/worlds "
+                             "(e.g. daily_neighborhood_v1) or a package directory")
+    parser.add_argument("--lived-needs", action="store_true", dest="lived_needs",
+                        help="enable the optional virtual hunger/thirst/toilet profile")
+    parser.add_argument("--lived-needs-hunger", type=float, default=None,
+                        dest="lived_needs_hunger", help="explicit initial hunger 0..1 (default 0)")
+    parser.add_argument("--lived-needs-thirst", type=float, default=None,
+                        dest="lived_needs_thirst", help="explicit initial thirst 0..1 (default 0)")
+    parser.add_argument("--lived-needs-toilet", type=float, default=None,
+                        dest="lived_needs_toilet", help="explicit initial toilet 0..1 (default 0)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nyairo_day.py",
@@ -1105,6 +1408,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Memory 删除底账文件；必须在该实例目录之外（默认在同级目录）")
     init.add_argument("--run-id", default=None, dest="run_id",
                       help="可选的 run 名字；默认沿用实例自己的 run:<目录名>")
+    _add_creation_options(init)
     init.add_argument("--json", action="store_true")
     init.set_defaults(handler=cmd_init)
 
@@ -1113,6 +1417,15 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--port", type=int, default=DEFAULT_PORT)
     start.add_argument("--memory-authority", default=None, dest="memory_authority",
                        help="只在 start 自动准备新实例时使用；必须在该实例目录之外")
+    _add_creation_options(start)
+    start.add_argument("--room-living", action="store_true", dest="room_living", default=None,
+                       help="显式开启房间链（实体店/交付/布置/灯）；默认沿用本实例上次选择")
+    start.add_argument("--no-room-living", action="store_false", dest="room_living",
+                       help="显式关闭房间链")
+    start.add_argument("--world-actions", action="store_true", dest="world_actions", default=None,
+                       help="显式允许本进程树的本地世界动作（临时 canonical；默认 gate off）")
+    start.add_argument("--no-world-actions", action="store_false", dest="world_actions",
+                       help="显式关闭本地世界动作")
     start.add_argument("--foreground", action="store_true", help="前台运行，Ctrl-C 停止")
     start.add_argument("--json", action="store_true")
     start.set_defaults(handler=cmd_start)
@@ -1158,8 +1471,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         internal = argparse.ArgumentParser(prog="nyairo_day.py _serve")
         internal.add_argument("--root", required=True)
         internal.add_argument("--port", type=int, required=True)
+        internal.add_argument("--room-living", action="store_true", dest="room_living")
+        internal.add_argument("--world-actions", action="store_true", dest="world_actions")
         parsed = internal.parse_args(arguments[1:])
-        return _serve_forever(Path(parsed.root).expanduser(), int(parsed.port))
+        return _serve_forever(Path(parsed.root).expanduser(), int(parsed.port),
+                              room_living=bool(parsed.room_living),
+                              world_actions=bool(parsed.world_actions))
     parser = build_parser()
     try:
         args = parser.parse_args(arguments)

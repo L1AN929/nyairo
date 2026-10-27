@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import stat
 import subprocess
@@ -68,6 +69,34 @@ ROOM_LIVING_FEATURES: dict[str, str] = {
     "CHIYO_WORLD_DAILY_RHYTHM_ENABLED": "1",
     "CHIYO_WORLD_ROOM_ENVIRONMENT_ENABLED": "1",
 }
+
+#: Optional virtual lived-needs relief declared through the *existing* instance
+#: capability document (``state/world_object_capabilities.json``).  The package
+#: format has no consumable/facility schema, so this is the formal instance
+#: config path the Body owner already reads -- not a demo-only runtime patch.
+LIVED_NEEDS_CONSUMABLES: dict[str, dict[str, Any]] = {
+    "water_bottle_home": {
+        "consumable": True, "free_to_consume": True,
+        "lived_need_effects": {"thirst": 0.8},
+        "label": "家里的水瓶",
+    },
+    "rice_ball_home": {
+        "consumable": True, "free_to_consume": True,
+        "lived_need_effects": {"hunger": 0.65},
+        "label": "家里的饭团",
+    },
+}
+LIVED_NEEDS_FACILITIES: dict[str, dict[str, Any]] = {
+    "home_toilet": {
+        "facility_kind": "toilet", "location_id": "home",
+        "lived_need_effects": {"toilet": 0.9},
+        "label": "家里的洗手间",
+    },
+}
+LIVED_NEEDS_HOME_AREA = "bedroom"
+
+#: Gate values the World owner accepts for explicit local tool actions.
+WORLD_INTENT_GATES = ("off", "shadow", "canonical")
 
 
 def effective_features(instance: Mapping[str, Any], *, room_living: bool = False
@@ -423,6 +452,7 @@ def _reclaim_previous_generation(root: Path, instance: Mapping[str, Any]
 def _world_child(root: Path, instance: Mapping[str, Any], *,
                  tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
                  room_living: bool = False,
+                 world_intent_gate: Optional[str] = None,
                  business_clock: Optional[Path | str] = None,
                  clock_domain: Optional[str] = None,
                  clock_run_id: Optional[str] = None) -> ChildService:
@@ -453,6 +483,13 @@ def _world_child(root: Path, instance: Mapping[str, Any], *,
         # Only a declared switch is passed explicitly: an undeclared one keeps inheriting the
         # operator's environment exactly as before (old default unchanged).
         extra["CHIYO_WORLD_ROOM_ENVIRONMENT_ENABLED"] = room_flag
+    if world_intent_gate is not None:
+        gate = str(world_intent_gate).strip().lower()
+        if gate not in WORLD_INTENT_GATES:
+            raise PhoneDemoError("WORLD_INTENT_GATE_INVALID")
+        # Explicit local tool actions for *this* process tree only; the operator's
+        # environment is never edited and the default gate stays off.
+        extra["WORLD_BODY_INTENT_MUTATION_GATE"] = gate
     environment = _child_environment(extra)
     command = [sys.executable, str(CLI_SCRIPT), "owner-world",
                "--world-home", str(world_home), "--package", package,
@@ -472,6 +509,7 @@ def _world_child(root: Path, instance: Mapping[str, Any], *,
 def owner_children(root: Path | str, *, generation: str, writer_instance: str,
                    tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
                    room_living: bool = False,
+                   world_intent_gate: Optional[str] = None,
                    business_clock: Optional[Path | str] = None,
                    clock_domain: Optional[str] = None,
                    clock_run_id: Optional[str] = None) -> dict[str, ChildService]:
@@ -486,7 +524,9 @@ def owner_children(root: Path | str, *, generation: str, writer_instance: str,
     instance = phone_service.load_instance(root_path)
     supply = _supply_child(root_path, writer_instance=writer_instance, generation=generation)
     world = _world_child(root_path, instance, tick_seconds=float(tick_seconds),
-                         room_living=bool(room_living), business_clock=business_clock,
+                         room_living=bool(room_living),
+                         world_intent_gate=world_intent_gate,
+                         business_clock=business_clock,
                          clock_domain=clock_domain, clock_run_id=clock_run_id)
     return {"supply": supply, "world": world}
 
@@ -624,6 +664,94 @@ def _package_capabilities(package_dir: Path) -> tuple[dict[str, dict[str, Any]],
     return declarations, rows
 
 
+def resolve_world_package(value: str | Path) -> Path:
+    """A package name under ``examples/worlds`` or an explicit package directory."""
+
+    raw = Path(str(value)).expanduser()
+    candidates = [raw]
+    if not raw.is_absolute():
+        candidates.append(REPO_ROOT / "examples" / "worlds" / raw)
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate.resolve()
+    raise PhoneDemoError("WORLD_PACKAGE_MISSING:%s" % str(value))
+
+
+def world_package_identity(package_dir: Path) -> dict[str, Any]:
+    """The package's own ``world.json`` identity (bounded, no invention)."""
+
+    try:
+        doc = json.loads((Path(package_dir) / "world.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PhoneDemoError("WORLD_PACKAGE_UNREADABLE") from exc
+    if not isinstance(doc, Mapping):
+        raise PhoneDemoError("WORLD_PACKAGE_UNREADABLE")
+    world_id = str(doc.get("world_id") or "")
+    if not world_id:
+        raise PhoneDemoError("WORLD_PACKAGE_ID_MISSING")
+    return {"world_id": world_id, "name": str(doc.get("name") or world_id),
+            "package_schema": "worldgen.package.v1"}
+
+
+def _write_lived_needs_supplies(world_home: Path) -> dict[str, Any]:
+    """Declare a small, fixed set of home relief through the existing capability document.
+
+    The world-package format has no consumable/facility block, so widening it
+    would be a new schema.  This writes the *existing* instance config the Body
+    owner already reads (``consumables`` + ``lived_need_facilities``) and places
+    the two consumable instances with the substrate owner's own writer.  A cup
+    is never treated as water: only the declared bottle/food/ facility has an
+    effect.
+    """
+
+    import world_body_substrate as substrate
+
+    path = world_home / "state" / "world_object_capabilities.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PhoneDemoError("CAPABILITIES_UNREADABLE") from exc
+        if isinstance(loaded, dict):
+            document = loaded
+    document.setdefault("schema_version", "world.object.capabilities.v1")
+    consumables = document.get("consumables")
+    consumables = dict(consumables) if isinstance(consumables, Mapping) else {}
+    for object_id, declaration in LIVED_NEEDS_CONSUMABLES.items():
+        consumables.setdefault(object_id, dict(declaration))
+    document["consumables"] = consumables
+    facilities = document.get("lived_need_facilities")
+    facilities = dict(facilities) if isinstance(facilities, Mapping) else {}
+    for facility_id, declaration in LIVED_NEEDS_FACILITIES.items():
+        facilities.setdefault(facility_id, dict(declaration))
+    document["lived_need_facilities"] = facilities
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2),
+                   encoding="utf-8")
+    os.replace(tmp, path)
+
+    placed: list[dict[str, Any]] = []
+    store = substrate.SubstrateStore(substrate.substrate_path(world_home))
+    live = store.load()
+    if live is not None:
+        target = {"kind": "room", "location_id": "home",
+                  "area_id": LIVED_NEEDS_HOME_AREA}
+        state = live
+        base_revision = int(state.get("revision") or 0)
+        for object_id in sorted(LIVED_NEEDS_CONSUMABLES):
+            state = substrate.place_object(state, object_id, target)
+            placed.append({"object_id": object_id, "placement": target})
+        store.save(state, expected_revision=base_revision)
+    return {
+        "consumables": sorted(LIVED_NEEDS_CONSUMABLES),
+        "facilities": sorted(LIVED_NEEDS_FACILITIES),
+        "placed": placed,
+        "note": "declared in the existing instance capability document; no new schema",
+    }
+
+
 def _interior_locations(package_dir: Path) -> list[str]:
     try:
         from components.worldgen.loader import load as load_package
@@ -756,6 +884,8 @@ def prepare_demo(
     request_utc_day_max: Optional[int] = None,
     request_run_window_max: Optional[int] = None,
     max_cognition_calls_per_day: Optional[int] = None,
+    world_package: Optional[str | Path] = None,
+    lived_needs: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Create one real phone instance in a brand-new root.  Never overwrites, never resets.
 
@@ -763,6 +893,12 @@ def prepare_demo(
     existing convention (``run:<root name>``).  ``seed_work_artifact=False`` skips the demo's
     placeholder work artifact, so an operator can prepare a real room + public-domain reading
     without presenting synthetic seed text as her history.  Both default to the old behaviour.
+
+    ``world_package`` explicitly selects an existing package (a name under
+    ``examples/worlds`` or a directory); it is copied into this new root so the
+    source package is never rewritten.  ``lived_needs`` (when given) declares the
+    small home relief set in the instance's existing capability document.  Both
+    default to the old generated-world / v1-body behaviour.
     """
 
     root_path = Path(str(root)).expanduser()
@@ -772,6 +908,14 @@ def prepare_demo(
     root_path.mkdir(parents=True, exist_ok=False)
     for relative in ("run", "logs", "phone", "supply"):
         (root_path / relative).mkdir(parents=True, exist_ok=True)
+
+    package_copy: Optional[Path] = None
+    package_identity: Optional[dict[str, Any]] = None
+    if world_package is not None:
+        source = resolve_world_package(world_package)
+        package_identity = world_package_identity(source)
+        package_copy = root_path / "world-package"
+        shutil.copytree(source, package_copy)
 
     generation = "prepare-%d-%d" % (int(time.time()), os.getpid())
     supply = _supply_child(root_path, writer_instance="phone-demo-prepare:%d" % os.getpid(),
@@ -790,7 +934,9 @@ def prepare_demo(
                                    seed_work_artifact=seed_work_artifact,
                                    request_utc_day_max=request_utc_day_max,
                                    request_run_window_max=request_run_window_max,
-                                   max_cognition_calls_per_day=max_cognition_calls_per_day)
+                                   max_cognition_calls_per_day=max_cognition_calls_per_day,
+                                   world_package=package_copy,
+                                   lived_needs=lived_needs)
     finally:
         supply.stop()
 
@@ -815,6 +961,8 @@ def prepare_demo(
         "genesis": prepared["genesis"],
         "prepared": prepared["summary"],
         "world": prepared.get("world") or {},
+        "world_package": package_identity,
+        "lived_needs": prepared.get("lived_needs"),
     }
 
 
@@ -824,7 +972,9 @@ def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, t
                     seed_work_artifact: bool = True,
                     request_utc_day_max: Optional[int] = None,
                     request_run_window_max: Optional[int] = None,
-                    max_cognition_calls_per_day: Optional[int] = None) -> dict[str, Any]:
+                    max_cognition_calls_per_day: Optional[int] = None,
+                    world_package: Optional[Path] = None,
+                    lived_needs: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
     """The owners' own commands: Supply artifacts + a real generated World."""
 
     import importlib
@@ -852,6 +1002,7 @@ def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, t
         subject=subject,
         title=WORK_TITLE,
         seed_content=None,
+        world_package=str(world_package) if world_package is not None else None,
         world_seed=int(seed),
         world_theme=str(theme),
         reading_title=reading_title,
@@ -883,17 +1034,22 @@ def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, t
         world_extra = _prepare_world(world_home, world_package,
                                      world_id=str(data.get("world_id") or ""))
     capabilities = _write_capabilities(
-        world_home, package_dir=world_package if with_world else None)
+        world_home, package_dir=data.get("world_package") if with_world else None)
+    lived_supplies = None
+    if lived_needs:
+        lived_supplies = _write_lived_needs_supplies(world_home)
     return {
         "data": data,
         "genesis": genesis,
         "capabilities": capabilities,
         "world": world_extra,
+        "lived_needs": lived_supplies,
         "economy_state": str(economy.state_path(world_home)),
         "summary": {"steps": report.get("steps"), "world_id": data.get("world_id"),
                     "room_objects": report.get("room_objects"),
                     "with_world": bool(with_world),
-                    "world_package": str(world_package) if with_world else None},
+                    "world_package": str(data.get("world_package") or "")
+                    if with_world else None},
     }
 
 
@@ -953,6 +1109,7 @@ def serve_instance(
     on_ready: Optional[Any] = None,
     tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
     room_living: bool = False,
+    world_intent_gate: Optional[str] = None,
     stop_event: Optional[threading.Event] = None,
     announce: bool = True,
     supervisor: Optional[Any] = None,
@@ -962,7 +1119,10 @@ def serve_instance(
 
     ``room_living=True`` (``scripts/phone.py serve --with-room-living``) is the only explicit way
     to turn RC1's room chain on: the same two flags reach the World/Body child's environment and
-    this process's ``PhoneService``.  Nothing about it is written back to ``instance.json``.
+    this process's ``PhoneService``.  ``world_intent_gate`` is likewise explicit and per process
+    tree: ``canonical`` (or ``shadow``) is passed to the World child only when a caller asks for
+    local tool actions; the operator's environment and the default-off gate are untouched.
+    Nothing here is written back to ``instance.json``.
     """
 
     from .server import create_server
@@ -981,7 +1141,8 @@ def serve_instance(
     supply = _supply_child(root_path, writer_instance="phone-serve:%d" % os.getpid(),
                            generation=generation)
     world = _world_child(root_path, instance, tick_seconds=float(tick_seconds),
-                         room_living=bool(room_living))
+                         room_living=bool(room_living),
+                         world_intent_gate=world_intent_gate)
     world_home = Path(str(instance["world_home"]))
     children: list[ChildService] = [supply, world]
     server = None
@@ -1037,6 +1198,7 @@ def serve_instance(
             # Evidence of what this generation actually runs with (the flags below are the
             # effective ones; nothing here is written back into the instance's features).
             "room_living": bool(room_living),
+            "world_intent_gate": world_intent_gate,
         }
         if retired:
             announcement["retired_sockets"] = retired
