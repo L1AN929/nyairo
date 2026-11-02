@@ -6,11 +6,13 @@
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initCommandCopy();
+  initInstallMethods();
   renderSidebar();
   initRouting();
   initSearch();
   initMobileMenu();
   initShowcaseTabs();
+  initRoadmapAccordion();
 });
 
 /* ==========================================================================
@@ -51,11 +53,13 @@ function updateThemeIcon(theme) {
       <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
     `;
     btnEl.setAttribute('title', '切换为亮色模式');
+    btnEl.setAttribute('aria-label', '切换为亮色模式');
   } else {
     iconEl.innerHTML = `
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
     `;
     btnEl.setAttribute('title', '切换为暗色模式');
+    btnEl.setAttribute('aria-label', '切换为暗色模式');
   }
 }
 
@@ -75,12 +79,80 @@ function initCommandCopy() {
     btn.setAttribute('aria-label', copied ? '已复制安装命令' : '请手动复制安装命令');
     btn.classList.toggle('copied', copied);
     const feedback = document.getElementById('hero-copy-feedback');
-    if (feedback) feedback.textContent = '';
+    if (feedback) feedback.textContent = copied ? '已复制安装命令' : '已选中命令，请按快捷键手动复制';
     setTimeout(() => {
       btn.setAttribute('aria-label', '复制安装命令');
       btn.classList.remove('copied');
     }, 2000);
   });
+}
+
+/* ==========================================================================
+   3b. 安装方式切换与 AI Agent 辅助安装交互控制器
+   ========================================================================== */
+function initInstallMethods() {
+  const tabCli = document.getElementById('install-tab-cli');
+  const tabAgent = document.getElementById('install-tab-agent');
+  const panelCli = document.getElementById('install-panel-cli');
+  const panelAgent = document.getElementById('install-panel-agent');
+  if (!tabCli || !tabAgent || !panelCli || !panelAgent) return;
+
+  function select(useAgent) {
+    tabCli.classList.toggle('is-active', !useAgent);
+    tabAgent.classList.toggle('is-active', useAgent);
+    tabCli.setAttribute('aria-selected', String(!useAgent));
+    tabAgent.setAttribute('aria-selected', String(useAgent));
+    tabCli.tabIndex = useAgent ? -1 : 0;
+    tabAgent.tabIndex = useAgent ? 0 : -1;
+    panelCli.hidden = useAgent;
+    panelAgent.hidden = !useAgent;
+  }
+
+  tabCli.addEventListener('click', () => select(false));
+  tabAgent.addEventListener('click', () => select(true));
+  [tabCli, tabAgent].forEach((tab, index) => tab.addEventListener('keydown', e => {
+    let next;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') next = 1 - index;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End') next = 1;
+    if (next === undefined) return;
+    e.preventDefault(); select(next === 1); [tabCli, tabAgent][next].focus();
+  }));
+  select(false);
+
+  // 抽屉展开折叠
+  const drawerBtn = document.getElementById('agent-toggle-drawer');
+  const drawer = document.getElementById('agent-code-drawer');
+  const drawerLabel = document.getElementById('drawer-toggle-label');
+  if (drawerBtn && drawer) {
+    drawerBtn.addEventListener('click', () => {
+      const isClosed = drawer.hidden;
+      drawer.hidden = !isClosed;
+      drawerBtn.classList.toggle('open', isClosed);
+      drawerBtn.setAttribute('aria-expanded', String(isClosed));
+      if (drawerLabel) {
+        drawerLabel.textContent = isClosed ? '收起指令明细' : '展开查看指令明细';
+      }
+    });
+  }
+
+  // Agent Prompt 复制
+  const code = document.querySelector('#agent-install-command code');
+  const btn = document.getElementById('agent-cmd-btn');
+  const feedback = document.getElementById('agent-copy-feedback');
+  if (code && btn && feedback) {
+    btn.addEventListener('click', async () => {
+      const copied = await copyTextOrSelect(code);
+      feedback.textContent = copied
+        ? '已复制完整安装 Prompt，粘贴给你的 Agent 即可'
+        : '已选中指令，请按快捷键复制';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        feedback.textContent = '';
+        btn.classList.remove('copied');
+      }, 3000);
+    });
+  }
 }
 
 /* ==========================================================================
@@ -285,7 +357,7 @@ function loadDoc(docId, anchor = null) {
     requestAnimationFrame(() => {
       const targetEl = document.getElementById(anchor);
       if (targetEl) {
-        targetEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        targetEl.scrollIntoView({ block: 'start', behavior: preferredScrollBehavior() });
       } else {
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
@@ -360,8 +432,8 @@ function renderTOC(tocList) {
       const anchorId = link.getAttribute('data-anchor');
       const targetEl = document.getElementById(anchorId);
       if (targetEl) {
-        targetEl.scrollIntoView({ behavior: 'smooth' });
-        history.replaceState(null, '', `#${docAnchorPage(anchorId)}`);
+        targetEl.scrollIntoView({ behavior: preferredScrollBehavior() });
+        history.replaceState(null, '', `#${anchorId}`);
       }
     });
   });
@@ -522,7 +594,7 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function docAnchorPage(anchorId) { return anchorId.split("-section-")[0]; }
+function preferredScrollBehavior() { return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'; }
 
 async function copyTextOrSelect(code) {
   try {
@@ -551,26 +623,42 @@ async function copyDocumentationText(code, btn) {
    ========================================================================== */
 function initShowcaseTabs() {
   const tabs = [...document.querySelectorAll('.showcase-tab')];
-  const track = document.getElementById('showcase-track');
-  if (!tabs.length) return;
+  const panels = [...document.querySelectorAll('.showcase-panel')];
+  if (!tabs.length || !panels.length) return;
 
-  const activate = (targetIndex, focus = false) => {
+  const activate = (targetIndex, focus = false, scroll = true) => {
     tabs.forEach((t, i) => {
       const isCurrent = i === targetIndex;
       t.classList.toggle('active', isCurrent);
       t.setAttribute('aria-selected', String(isCurrent));
       t.tabIndex = isCurrent ? 0 : -1;
-      const key = t.getAttribute('data-tab');
-      const panel = document.getElementById(`showcase-panel-${key}`);
-      if (panel) {
-        panel.classList.toggle('active', isCurrent);
-      }
       if (focus && isCurrent) t.focus();
     });
-    if (track) {
-      track.style.transform = `translateX(-${targetIndex * 100}%)`;
+
+    panels.forEach((p, i) => {
+      const isCurrent = i === targetIndex;
+      if (isCurrent) {
+        p.classList.add('active');
+        // 重置气泡错落动效触发
+        const bubbles = p.querySelectorAll('.chat-bubble');
+        bubbles.forEach((b, bIdx) => {
+          b.style.animation = 'none';
+          b.offsetHeight; /* 强制重绘回流 */
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) b.style.animation = `bubble-pop 0.35s cubic-bezier(0.16, 1, 0.3, 1) ${bIdx * 0.045}s both`;
+        });
+      } else {
+        p.classList.remove('active');
+      }
+    });
+
+    // 手机端标签行是单行横向滑动，选中的标签自动滚入视野
+    const tabsEl = tabs[0] && tabs[0].parentElement;
+    if (scroll && tabsEl && tabsEl.scrollWidth > tabsEl.clientWidth + 1) {
+      tabs[targetIndex].scrollIntoView({ behavior: preferredScrollBehavior(), block: 'nearest', inline: 'nearest' });
     }
   };
+
+  activate(0, false, false);
 
   tabs.forEach((tab, index) => {
     tab.addEventListener('click', (e) => {
@@ -589,3 +677,72 @@ function initShowcaseTabs() {
     });
   });
 }
+
+function initRoadmapAccordion() {
+  const list = Array.from(document.querySelectorAll('.rm-details'));
+  if (!list.length || !window.matchMedia) return;
+
+  const mq = window.matchMedia('(max-width: 768px)');
+  let lastMode = null;
+
+  function apply() {
+    const mobile = mq.matches;
+    if (mobile === lastMode) return; // 仅在断点切换时重置，不干扰用户手动展开
+    lastMode = mobile;
+    list.forEach((d, i) => {
+      d.open = mobile ? i === 0 : true;
+    });
+  }
+
+  apply();
+  if (mq.addEventListener) {
+    mq.addEventListener('change', apply);
+  } else if (mq.addListener) {
+    mq.addListener(apply); // 兼容旧版 Safari
+  }
+}
+// 交互式未来规划演进时间轴控制器 (Interactive Animated Roadmap Controller)
+function initInteractiveRoadmap() {
+  const stage = document.getElementById('roadmap-stage');
+  if (!stage) return;
+
+  const buttons = Array.from(stage.querySelectorAll('.stage-step-btn'));
+  const panels = Array.from(stage.querySelectorAll('.phase-panel'));
+  const fill = document.getElementById('stage-progress-fill');
+  if (!buttons.length || !panels.length) return;
+
+  function setPhase(index, focus = false) {
+    buttons.forEach((btn, i) => {
+      const active = i === index;
+      btn.id = `phase-tab-${i}`;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+      btn.tabIndex = active ? 0 : -1;
+      if (active && focus) btn.focus();
+    });
+    panels.forEach((panel, i) => {
+      const active = i === index;
+      panel.classList.toggle('active', active);
+      panel.hidden = !active;
+      panel.setAttribute('aria-labelledby', `phase-tab-${i}`);
+    });
+    if (fill) fill.style.width = `${buttons.length > 1 ? index / (buttons.length - 1) * 100 : 0}%`;
+  }
+  buttons.forEach((btn, index) => {
+    btn.addEventListener('click', () => setPhase(index));
+    btn.addEventListener('keydown', e => {
+      let next;
+      if (e.key === 'ArrowRight') next = (index + 1) % buttons.length;
+      if (e.key === 'ArrowLeft') next = (index + buttons.length - 1) % buttons.length;
+      if (e.key === 'Home') next = 0;
+      if (e.key === 'End') next = buttons.length - 1;
+      if (next === undefined) return;
+      e.preventDefault(); setPhase(next, true);
+    });
+  });
+  setPhase(0);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initInteractiveRoadmap();
+});
