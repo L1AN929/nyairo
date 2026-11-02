@@ -584,6 +584,31 @@ def channel_text(prompt: dict) -> str:
 # ---------------------------------------------------------------------------------------------
 
 
+def issue_disclosure_permit(chain, source_id: str, version_id: str, *,
+                            operation: str) -> str:
+    """Issue one exact local disclosure permit through the product's own operator CLI.
+
+    ``send_local`` refuses a draft by name (``DISCLOSURE_GRANT_REQUIRED``) unless an active
+    permit names this exact source artifact+version and the local-owner target.  This helper
+    only drives the existing operator entry; it carries no share text and delivers nothing.
+    """
+    script = Path(__file__).resolve().parent / "disclosure_authority_cli.py"
+    completed = subprocess.run(
+        [sys.executable, "-B", str(script), "--socket", str(chain.services.gov_path),
+         "issue", "--subject", str(chain.data["subject_id"]),
+         "--source", str(source_id), "--version", str(version_id),
+         "--operation-id", str(operation)],
+        capture_output=True, text=True, timeout=60)
+    lines = (completed.stdout or "").strip().splitlines()
+    answer = json.loads(lines[-1]) if lines else {}
+    if completed.returncode != 0 or str(answer.get("status") or "") != "ALLOW":
+        raise SystemExit("disclosure permit was not issued: %r" % (answer,))
+    grant = str(answer.get("grant_id") or "")
+    if not grant:
+        raise SystemExit("disclosure permit carried no grant id: %r" % (answer,))
+    return grant
+
+
 def phase_p2(config: dict) -> dict:
     import agency_decision_ag1 as ag1
     import life_integration_ag2 as ag2
@@ -794,6 +819,10 @@ def phase_p2(config: dict) -> dict:
         owner_d2 = service.read_share(d2, include_text=False) if d2 else {}
         d2_bound = str(((owner_d2.get("data") or {}).get("share") or {}).get("source", {})
                        .get("version_id") or "")
+        # send_local 需要一张绑定到 D2 精确 source 版本与本地 owner 的披露许可；
+        # 走产品自己的 operator 入口真实签发，不改任何既有门槛或断言。
+        issue_disclosure_permit(chain, artifact_a, d2_bound,
+                                operation="v05-restart:p2:d2:%s" % d2)
         out_send = run_round(chain, planner, {"op": "send_local", "target": d2},
                              trigger="evt:v05-restart:p2-send-d2")
         sent = out_send.get("sharing") or {}

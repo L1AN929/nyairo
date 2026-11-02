@@ -13,8 +13,10 @@ from datetime import datetime, timedelta, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'tests' / 'fixtures'))
 from chiyo_bundle import world_move_tool as tool
 from chiyo_bundle.world_read_service import initialize
+from world_gateway_fixture import WorldGatewayFixture
 
 
 class WorldMoveTests(unittest.TestCase):
@@ -23,13 +25,46 @@ class WorldMoveTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name) / 'world-owner'
         initialize(self.home)
+        # The action lifecycle is resolved from the *process* environment (the intent
+        # executor does not take the handler's ``environment`` mapping), so point it at
+        # this case's own home.  Otherwise the records of the repository's historical
+        # ``data/world/run/action_lifecycle.jsonl`` leak in and every segment is refused
+        # as DUPLICATE_EXECUTION.
+        self._saved_lifecycle_env = {key: os.environ.get(key) for key in
+                                     ('WORLD_ACTION_LIFECYCLE_PATH', 'CHIYO_WORLD_HOME',
+                                      'WORLD_BODY_INTENT_MUTATION_GATE')}
+        os.environ['WORLD_ACTION_LIFECYCLE_PATH'] = str(
+            self.home / 'action_lifecycle.jsonl')
+        os.environ['CHIYO_WORLD_HOME'] = str(self.home)
+        # Real movement is what this fixture tests; the production default gate is off,
+        # so the isolated case opts in explicitly (and restores the previous value).
+        os.environ['WORLD_BODY_INTENT_MUTATION_GATE'] = 'canonical'
+        self.addCleanup(self._restore_lifecycle_env)
         self.env = {'CHIYO_WORLD_HOME': str(self.home),
                     'CHIYO_WORLD_LIVING_SKELETON_ENABLED': 'true',
                     'CHIYO_WORLD_TRAVEL_TIME_ENABLED': 'false'}
         self.now = datetime(2026, 1, 1, 3, tzinfo=timezone.utc)
         self.wls, self.wtd = tool._world_modules()
+        # 计时旅程的每一段都是新的 Action：本 case 自己的真实 gateway + registry。
+        # 服务侧 Resolver 用 config.environment 决定 MOVE 是否按真实步行计时提交，
+        # 必须与计时测试的请求环境一致（即时模式走工具自己的直写路径，不经服务）。
+        self.gateway = WorldGatewayFixture(
+            self.home, world_id='shiomi_city',
+            environment=dict(self.env, CHIYO_WORLD_TRAVEL_TIME_ENABLED='true'),
+            now=self.now)
+        self.addCleanup(self.gateway.stop)
+        self.env.update(self.gateway.request_environment())
+
+    def _restore_lifecycle_env(self):
+        for key, value in self._saved_lifecycle_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     def move(self, location, now=None):
+        # 业务时刻同时交给 gateway 的 Resolver，travel 时间与旅程账本保持同一时间域。
+        self.gateway.set_now(now or self.now)
         return json.loads(tool.move_handler({'location': location}, environment=self.env,
                                             now=now or self.now))
 
@@ -83,6 +118,12 @@ class WorldMoveTests(unittest.TestCase):
         self.assertEqual(started['status'], 'started')
         self.assertEqual(started['estimated_minutes'], 5)
         self.assertEqual(self.position(), 'nearby_street')
+        # 这一段确实走了正式授权口：同 execution 的一次性票已被 gateway 消费。
+        segment = json.loads(
+            (self.home / 'data/world/world_journey.json').read_text(encoding='utf-8')
+        )['active']['segments'][0]
+        issued = {row['execution_id']: row for row in self.gateway.authorizations()}
+        self.assertEqual(str(issued[segment['execution_id']]['state']).upper(), 'CONSUMED')
         travel_before = self.wtd.state_path(self.home).read_bytes()
         with patch.object(self.wls, 'apply_move_to', wraps=self.wls.apply_move_to) as apply:
             ongoing = self.move('公园', self.now + timedelta(seconds=61))
@@ -213,7 +254,12 @@ class WorldMoveTests(unittest.TestCase):
         ctx = Mock()
         with patch.dict(sys.modules, {'chiyo_bundle.hermes_plugin': owner}):
             plugin.register(ctx)
-        registration = ctx.register_tool.call_args.kwargs
+        # The plugin now registers more than one tool (world_move and her phone), so the
+        # *last* call is not necessarily world_move; pick the registration by name.
+        registrations = {call.kwargs['name']: call.kwargs
+                         for call in ctx.register_tool.call_args_list}
+        self.assertIn('world_move', registrations)
+        registration = registrations['world_move']
         self.assertEqual(registration['name'], 'world_move')
         self.assertEqual(registration['toolset'], 'chiyo_world')
         self.assertIs(registration['schema'], tool.MOVE_TOOL_SCHEMA)

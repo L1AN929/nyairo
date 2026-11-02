@@ -42,7 +42,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from lifesupply.artifact import album as album_media
-from lifesupply.artifact.store import ManagedArtifactStore
+from lifesupply.artifact.store import (
+    MAX_PROJECTION_BYTES,
+    ArtifactStoreClosed,
+    ManagedArtifactStore,
+)
 from lifesupply.db import (
     CANONICAL_FILENAME,
     OWNERS,
@@ -51,7 +55,14 @@ from lifesupply.db import (
     UnitOfWorkDoomed,
 )
 from lifesupply.fencing import StaleWriter, WriterFence
-from lifesupply.governance.authority import CAPABILITIES, GovernanceAuthority
+from lifesupply.governance.authority import (
+    CAPABILITIES,
+    DISCLOSE_CAPABILITY,
+    DISCLOSURE_AUTHORITY_SCOPE,
+    DISCLOSURE_TARGET_LOCAL_OWNER,
+    GovernanceAuthority,
+    disclosure_scope,
+)
 from lifesupply.identity import (
     KIND_HOST_OPERATOR,
     KIND_SERVICE_PRINCIPAL,
@@ -110,6 +121,44 @@ INQUIRY_SCOPE = "inquiry:personal"
 ARTIFACT_SCOPE = "artifact:personal"
 WORKSPACE_AUTHORITY_SCOPE = "life-supply.workspace.v1"
 ARTIFACT_AUTHORITY_SCOPE = "life-supply.artifact.v1"
+
+#: A share delivery is still one ``commit_markdown``, but it additionally needs an *active*
+#: disclosure permit bound to (subject, exact source artifact, exact source version, local owner)
+#: checked here, in the owner's own commit transaction.  The envelope is the existing v1 share
+#: format; the owner only reads the header fields it needs (never the body) and never rewrites it.
+SHARE_ENVELOPE_SCHEMA = "nyairo.share.v1"
+SHARE_STATE_LOCAL_DELIVERED = "LOCAL_DELIVERED"
+SHARE_CHANNEL_LOCAL_INBOX = "local_inbox"
+SHARE_TEXT_MARKER = "text:"
+#: The same state vocabulary the Sharing owner's canonical parser accepts.  A delivery may only
+#: advance a draft that is still sendable; dropping/expiring a draft must not be a way to deliver.
+SHARE_ENVELOPE_STATES = frozenset({"DRAFT", "DEFERRED", "DROPPED", "EXPIRED",
+                                   SHARE_STATE_LOCAL_DELIVERED})
+SHARE_SENDABLE_STATES = frozenset({"DRAFT", "DEFERRED"})
+
+#: Named refusals for the disclosure admission.  They are definite refusals (the write did not
+#: land), not "unknown effect": each one answers *why* the permit did not apply.
+DISCLOSURE_GRANT_REQUIRED = "DISCLOSURE_GRANT_REQUIRED"
+DISCLOSURE_REVOKED = "DISCLOSURE_REVOKED"
+DISCLOSURE_EXPIRED = "DISCLOSURE_EXPIRED"
+DISCLOSURE_SCOPE_MISMATCH = "DISCLOSURE_SCOPE_MISMATCH"
+DISCLOSURE_TARGET_MISMATCH = "DISCLOSURE_TARGET_MISMATCH"
+DISCLOSURE_CAPABILITY_MISMATCH = "DISCLOSURE_CAPABILITY_MISMATCH"
+DISCLOSURE_USE_EXHAUSTED = "DISCLOSURE_USE_EXHAUSTED"
+DISCLOSURE_GRANT_UNKNOWN = "DISCLOSURE_GRANT_UNKNOWN"
+DISCLOSURE_GRANT_AMBIGUOUS = "DISCLOSURE_GRANT_AMBIGUOUS"
+DISCLOSURE_SUBJECT_MISMATCH = "DISCLOSURE_SUBJECT_MISMATCH"
+DISCLOSURE_TARGET_REFUSED = "DISCLOSURE_TARGET_REFUSED"
+DISCLOSURE_CHANNEL_REFUSED = "DISCLOSURE_CHANNEL_REFUSED"
+DISCLOSURE_BINDING_INCOMPLETE = "DISCLOSURE_BINDING_INCOMPLETE"
+DISCLOSURE_SOURCE_NOT_FOUND = "DISCLOSURE_SOURCE_NOT_FOUND"
+DISCLOSURE_SOURCE_VERSION_MISMATCH = "DISCLOSURE_SOURCE_VERSION_MISMATCH"
+DISCLOSURE_DRAFT_BINDING_MISSING = "DISCLOSURE_DRAFT_BINDING_MISSING"
+DISCLOSURE_DRAFT_BINDING_MISMATCH = "DISCLOSURE_DRAFT_BINDING_MISMATCH"
+DISCLOSURE_ENVELOPE_MALFORMED = "DISCLOSURE_ENVELOPE_MALFORMED"
+DISCLOSURE_IMPORT_REFUSED = "DISCLOSURE_IMPORT_REFUSED"
+DISCLOSURE_GRANT_UNEXPECTED = "DISCLOSURE_GRANT_UNEXPECTED"
+DISCLOSURE_STORE_UNAVAILABLE = "DISCLOSURE_STORE_UNAVAILABLE"
 
 #: Modules this service must never load.  Checked against ``sys.modules`` at startup.
 FORBIDDEN_MODULES: tuple[str, ...] = (
@@ -192,6 +241,10 @@ class ServiceSettings:
     writer_instance: str | None = None
     allowed_subjects: tuple[str, ...] | None = None
     require_non_root_identity: bool = True
+    #: Activation gate for a *recovered* copy.  ``None`` is an ordinary instance.  The launcher
+    #: builds it from the instance environment (a Supply process never imports Life policy), so a
+    #: restored artifact database stays closed until the retained sweep has reopened it.
+    recovery_gate: Any = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "ServiceSettings":
@@ -251,6 +304,9 @@ READ_OPS: frozenset[str] = frozenset({
     # owner's own media directory; the bytes are base64 on the wire and are never stored in a
     # version body.
     "list_album_images", "read_album_image", "read_album_image_bytes",
+    # F-011/F-012/F-014: one pure representation observation.  It actually reads the managed
+    # Markdown but writes nothing -- no row, no Observation event, no repair.
+    "observe_projection",
 })
 
 COMMAND_OPS: frozenset[str] = frozenset({
@@ -260,6 +316,10 @@ COMMAND_OPS: frozenset[str] = frozenset({
     # COMMIT_MANAGED_ARTIFACT grant and the existing coordinated unit of work; no new owner,
     # table or capability is introduced.
     "import_album_image",
+    # F-011/F-012: one explicitly confirmed external-projection import (CAS on the canonical
+    # head, provenance labelled EXPLICIT_IMPORT), and one safe rebuild that may only repair
+    # MISSING/UNBOUND representations -- never overwrite a DIVERGED one.
+    "import_projection", "rebuild_projection",
 })
 
 OPS: frozenset[str] = READ_OPS | COMMAND_OPS
@@ -285,12 +345,18 @@ _NESTED_GRANT = frozenset({
 _NESTED_WORKSPACE = frozenset({"subject_id", "visibility", "artifact_scope"})
 _NESTED_INQUIRY = frozenset({"subject_id", "workspace_id", "topic", "source_refs",
                              "review_after", "expires_at"})
-_NESTED_ARTIFACT_CREATE = frozenset({"subject_id", "workspace_id", "title", "content"})
-_NESTED_ARTIFACT_COMMIT = frozenset({"subject_id", "artifact_id", "expected_head", "content"})
+_NESTED_ARTIFACT_CREATE = frozenset({"subject_id", "workspace_id", "title", "content",
+                                     "source_refs"})
+_NESTED_ARTIFACT_COMMIT = frozenset({"subject_id", "artifact_id", "expected_head", "content",
+                                     "source_refs"})
 _NESTED_ARTIFACT_LIFECYCLE = frozenset({"subject_id", "artifact_id", "expected_revision"})
 #: One album import: the caption and the picture's declared type/bytes.  There is deliberately no
 #: field for a path, a URL, a file name, an owner or an authority.
 _NESTED_ALBUM_IMPORT = frozenset({"subject_id", "caption", "content_type", "data"})
+#: One explicit projection import.  ``confirm`` must be literally ``True``; the candidate and
+#: base version are the two facts the user confirmed, never a free-form author or path.
+_NESTED_PROJECTION_IMPORT = frozenset({"subject_id", "artifact_id", "candidate_id",
+                                       "base_version_id", "confirm"})
 
 FIELD_TYPES: dict[str, dict[str, Any]] = {
     "health": {},
@@ -314,12 +380,19 @@ FIELD_TYPES: dict[str, dict[str, Any]] = {
     "read_album_image": {"subject": str, "artifact_id": str},
     "read_album_image_bytes": {"subject": str, "artifact_id": str},
     "import_album_image": {"grant_id": str, "operation_key": str, "image": dict},
+    "observe_projection": {"subject": str, "artifact_id": str},
+    "import_projection": {"grant_id": str, "operation_key": str, "import": dict},
+    "rebuild_projection": {"subject": str, "artifact_id": str},
     "issue_grant": {"grant": dict},
     "revoke_grant": {"grant_id": str, "expected_revision": int, "operation_id": str},
     "provision_workspace": {"grant_id": str, "operation_key": str, "workspace": dict},
     "admit_inquiry": {"grant_id": str, "operation_key": str, "inquiry": dict},
     "create_artifact": {"grant_id": str, "operation_key": str, "artifact": dict},
-    "commit_markdown": {"grant_id": str, "operation_key": str, "artifact": dict},
+    # ``disclosure_grant_id`` is optional and only meaningful for a share delivery: a normal
+    # commit carries it not at all.  When present the owner still derives the binding from the
+    # stored envelope, so the id can never widen the scope.
+    "commit_markdown": {"grant_id": str, "operation_key": str, "artifact": dict,
+                        "disclosure_grant_id": (str, type(None))},
     "archive_artifact": {"grant_id": str, "operation_key": str, "artifact": dict},
     "tombstone": {"grant_id": str, "operation_key": str, "artifact": dict},
 }
@@ -337,6 +410,9 @@ REQUIRED_FIELDS: dict[str, frozenset[str]] = {
     "read_album_image": frozenset({"subject", "artifact_id"}),
     "read_album_image_bytes": frozenset({"subject", "artifact_id"}),
     "import_album_image": frozenset({"grant_id", "operation_key", "image"}),
+    "observe_projection": frozenset({"subject", "artifact_id"}),
+    "import_projection": frozenset({"grant_id", "operation_key", "import"}),
+    "rebuild_projection": frozenset({"subject", "artifact_id"}),
     "read_effect_receipt": frozenset({"operation_key"}),
     "list_personal_opportunities": frozenset({"subject"}),
     "get_grant": frozenset({"grant_id"}),
@@ -359,7 +435,101 @@ NESTED_FIELDS: dict[str, dict[str, frozenset[str]]] = {
     "archive_artifact": {"artifact": _NESTED_ARTIFACT_LIFECYCLE},
     "tombstone": {"artifact": _NESTED_ARTIFACT_LIFECYCLE},
     "import_album_image": {"image": _NESTED_ALBUM_IMPORT},
+    "import_projection": {"import": _NESTED_PROJECTION_IMPORT},
 }
+
+
+#: Bound on how many source facts one commit may carry.  The owner's own table keeps them small;
+#: the bound only stops a caller turning one command into an unbounded write.
+MAX_SOURCE_REFS = 64
+_SOURCE_REF_FIELDS = frozenset({"kind", "ref", "namespace", "generation"})
+
+
+def validate_source_refs(value: Any) -> list[dict[str, str]] | None:
+    """Strict, typed lineage facts, or ``None`` when the caller sent something else.
+
+    ``None`` is a refusal, never "no lineage": a commit that names a malformed source must not
+    silently land without its edges.
+    """
+
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_SOURCE_REFS:
+        return None
+    out: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) - _SOURCE_REF_FIELDS:
+            return None
+        kind = item.get("kind")
+        ref = item.get("ref")
+        if not isinstance(kind, str) or not kind.strip():
+            return None
+        if not isinstance(ref, str) or not ref.strip():
+            return None
+        row = {"kind": kind.strip(), "ref": ref.strip()}
+        for key in ("namespace", "generation"):
+            if key in item:
+                if not isinstance(item.get(key), str):
+                    return None
+                row[key] = item[key].strip()
+        out.append(row)
+    return out
+
+
+def claims_share_envelope(content: Any) -> bool:
+    """True when the text's first line claims the share schema (whether or not it parses)."""
+    return (isinstance(content, str) and bool(content)
+            and content.split("\n", 1)[0].strip() == SHARE_ENVELOPE_SCHEMA)
+
+
+def parse_share_envelope(content: Any) -> dict[str, str] | None:
+    """The header fields of one v1 share envelope, or ``None`` when it is not one.
+
+    The grammar is deliberately the same one the Sharing owner's canonical parser accepts: one
+    schema line, ``key=value`` header lines up to the ``text:`` marker, no duplicate key, and a
+    state from the recognised vocabulary.  Only header lines are read; the body never enters
+    the answer.  ``None`` therefore means "Sharing would not treat this as a share envelope
+    either", not "the body is hidden".
+    """
+    if not isinstance(content, str) or not content:
+        return None
+    lines = content.split("\n")
+    if lines[0].strip() != SHARE_ENVELOPE_SCHEMA:
+        return None
+    fields: dict[str, str] = {}
+    terminated = False
+    for line in lines[1:]:
+        if line.strip() == SHARE_TEXT_MARKER:
+            terminated = True
+            break
+        if not line.strip():
+            continue
+        if "=" not in line:
+            return None
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in fields:
+            return None
+        fields[key] = value.strip()
+    if not terminated or fields.get("state") not in SHARE_ENVELOPE_STATES:
+        return None
+    return {
+        "state": fields.get("state", ""),
+        "source_artifact_id": fields.get("source_artifact_id", ""),
+        "source_version_id": fields.get("source_version_id", ""),
+        "audience": fields.get("audience", ""),
+        "channel": fields.get("channel", ""),
+        "subject_id": fields.get("subject_id", ""),
+    }
+
+
+def parse_share_send_envelope(content: Any) -> dict[str, str] | None:
+    """The header fields of one **send** envelope, or ``None`` for anything else."""
+    parsed = parse_share_envelope(content)
+    if parsed is None or parsed["state"] != SHARE_STATE_LOCAL_DELIVERED:
+        return None
+    return {key: parsed[key] for key in
+            ("source_artifact_id", "source_version_id", "audience", "channel", "subject_id")}
 
 
 class RequestRefused(Exception):
@@ -456,6 +626,7 @@ class LifeSupplyService:
                  allowed_subjects: Iterable[str] | None = None,
                  max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
                  require_non_root_identity: bool = False,
+                 recovery_gate: Any = None,
                  clock: Callable[[], float] = time.time) -> None:
         self.root = Path(data_root)
         self.clock = clock
@@ -500,7 +671,7 @@ class LifeSupplyService:
                 media_root=self.root / "media",
                 workspace_authority=self.workspace,
                 writer_fence=self.fences.get("ManagedArtifact"), read_only=self.read_only,
-                clock=self.clock)
+                recovery_gate=recovery_gate, clock=self.clock)
         except Exception as exc:  # unrecoverable startup failure -> FAILED, never READY
             self._release_fences()
             self.startup_error = f"{type(exc).__name__}: {exc}"
@@ -658,6 +829,10 @@ class LifeSupplyService:
         except StaleWriter as exc:
             self.fence_writer("WRITER_SUPERSEDED", str(exc))
             return refusal("BLOCKED", "SERVICE_FENCED", str(exc))
+        except ArtifactStoreClosed as exc:
+            # A recovered copy before/after its activation is a definite refusal, never an
+            # unknown effect: the gate fires before any body or version is touched.
+            return refusal("BLOCKED", str(exc.code), str(exc.detail))
         except UnitOfWorkDoomed as exc:
             return refusal("BLOCKED", "UNIT_OF_WORK_ROLLED_BACK", str(exc))
         except sqlite3.IntegrityError as exc:
@@ -704,6 +879,167 @@ class LifeSupplyService:
             raise RequestRefused(refusal("NOT_FOUND", "ARTIFACT_NOT_FOUND",
                                          "artifact/subject mismatch or unknown artifact"))
         return row
+
+    @staticmethod
+    def _disclosure_reason(status: str, detail: str | None = None) -> str:
+        text = str(detail or "")
+        if "subject mismatch" in text:
+            # ``_check_row`` answers a bare DENY for a permit minted for another subject; the
+            # exact reason is the point, so it is named here instead of collapsing to "required".
+            return DISCLOSURE_SUBJECT_MISMATCH
+        return {
+            "REVOKED": DISCLOSURE_REVOKED,
+            "EXPIRED": DISCLOSURE_EXPIRED,
+            "SCOPE_MISMATCH": DISCLOSURE_SCOPE_MISMATCH,
+            "TARGET_MISMATCH": DISCLOSURE_TARGET_MISMATCH,
+            "CAPABILITY_MISMATCH": DISCLOSURE_CAPABILITY_MISMATCH,
+            "USE_EXHAUSTED": DISCLOSURE_USE_EXHAUSTED,
+            "STALE_REVISION": DISCLOSURE_SCOPE_MISMATCH,
+            "UNKNOWN": DISCLOSURE_GRANT_UNKNOWN,
+            "CONFLICT": DISCLOSURE_GRANT_AMBIGUOUS,
+        }.get(str(status or ""), DISCLOSURE_GRANT_REQUIRED)
+
+    def _disclosure_binding(self, content: Any, subject: str) -> dict[str, str] | None:
+        """Derive the disclosure binding from the stored envelope, never from request extras."""
+        binding = parse_share_send_envelope(content)
+        if binding is None:
+            if claims_share_envelope(content) and parse_share_envelope(content) is None:
+                # The text claims the reserved schema but does not parse: a duplicate header, a
+                # missing ``text:`` marker or an unknown state.  Sharing would not read it as a
+                # delivery either, so it is refused instead of landing as opaque look-alike text.
+                raise RequestRefused(refusal("DENY", DISCLOSURE_ENVELOPE_MALFORMED,
+                                             "the text claims the share schema but the envelope "
+                                             "does not parse", stage="disclosure"))
+            return None
+        source_id = binding["source_artifact_id"]
+        version_id = binding["source_version_id"]
+        if not source_id or not version_id:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_BINDING_INCOMPLETE,
+                                         "the delivery envelope names no exact source version",
+                                         stage="disclosure"))
+        if binding["subject_id"] != subject:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_SUBJECT_MISMATCH,
+                                         "the envelope's subject is not the committing subject",
+                                         stage="disclosure"))
+        if binding["audience"] != DISCLOSURE_TARGET_LOCAL_OWNER:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_TARGET_REFUSED,
+                                         "the only disclosure target is the local owner",
+                                         stage="disclosure"))
+        if binding["channel"] != SHARE_CHANNEL_LOCAL_INBOX:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_CHANNEL_REFUSED,
+                                         "the only disclosure channel is the local inbox",
+                                         stage="disclosure"))
+        if self.artifact_store.get_artifact_for_subject(source_id, subject) is None:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_SOURCE_NOT_FOUND,
+                                         "the named source artifact is not this subject's",
+                                         stage="disclosure", source_artifact_id=source_id))
+        version = self.artifact_store.read_version(version_id)
+        if version is None or str(version.get("artifact_id") or "") != source_id:
+            # The version named in the envelope must really belong to the named source: a permit
+            # for one artifact's version can never be borrowed by another artifact's envelope.
+            raise RequestRefused(refusal("DENY", DISCLOSURE_SOURCE_VERSION_MISMATCH,
+                                         "the named version does not belong to the named source "
+                                         "artifact", stage="disclosure",
+                                         source_artifact_id=source_id))
+        return binding
+
+    def _canonical_draft_binding(self, head: Any, binding: Mapping[str, str]) -> None:
+        """A delivery may only advance the draft that is already the canonical head.
+
+        The envelope is client-authored text, so its own header is not authority.  The stored
+        head is: the new version must carry exactly the source artifact, exact source version,
+        subject, audience and channel the canonical draft was prepared with.  Without that, a
+        permit won for artifact B could be used to deliver a draft prepared from artifact A.
+        """
+        if head is None:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_DRAFT_BINDING_MISSING,
+                                         "a local delivery must be committed over a prepared "
+                                         "share draft; the first version cannot be a delivery",
+                                         stage="disclosure"))
+        draft = parse_share_envelope(head.get("content"))
+        if draft is None or draft.get("state") not in SHARE_SENDABLE_STATES:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_DRAFT_BINDING_MISSING,
+                                         "the canonical head is not a sendable share draft",
+                                         stage="disclosure"))
+        for key in ("source_artifact_id", "source_version_id", "subject_id", "audience", "channel"):
+            if str(draft.get(key) or "") != str(binding.get(key) or ""):
+                raise RequestRefused(refusal("DENY", DISCLOSURE_DRAFT_BINDING_MISMATCH,
+                                             "the delivery envelope does not match the canonical "
+                                             "draft's source, subject or target",
+                                             stage="disclosure", field=key))
+
+    def _choose_disclosure_grant(self, *, subject: str, binding: Mapping[str, str],
+                                 explicit: str | None) -> str:
+        """The one permit this delivery may use, or a named refusal (read-only, no reserve)."""
+        if explicit:
+            return explicit
+        scope = disclosure_scope(binding["source_artifact_id"], binding["source_version_id"])
+        rows = self.gov_store.lookup_grants_exact(
+            subject=subject, capability=DISCLOSE_CAPABILITY, scope=scope,
+            target=DISCLOSURE_TARGET_LOCAL_OWNER)
+        if rows is None:
+            raise RequestRefused(refusal("BLOCKED", DISCLOSURE_STORE_UNAVAILABLE,
+                                         "the governance store could not be read",
+                                         stage="disclosure"))
+        now = float(self.gov_store.clock())
+        active = [row for row in rows
+                  if row.get("revocation_state") == "ACTIVE"
+                  and (row.get("expires_at") is None or now < float(row["expires_at"]))]
+        if len(active) > 1:
+            raise RequestRefused(refusal("DENY", DISCLOSURE_GRANT_AMBIGUOUS,
+                                         "more than one active permit matches this exact binding",
+                                         stage="disclosure"))
+        if active:
+            return str(active[0]["grant_id"])
+        if any(row.get("revocation_state") == "REVOKED" for row in rows):
+            raise RequestRefused(refusal("DENY", DISCLOSURE_REVOKED,
+                                         "the permit for this exact binding was revoked",
+                                         stage="disclosure"))
+        if any(row.get("revocation_state") == "EXPIRED"
+               or (row.get("expires_at") is not None and now >= float(row["expires_at"]))
+               for row in rows):
+            raise RequestRefused(refusal("DENY", DISCLOSURE_EXPIRED,
+                                         "the permit for this exact binding has expired",
+                                         stage="disclosure"))
+        raise RequestRefused(refusal("DENY", DISCLOSURE_GRANT_REQUIRED,
+                                     "no permit is bound to this exact source version and target",
+                                     stage="disclosure"))
+
+    def _admit_disclosure(self, uow: Any, *, subject: str, binding: Mapping[str, str],
+                          explicit: str | None, operation_key: str,
+                          actor_uid: int | None) -> str:
+        """Reserve/begin/consume the disclosure permit inside the sending command."""
+        grant_id = self._choose_disclosure_grant(subject=subject, binding=binding,
+                                                 explicit=explicit)
+        scope = disclosure_scope(binding["source_artifact_id"], binding["source_version_id"])
+        try:
+            self._reserve(uow, grant_id=grant_id, subject=subject,
+                          capability=DISCLOSE_CAPABILITY, scope=scope,
+                          target=DISCLOSURE_TARGET_LOCAL_OWNER,
+                          operation_key=operation_key + "#disclose", payload=None,
+                          actor_uid=actor_uid, authority_scope=DISCLOSURE_AUTHORITY_SCOPE)
+        except RequestRefused as exc:
+            status = str(exc.payload.get("status") or "")
+            detail = str(exc.payload.get("detail") or "the disclosure permit did not apply")
+            raise RequestRefused(refusal(
+                "DENY", self._disclosure_reason(status, detail), detail,
+                stage="disclosure", grant_id=grant_id)) from exc
+        return grant_id
+
+    def _check_disclosure_readonly(self, *, subject: str, binding: Mapping[str, str],
+                                   explicit: str | None) -> None:
+        """The NO_CHANGE path's read-only equivalent: validate, never reserve or consume."""
+        grant_id = self._choose_disclosure_grant(subject=subject, binding=binding,
+                                                 explicit=explicit)
+        scope = disclosure_scope(binding["source_artifact_id"], binding["source_version_id"])
+        decision = self.gov_store.validate_grant(
+            grant_id, subject=subject, capability=DISCLOSE_CAPABILITY, scope=scope,
+            target=DISCLOSURE_TARGET_LOCAL_OWNER, payload=None)
+        if not decision.allowed:
+            raise RequestRefused(refusal(
+                "DENY", self._disclosure_reason(decision.status, decision.detail),
+                decision.detail or "the disclosure permit did not apply",
+                stage="disclosure", grant_id=grant_id))
 
     def _reserve(self, uow: Any, *, grant_id: str, subject: str, capability: str, scope: str,
                  target: str, operation_key: str, payload: Any, actor_uid: int | None,
@@ -887,6 +1223,10 @@ class LifeSupplyService:
         content = row.get("content")
         content = content if isinstance(content, str) else ""
         truncated = len(content) > max_chars
+        # The owner's own operation row is the only source of import provenance; an ordinary
+        # commit has none, and "absent" stays None instead of being guessed.
+        provenance = self.artifact_store.read_version_provenance(
+            str(row["artifact_id"]), str(row["version_id"]))
         return {
             "status": "OK",
             "subject": req["subject"],
@@ -902,7 +1242,228 @@ class LifeSupplyService:
             "content_sha256": row.get("content_sha256"),
             "content_truncated": truncated,
             "lifecycle": artifact["lifecycle"],
+            "provenance": provenance,
+            # An ordinary commit carries no creator receipt here, so it is not labelled
+            # ACTION_COMMIT; only an explicit import asserts a source kind.
+            "source_kind": (provenance or {}).get("source_kind") or "ORDINARY_COMMIT",
         }
+
+    # -- F-011/F-012/F-014: projection observation, explicit import, safe rebuild ----------
+
+    def _op_observe_projection(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        """Pure read: canonical payload health and representation health, reported separately."""
+        subject, artifact_id = req["subject"], req["artifact_id"]
+        self.subject_identity(subject)
+        self._require_subject_owned_artifact(artifact_id, subject)
+        view = self.artifact_store.observe_projection(artifact_id, subject_id=subject)
+        if view.get("status") != "OK":
+            return refusal(str(view.get("status") or "UNKNOWN"),
+                           str(view.get("reason") or "PROJECTION_OBSERVE_FAILED"),
+                           str(view.get("detail") or ""))
+        view["max_projection_bytes"] = MAX_PROJECTION_BYTES
+        return view
+
+    def _op_rebuild_projection(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        """Explicitly repair a MISSING/UNBOUND projection; a DIVERGED one is never overwritten."""
+        gated = self.switches.require("ARTIFACT_EXTERNAL_ACTION")
+        if gated is not None:
+            return gated
+        subject, artifact_id = req["subject"], req["artifact_id"]
+        self.subject_identity(subject)
+        artifact = self._require_subject_owned_artifact(artifact_id, subject)
+        workspace = self._active_workspace(subject)
+        if artifact["workspace_id"] != workspace["workspace_id"]:
+            return refusal("NOT_FOUND", "ARTIFACT_NOT_FOUND", "artifact/workspace mismatch")
+        self._require_ready_for_write("ManagedArtifact")
+        result = self.artifact_store.rebuild_projection_safe(artifact_id, subject_id=subject)
+        status = str(result.get("status") or "UNKNOWN")
+        if status in {"OK", "NO_CHANGE"}:
+            answer = dict(result)
+            answer["artifact_id"] = artifact_id
+            answer["operation_key"] = None
+            return answer
+        if status == "NOT_FOUND":
+            return refusal("NOT_FOUND", "ARTIFACT_NOT_FOUND", "artifact is unknown or tombstoned")
+        reason = str(result.get("reason") or "PROJECTION_REBUILD_FAILED")
+        return refusal("BLOCKED" if status == "BLOCKED" else "UNKNOWN", reason,
+                       str(result.get("detail") or ""),
+                       content_health=result.get("content_health"),
+                       representation_health=result.get("representation_health"))
+
+    def _op_import_projection(self, req, *, caller, peer_uid) -> dict[str, Any]:
+        """Import an explicitly confirmed external Markdown edit as one CAS'd owner version."""
+        gated = self.switches.require("ARTIFACT_EXTERNAL_ACTION")
+        if gated is not None:
+            return gated
+        body = dict(req["import"])
+        subject = str(body["subject_id"])
+        artifact_id = str(body["artifact_id"])
+        candidate_id = str(body["candidate_id"])
+        base_version_id = body.get("base_version_id")
+        operation_key, grant_id = req["operation_key"], req["grant_id"]
+        if body.get("confirm") is not True:
+            return refusal("DENY", "EXPLICIT_CONFIRMATION_REQUIRED",
+                           "confirm must be literally true: an external edit is never imported implicitly")
+        if not candidate_id:
+            return refusal("DENY", "FIELD_REQUIRED:candidate_id", "candidate_id is required")
+        if base_version_id is not None and not isinstance(base_version_id, str):
+            return refusal("DENY", "FIELD_TYPE:base_version_id",
+                           "base_version_id must be a version id string or null")
+        self.subject_identity(subject)
+        artifact = self._require_subject_owned_artifact(artifact_id, subject)
+        workspace = self._active_workspace(subject)
+        if artifact["workspace_id"] != workspace["workspace_id"]:
+            return refusal("NOT_FOUND", "ARTIFACT_NOT_FOUND", "artifact/workspace mismatch")
+        # Same-key retry: the owner's own operation row decides, before any file is re-read.
+        existing = self.artifact_store.lookup_operation(operation_key)
+        if existing is not None:
+            try:
+                original = json.loads(existing["result_json"])
+            except (TypeError, ValueError):
+                original = {}
+            provenance = original.get("provenance") if isinstance(original, dict) else None
+            same_intent = (
+                existing.get("operation_kind") == "COMMIT_MARKDOWN"
+                and isinstance(original, dict)
+                and str(original.get("artifact_id") or "") == artifact_id
+                and isinstance(provenance, dict)
+                and str(provenance.get("candidate_id") or "") == candidate_id
+                and str(provenance.get("base_projection_version") or "") == str(base_version_id or "")
+            )
+            if same_intent:
+                replay = dict(original)
+                replay["replayed"] = True
+                replay["operation_key"] = operation_key
+                return replay
+            return refusal("CONFLICT", "OPERATION_KEY_REUSED",
+                           "this operation key already names a different artifact or import intent")
+        # The projection file is a representation; the erased canonical head is the authority.
+        # Checked before any file byte is read, so an old representation put back on the path
+        # cannot be re-imported as private text after a forget decision.
+        erased = self.artifact_store.head_was_erased(artifact_id)
+        if erased is None:
+            return refusal("UNKNOWN", "CANONICAL_HEAD_UNREADABLE",
+                           "the owner could not read the canonical head it would import onto")
+        if erased:
+            return refusal("BLOCKED", "CANONICAL_PAYLOAD_ERASED",
+                           "the canonical head was erased by a forget decision; a projection "
+                           "file cannot restore that body")
+        seen = self.artifact_store.observe_projection(
+            artifact_id, subject_id=subject, include_content=True)
+        if seen.get("status") != "OK":
+            return refusal(str(seen.get("status") or "UNKNOWN"),
+                           str(seen.get("reason") or "PROJECTION_OBSERVE_FAILED"),
+                           str(seen.get("detail") or ""))
+        rep_state = seen["representation_health"]["state"]
+        if rep_state != "DIVERGED":
+            return refusal("BLOCKED", "NO_EXTERNAL_CHANGE",
+                           f"projection is {rep_state}; there is no external edit to import",
+                           representation_health=seen["representation_health"],
+                           content_health=seen["content_health"])
+        candidate = seen.get("candidate")
+        if not isinstance(candidate, dict) or str(candidate.get("candidate_id") or "") != candidate_id:
+            return refusal("BLOCKED", "CANDIDATE_STALE",
+                           "the projection changed after that candidate was observed; observe again",
+                           current_candidate=(candidate or {}).get("candidate_id"),
+                           content_health=seen["content_health"])
+        candidate_base = candidate.get("base_projection_version")
+        if not candidate_base or str(base_version_id or "") != str(candidate_base):
+            return refusal("BLOCKED", "BASE_VERSION_UNKNOWN",
+                           "the projection does not name the version it was edited from",
+                           candidate_base_version=candidate_base,
+                           base_basis=candidate.get("base_basis"))
+        current_head = str((seen.get("head") or {}).get("version_id") or "")
+        if str(base_version_id or "") != current_head:
+            return refusal("CONFLICT", "HEAD_MOVED",
+                           "the canonical head moved after observation; the candidate is not rebased",
+                           base_version_id=base_version_id, current_head=current_head)
+        content = seen.get("_candidate_content")
+        if not isinstance(content, str):
+            return refusal("BLOCKED", "CANDIDATE_CONTENT_UNREADABLE",
+                           "the confirmed candidate has no readable UTF-8 body")
+        # An external projection edit is another writer of artifact text.  It bypasses the
+        # commit-over-draft path, so it cannot be allowed to introduce a delivery envelope:
+        # otherwise a file on disk would be an unchecked way into ``LOCAL_DELIVERED``.
+        if parse_share_send_envelope(content) is not None or (
+                claims_share_envelope(content) and parse_share_envelope(content) is None):
+            return refusal("DENY", DISCLOSURE_IMPORT_REFUSED,
+                           "an imported projection cannot introduce a share delivery envelope",
+                           stage="disclosure")
+        projection_sha = str(candidate.get("observed_sha256") or "")
+        provenance = {
+            "source_kind": "EXPLICIT_IMPORT",
+            "via": "projection_import",
+            "authority": "EXTERNAL_UNKNOWN",
+            "external_contributor": "UNKNOWN",
+            "author_basis": ("file content only; authorship is not inferred from path, directory, "
+                             "user name or mtime"),
+            "candidate_id": candidate_id,
+            "base_projection_version": base_version_id,
+            "projection_sha256": projection_sha,
+            "imported_at": self._iso_time(self.clock()),
+            "confirmed_by": "explicit_local_operator",
+            "canonical_subject": subject,
+        }
+        target = f"workspace:{workspace['workspace_id']}"
+        authorized_payload = {"operation": "import_projection", "subject_id": subject,
+                              "artifact_id": artifact_id, "expected_head": base_version_id,
+                              "candidate_id": candidate_id,
+                              "projection_sha256": projection_sha}
+        self._require_ready_for_write("ManagedArtifact")
+        try:
+            with self.db_store.unit_of_work(command="COMMIT_MARKDOWN", operation_id=operation_key,
+                                            subject_id=subject,
+                                            caller_principal=SERVICE_PRINCIPAL) as uow:
+                uow.param("subject_id", subject)
+                uow.param("operation_key", operation_key)
+                uow.param("artifact_id", artifact_id)
+                uow.param("grant_id", grant_id)
+                reserved = self._reserve(
+                    uow, grant_id=grant_id, subject=subject, capability=ARTIFACT_CAPABILITY,
+                    scope=ARTIFACT_SCOPE, target=target, operation_key=operation_key,
+                    payload=authorized_payload, actor_uid=peer_uid,
+                    authority_scope=ARTIFACT_AUTHORITY_SCOPE)
+                committed = self.artifact_store.commit_markdown(
+                    artifact_id=artifact_id, authorized_subject_id=subject,
+                    expected_head=base_version_id, content=content,
+                    operation_key=operation_key,
+                    grant_reservation_id=reserved.reservation_id,
+                    operation_payload=None, provenance=provenance,
+                    expected_projection_sha256=projection_sha)
+                uow.step(committed, owner="ManagedArtifact", action="commit_markdown")
+                if committed.get("status") not in {"OK", "NO_CHANGE"}:
+                    raise RequestRefused(refusal(
+                        "CONFLICT" if committed.get("status") == "CONFLICT" else
+                        str(committed.get("status") or "UNKNOWN"),
+                        "ARTIFACT_REFUSED", str(committed.get("detail") or ""),
+                        stage="commit_markdown", current_head=committed.get("current_head")))
+                if committed.get("version_id"):
+                    uow.note("ManagedArtifact", "artifact_versions",
+                             "external import committed", committed["version_id"])
+                after = self.artifact_store.observe_projection(artifact_id, subject_id=subject)
+                result = {
+                    "status": committed.get("status"),
+                    "artifact_id": artifact_id,
+                    "version_id": committed.get("version_id"),
+                    "version_number": committed.get("version_number"),
+                    "parent_version_id": committed.get("parent_version_id"),
+                    "head_version_id": (after.get("head") or {}).get("version_id"),
+                    "version_created": committed.get("version_created"),
+                    "operation_key": operation_key,
+                    "reservation_id": reserved.reservation_id,
+                    "uow_id": uow.uow_id,
+                    "coordinated": True,
+                    "source_kind": "EXPLICIT_IMPORT",
+                    "provenance": provenance,
+                    "candidate_id": candidate_id,
+                    "base_version_id": base_version_id,
+                    "content_health": after.get("content_health"),
+                    "representation_health": after.get("representation_health"),
+                    "replayed": False,
+                }
+        except RequestRefused as exc:
+            return exc.payload
+        return result
 
     # -- EP-16: the private album (one explicit import + bounded pure reads) -------------
 
@@ -1315,9 +1876,24 @@ class LifeSupplyService:
         if capability not in CAPABILITIES:
             return refusal("DENY", "CAPABILITY_NOT_ALLOWED",
                            f"{capability!r} is not in the narrow allowlist")
-        expected_scope = (WORKSPACE_AUTHORITY_SCOPE
-                          if capability in {WORKSPACE_CAPABILITY, INQUIRY_CAPABILITY}
-                          else ARTIFACT_AUTHORITY_SCOPE)
+        if capability == DISCLOSE_CAPABILITY:
+            expected_scope = DISCLOSURE_AUTHORITY_SCOPE
+            if str(body.get("target") or "") != DISCLOSURE_TARGET_LOCAL_OWNER:
+                return refusal("DENY", DISCLOSURE_TARGET_REFUSED,
+                               "a disclosure permit targets only the local owner",
+                               stage="issue_grant")
+            if not str(body.get("scope") or "").startswith("disclosure:"):
+                return refusal("DENY", "DISCLOSURE_SCOPE_INVALID",
+                               "a disclosure permit carries a structured disclosure scope",
+                               stage="issue_grant")
+            if body.get("payload_binding") is not None:
+                return refusal("DENY", "DISCLOSURE_SCOPE_INVALID",
+                               "a disclosure permit binds ids in its scope, never a payload",
+                               stage="issue_grant")
+        else:
+            expected_scope = (WORKSPACE_AUTHORITY_SCOPE
+                              if capability in {WORKSPACE_CAPABILITY, INQUIRY_CAPABILITY}
+                              else ARTIFACT_AUTHORITY_SCOPE)
         supplied_scope = body.get("authority_scope")
         if supplied_scope is not None and supplied_scope != expected_scope:
             return refusal("DENY", "AUTHORITY_SCOPE_MISMATCH",
@@ -1359,9 +1935,17 @@ class LifeSupplyService:
         grant_id = req["grant_id"]
         expected_revision = int(req["expected_revision"])
         operation_id = req["operation_id"]
+        # The journal's ``subject_id`` is the participant this command is about.  Every other
+        # coordinated command passes it; revocation must derive it from the grant row the owner
+        # is about to change, never from the request (a caller may not name the subject here).
+        # A missing grant leaves it None and the owner still answers NOT_FOUND below.
+        grant_row = self.gov_store.get_grant(grant_id)
+        grant_subject = (str(grant_row.get("subject") or "") or None
+                         if isinstance(grant_row, dict) else None)
         writer = self._require_ready_for_write("Governance")
         try:
             with self.db_store.unit_of_work(command="REVOKE_GRANT", operation_id=operation_id,
+                                            subject_id=grant_subject,
                                             caller_principal=SERVICE_PRINCIPAL) as uow:
                 decision = self.gov_store.revoke_grant(
                     grant_id, expected_revision=expected_revision, operation_id=operation_id,
@@ -1499,6 +2083,22 @@ class LifeSupplyService:
             return refusal("DENY", "FIELD_REQUIRED:title", "title is required")
         if not isinstance(content, str):
             return refusal("DENY", "FIELD_TYPE:content", "content must be a string")
+        source_refs = validate_source_refs(body.get("source_refs"))
+        if source_refs is None:
+            return refusal("DENY", "FIELD_TYPE:source_refs",
+                           "source_refs must be a list of typed {kind, ref} facts")
+        # ``create_artifact`` also writes the artifact's first version, so it is an equivalent
+        # way to land a delivery text.  It has no canonical draft to compare against and no
+        # sending transaction, therefore it refuses a delivery envelope outright instead of
+        # offering a second, unchecked path to ``LOCAL_DELIVERED``.
+        if parse_share_send_envelope(content) is not None:
+            return refusal("DENY", DISCLOSURE_DRAFT_BINDING_MISSING,
+                           "a local delivery must be committed over a prepared share draft, "
+                           "not created as a first version", stage="disclosure")
+        if claims_share_envelope(content) and parse_share_envelope(content) is None:
+            return refusal("DENY", DISCLOSURE_ENVELOPE_MALFORMED,
+                           "the text claims the share schema but the envelope does not parse",
+                           stage="disclosure")
         workspace = self._active_workspace(subject)
         workspace_id = workspace["workspace_id"]
         if body["workspace_id"] != workspace_id:
@@ -1510,6 +2110,10 @@ class LifeSupplyService:
         reserve_payload = {"operation": "create_artifact", "subject_id": subject,
                            "workspace_id": workspace_id, "title": title,
                            "first_version_content": content}
+        if source_refs:
+            # Lineage is part of the request the grant authorises, not an afterthought: a grant
+            # minted for one source set cannot be reused to write a document from another.
+            reserve_payload["source_refs"] = source_refs
         create_payload = {"operation": "create_artifact", "subject_id": subject,
                           "workspace_id": workspace_id, "title": title}
         self._require_ready_for_write("ManagedArtifact")
@@ -1527,7 +2131,7 @@ class LifeSupplyService:
                 created = self.artifact_store.create_artifact(
                     subject_id=subject, workspace_id=workspace_id, title=title,
                     operation_key=operation_key, grant_reservation_id=reserved.reservation_id,
-                    operation_payload=create_payload)
+                    operation_payload=create_payload, source_refs=source_refs)
                 uow.step(created, owner="ManagedArtifact", action="create_artifact")
                 if created.get("status") not in {"OK", "NO_CHANGE"}:
                     raise RequestRefused(refusal(created.get("status") or "UNKNOWN",
@@ -1580,25 +2184,91 @@ class LifeSupplyService:
             return refusal("DENY", "FIELD_TYPE:content", "content must be a string")
         if expected_head is not None and not isinstance(expected_head, str):
             return refusal("DENY", "FIELD_TYPE:expected_head", "expected_head must be a string or null")
+        source_refs = validate_source_refs(body.get("source_refs"))
+        if source_refs is None:
+            return refusal("DENY", "FIELD_TYPE:source_refs",
+                           "source_refs must be a list of typed {kind, ref} facts")
         self.subject_identity(subject)
         artifact = self._require_subject_owned_artifact(artifact_id, subject)
         workspace = self._active_workspace(subject)
         if artifact["workspace_id"] != workspace["workspace_id"]:
             return refusal("NOT_FOUND", "ARTIFACT_NOT_FOUND", "artifact/workspace mismatch")
+        # A commit whose new head is a LOCAL_DELIVERED share envelope is a disclosure, and the
+        # owner admits it only with a permit for the exact source version and local target.  The
+        # binding is derived from the stored text, so request fields can never widen it.
+        explicit_disclosure = req.get("disclosure_grant_id")
+        try:
+            disclosure_binding = self._disclosure_binding(content, subject)
+        except RequestRefused as exc:
+            return exc.payload
+        if disclosure_binding is None and explicit_disclosure:
+            return refusal("DENY", DISCLOSURE_GRANT_UNEXPECTED,
+                           "this commit is not a local share delivery, so a disclosure permit "
+                           "does not apply", stage="disclosure")
         target = f"workspace:{workspace['workspace_id']}"
         head = self.artifact_store.read_head(artifact_id)
+        authorized_payload = {"operation": "commit_markdown", "subject_id": subject,
+                              "artifact_id": artifact_id, "expected_head": expected_head,
+                              "content": content}
+        if source_refs:
+            authorized_payload["source_refs"] = source_refs
+        # The store's own operation payload keeps its frozen shape; lineage rides beside it and is
+        # registered by the same owner call.
+        commit_payload = {"operation": "commit_markdown", "subject_id": subject,
+                          "artifact_id": artifact_id, "expected_head": expected_head,
+                          "content": content}
         if (head is not None and expected_head == head["version_id"] and head["content"] == content):
             # A NO_CHANGE commit would create no version, and
             # db.COMMAND_CONTRACTS["COMMIT_MARKDOWN"] rightly refuses to let a coordinated command
             # commit without the version its postcondition requires.  Nothing is written, so
-            # nothing needs coordinating: report the owner's own NO_CHANGE outcome.
+            # nothing needs coordinating -- but idempotency is not authority: the same grant
+            # checks that guard a real commit also decide whether this caller may be told its
+            # action is already done.  A revoked/expired/retargeted grant therefore cannot use
+            # "identical content" as a way past admission.  This read-only check never reserves
+            # or consumes a use; the write path below still does the authoritative reserve.
+            decision = self.gov_store.validate_grant(
+                grant_id, subject=subject, capability=ARTIFACT_CAPABILITY,
+                scope=ARTIFACT_SCOPE, target=target, payload=authorized_payload)
+            if not decision.allowed:
+                return refusal(decision.status or "DENY", "GOVERNANCE_REFUSED",
+                               decision.detail or "this grant is no longer usable",
+                               stage="replay_grant", grant_id=grant_id)
+            if source_refs:
+                # A source-carrying commit must produce a version: the same owner call that
+                # writes the body is the one that registers its lineage.  Answering NO_CHANGE
+                # here would tell the caller its work landed while the named sources were
+                # never checked or recorded, so it is refused by name instead of silently
+                # dropping the edges.  A plain commit without source_refs keeps the old
+                # read-only replay answer and the grant check above.
+                return refusal("BLOCKED", "SOURCE_REFS_REQUIRE_NEW_VERSION",
+                               "identical content is already at head; a commit that carries "
+                               "source_refs must produce a new version so its lineage can be "
+                               "registered",
+                               stage="no_change_source_refs",
+                               head_version_id=head["version_id"])
+            if disclosure_binding is not None:
+                # The same "idempotency is not authority" rule: a delivery already at head may
+                # only be replayed by a caller whose permit still applies.  Read-only: no
+                # reserve, no consume, no write.
+                try:
+                    self._check_disclosure_readonly(
+                        subject=subject, binding=disclosure_binding,
+                        explicit=explicit_disclosure)
+                except RequestRefused as exc:
+                    return exc.payload
             return {"status": "NO_CHANGE", "artifact_id": artifact_id,
                     "head_version_id": head["version_id"], "version_created": False,
                     "operation_key": operation_key, "coordinated": False,
                     "detail": "identical content already at head; no canonical write"}
-        authorized_payload = {"operation": "commit_markdown", "subject_id": subject,
-                              "artifact_id": artifact_id, "expected_head": expected_head,
-                              "content": content}
+        if disclosure_binding is not None:
+            # The client-authored header is not authority: the canonical draft is.  A new
+            # delivered version must advance exactly the source/subject/target the prepared
+            # draft already recorded, so a permit won for another artifact/version cannot be
+            # used to relabel this draft.
+            try:
+                self._canonical_draft_binding(head, disclosure_binding)
+            except RequestRefused as exc:
+                return exc.payload
         self._require_ready_for_write("ManagedArtifact")
         try:
             with self.db_store.unit_of_work(command="COMMIT_MARKDOWN", operation_id=operation_key,
@@ -1608,6 +2278,15 @@ class LifeSupplyService:
                 uow.param("operation_key", operation_key)
                 uow.param("artifact_id", artifact_id)
                 uow.param("grant_id", grant_id)
+                if disclosure_binding is not None:
+                    # Both domains must hold: the write permit below and this disclosure permit.
+                    # Reserved and fenced in the same coordinated transaction as the write, so a
+                    # revoke that lands before this point refuses the delivery, while a revoke
+                    # after it cannot erase an already-recorded local receipt.
+                    self._admit_disclosure(
+                        uow, subject=subject, binding=disclosure_binding,
+                        explicit=explicit_disclosure, operation_key=operation_key,
+                        actor_uid=peer_uid)
                 reserved = self._reserve(
                     uow, grant_id=grant_id, subject=subject, capability=ARTIFACT_CAPABILITY,
                     scope=ARTIFACT_SCOPE, target=target, operation_key=operation_key,
@@ -1617,7 +2296,7 @@ class LifeSupplyService:
                     artifact_id=artifact_id, authorized_subject_id=subject,
                     expected_head=expected_head, content=content, operation_key=operation_key,
                     grant_reservation_id=reserved.reservation_id,
-                    operation_payload=authorized_payload)
+                    operation_payload=commit_payload, source_refs=source_refs)
                 uow.step(committed, owner="ManagedArtifact", action="commit_markdown")
                 if committed.get("status") not in {"OK", "NO_CHANGE"}:
                     raise RequestRefused(refusal(committed.get("status") or "UNKNOWN",
@@ -1948,7 +2627,8 @@ def run_service(settings: ServiceSettings, *, service: LifeSupplyService | None 
             writer_instance=settings.writer_instance, switches=FeatureSwitches.from_env(),
             allowed_subjects=settings.allowed_subjects,
             max_payload_bytes=settings.max_payload_bytes,
-            require_non_root_identity=settings.require_non_root_identity)
+            require_non_root_identity=settings.require_non_root_identity,
+            recovery_gate=settings.recovery_gate)
         server = LifeSupplySocketServer(str(socket_path), active,
                                         max_payload_bytes=settings.max_payload_bytes,
                                         socket_mode=settings.socket_mode)

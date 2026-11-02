@@ -96,7 +96,8 @@ Status: implemented
      `docs/engineering/v04-life-report-coverage-result.md` §6。
   2. 崩溃进程的覆盖上限仍是它最后一次 heartbeat，tick 之间那段恒为 `unknown`（方向安全，覆盖率会略低）。
   3. `current_tail` 依赖 `now`：一个已死但 summary 仍写 `running: true` 的实例会被判 `RUNNING`；判「真死」
-     需要外部存活证据，本批不造。
+     需要外部存活证据，本批不造。（2026-10-29 已补只读的 `/proc` 启动时间核验入口，仍不改本报告的
+     判定；见文末「运行健康只读入口」。）
   4. 本轮**没有**真实 24h、没有真实模型、没有在原实例上跑；全部是注入时钟+夹具。
 - **相邻既有决定**：[运行时间证据与 wall 跨度分开](./2026-10-26-v04-day-life-runtime-coverage.md)、
   [一天生活验收报告按 journal 算覆盖](../../../../docs/engineering/v02-autonomous-life-implementation.md)、
@@ -129,3 +130,31 @@ Status: implemented
   （输出 `$env:PI_SCRATCH_DIR\cli-report-20261027.json`）。
 - 未做：`py_compile`、全树 SHA、全套/全树回归、真实 resident 启动、真实模型、任何删除与
   `TemporaryDirectory` 清理（夹具全部保留）。
+
+## 2026-10-29 补充：运行健康只读入口（安静 / 已停 / 待处理积压分开）
+
+**Problem**：上一节第 3 条留下的缺口没有入口可答：`summary.running` 是写记录的进程当时的自述，进程崩溃后
+它不会变；pid 是个数字，占着同一个号的可能是另一个进程；AR-0 的 `open_submission_intents` / UNKNOWN 动作
+有没有积压，也没有只读投影。operator 只能从「摘要说 running」「pid 在」「队列非空」三个互相不等价的事实里猜，
+容易把安静、已停、旧记录残留和待处理积压混成一种结论。
+
+**Decision**：新增 `components/life/scripts/runtime_health_review.py`（纯读投影）与
+`scripts/runtime_health_cli.py --instance <root>` 或 `--state-root <state>`。它只读四处既有权威：
+`resident_summary.json`、`resident_coverage.json`（经同一 `life_runtime_coverage.coverage` 算术，不另算一套）、
+当前主机 `/proc/<pid>/stat` 的启动时间（与记录里的 `(host, pid, started_at)` 比对，pid 存在不算数）、
+AR-0 `action_reality_state.json` 的直接 JSON（不调会重放 WAL 的 `load_state`）。
+结果分五类：`ALIVE_QUIET`（进程核验匹配且无积压）、`ALIVE_WITH_PENDING`、`STOPPED`（记录没声称 running
+且进程不在）、`RECORD_STALE_PROCESS_ABSENT`（记录还写 running 但进程不在）、`UNKNOWN`（缺身份/跨主机/无 /proc）；
+`NO_RECORD` 表示没有记录。队列分 `IDLE` / `PENDING` / `LAST_FAILURE` / `ABSENT` / `UNKNOWN`。
+
+**Alternatives considered**：另一方案是 B——新建 heartbeat/队列 store/watchdog，主动检测「多久没动」。
+最强理由：能主动发现卡死，不依赖进程读取。否决原因：会引入新的持久协议、第二真理源和「多少秒没动 = 卡死」
+的阈值，而长模型/owner I/O 与正当 WAIT 都合法；本功能要的是把既有事实读清楚，不是新增监控合同。
+也否决「用 pid 是否存在当存活」：pid 复用会把别的进程当成她。
+
+**Consequences**：operator 现在能同时看到：记录声称的 running、本机启动时间核验后的进程状态（匹配/不在/未知）、
+最近 tick/heartbeat 及距今秒数、AR-0 的未确认提交意图数/待对账动作数/最近明确失败原因。
+不设超时阈值，不输出 STALLED；队列缺账本报 `ABSENT`，不冒充「队列为空」；跨主机或没有 `/proc` 一律 UNKNOWN。
+读投影不取 Activity lease、不恢复 WAL、不重试/消费/重发、不写实例文件，也不改 resident 的执行/tick/写盘格式。
+**未验证**：没有在真实长期实例上观测过（fixture 用 `offline_scripted + act=False`，0 模型请求）；不是个人经历，
+也不证明完整场景 11 / G1 / 24h。

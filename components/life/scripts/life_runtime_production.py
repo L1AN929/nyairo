@@ -54,6 +54,8 @@ from typing import Any, Callable, Mapping, Optional
 
 import activity_admission as adm
 import activity_continuity as ac
+import activity_external_stop as aes
+import activity_outcome_assessment as ao
 import activity_progress_completion_lr5 as lr5
 import action_reality_ledger as ar0
 import agency_decision_ag1 as ag1
@@ -154,11 +156,20 @@ class RefusingExperienceConsumer(ag2.FakeExperienceConsumer):
 
 
 class RefusingSettlementConsumer(ar1.FakeMemoryConsumer):
-    """Settlement outcomes must not be written into Memory/Goal/World by this cutover."""
+    """Settlement outcomes must not be written into Memory/Goal/World by this cutover.
+
+    AR-1 registers consumers by ``consumer_domain``.  Inheriting ``FakeMemoryConsumer``'s
+    hard-coded ``memory`` domain would collapse the goal and world refusals onto memory, so
+    each refusing consumer restates its own (validated) domain and keeps a distinct
+    per-domain delivery record.
+    """
 
     def __init__(self, domain: str) -> None:
         super().__init__()
+        if domain not in ar1.VALID_CONSUMER_DOMAINS:
+            raise ValueError(f"unknown settlement consumer domain {domain!r}")
         self._domain = domain
+        self.consumer_domain = domain
 
     def receive_settled_event(self, *args: Any, **kwargs: Any) -> Any:
         raise ProductionExecutionRefused(f"LPC0A_{self._domain.upper()}_WRITE_DISABLED")
@@ -459,6 +470,229 @@ class ProductionLifeRuntime:
             adm.ActivityConsequencePort(self.interruption_consequence_capability, self.activity_command)
         )
 
+        # ---- 6b. S09 outcome assessment (FAILED/BLOCKED) ----
+        # Two more ACTIVITY_CONSEQUENCE capabilities over the *existing* owners.  FAIL is
+        # granted only to the S09 assessment gate and re-checks the exact revision/scope/
+        # criteria/evidence; BLOCK records a named basis and nothing else.  Neither is a
+        # model verb, neither owns a store, and neither can create a recovery by itself.
+        def _owner_evidence(ref: str) -> Mapping[str, Any]:
+            text = str(ref or "")
+            prefix = text.split(":", 1)[0]
+            if prefix in ("artifact", "artifact_file"):
+                port = getattr(self.artifact_action_adapter, "port", None)
+                if port is None:
+                    raise RuntimeError("no managed-artifact owner read is wired")
+                view = port.read_artifact(text) or {}
+                artifact = view.get("artifact") or {}
+                if not artifact.get("artifact_id"):
+                    raise RuntimeError("the managed-artifact owner returned no record")
+                return {"verified": True, "owner": "lifesupply.managed_artifact",
+                        "artifact_id": artifact.get("artifact_id"),
+                        "lifecycle": artifact.get("lifecycle")}
+            if prefix in ("artifact_rev", "art_rev"):
+                port = getattr(self.artifact_action_adapter, "port", None)
+                if port is None:
+                    raise RuntimeError("no managed-artifact owner read is wired")
+                remainder = text.split(":", 1)[1]
+                artifact_id, _, version_id = remainder.rpartition(":")
+                if not artifact_id or not version_id:
+                    raise RuntimeError("artifact_rev needs artifact_id:version_id")
+                row = port.read_version(artifact_id, version_id) or {}
+                if not row:
+                    raise RuntimeError("the managed-artifact owner returned no version")
+                return {"verified": True, "owner": "lifesupply.managed_artifact",
+                        "artifact_id": artifact_id, "version_id": version_id}
+            if prefix in ("actn", "action"):
+                row = self.action_read.get_action(text)
+                if not row:
+                    raise RuntimeError("the action ledger has no such action")
+                return {"verified": True, "owner": "action_reality_ledger",
+                        "action_id": row.get("action_id"), "status": row.get("status"),
+                        "activity_ref": row.get("activity_ref"),
+                        "decision_ref": row.get("decision_ref"),
+                        "target_ref": row.get("target_ref"),
+                        "last_receipt_ref": row.get("last_receipt_ref")}
+            if prefix in ("act_receipt", "action_receipt", "arcpt"):
+                # The owner row is the receipt; its Action is where activity linkage lives.
+                for act_row in self.action_read.list_actions():
+                    if text not in (act_row.get("receipt_refs") or []):
+                        continue
+                    for rcpt in self.action_read.list_receipts(str(act_row.get("action_id"))):
+                        if str(rcpt.get("receipt_id")) == text:
+                            return {"verified": True, "owner": "action_reality_ledger",
+                                    "receipt_id": text,
+                                    "action_id": rcpt.get("action_id"),
+                                    "status": rcpt.get("status_claim"),
+                                    "activity_ref": act_row.get("activity_ref")}
+                raise RuntimeError(f"the action ledger has no receipt {text!r}")
+            if prefix in ("rset", "settlement", "srev"):
+                row = self.settlement_read.get_settlement_by_id(text)
+                if not row:
+                    raise RuntimeError("the settlement ledger has no such record")
+                # The settlement names its Action; the Action carries the Activity linkage.
+                action = self.action_read.get_action(str(row.get("action_id") or "")) or {}
+                return {"verified": True, "owner": "result_settlement_ledger",
+                        "settlement_id": row.get("settlement_id"),
+                        "status": row.get("settlement_status"),
+                        "outcome_kind": row.get("outcome_kind"),
+                        "action_id": row.get("action_id"),
+                        "activity_ref": action.get("activity_ref")}
+            raise RuntimeError(f"no owner read is wired for evidence prefix {prefix!r}")
+
+        self.blocked_consequence_capability = self.admission_issuer.build_consequence_capability(
+            allowed_kinds=("BLOCK",),
+            owner_label="s09_suspension_owner",
+            evidence_verifier=adm.build_blocked_evidence_verifier(self.activity_read),
+        )
+        self.failure_consequence_capability = self.admission_issuer.build_consequence_capability(
+            allowed_kinds=("FAIL",),
+            owner_label=ao.OWNER_LABEL,
+            evidence_verifier=adm.build_failure_evidence_verifier(
+                self.activity_read, _owner_evidence),
+        )
+        def _failure_handoff(activity_id: str, assessment: Any) -> Mapping[str, Any]:
+            """Finish the one FAILED experience handoff over the existing AG-2 outbox.
+
+            This is the production entry, not a demo helper: a committed FAILED reaches this
+            call from wherever the fail command was adopted (runtime, CLI, resident).  The
+            handoff itself is idempotent by Activity+kind, so a repeated fail operation only
+            replays the original event.  If the integration record cannot be found the answer
+            says so by name; AG-2's own reconcile Phase F will emit it once FAILED is visible.
+            """
+
+            state = self.coordinator.integration_commit.read_state() or {}
+            integration_ids = list(
+                (state.get("integration_ids_by_activity") or {}).get(activity_id) or [])
+            if not integration_ids:
+                return {"status": "NO_INTEGRATION_RECORD", "activity_id": activity_id,
+                        "handoff_id": None, "consumer_disposition": None}
+            # The object the owner judged is a real owner ref in the assessment's own evidence;
+            # carrying it makes the admitted outcome about that artifact instead of a bare id.
+            evidence_artifacts = [
+                str(ref) for ref in assessment.evidence_refs
+                if str(ref).split(":", 1)[0] in {"artifact", "artifact_file"}]
+            emitted = self.coordinator.emit_experience_handoff(
+                integration_id=str(integration_ids[0]),
+                activity_id=activity_id,
+                terminal_or_milestone_kind=ag2.HANDOFF_KIND_FAILED,
+                occurred_at=assessment.assessed_at,
+                artifact_refs=evidence_artifacts,
+            )
+            event = emitted.get("handoff_event")
+            dispatch = dict(emitted.get("dispatch_result") or {})
+            deliveries = list(dispatch.get("deliveries") or [])
+            disposition = (deliveries[-1].get("consumer_disposition")
+                           if deliveries else None)
+            delivery_status = (deliveries[-1].get("status") if deliveries else None)
+            return {
+                "status": "DELIVERED" if delivery_status == "DELIVERED" else (
+                    "DEFERRED" if delivery_status else "QUEUED"),
+                "activity_id": activity_id,
+                "handoff_id": getattr(event, "handoff_id", None),
+                "handoff_kind": ag2.HANDOFF_KIND_FAILED,
+                "idempotent_replay": bool(emitted.get("idempotent_replay")),
+                "consumer_disposition": disposition,
+                "delivery_status": delivery_status,
+                "pending_handoff_count": len(dispatch.get("pending_handoff_ids") or []),
+            }
+
+        self.activity_outcome = ao.ActivityOutcomeService(
+            activity_command=self.activity_command,
+            activity_read=self.activity_read,
+            activity_store=self.activity_store,
+            failure_capability=self.failure_consequence_capability,
+            blocked_capability=self.blocked_consequence_capability,
+            evidence_resolver=_owner_evidence,
+            now_iso=lambda: ac._iso(ac.now()),
+            failure_handoff=_failure_handoff,
+        )
+
+        # ---- 6c. external stop (local operator) ----
+        # One narrow capability over the *existing* owner: STOP_INTENT (durable intent) and
+        # CANCEL (the terminal once a safe boundary is reached).  The two kinds carry their
+        # own verifiers; nothing here can act for an Activity that has no accepted intent.
+        _stop_intent_verify = adm.build_external_stop_evidence_verifier(
+            self.activity_read, subject_id=ac.GLOBAL_SUBJECT_ID)
+        _stop_cancel_verify = adm.build_external_stop_cancel_verifier(self.activity_read)
+
+        def _external_stop_verify(transition: Mapping[str, Any], canonical_state: Any = None):
+            kind = str(transition.get("transition_type") or "")
+            if kind == "STOP_INTENT":
+                return _stop_intent_verify(transition, canonical_state)
+            if kind == "CANCEL":
+                return _stop_cancel_verify(transition, canonical_state)
+            raise adm.ConsequenceRejected("EXTERNAL_STOP_KIND_NOT_GRANTED:%s" % kind)
+
+        self.external_stop_capability = self.admission_issuer.build_consequence_capability(
+            allowed_kinds=("STOP_INTENT", "CANCEL"),
+            owner_label="local_operator_external_stop",
+            evidence_verifier=_external_stop_verify,
+        )
+
+        def _cancelled_handoff(activity_id: str) -> Mapping[str, Any]:
+            """One CANCELLED experience handoff over the existing AG-2 outbox."""
+
+            state = self.coordinator.integration_commit.read_state() or {}
+            integration_ids = list(
+                (state.get("integration_ids_by_activity") or {}).get(activity_id) or [])
+            if not integration_ids:
+                return {"status": "NO_INTEGRATION_RECORD", "activity_id": activity_id,
+                        "handoff_id": None, "consumer_disposition": None}
+            emitted = self.coordinator.emit_experience_handoff(
+                integration_id=str(integration_ids[0]),
+                activity_id=activity_id,
+                terminal_or_milestone_kind=ag2.HANDOFF_KIND_CANCELLED,
+                occurred_at=ac._iso(ac.now()),
+            )
+            event = emitted.get("handoff_event")
+            dispatch = dict(emitted.get("dispatch_result") or {})
+            deliveries = list(dispatch.get("deliveries") or [])
+            delivery = dict(deliveries[-1]) if deliveries else {}
+            delivery_status = delivery.get("status")
+            # Keep a *failed delivery* distinct from a consumer that actively deferred:
+            # ``FAILED_PENDING_RETRY`` means the consumer raised (e.g. Memory write is off),
+            # ``DEFERRED`` means it returned DEFER.  Neither is rounded up to DELIVERED, and
+            # neither is collapsed into the other.
+            if delivery_status == "DELIVERED":
+                status = "DELIVERED"
+            elif delivery_status == "DEFERRED":
+                status = "DEFERRED"
+            elif delivery_status == "FAILED_PENDING_RETRY":
+                status = "FAILED_PENDING_RETRY"
+            else:
+                status = "QUEUED"
+            error_class = ""
+            error_reason = ""
+            raw = str(delivery.get("last_error") or "")
+            if raw:
+                head, _, tail = raw.partition(":")
+                error_class = head[:80]
+                error_reason = tail[:160]
+            return {
+                "status": status,
+                "activity_id": activity_id,
+                "handoff_id": getattr(event, "handoff_id", None),
+                "handoff_kind": ag2.HANDOFF_KIND_CANCELLED,
+                "idempotent_replay": bool(emitted.get("idempotent_replay")),
+                "consumer_disposition": delivery.get("consumer_disposition"),
+                "delivery_status": delivery_status,
+                "error_class": error_class,
+                "error_reason": error_reason,
+                "pending_handoff_count": len(dispatch.get("pending_handoff_ids") or []),
+            }
+
+        self.activity_stop = aes.ExternalStopService(
+            activity_command=self.activity_command,
+            activity_read=self.activity_read,
+            activity_store=self.activity_store,
+            stop_capability=self.external_stop_capability,
+            now_iso=lambda: ac._iso(ac.now()),
+            subject_id=ac.GLOBAL_SUBJECT_ID,
+            interruption=self.interruption_coordinator,
+            cancel_handoff=_cancelled_handoff,
+            action_read=self.action_read,
+        )
+
         # ---- settlement consumers: LR-5 is the only canonical LIFE consumer ----
         self.settlement_service.register_consumer(self.progress_coordinator)
         self.memory_consumer = RefusingSettlementConsumer("memory")
@@ -475,6 +709,47 @@ class ProductionLifeRuntime:
         self.commitment_source = ag2.CommitmentCandidateSource(enabled=enable_commitment_source)
         self.goal_source = ag2.ExplicitGoalCandidateSource(enabled=enable_goal_source)
         self.world_opportunity_source = ag2.WorldOpportunityCandidateSource()
+
+        def _blocked_exit_safety(activity_id: str) -> Mapping[str, Any]:
+            """Can a suspended Activity be ended without leaving something unresolved behind?
+
+            The only owner facts consulted are the AG-2 integration records that already name
+            this Activity and the AR-0 status of the Actions they reference.  A read that
+            cannot complete answers ``readable: False`` -- the candidate source then withholds
+            the exit by name instead of pretending it is safe.
+            """
+
+            try:
+                state = self.coordinator.integration_commit.read_state() or {}
+            except Exception as exc:
+                return {"readable": False, "reason_code": "INTEGRATION_READ_FAILED",
+                        "detail": "%s: %s" % (type(exc).__name__, exc)}
+            ids = list((state.get("integration_ids_by_activity") or {}).get(activity_id) or [])
+            unresolved: list[str] = []
+            for integration_id in ids:
+                record = (state.get("integrations_by_id") or {}).get(integration_id) or {}
+                if str(record.get("partial_stage") or "") == "ACTION_UNKNOWN_UNSETTLED":
+                    unresolved.extend(str(ref) for ref in (record.get("action_refs") or []))
+                for action_ref in record.get("action_refs") or []:
+                    row = self.action_read.get_action(str(action_ref))
+                    if not row:
+                        return {"readable": False, "reason_code": "ACTION_READ_MISSING",
+                                "detail": str(action_ref)}
+                    status = str(row.get("status") or "")
+                    if status not in {"SUCCEEDED", "FAILED"} and str(action_ref) not in unresolved:
+                        unresolved.append(str(action_ref))
+            return {
+                "readable": True,
+                "unresolved": bool(unresolved),
+                "refs": unresolved,
+                "reason_code": "UNRESOLVED_ACTION" if unresolved else "NO_UNRESOLVED_EFFECT",
+            }
+
+        #: 2026-10-28: a BLOCKED Activity released the foreground, so neither the current nor
+        #: the resume-eligible source sees it.  This projection offers only its legal ABANDON
+        #: exit; the safety answer above is what decides whether it is offered at all.
+        self.blocked_activity_source = ag0.BlockedActivityCandidateSource(
+            self.activity_read, unresolved_effect_provider=_blocked_exit_safety)
         self.candidate_registry = ag2.CandidateSourceRegistry({
             ag2.SOURCE_CURRENT_ACTIVITY: self.current_activity_source,
             ag2.SOURCE_RESUME_ELIGIBLE: self.resume_eligible_source,
@@ -482,6 +757,7 @@ class ProductionLifeRuntime:
             ag2.SOURCE_COMMITMENT: self.commitment_source,
             ag2.SOURCE_EXPLICIT_GOAL: self.goal_source,
             ag2.SOURCE_WORLD_OPPORTUNITY: self.world_opportunity_source,
+            ag0.SOURCE_BLOCKED_ACTIVITY: self.blocked_activity_source,
         })
         self.candidate_capability = ag0.CandidateProjectionGuard.issue_capability(
             caller_module=CALLER_CANDIDATE_MATERIALIZER, namespace=NAMESPACE_AGENCY
@@ -536,6 +812,14 @@ class ProductionLifeRuntime:
         # keeps being refused, so the default assembly cannot write a memory by accident.
         self.experience_consumer = (experience_consumer if experience_consumer is not None
                                     else RefusingExperienceConsumer())
+        # The admission consumer may only file what *this* runtime's AG-2 owner really
+        # persisted.  Handing it the owner's own read port here -- the one place every
+        # production assembly (resident included) passes through -- means an injected
+        # consumer cannot be run without provenance checking, and the default refusing
+        # consumer stays untouched.
+        _bind = getattr(self.experience_consumer, "bind_handoff_verifier", None)
+        if callable(_bind):
+            _bind(self.persisted_experience_handoff)
 
         self.ag2_decision_port = ag2.build_ag2_port(
             self.decision_service, {"evaluate_opportunity", "reconcile_after_crash"})
@@ -643,6 +927,18 @@ class ProductionLifeRuntime:
     def transitions(self) -> list[dict[str, Any]]:
         return self.activity_read.get_transition_history()
 
+    def persisted_experience_handoff(self, handoff_id: str) -> Optional[Mapping[str, Any]]:
+        """The AG-2 owner's own persisted handoff record, or ``None``.
+
+        Read-only, by id, through the same integration read port the runtime already holds.
+        The Experience consumer uses this to prove that a delivered handoff is the record
+        this instance issued, not a mapping somebody assembled by hand.
+        """
+
+        state = self.integration_read.read_state()
+        record = (state.get("handoff_events_by_id") or {}).get(str(handoff_id))
+        return record if isinstance(record, Mapping) else None
+
     def ports(self) -> dict[str, Any]:
         return {
             "ag2_decision_port": self.ag2_decision_port,
@@ -654,6 +950,9 @@ class ProductionLifeRuntime:
             "ag2_file_observer_port": self.ag2_file_observer_port,
             "ag2_activity_command_port": self.ag2_activity_command_port,
             "ag2_candidate_port": self.ag2_candidate_port,
+            # 2026-10-28: the local-operator stop seam the phone control route talks to when
+            # it shares this process; a separate phone process uses the mailbox instead.
+            "activity_stop": self.activity_stop,
         }
 
     # -- gates (order section 7) --------------------------------------------------------

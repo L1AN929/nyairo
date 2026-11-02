@@ -438,11 +438,18 @@ class RunIdentityBindingTest(unittest.TestCase):
         # prepare 要求根尚不存在；mkdtemp 已建好父目录。显式 300/14/286 只绑定本实例：
         # 真实例的 UTC 日/run 窗口上限与认知每日配置都必须真的落在实例环境里。
         root = _root() / "instance"
+        # Memory 的删除底账没有生产默认位置：它必须由操作者给出、并落在实例业务根之外，
+        # 否则只恢复实例自己的备份就会把它一起盖掉。这里用另一个临时目录当那个「显式、
+        # 独立于本实例备份域」的权威，经真实 CLI ``--memory-authority`` 交给
+        # ``enable_instance_memory(authority_path=...)``——不再进程内 patch 那个入口。
+        retained = _root() / "retained-memory-authority" / "authority.db"
+        retained.parent.mkdir(parents=True, exist_ok=True)
+
         code, prepared = _cli("prepare", "--root", str(root), "--run-id", "fastday-int",
-                              "--logical-seconds", "120", "--real-seconds", "60",
-                              "--max-new-requests", "286",
-                              "--request-total-limit", "300",
-                              "--historical-requests", "14", timeout=900.0)
+                              "--real-seconds", "60", "--logical-seconds", "120",
+                              "--max-new-requests", "286", "--request-total-limit", "300",
+                              "--historical-requests", "14",
+                              "--memory-authority", str(retained), timeout=300.0)
         self.assertEqual(code, 0, prepared)
         self.assertEqual(prepared["run_id"], "fastday-int")
         self.assertEqual(prepared["ledger_run_id"], "run:fastday-int")
@@ -468,6 +475,10 @@ class RunIdentityBindingTest(unittest.TestCase):
             nested["environment"]["CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_RUN_WINDOW"], "300")
         self.assertEqual(
             nested["environment"]["CHIYO_AUTONOMOUS_MAX_COGNITION_CALLS_PER_DAY"], "300")
+        # 正控走真实 enable：底账路径确实由 CLI 参数写成了持久绑定，不是被 mock 吞掉。
+        authority_env = phone_life.memory_env_names()["authority"][0]
+        self.assertEqual(nested["environment"][authority_env], str(retained))
+        self.assertTrue(retained.exists())
         binding = phone_life.build_binding(phone_life.load_phone_instance(root),
                                            phone_life.read_nested_life(root))
         self.assertEqual(binding["environment"]["CHIYO_AUTONOMOUS_RUN_ID"],
@@ -511,6 +522,49 @@ class RunIdentityBindingTest(unittest.TestCase):
         self.assertEqual(refused["reason_code"], fast_day.REASON_INHERITED_RUN_CONFLICT)
         self.assertFalse((root / "fastday.json").exists())
         self.assertEqual(list(root.iterdir()) if root.exists() else [], [])
+
+
+class PrepareMemoryAuthorityCliTest(unittest.TestCase):
+    """``--memory-authority`` 是操作者显式给出的路径，不是可以猜出来的默认值。"""
+
+    def test_non_clock_prepare_without_authority_is_refused_before_any_write(self):
+        root = _root()
+        code, refused = _cli("prepare", "--root", str(root), "--run-id", "no-authority",
+                             "--real-seconds", "60", "--logical-seconds", "120")
+        self.assertEqual(code, 1, refused)
+        self.assertEqual(refused["reason_code"], fast_day.REASON_MEMORY_AUTHORITY_REQUIRED)
+        # 纯输入校验在任何写入之前：没有半套实例，也没有 fastday.json。
+        self.assertEqual(list(root.iterdir()), [])
+
+    def test_authority_inside_the_instance_root_is_refused_before_any_write(self):
+        root = _root()
+        inside = root / "memory" / "authority.db"
+        code, refused = _cli("prepare", "--root", str(root), "--run-id", "inside-authority",
+                             "--real-seconds", "60", "--logical-seconds", "120",
+                             "--memory-authority", str(inside))
+        self.assertEqual(code, 1, refused)
+        self.assertEqual(refused["reason_code"], fast_day.REASON_MEMORY_AUTHORITY_INSIDE_ROOT)
+        self.assertEqual(list(root.iterdir()), [])
+        self.assertFalse((root / "memory").exists())
+
+    def test_relative_authority_is_refused(self):
+        root = _root()
+        code, refused = _cli("prepare", "--root", str(root), "--run-id", "relative-authority",
+                             "--real-seconds", "60", "--logical-seconds", "120",
+                             "--memory-authority", "memory/authority.db")
+        self.assertEqual(code, 1, refused)
+        self.assertEqual(refused["reason_code"], fast_day.REASON_MEMORY_AUTHORITY_PATH_INVALID)
+        self.assertEqual(list(root.iterdir()), [])
+
+    def test_clock_only_prepare_still_needs_no_memory_authority(self):
+        root = _root()
+        code, prepared = _cli("prepare", "--clock-only", "--root", str(root),
+                              "--run-id", "clock-no-memory",
+                              "--real-seconds", "60", "--logical-seconds", "120")
+        self.assertEqual(code, 0, prepared)
+        self.assertFalse(prepared["provisioned"])
+        code, status = _cli("status", "--root", str(root))
+        self.assertEqual(code, 0, status)
 
 
 class WallBudgetCliTest(unittest.TestCase):

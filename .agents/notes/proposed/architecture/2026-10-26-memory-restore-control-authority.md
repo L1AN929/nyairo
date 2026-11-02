@@ -30,6 +30,11 @@ V-C 已有实证失败：DELETE 生效后，只要把删除前的 evidence 与 c
    确为空库才写零基线。未配置底账的旧实例保持原路径，不自动纳管。下限文件与底账同域，
    同域整体回滚仍不在承诺内。
 
+   2026-10-28 补：在既有 authority/floor 之上已限定实现 operator 请求入口、case 协调记录与
+   source 级读/准入 gate，实际范围见
+   [F-153/F-154 实际范围](../../implemented/feature/2026-10-28-forget-generation-barrier.md)；
+   本笔记其余设计项仍未实施。
+
 ## Alternatives considered
 
 * **只在恢复时比较 epoch**：最强理由是复用 Supply `WriterFence` 的单调性、改动最小。否决原因：epoch 存在会一起回滚的库里时同样会退；且旧 writer 可以在恢复后继续写，必须每写校验，不能只在 restore 比一次。

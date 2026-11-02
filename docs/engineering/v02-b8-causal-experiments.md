@@ -1,5 +1,7 @@
 # v0.2 B8-5：三组因果实验（E12.4）
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 本批只做 B8-5。分支 `v0.2-autonomous-life`，施工前 HEAD `b253960`。
 
 实验要回答的问题不是"她感觉不同了吗"，而是三个可以分开验证的层次：
@@ -27,12 +29,12 @@
 * 隔离环境：WSL Ubuntu 的 `/srv/nya02`，两个真实非 root 身份 `nyaop`(1001，只签发授权) 与 `nyasvc`(1002，服务主体)；真实 Life Supply owner 跑在 `/srv/nya02/sock/life-supply.sock`。
 * 每个组一个独立 subject + workspace + `COMMIT_MANAGED_ARTIFACT` 授权，作品差异全部由**合法 owner 操作**（`create_artifact` / `commit_version`）建立，没有直接改数据库。
 * 每组独立的 Life state root（`/srv/nya02/b8-causal-ca/*`、`/srv/nya02/b8-causal-cb/*`）；每个场景的记忆库（`evidence.db` / `controls.db`）也在各自 root 内。
-* 模型 profile：`/root/.nyairo/config.yaml`，`provider: custom`、`default: gemini-3.8-flash-high`、`base_url: https://gw.929711.xyz/v1`，密钥由 root 解析后只经进程环境交给服务身份（不落盘、不打印）。
+* 模型 profile：`/root/.nyairo/config.yaml`，`provider: custom`、`default: gemini-3.8-flash-high`、`base_url: https://gw.example.invalid/v1`，密钥由 root 解析后只经进程环境交给服务身份（不落盘、不打印）。
 
 **本轮该网关从隔离环境不可达**，所以 B2 的真实模型半边标记 `NOT_RUN`：
 
 ```
-getent hosts gw.929711.xyz   -> 只有 IPv6 (2606:4700:3036::ac43:d1e1 / 2606:4700:3031::6815:5d7c)
+getent hosts gw.example.invalid   -> 只有 IPv6 (2606:4700:3036::ac43:d1e1 / 2606:4700:3031::6815:5d7c)
 ip -6 route show default     -> 无 IPv6 默认路由
 TCP 443 -> 104.21.93.124     -> TCP_TIMEOUT      (对照 api.github.com -> 200)
 TCP 443 -> 140.82.121.4      -> TCP_OK

@@ -36,7 +36,8 @@ for entry in (str(ROOT), str(ROOT / "components"), str(ROOT / "scripts"),
               str(ROOT / "components" / "life" / "scripts"),
               str(ROOT / "components" / "native"),
               str(ROOT / "components" / "native" / "src"),
-              str(ROOT / "components" / "native" / "memory_runtime_v1")):
+              str(ROOT / "components" / "native" / "memory_runtime_v1"),
+              str(ROOT / "tests" / "fixtures")):
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
@@ -63,12 +64,17 @@ try:  # the consumer imports the boundary port, which imports the M0 store (``fc
         DISPOSITION_DEFER,
         MemoryAdmissionExperienceConsumer,
     )
+    #: The shared fixture that makes the *real* AG-2 owner issue and persist the handoff; the
+    #: consumer compares the delivered mapping against that owner's own read port.  See the
+    #: fixture docstring and 2026-10-29-maintenance-experience-boundary.md.
+    from memory_owner_handoff import MemoryOwnerHandoff  # noqa: E402
 
     CONSUMER_AVAILABLE = True
 except Exception:  # pragma: no cover - Windows
     DISPOSITION_ACCEPT = "ACCEPT"
     DISPOSITION_DEFER = "DEFER"
     MemoryAdmissionExperienceConsumer = None
+    MemoryOwnerHandoff = None
     CONSUMER_AVAILABLE = False
 
 from life_memory_service import LifeMemoryService, memory_service_from_env  # noqa: E402
@@ -426,92 +432,172 @@ class RecordingPort:
         return {"status": "inserted", "event_id": event.event_id}
 
 
-def handoff(**overrides) -> dict:
-    payload = {
-        "handoff_id": "lexp:abcdef0123456789",
-        "correlation_id": "corr:1",
-        "activity_ref": "act:1",
-        "activity_revision": 2,
-        "activity_kind": "WRITE",
-        "terminal_or_milestone_kind": "SIGNIFICANT_PROGRESS",
-        "decision_refs": ["dec:1"],
-        "adoption_refs": ["adp:1"],
-        "action_refs": ["actn:1"],
-        "settlement_refs": ["set:1"],
-        "progress_refs": [],
-        "completion_evidence_ref": None,
-        "fact_refs": ["fact:v04:version-2"],
-        "artifact_refs": ["v04:artifact-notes"],
-        "world_refs": [],
-        "occurred_at": "2026-10-24T09:00:00+00:00",
-        "subject_id": "chiyo",
-    }
-    payload.update(overrides)
-    return payload
+HANDOFF_ACTIVITY = "act:1"
+HANDOFF_REVISION = 2
+HANDOFF_OCCURRED_AT = "2026-10-24T09:00:00+00:00"
+
+
+def owner_handoff(testcase, *, artifact_refs=(), fact_refs=(), world_refs=(),
+                  owner_confirmed_context=None, kind: str = "SIGNIFICANT_PROGRESS",
+                  activity_kind: str = "WRITE", revision: int = HANDOFF_REVISION):
+    """A handoff the instance's own AG-2 owner really issued and persisted.
+
+    The returned record is read back through the owner's own ``IntegrationReadPort`` -- the
+    tests deliver exactly that mapping and pass ``owner.verifier`` to the consumer, the same
+    read ``ProductionLifeRuntime.persisted_experience_handoff`` performs.  Nothing here
+    assembles a second provenance record.
+    """
+
+    owner = MemoryOwnerHandoff(unique_root("v04-mem-ag2-owner-"))
+    testcase.addCleanup(owner.close)
+    owner.register_activity(HANDOFF_ACTIVITY, revision=revision, activity_kind=activity_kind)
+    owner.open_integration(
+        integration_id="lint:v04memoryowner0001",
+        correlation_id="corr:v04memoryowner0001",
+        decision_ref="dec:1", adoption_ref="adp:1",
+        action_refs=["actn:1"], settlement_refs=["set:1"])
+    issued = owner.emit(
+        integration_id="lint:v04memoryowner0001",
+        activity_id=HANDOFF_ACTIVITY,
+        kind=kind,
+        occurred_at=HANDOFF_OCCURRED_AT,
+        artifact_refs=list(artifact_refs),
+        fact_refs=list(fact_refs),
+        world_refs=list(world_refs),
+        owner_confirmed_context=owner_confirmed_context)
+    record = issued["record"]
+    if not record:
+        raise AssertionError("the AG-2 owner did not persist the fixture handoff")
+    return owner, record
 
 
 class ConsumerOwnerTests(unittest.TestCase):
     @owner_bound_only
     def test_the_owner_is_the_ports_subject_never_the_handoff_spelling(self) -> None:
+        owner, record = owner_handoff(self)
+        self.assertEqual(record["subject_id"], "chiyo.global",
+                         "the handoff carries the owner's own global spelling")
         port = RecordingPort("chiyo")
-        consumer = MemoryAdmissionExperienceConsumer(port=port, enabled=True)
-        receipt = consumer.receive_experience_handoff(handoff(subject_id="chiyo.global.other"))
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True, handoff_verifier=owner.verifier)
+        receipt = consumer.receive_experience_handoff(record)
         self.assertEqual(receipt["disposition"], DISPOSITION_ACCEPT, receipt)
         self.assertEqual(receipt["owner"], "chiyo")
         self.assertEqual([event.memory_owner for event in port.events], ["chiyo"])
         self.assertEqual(port.events[0].conversation_id, "life:chiyo")
 
     @owner_bound_only
-    def test_a_persona_port_writes_under_its_own_owner_even_when_the_handoff_says_chiyo(
+    def test_a_persona_port_writes_under_its_own_owner_even_when_the_handoff_names_chiyo(
             self) -> None:
+        owner, record = owner_handoff(self)
+        self.assertNotEqual(record["subject_id"], "chiyo.persona")
         port = RecordingPort("chiyo.persona")
-        consumer = MemoryAdmissionExperienceConsumer(port=port, enabled=True)
-        receipt = consumer.receive_experience_handoff(handoff(subject_id="chiyo"))
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True, handoff_verifier=owner.verifier)
+        receipt = consumer.receive_experience_handoff(record)
         self.assertEqual(receipt["disposition"], DISPOSITION_ACCEPT, receipt)
         self.assertEqual([event.memory_owner for event in port.events], ["chiyo.persona"])
 
     @owner_bound_only
     def test_a_port_without_an_owner_defers_instead_of_guessing(self) -> None:
+        owner, record = owner_handoff(self)
         port = RecordingPort("")
-        consumer = MemoryAdmissionExperienceConsumer(port=port, enabled=True)
-        receipt = consumer.receive_experience_handoff(handoff(subject_id="chiyo.global"))
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True, handoff_verifier=owner.verifier)
+        receipt = consumer.receive_experience_handoff(record)
         self.assertEqual(receipt["disposition"], DISPOSITION_DEFER)
         self.assertEqual(receipt["reason"], "MEMORY_OWNER_UNRESOLVED")
         self.assertEqual(port.events, [])
 
     @owner_bound_only
     def test_a_handoff_still_writes_the_owner_it_was_bound_to(self) -> None:
+        owner, record = owner_handoff(self)
         root = unique_root("v04-mem-consumer-owner-")
         root.mkdir(parents=True)
         binding = build_memory(root)
         port = LifeExperiencePort(binding["evidence"], controls_db=binding["controls"],
                                   subject="chiyo")
-        consumer = MemoryAdmissionExperienceConsumer(port=port, enabled=True)
-        self.assertEqual(consumer.receive_experience_handoff(
-            handoff(subject_id="chiyo.host"))["disposition"], DISPOSITION_ACCEPT)
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True, handoff_verifier=owner.verifier)
+        self.assertEqual(consumer.receive_experience_handoff(record)["disposition"],
+                         DISPOSITION_ACCEPT)
         service = memory_service_from_env(memory_env(binding))
         listed = service.list_experiences()
         self.assertEqual(listed["data"]["count"], 1)
         persona = memory_service_from_env(memory_env(binding, owner="chiyo.persona"))
         self.assertEqual(persona.list_experiences()["data"]["experiences"], [])
 
+    @owner_bound_only
+    def test_an_id_the_owner_never_persisted_is_refused_before_m0(self) -> None:
+        owner, record = owner_handoff(self)
+        port = RecordingPort("chiyo")
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True, handoff_verifier=owner.verifier)
+        receipt = consumer.receive_experience_handoff(
+            dict(record, handoff_id="lexp:0123456789abcdef"))
+        self.assertEqual(receipt["disposition"], "IGNORE", receipt)
+        self.assertEqual(receipt["reason"], "HANDOFF_SOURCE_NOT_FOUND")
+        self.assertEqual(port.events, [])
+
+    @owner_bound_only
+    def test_a_copied_id_with_a_changed_field_is_refused_before_m0(self) -> None:
+        owner, record = owner_handoff(self)
+        tampered = dict(record)
+        tampered["action_refs"] = list(tampered.get("action_refs") or []) + ["actn:forged"]
+        port = RecordingPort("chiyo")
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True, handoff_verifier=owner.verifier)
+        receipt = consumer.receive_experience_handoff(tampered)
+        self.assertEqual(receipt["disposition"], "IGNORE", receipt)
+        self.assertEqual(receipt["reason"], "HANDOFF_SOURCE_MISMATCH")
+        self.assertEqual(port.events, [])
+
 
 class ConfirmedContextTests(unittest.TestCase):
-    def _run(self, **overrides):
+    """The confirmed-result projection, split by what AG-2 can actually persist.
+
+    Positive and reference-mismatch cases go through the real owner: ``owner_handoff`` lets
+    the real ``emit_experience_handoff`` persist the mapping, and the consumer compares the
+    delivered record against that owner's read port.
+
+    Three cases -- ``outcome_confirmed`` not literally ``True``, an unknown key such as
+    ``self_note``, and a non-mapping -- cannot be persisted by AG-2 at all:
+    ``validate_owner_confirmed_context`` refuses them before the store is touched.  For those
+    the consumer's own projection guard is exercised with a test-owned owner store, which is
+    a projection-layer fixture, **not** a real-owner positive control (same boundary the
+    2026-10-29 note records for ``test_life_continuity_inputs.py``).
+    """
+
+    def _real(self, **emit_kwargs):
+        owner, record = owner_handoff(self, **emit_kwargs)
         port = RecordingPort("chiyo")
-        consumer = MemoryAdmissionExperienceConsumer(port=port, enabled=True)
-        receipt = consumer.receive_experience_handoff(handoff(**overrides))
-        return receipt, port.events[0]
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True, handoff_verifier=owner.verifier)
+        receipt = consumer.receive_experience_handoff(record)
+        return receipt, (port.events[0] if port.events else None)
+
+    def _projection(self, confirmed, **emit_kwargs):
+        _owner, record = owner_handoff(self, **emit_kwargs)
+        stored = dict(record, owner_confirmed_context=confirmed)
+        port = RecordingPort("chiyo")
+        consumer = MemoryAdmissionExperienceConsumer(
+            port=port, enabled=True,
+            handoff_verifier=lambda handoff_id: (
+                stored if handoff_id == stored["handoff_id"] else None))
+        receipt = consumer.receive_experience_handoff(dict(stored))
+        return receipt, (port.events[0] if port.events else None)
 
     @owner_bound_only
     def test_a_type_correct_anchored_mapping_is_used_within_bounds(self) -> None:
-        receipt, event = self._run(owner_confirmed_context={
-            "artifact_id": "v04:artifact-notes",
-            "version_ref": "fact:v04:version-2",
-            "title": "夜间阅读记录",
-            "result_description": "把昨天读的三页写成了笔记，所有者确认了新版本",
-            "outcome_confirmed": True,
-        })
+        receipt, event = self._real(
+            artifact_refs=["v04:artifact-notes"], fact_refs=["fact:v04:version-2"],
+            owner_confirmed_context={
+                "artifact_id": "v04:artifact-notes",
+                "version_ref": "fact:v04:version-2",
+                "title": "夜间阅读记录",
+                "result_description": "把昨天读的三页写成了笔记，所有者确认了新版本",
+                "outcome_confirmed": True,
+            })
         self.assertEqual(receipt["owner_confirmed_context"], "USED", receipt)
         self.assertIn("夜间阅读记录", event.content)
         self.assertIn("写成了笔记", event.content)
@@ -524,13 +610,15 @@ class ConfirmedContextTests(unittest.TestCase):
 
     @owner_bound_only
     def test_a_version_that_the_event_does_not_really_carry_is_rejected(self) -> None:
-        receipt, event = self._run(owner_confirmed_context={
-            "artifact_id": "v04:artifact-notes",
-            "version_ref": "v04:version-999",
-            "title": "夜间阅读记录",
-            "result_description": "这句话不该被写成事实",
-            "outcome_confirmed": True,
-        })
+        receipt, event = self._real(
+            artifact_refs=["v04:artifact-notes"], fact_refs=["fact:v04:version-2"],
+            owner_confirmed_context={
+                "artifact_id": "v04:artifact-notes",
+                "version_ref": "v04:version-999",
+                "title": "夜间阅读记录",
+                "result_description": "这句话不该被写成事实",
+                "outcome_confirmed": True,
+            })
         self.assertEqual(receipt["owner_confirmed_context"], "VERSION_NOT_REFERENCED")
         self.assertNotIn("这句话不该被写成事实", event.content)
         self.assertNotIn("夜间阅读记录", event.content)
@@ -538,19 +626,21 @@ class ConfirmedContextTests(unittest.TestCase):
 
     @owner_bound_only
     def test_an_artifact_outside_the_handoff_is_rejected(self) -> None:
-        receipt, event = self._run(owner_confirmed_context={
-            "artifact_id": "v04:artifact-other",
-            "version_ref": "fact:v04:version-2",
-            "result_description": "别的作品的结果",
-            "outcome_confirmed": True,
-        })
+        receipt, event = self._real(
+            artifact_refs=["v04:artifact-notes"], fact_refs=["fact:v04:version-2"],
+            owner_confirmed_context={
+                "artifact_id": "v04:artifact-other",
+                "version_ref": "fact:v04:version-2",
+                "result_description": "别的作品的结果",
+                "outcome_confirmed": True,
+            })
         self.assertEqual(receipt["owner_confirmed_context"], "ARTIFACT_NOT_REFERENCED")
         self.assertNotIn("别的作品的结果", event.content)
 
     @owner_bound_only
     def test_confirmation_must_be_literally_true(self) -> None:
         for value in (False, "true", 1, None):
-            receipt, event = self._run(owner_confirmed_context={
+            receipt, event = self._projection({
                 "artifact_id": "v04:artifact-notes",
                 "version_ref": "fact:v04:version-2",
                 "result_description": "未确证的结果",
@@ -561,21 +651,24 @@ class ConfirmedContextTests(unittest.TestCase):
 
     @owner_bound_only
     def test_a_model_self_note_is_never_promoted_to_fact(self) -> None:
-        receipt, event = self._run(owner_confirmed_context={
+        receipt, event = self._projection({
             "artifact_id": "v04:artifact-notes",
             "version_ref": "fact:v04:version-2",
             "result_description": "所有者确认：写入了新版本",
             "outcome_confirmed": True,
             "self_note": "我觉得这次写得特别有灵魂",
-        })
+        }, artifact_refs=["v04:artifact-notes"], fact_refs=["fact:v04:version-2"])
         self.assertEqual(receipt["owner_confirmed_context"], "USED_WITH_IGNORED_KEYS")
         self.assertNotIn("灵魂", event.content)
         self.assertIn("写入了新版本", event.content)
 
     @owner_bound_only
     def test_an_unsettled_outcome_is_not_upgraded_by_a_confirmed_mapping(self) -> None:
-        receipt, event = self._run(
-            outcome_kind="UNKNOWN_EFFECT",
+        # The event's own world ref carries the unresolved verdict; AG-2 has no separate
+        # ``outcome_kind`` field, and the consumer reads both.
+        receipt, event = self._real(
+            artifact_refs=["v04:artifact-notes"], fact_refs=["fact:v04:version-2"],
+            world_refs=["world:pose:UNKNOWN_EFFECT"],
             owner_confirmed_context={
                 "artifact_id": "v04:artifact-notes",
                 "version_ref": "fact:v04:version-2",
@@ -592,7 +685,7 @@ class ConfirmedContextTests(unittest.TestCase):
 
     @owner_bound_only
     def test_a_non_mapping_is_rejected(self) -> None:
-        receipt, event = self._run(owner_confirmed_context="完成了一次修改")
+        receipt, event = self._projection("完成了一次修改")
         self.assertEqual(receipt["owner_confirmed_context"], "NOT_A_MAPPING")
         self.assertNotIn("完成了一次修改", event.content)
 

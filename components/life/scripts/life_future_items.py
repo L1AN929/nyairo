@@ -344,6 +344,21 @@ class FutureItem:
         return due is not None and due <= now
 
 
+def proposal_intent_key(*, title: Any, due_at: Any, source_refs: Optional[Iterable[Any]] = None,
+                        origin: str = ORIGIN_MODEL_PROPOSAL) -> str:
+    """The one identity of a "later" intent (title + due instant + source refs + origin).
+
+    It is public because the *read* side needs the same formula: a committed Decision carries its
+    ``later_item`` proposal, and the item it produced can only be named by recomputing this key.
+    One definition means a report can never claim a different Decision wrote the item.
+    """
+
+    intent = "|".join([str(title), str(due_at),
+                       ",".join(sorted(str(ref) for ref in (source_refs or ()))),
+                       str(origin)])
+    return f"fitem_intent:{_sha(intent)[:24]}"
+
+
 class FutureItems:
     """The one store of her own "later" items, under one Life state root."""
 
@@ -449,8 +464,8 @@ class FutureItems:
             raise FutureItemError("FUTURE_ITEM_ORIGIN_UNSUPPORTED", origin_text)
         resolved_due = resolve_due_at(due_at=due_at, in_minutes=in_minutes, now=observed)
         refs = _clean_refs(source_refs)
-        intent = "|".join([clean_title, resolved_due, ",".join(sorted(refs)), origin_text])
-        idem = f"fitem_intent:{_sha(intent)[:24]}"
+        idem = proposal_intent_key(title=clean_title, due_at=resolved_due,
+                                   source_refs=refs, origin=origin_text)
 
         state = self.read_state()
         items: dict[str, Any] = state["items"]
@@ -765,4 +780,5 @@ __all__ += [
     "park_basis",
     "park_wait_spec_for_decision",
     "proposal_due_at",
+    "proposal_intent_key",
 ]

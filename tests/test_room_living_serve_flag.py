@@ -217,6 +217,14 @@ class ServePersistenceTest(unittest.TestCase):
         class FakeServer:
             server_address = ("127.0.0.1", 0)
 
+            #: ``serve_instance`` hands the two minted credentials to the real server; the stand-in
+            #: records neither, it only has to accept the same calls.
+            def set_capability(self, _capability) -> None:
+                return None
+
+            def set_operator_stop(self, _credential) -> None:
+                return None
+
             def serve_forever(self, **_kwargs) -> None:  # pragma: no cover - never reached
                 return None
 
@@ -228,8 +236,11 @@ class ServePersistenceTest(unittest.TestCase):
 
         stop = threading.Event()
         stop.set()
+        #: ``serve_instance`` waits on ``ChildService.wait_ready`` (the old bare
+        #: ``wait_for_socket`` helper is no longer on that path); nothing is spawned here.
         with mock.patch.object(demo.ChildService, "start", lambda self: self), \
-                mock.patch.object(phone_service, "wait_for_socket", lambda *_a, **_k: True), \
+                mock.patch.object(demo.ChildService, "wait_ready",
+                                  lambda self, *_a, **_k: True), \
                 mock.patch.object(phone_server, "create_server",
                                   lambda *_a, **_k: FakeServer()):
             announcement = demo.serve_instance(root, port=0, room_living=True,

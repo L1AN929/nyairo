@@ -81,6 +81,18 @@ lease、权限过期、请求账本的真实 UTC 日、审计 `recorded_at`）�
   **不绑 HTTP**），World 子进程用 `--business-clock/--clock-domain/--clock-run-id`
   读同一域；resident 是独立子进程，环境来自实例自己的绑定，run 不一致直接拒绝，
   不再 `setdefault` 透传。停止只收本记录里的 supervisor/resident/owner pid。
+- **显式 Memory 底账参数（2026-11-01 补接）**：`fast_day prepare` 新增
+  `--memory-authority`，路径由操作者给出，经 `prepare(..., memory_authority=...)` →
+  `_provision_instance` → `phone_life.enable_instance_memory(authority_path=...)` 原样
+  传递；不猜 `root.parent`、不从环境兜底、不复制一套 Memory 实现。非 `--clock-only`
+  的 prepare **必须**给这个参数，缺参/相对路径/落在实例业务根内都在任何写入之前具名
+  拒绝（`MEMORY_AUTHORITY_PATH_REQUIRED` / `MEMORY_AUTHORITY_PATH_INVALID` /
+  `MEMORY_AUTHORITY_PATH_INSIDE_INSTANCE`），不会先造半套实例再让下游入口事后拒。
+  `--clock-only` 仍不需要它。此前 `tests/test_fastday_runtime.py` 靠进程内 patch
+  `enable_instance_memory` 注入 authority 才绿，那是测试替身而不是真实 CLI 通过；
+  现在恢复真实子进程 `prepare` 正控，负控覆盖缺参、根内路径与相对路径。
+  边界：根外只表示**路径隔离**——不证明能抵抗整机回滚，不改 Memory 准入，不迁移
+  旧实例，也不使 V-C 恢复合同完整通过。
 
 ## Alternatives considered
 
@@ -93,9 +105,19 @@ lease、权限过期、请求账本的真实 UTC 日、审计 `recorded_at`）�
    的大量调用点会把改动面和回归风险放大，且多数路径已经通过 `observed_at` 传入；
    只对真正缺口的入口补 `clock`/`observed_at` 更小且可证。
 4. **把业务时钟放在 env 里的固定 rate 全局配置**：否决，无法表达暂停/检查点/域。
+5. **测试里继续进程内 patch `enable_instance_memory` 注入 authority**：最强理由是
+   零生产改动、一行 `setdefault` 就能让既有正控变绿。否决：那证明的是测试替身，
+   CLI 路径仍然缺参数，`fast_day prepare` 真实子进程依旧不通；现有测试自己都写着
+   「不拿根内备份冒充域外权威」，用 patch 补参数等于把同一要求绕过去。
+6. **在 `fast_day` 里猜 `root.parent` 或读环境变量当默认底账位置**：最强理由是
+   操作者少填一个参数。否决：底账必须落在实例业务根**之外**才有意义，猜出来的
+   位置可能正好在实例备份域里，等于默认削弱删除治理；缺参数就该具名拒绝。
 
 ## Consequences
 
+- `--memory-authority` 只把操作者给的路径传下去：它证明 CLI 到既有 enable 入口的
+  参数链完整、正控走真实绑定，不证明跨备份/整机回滚下的新鲜度，也不把 V-C 完整
+  恢复合同、真实模型生活或发行验收一起冒认通过。
 - 默认生产不变：没有 `NYA02_FASTDAY_CLOCK` 时 resident 不加载任何业务时钟，
   `time_domain` 报 `REAL_TIME`，行为与以前一致。
 - 普通路径下 cycle 的 `_now_iso()` 仍是系统 UTC 墙钟；只有注入业务时钟时才变。

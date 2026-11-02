@@ -13,7 +13,8 @@
 ``POST /api/phone/store/purchases``（CSRF、身份/价格字段拒绝、未知字段、缺 key、applied/
 already_applied/rejected/unavailable 的 HTTP 映射与 reason_code 原样、操作日志）、
 ``/state`` 的新实体店摘要与房间摘要（缺块 = NOT_REPORTED，灯原样复制）、
-``ARRANGE``/``RELOCATE``/``TOGGLE_FIXTURE`` 的形状与黑名单、以及 GET 不写盘。
+``ARRANGE``/``RELOCATE``/``TOGGLE_FIXTURE`` 的形状与黑名单、``TOILET {facility_id}``
+的原样转发与拒绝面、以及 GET 不写盘。
 """
 from __future__ import annotations
 
@@ -606,6 +607,94 @@ class RoomVerbTest(RoomAPIBase):
 
 
 # ---------------------------------------------------------------------------------------------
+# POST /api/phone/world/actions — TOILET (already declared by the owner, only re-exposed here)
+# ---------------------------------------------------------------------------------------------
+
+
+class ToiletRouteTest(RoomAPIBase):
+    """P adds no rule of its own: one declared ``facility_id`` travels, the owner still decides.
+
+    Whether the facility exists, sits at the current place and is open at this hour is the
+    World owner's verdict (``world_lived_need_facilities`` / the Resolver).  These tests only
+    prove P's layer with a stub owner; they are **not** a World physical-effect acceptance.
+    """
+
+    def world_action(self, action, params, key="toilet-key-1", *, csrf=True, headers=None):
+        body = {"action": action, "params": params, "operation_key": key}
+        extra = dict(headers or {})
+        if csrf:
+            extra["X-CSRF-Token"] = CSRF
+        return self.call("POST", "/api/phone/world/actions", body, headers=extra)
+
+    def test_toilet_forwards_exactly_the_declared_facility_id(self) -> None:
+        self.build()
+        code, doc = self.world_action("TOILET", {"facility_id": "home-toilet-01"},
+                                      key="toilet-use-1")
+        self.assertEqual(code, 200, doc)
+        self.assertEqual([call[0] for call in self.world.calls], ["act"])
+        action, params, key = self.world.calls[-1][1:]
+        self.assertEqual(action, "TOILET")
+        self.assertEqual(params, {"facility_id": "home-toilet-01"})
+        self.assertEqual(key, "toilet-use-1")
+        self.assertEqual(self.journal()[-1]["action"], "world:toilet")
+
+    def test_toilet_keeps_the_identifier_string_verbatim(self) -> None:
+        # No trimming of inner text, no case folding, no prefixing: the owner names the facility.
+        self.build()
+        facility = "home-toilet-01"
+        code, doc = self.world_action("TOILET", {"facility_id": "  " + facility + "  "})
+        self.assertEqual(code, 200, doc)
+        self.assertEqual(self.world.calls[-1][2], {"facility_id": facility})
+
+    def test_toilet_needs_one_facility_id(self) -> None:
+        self.build()
+        code, doc = self.world_action("TOILET", {})
+        self.assertEqual((code, doc["reason_code"]), (400, "PARAM_REQUIRED:facility_id"))
+        for bad in (123, True, "", "   ", "x" * 129, "home\rtoilet"):
+            with self.subTest(facility_id=bad):
+                code, doc = self.world_action("TOILET", {"facility_id": bad})
+                self.assertEqual((code, doc["reason_code"]), (400, "FACILITY_ID_INVALID"))
+        self.assertEqual(self.world.calls, [], "a refused shape must never reach the owner")
+
+    def test_toilet_refuses_identity_effects_and_extra_fields(self) -> None:
+        self.build()
+        for field, value in (("uid", 0), ("authority", "world"), ("home", "/tmp/x"),
+                             ("elapsed_seconds", 60), ("fatigue", 0.1)):
+            with self.subTest(field=field):
+                code, doc = self.world_action("TOILET", {"facility_id": "home-toilet-01",
+                                                         field: value})
+                self.assertEqual(code, 409)
+                self.assertIn("CLIENT_IDENTITY_REFUSED", doc["reason_code"])
+        # A client may not send the effect, the facility kind or a second id: those are the
+        # owner's declared facts, and an unknown field is refused rather than ignored.
+        for field, value in (("lived_need_effects", {"toilet": 1.0}),
+                             ("facility_kind", "toilet"),
+                             ("object_id", "home-toilet-01")):
+            with self.subTest(field=field):
+                code, doc = self.world_action("TOILET", {"facility_id": "home-toilet-01",
+                                                         field: value})
+                self.assertEqual((code, doc["reason_code"]),
+                                 (400, "UNKNOWN_FIELD:" + field))
+        self.assertEqual(self.world.calls, [])
+
+    def test_toilet_still_needs_the_csrf_door(self) -> None:
+        self.build()
+        code, doc = self.world_action("TOILET", {"facility_id": "home-toilet-01"}, csrf=False)
+        self.assertEqual((code, doc["reason_code"]), (403, "CSRF_TOKEN_MISSING"))
+        self.assertEqual(self.world.calls, [])
+
+    def test_owner_refusal_is_passed_through_without_a_fake_success(self) -> None:
+        self.build(world=StubWorld(act={
+            "ok": False, "status": phone_service.STATUS_REJECTED,
+            "reason_code": "facility_not_open",
+            "data": {"reason_code": "facility_not_open"}}))
+        code, doc = self.world_action("TOILET", {"facility_id": "home-toilet-01"})
+        self.assertEqual((code, doc["reason_code"]), (409, "facility_not_open"))
+        self.assertIs(doc["ok"], False)
+        self.assertEqual(len([c for c in self.world.calls if c[0] == "act"]), 1)
+
+
+# ---------------------------------------------------------------------------------------------
 # conformance with C's real facade (import only: no world instance, no socket, no write)
 # ---------------------------------------------------------------------------------------------
 
@@ -635,7 +724,7 @@ class FacadeConformanceTest(unittest.TestCase):
         except Exception as exc:  # pragma: no cover - only when C's tree is absent
             self.skipTest("world_phone_world not importable here: %s" % type(exc).__name__)
         self.assertEqual(tuple(wpw.VERBS), phone_service.WORLD_ACTIONS)
-        for verb in ("ARRANGE", "TOGGLE_FIXTURE"):
+        for verb in ("ARRANGE", "TOGGLE_FIXTURE", "TOILET"):
             required, optional = wpw.PARAM_SPEC[verb]
             allowed, must = phone_server.WORLD_ACTION_FIELDS[verb]
             self.assertEqual(set(required) | set(optional), set(allowed), verb)

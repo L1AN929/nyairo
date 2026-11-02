@@ -40,6 +40,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -63,14 +64,23 @@ READ_ACTIONS = {
     # 只读 Activity 权威、Life 文档与 owner 回执，不启动服务、不写结果、不调用模型。
     "today": "/api/phone/today",
     "today_arrangements": "/api/phone/today/arrangements",
+    # 她今天有记录的几件事合成的一条时间线：活动、日计划（只表示排定）、World 动作、
+    # 日记/相册/钱包的写入骨架。只读，不带日记正文、相册说明或图片字节。
+    "day_timeline": "/api/phone/today/timeline",
     # 她的日记目录：只列写入时间与字数，正文要单独 diary_read。
     "diary": "/api/phone/diary",
     # 她的私人相册目录：时间、说明与来源，不带图片字节（看图走手机的图片地址）。
     "album": "/api/phone/album",
+    # S03: 她当前有理由相信的主张（观察到 / 有人报告 / 据此推断），每条带范围、时效与
+    # 来源类别；冲突、过时与未知都如实分开，不是一个置信分数。
+    "claims": "/api/phone/claims",
+    # F-140: 她认识谁（本实例 operator 登记过的参与者）——稳定 id、显示名/别名、创建来源
+    # 与时间、关联过的来话条数。这是身份只读面，没有正文、没有关系分数，也不能创建/绑定/发送。
+    "participants": "/api/phone/participants",
 }
 WRITE_ACTIONS = ("note_save", "reference_save", "purchase", "store_purchase", "use",
                  "world_action", "reading_import", "reading_position", "reading_annotate",
-                 "diary_write", "camera")
+                 "diary_write", "camera", "claim_observe")
 #: Actions that read or write her private artifacts (or a private-artifact derivative).  Under a
 #: restricted memory profile these need the separate ``phone.private_artifacts`` permit.
 #: World/body commands are a different surface: they already require ``write_enabled``, and a
@@ -84,17 +94,21 @@ PRIVATE_ARTIFACT_ACTIONS = frozenset({
     "use",
     "reading_material", "reading_import", "reading_position", "reading_annotate",
     "reading_operation",
-    "today", "today_arrangements",
+    "today", "today_arrangements", "day_timeline",
     # 同一件作品的有界上下文（旧版/来历/真实结果/相关做法与评价/本地草稿）：它读的是她的私人
     # 作品与经历摘录，因此和其余私人档案读面共用同一条显式许可，不新增权限面。
     "work_context", "work_version",
     # 日记正文是她自己的私人文字：目录可只看时间/字数，但写与读正文都属于私人档案面。
     "diary", "diary_read", "diary_write",
+    # 当前主张包含她观察到的位置等事实；与其余私人档案读面共用同一条显式许可。
+    "claims", "claim_slot",
 })
 ACTIONS = tuple(sorted(READ_ACTIONS)) + WRITE_ACTIONS + ("operation", "world_operation",
                                                          "reading_operation", "work_context",
                                                          "work_version", "diary_read",
-                                                         "album_image")
+                                                         "album_image", "claim_slot",
+                                                         # F-140: 单人只读（稳定 id 来自 participants 列表）。
+                                                         "participant")
 
 #: The World verbs a local owner may ask for.  The first five are the frozen v0.4 set (C's
 #: contract §3.1); ``ARRANGE`` and ``TOGGLE_FIXTURE`` are this round's room verbs, exactly as C's
@@ -153,6 +167,15 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
 OWNER_ID_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")
 TIMEOUT_SECONDS = 10.0
+#: ``camera`` is the one action whose answer legitimately takes minutes on the phone side: one
+#: local Chinese->English conversion (``TRANSLATOR_TIMEOUT`` 90 s) plus one 512px generation
+#: (``DEFAULT_TIMEOUT`` 300 s), each preceded by a short idle probe.  Over the WSL->Windows
+#: bridge every request also adds a 15 s process margin, so the phone's own worst case is about
+#: 90+15 + 300+15 + two 10+15 probes = 470 s.  The client must outlast that, otherwise it hangs
+#: up first while the phone is still generating -- the picture is saved but the caller only sees
+#: "unreachable".  Every other action keeps the short read timeout above; this is a per-action
+#: budget, not a global increase, and it still starts no retry.
+CAMERA_TIMEOUT_SECONDS = 480.0
 
 PHONE_TOOL_SCHEMA = {
     "name": "chiyo_phone",
@@ -162,7 +185,9 @@ PHONE_TOOL_SCHEMA = {
         "姿势与身体信号、已到货的自有家具、房间灯）；today 读她今天真正发生的活动与作品版本，"
         "today_arrangements 读今天的计划、义务与可证执行状态（PLANNED 只表示排进了今天、义务 "
         "PENDING 只表示还没有 owner 回执、执行 UNKNOWN 表示没有可证证据，都不是「还没开始」"
-        "或「失败了」）；也可以显式提交一条操作（写笔记、存收藏、"
+        "或「失败了」）；day_timeline 把她今天有记录的活动、排定、World 动作、日记/相册/钱包"
+        "写入合成一条只读时间线（不补空白、不复制正文，做没做仍看各来源自己的状态）；"
+        "也可以显式提交一条操作（写笔记、存收藏、"
         "手机虚拟店购买、实体店柜台购买、使用属于自己的物件、在世界里移动/拿放/换姿势/休息/"
         "布置自有家具/开关自己的灯）。"
         "日记只有一个入口：diary 读目录（只有写入时间、字数和日期，不带正文），diary_read 按 "
@@ -183,6 +208,13 @@ PHONE_TOOL_SCHEMA = {
         "work_context 按 owner 的 artifact_id 只读同一件作品的有界上下文：head 与旧版/来历、"
         "artifact_ref 就是这件作品的真实结果、证据指回这些结果的做法与最近一次显式评价、"
         "以及来源就是它的本地草稿（不带正文、不发送）；没有证据的部分如实为空。"
+        "claims 只读她当前有理由相信的主张（观察到 / 有人报告 / 据此推断），每条带范围、"
+        "适用时间、观察时间、来源类别与状态（支持 / 冲突 / 过时 / 未知）；claim_slot 按 slot_id "
+        "读同一问题的当前状态与修订历史。claim_observe 用显式 operation_key 让她对 World 做一次"
+        "正式观察并登记为证据（客户端不提供观察内容或 world id）；主张不是动作许可，也不更新世界。"
+        "participants 只读她认识谁：本实例 operator 显式登记过的参与者（稳定 id、显示名/别名、"
+        "创建来源与时间、关联来话条数）；participant 按 id 读一位的端点与关联来话引用。"
+        "这里没有创建、绑定或发送动作，显示名不是账号证据，参与者也不继承任何权限。"
         "所有数字与状态都来自真实 owner，工具不会补零、不会猜价格，也不会把失败说成成功："
         "购买成功不等于已到货，布置成功不等于已经可用，保存停点不等于读懂了（understanding 恒 UNKNOWN）。"
         "移动/拿放/姿势/休息/布置/开关灯必须给出 operation_key 并原样复用；若返回 status=unknown，"
@@ -197,9 +229,9 @@ PHONE_TOOL_SCHEMA = {
                 "enum": list(ACTIONS),
                 "description": (
                     "wallet/notes/references/reading/reading_material/shop/store/inventory/world/"
-                    "today/today_arrangements 为只读；"
+                    "today/today_arrangements/day_timeline/claims/claim_slot 为只读；"
                     "note_save/reference_save/purchase/store_purchase/use/world_action/"
-                    "reading_import/reading_position/reading_annotate 为显式写；operation/"
+                    "reading_import/reading_position/reading_annotate/claim_observe 为显式写；operation/"
                     "world_operation/reading_operation 用 operation_key 对账（原 key，不换键重试）。"
                 ),
             },
@@ -208,6 +240,14 @@ PHONE_TOOL_SCHEMA = {
                                             "自己的协议字符串，只读，不写、不发送")},
             "version_id": {"type": "string", "maxLength": 200,
                            "description": "要固定读取的旧版本 id（work_version，只读不回滚）"},
+            "claim_slot_id": {"type": "string", "maxLength": 200,
+                              "description": ("S03 主张的 slot id（claim_slot）：owner 的 opaque "
+                                              "协议字符串，读该问题的当前状态与修订历史；不是世界"
+                                              "动作的手槽")},
+            "participant_id": {"type": "string", "maxLength": 200,
+                               "description": ("参与者的稳定 id（participant）：必须来自 "
+                                               "participants 列表；只读显示名/别名/来源/关联来话"
+                                               "引用，不是消息正文，也不代表任何权限")},
             "title": {"type": "string", "maxLength": 80, "description": "笔记标题（note_save）"},
             "body": {"type": "string", "maxLength": 4000,
                      "description": "笔记正文（note_save）或一条日记的正文（diary_write）"},
@@ -323,6 +363,11 @@ _FIELD_BY_ACTION = {
     "work_context": frozenset({"action", "artifact_id"}),
     # 固定读同一件作品的一个旧版（读取不是回滚：head 不变）。
     "work_version": frozenset({"action", "artifact_id", "version_id"}),
+    # S03: 一个 slot 的当前状态与修订历史（只读）。字段名刻意不叫 slot_id，
+    # 免得和世界动作手槽（world params 里的 left_hand/right_hand）混淆。
+    "claim_slot": frozenset({"action", "claim_slot_id"}),
+    # 一次正式世界观察：客户端只给原幂等键，观察内容由手机向 World 正式读面取得。
+    "claim_observe": frozenset({"action", "operation_key"}),
     # 日记：写一条她自己的文字；读某一条的正文（目录用只读 action=diary）。
     # operation_key 必须显式给出：同一次写入重试落在同一条，不同日期写同样的话是两条。
     "diary_write": frozenset({"action", "body", "operation_key"}),
@@ -330,6 +375,8 @@ _FIELD_BY_ACTION = {
     # 相册：一张图一条说明（详情只读）；拍照是本机按她的画面描述生成一张图，再由相册
     # 正式保存。scene/caption 由她显式给出，operation_key 必须复用原键，重试不再生成第二张。
     "album_image": frozenset({"action", "artifact_id"}),
+    # F-140：按 participants 列表给出的 owner id 读一位参与者（只读，无正文/无权限继承）。
+    "participant": frozenset({"action", "participant_id"}),
     "camera": frozenset({"action", "scene", "caption", "operation_key"}),
 }
 
@@ -388,13 +435,26 @@ def load_settings(kwargs: Mapping[str, Any]) -> dict[str, Any]:
         raise PhoneToolRefused("PHONE_BASE_URL_INVALID", "手机服务地址需要显式端口。")
     if parts.path not in ("", "/") or parts.query or parts.fragment:
         raise PhoneToolRefused("PHONE_BASE_URL_INVALID", "手机服务地址不能带路径。")
+    # The private diary's local capability file.  The profile passes only a path, never the
+    # token; when omitted it defaults to this instance root's own ``run`` file (the same path
+    # ``serve`` writes).  A missing file is a refusal, not "anonymous is fine".
+    capability_file = str(section.get("capability_file") or "").strip()
+    profile_home = str(section.get("profile_home") or "").strip()
+    if not capability_file and profile_home:
+        capability_file = str(Path(profile_home).expanduser() / "run" / "phone-capability.json")
+    elif capability_file:
+        capability = Path(capability_file).expanduser()
+        if not capability.is_absolute():
+            capability = home / capability
+        capability_file = str(capability)
     return {
-        "profile_home": str(section.get("profile_home") or ""),
+        "profile_home": profile_home,
         "base_url": "http://%s:%d" % ((parts.hostname or "").lower(), int(parts.port)),
         "write_enabled": section.get("write_enabled") is True,
         # Private artifacts (notes/references/reading) are a separate, explicit permit: they can
         # hold the operator's own private history, so "phone on" must not imply "read my notes".
         "private_artifacts": section.get("private_artifacts") is True,
+        "capability_file": capability_file,
         "config": config,
     }
 
@@ -460,29 +520,96 @@ def _authorize(settings: Mapping[str, Any], kwargs: Mapping[str, Any]) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: a credential must only ever reach the bound local endpoint."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401 - stdlib
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _request(settings: Mapping[str, Any], method: str, path: str,
              body: Optional[Mapping[str, Any]] = None, *,
              csrf: Optional[str] = None,
-             actor: Optional[str] = None) -> tuple[int, dict[str, Any]]:
+             actor: Optional[str] = None,
+             capability: Optional[str] = None,
+             timeout: Optional[float] = None) -> tuple[int, dict[str, Any]]:
+    """One loopback request.  ``timeout`` is a per-call budget; the default stays short."""
+
+    budget = TIMEOUT_SECONDS if timeout is None else float(timeout)
     data = None if body is None else json.dumps(dict(body), ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(str(settings["base_url"]) + path, data=data, method=method)
     request.add_header("Accept", "application/json")
     if data is not None:
         request.add_header("Content-Type", "application/json")
     if data is not None or actor:
-        # Existing attribution, used verbatim: the subject's own tool path declares itself so a
-        # private body read is distinguishable from the operator's ordinary page read.  It is a
-        # declaration, not a local-admin boundary (the tool docs say so).
+        # Attribution intent only.  Since the local capability gate, ``model`` alone grants no
+        # private diary privilege; the credential below is what the server verifies.
         request.add_header("X-Phone-Actor", str(actor or "model"))
+    if capability:
+        # The token is only attached by the explicit diary calls below.  It is never inherited
+        # from the environment/profile and never sent on a redirect (see ``_NoRedirect``).
+        request.add_header("Authorization", "Bearer " + str(capability))
     if csrf:
         request.add_header("X-CSRF-Token", str(csrf))
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with _NO_REDIRECT_OPENER.open(request, timeout=budget) as response:
             return int(response.status), _parse(response.read())
     except urllib.error.HTTPError as error:
         return int(error.code), _parse(error.read())
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise PhoneToolRefused("PHONE_UNREACHABLE", type(error).__name__)
+
+
+def _private_capability(settings: Mapping[str, Any],
+                        state_doc: Mapping[str, Any]) -> str:
+    """Read this serve's credential for the private diary, fresh on every call.
+
+    The file path comes from the profile (or the instance root's fixed default).  The endpoint
+    must equal the profile's loopback ``base_url`` and the subject must equal the one the phone
+    itself published, so a credential is never sent to a different endpoint or used for another
+    subject.  The token is never cached and never appears in an error message.
+    """
+
+    path_text = str(settings.get("capability_file") or "").strip()
+    if not path_text:
+        raise PhoneToolRefused("PHONE_CAPABILITY_NOT_CONFIGURED",
+                               "profile 没有给出本机日记凭据路径；私人正文与主体写入保持关闭。")
+    try:
+        from components.phone import capability as phone_capability
+    except Exception:
+        # ``chiyo_bundle`` normally lives beside ``components`` in the release tree.  If the
+        # caller only put the former on ``sys.path``, add the repository root once and retry.
+        repository = Path(__file__).resolve().parents[1]
+        if str(repository) not in sys.path:
+            sys.path.insert(0, str(repository))
+        try:
+            from components.phone import capability as phone_capability
+        except Exception:
+            raise PhoneToolRefused(
+                "PHONE_CAPABILITY_UNAVAILABLE",
+                "本机日记凭据模块不可用；私人正文与主体写入保持关闭。") from None
+    try:
+        capability = phone_capability.read_capability(Path(path_text))
+    except phone_capability.CapabilityInvalid as exc:
+        code = str(exc.reason_code)
+        suffix = code[len("CAPABILITY_"):] if code.startswith("CAPABILITY_") else code
+        raise PhoneToolRefused("PHONE_CAPABILITY_%s" % suffix,
+                               "本机日记凭据文件不可用；没有发送任何正文请求。") from None
+    except OSError:
+        raise PhoneToolRefused("PHONE_CAPABILITY_UNREADABLE",
+                               "本机日记凭据文件读不到；没有发送任何正文请求。") from None
+    if capability.endpoint != str(settings.get("base_url") or ""):
+        raise PhoneToolRefused("PHONE_CAPABILITY_ENDPOINT_MISMATCH",
+                               "凭据绑定的不是 profile 里的这个手机地址；没有发送凭据。")
+    instance = state_doc.get("instance") if isinstance(state_doc.get("instance"), Mapping) else {}
+    expected_subject = str(instance.get("subject") or "").strip()
+    if expected_subject and capability.subject != expected_subject:
+        raise PhoneToolRefused("PHONE_CAPABILITY_SUBJECT_MISMATCH",
+                               "凭据不是这部手机当前主体的；没有发送凭据。")
+    return capability.token
 
 
 def _parse(raw: bytes) -> dict[str, Any]:
@@ -725,8 +852,15 @@ def _reading_message(action: str, status: str, reason_code: str) -> str:
 
 
 def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
-    """One bounded call.  Every refusal is typed; nothing is retried with a new key."""
+    """One bounded call.  Every refusal is typed; nothing is retried with a new key.
 
+    2026-10-28 external stop: there is deliberately **no** stop/cancel action here.  Stopping
+    an Activity from outside is the local operator's act, authorized by its own credential on
+    a loopback control route.  The model may still choose ABANDON for herself -- that is a
+    Decision, not this tool.
+    """
+
+    action = ""
     try:
         if not isinstance(args, Mapping):
             return _result(False, "rejected", "参数必须是对象。", reason_code="INVALID_ARGUMENTS")
@@ -753,6 +887,10 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
             return _result(False, "rejected",
                            "camera 需要显式的 operation_key：同一次拍照重试必须复用原 key，"
                            "否则会为本机生成第二张图。",
+                           reason_code="OPERATION_KEY_REQUIRED")
+        if action == "claim_observe" and not str(args.get("operation_key") or "").strip():
+            return _result(False, "rejected",
+                           "claim_observe 需要显式的 operation_key：同一次观察重试必须复用原 key。",
                            reason_code="OPERATION_KEY_REQUIRED")
 
         settings = load_settings(kwargs)
@@ -791,11 +929,80 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
             return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
                            http_status=code, result=result)
 
+        if action == "day_timeline":
+            # 她自己的工具看这一天：骨架相同，但拿到原入口 detail_ref（要正文仍走 diary_read /
+            # album_image）。聚合本身仍不复制日记正文、相册说明或图片字节。
+            code, doc = _request(settings, "GET", READ_ACTIONS[action], actor="model")
+            result = _summary(doc)
+            data = doc.get("data") if isinstance(doc.get("data"), Mapping) else {}
+            if not doc.get("ok"):
+                message = "今天的时间线读不到；服务说明了原因（读不到不是「今天什么都没发生」）。"
+            elif not data.get("entries"):
+                message = ("今天还没有任何有记录的条目；空白就是空白，没有补一条凑数。"
+                           "各来源的读取状态在 sources 里。")
+            else:
+                message = ("已读取她今天有记录的时间线（只读，%d 条）：活动、排定、World 动作、"
+                           "日记/相册/钱包写入；计划只表示排进今天，不表示已执行；不同来源的"
+                           "时间域在 ordering 里如实分开。正文与图片字节不在聚合里，按 "
+                           "detail_ref 走原入口。" % int(data.get("count") or 0))
+            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+                           http_status=code, result=result)
+
+        if action == "claim_slot":
+            slot_id = str(args.get("claim_slot_id") or "").strip()
+            if not slot_id:
+                return _result(False, "rejected", "claim_slot 需要 claim_slot_id。",
+                               reason_code="CLAIM_SLOT_ID_REQUIRED")
+            if len(slot_id) > 200 or not set(slot_id) <= OWNER_ID_CHARS:
+                return _result(False, "rejected", "claim_slot_id 不是 owner 的协议 id。",
+                               reason_code="CLAIM_SLOT_ID_INVALID")
+            code, doc = _request(settings, "GET", "/api/phone/claims/" + slot_id)
+            result = _summary(doc)
+            data = doc.get("data") if isinstance(doc.get("data"), Mapping) else {}
+            if not doc.get("ok"):
+                message = "这个 slot 读不到；服务说明了原因。"
+            else:
+                message = ("已读取这个 slot 的当前状态与修订历史（只读）：状态、来源类别、"
+                           "记录时间与旧修订分开；被撤回来源的正文不会在这里重新出现。")
+            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+                           http_status=code, result=result)
+
+        if action == "participant":
+            # F-140: one participant by the owner's own id.  Read-only; the id must be an
+            # owner protocol string, never a path/URL, and this action can never create or bind.
+            participant_id = str(args.get("participant_id") or "").strip()
+            if not participant_id:
+                return _result(False, "rejected", "participant 需要 participant_id。",
+                               reason_code="PARTICIPANT_ID_REQUIRED")
+            if len(participant_id) > 200 or not set(participant_id) <= OWNER_ID_CHARS \
+                    or not participant_id.startswith("participant:"):
+                return _result(False, "rejected",
+                               "participant_id 不是 owner 自己的参与者 id（不接受路径或 URL）。",
+                               reason_code="PARTICIPANT_ID_INVALID")
+            code, doc = _request(settings, "GET", "/api/phone/participants/" + participant_id)
+            result = _summary(doc)
+            if not doc.get("ok"):
+                message = "这位参与者读不到；服务说明了原因（读不到不是「不存在」）。"
+            else:
+                message = ("已读取这位参与者的身份事实（只读）：稳定 id、显示名/别名、创建来源"
+                           "与时间、显式绑定的端点、关联过的来话引用与计数。这里没有消息正文，"
+                           "名字不是账号证据，参与者也不代表或继承任何权限。")
+            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+                           http_status=code, result=result)
+
         if action in READ_ACTIONS:
             code, doc = _request(settings, "GET", READ_ACTIONS[action])
             result = _summary(doc)
             if not doc.get("ok"):
                 message = "读取失败，服务说明了原因。"
+            elif action == "claims":
+                message = ("已读取她当前有理由相信的主张（只读）：每条带范围、适用时间、观察"
+                           "时间与来源类别（观察到 / 有人报告 / 据此推断）；冲突并列、过时和"
+                           "未知各自具名，不是一个置信数字，也不是动作许可。")
+            elif action == "participants":
+                message = ("已读取她认识谁（只读）：本实例 operator 显式登记过的参与者，每人带"
+                           "稳定 id、显示名/别名、创建来源与时间、端点与关联来话计数。同名不会"
+                           "自动合并；这里没有消息正文，也没有创建/绑定/发送动作。")
             elif action == "today":
                 message = ("已读取她今天真正发生的活动与作品版本（只读）；读不到是具名的不可用，"
                            "不是「今天什么都没做」。")
@@ -875,8 +1082,9 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 return _result(False, "rejected",
                                "entry_id 不是 owner 自己的日记 id（不接受路径或 URL）。",
                                reason_code="DIARY_ENTRY_ID_INVALID")
+            capability = _private_capability(settings, _state_doc)
             code, doc = _request(settings, "GET", "/api/phone/diary/" + entry_id,
-                                 actor="model")
+                                 actor="model", capability=capability)
             result = _summary(doc)
             entry = doc.get("entry") if isinstance(doc.get("entry"), Mapping) else {}
             if not doc.get("ok"):
@@ -960,6 +1168,7 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                            http_status=code, operation_key=key, result=result)
 
         key = _operation_key(action, args)
+        capability = None
         if action == "note_save":
             path = "/api/phone/notes"
             body = {"title": args.get("title"), "body": args.get("body"),
@@ -970,9 +1179,11 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 body["expected_head"] = args["expected_head"]
         elif action == "diary_write":
             # 她自己的文字：没有标题、没有摘要、没有第二次模型生成。日期由手机服务自己的
-            # 业务时间记录，调用方不能自带时间。
+            # 业务时间记录，调用方不能自带时间。主体写入先取本次 serve 的本地能力凭据；
+            # 文件缺失/错误时在发请求前拒绝，owner 不会收到零凭据的写入。
             path = "/api/phone/diary"
             body = {"body": args.get("body"), "operation_key": key}
+            capability = _private_capability(settings, _state_doc)
         elif action == "camera":
             # 她的画面描述 + 她写的一句说明：本机生成一张图，再走既有相册正式保存。
             # 服务地址、模型与生成参数都在手机侧；这里只传她的文字与自己的幂等键。
@@ -1020,11 +1231,19 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                     "expected_head": str(args.get("expected_head") or "").strip(),
                     "operation_key": key}
             body.update(_reading_annotation(args))
+        elif action == "claim_observe":
+            # The client names no content and no world id: the phone takes one formal
+            # snapshot from the World owner and records exactly what that read contained.
+            path = "/api/phone/claims/observations"
+            body = {"operation_key": key}
         else:  # use
             path = "/api/phone/items/use"
             body = {"item_instance_id": args.get("item_instance_id"), "operation_key": key}
 
-        code, doc = _request(settings, "POST", path, body, csrf=csrf)
+        # Only the camera waits for the phone's own (much longer) budget; every other write
+        # action keeps the short default, so a stalled read still fails fast.
+        code, doc = _request(settings, "POST", path, body, csrf=csrf, capability=capability,
+                             timeout=(CAMERA_TIMEOUT_SECONDS if action == "camera" else None))
         status = str(doc.get("status") or "unknown")
         result = _summary(doc)
         if status in ("applied", "already_applied"):
@@ -1052,6 +1271,18 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 message = "世界/身体服务当前不可用或关闭，动作没有确认。"
             else:
                 message = "结果未知：不要换 key 重发，先用 action=world_operation 查原 key。"
+        if action == "claim_observe":
+            if status == "applied":
+                message = ("已记录这次正式观察：来源 id/修订与观察回执随证据保存；它只证明"
+                           "当时看到什么，不更新世界、也不是动作许可。")
+            elif status == "already_applied":
+                message = "同一次观察此前已记录，没有新增主张。"
+            elif status == "rejected":
+                message = "World 观察当前不可用或来源不完整，没有记录任何主张。"
+            elif status in ("unavailable", "disabled"):
+                message = "World/主张存储当前不可用，这次观察没有确认。"
+            else:
+                message = "结果未知：不要换 key 重发，先读一次当前主张。"
         if action == "store_purchase":
             # 柜台成交 ≠ 已到货：到货、可布置、可用都是 owner 之后的快照事实。
             if status == "applied":
@@ -1099,10 +1330,15 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
         return _result(bool(doc.get("ok")), status, message, http_status=code,
                        operation_key=key, result=result)
     except PhoneToolRefused as exc:
+        if exc.reason_code == "PHONE_UNREACHABLE" and action == "camera":
+            # A camera capture is long: losing the answer never proves the phone did nothing.
+            # The picture may already be generated and saved -- the honest answer is "unknown".
+            message = ("没有等到手机的回答：这次拍照是否已生成、是否已保存都无法确认，"
+                       "不要换 operation_key 重发，先按原 key 对账。")
+        else:
+            message = exc.message or "手机服务不可用，操作没有提交。"
         return _result(False, "rejected" if exc.reason_code != "PHONE_UNREACHABLE"
-                       else "unavailable",
-                       exc.message or "手机服务不可用，操作没有提交。",
-                       reason_code=exc.reason_code)
+                       else "unavailable", message, reason_code=exc.reason_code)
     except Exception as exc:  # never leak paths, tokens or raw exception text
         return _result(False, "unavailable", "手机状态无法确认，操作没有提交。",
                        reason_code="PHONE_TOOL_ERROR", error_type=type(exc).__name__)

@@ -602,6 +602,7 @@ def _urls(port: int) -> dict[str, str]:
         "此刻": base + "/api/phone/living",
         "今天": base + "/api/phone/today",
         "安排": base + "/api/phone/today/arrangements",
+        "时间线": base + "/api/phone/today/timeline",
         "作品": base + "/api/phone/projects",
         "世界": base + "/api/phone/world",
         "钱包": base + "/api/phone/wallet",
@@ -666,6 +667,31 @@ def _start_text(root: Path, port: int, *, already: bool) -> str:
     for name, url in _urls(port).items():
         lines.append("  %s：%s" % (name, url))
     lines.extend(_config_lines(root))
+    try:
+        from components.phone import capability as phone_capability
+
+        capability_file = phone_capability.capability_path(root)
+        if capability_file.exists():
+            lines.append("日记正文凭据：%s（只对本次 serve 有效，重启轮换）" % capability_file)
+        else:
+            lines.append("日记正文凭据：本次 serve 未发布；私人正文与主体日记写入 fail closed。")
+    except Exception:
+        # A probing line must never turn a healthy serve into a failed start.
+        lines.append("日记正文凭据：状态未读取；私人日记按服务端实际校验。")
+    try:
+        from components.phone import operator_stop as phone_operator_stop
+
+        operator_file = phone_operator_stop.credential_path(root)
+        if operator_file.exists():
+            # 2026-10-28: a *separate* credential.  `stop` below stops the service; this
+            # stops one Activity.  The two are deliberately different acts.
+            lines.append("外部叫停凭据：%s（只对本次 serve 有效，与日记凭据不通用）" % operator_file)
+            lines.append("叫停某个活动：python3 scripts/activity_stop_cli.py --instance %s "
+                         "--activity <actv_...> --revision <revision>" % root)
+        else:
+            lines.append("外部叫停凭据：本次 serve 未发布；叫停路由 fail closed（不影响其它读）。")
+    except Exception:
+        lines.append("外部叫停凭据：状态未读取；叫停路由按服务端实际校验。")
     lines.append("")
     lines.append("看状态：python3 scripts/nyairo_day.py status --root %s" % root)
     lines.append("给材料：python3 scripts/nyairo_day.py import --root %s --file 你的材料.txt" % root)
@@ -1020,6 +1046,23 @@ def _arrangements_read(root: Path, port: Optional[int]) -> dict[str, Any]:
                 "detail": type(exc).__name__}
 
 
+def _timeline_read(root: Path, port: Optional[int]) -> dict[str, Any]:
+    """She today's recorded timeline: HTTP when the service is up, otherwise a direct pure read."""
+
+    if port:
+        try:
+            return _http_json(port, "/api/phone/today/timeline")
+        except Exception:
+            pass
+    try:
+        from components.phone import service as phone_service
+
+        return phone_service.PhoneService(phone_service.load_instance(root)).day_timeline()
+    except Exception as exc:
+        return {"ok": False, "reason_code": "TIMELINE_READ_FAILED",
+                "detail": type(exc).__name__}
+
+
 def _projects_read(root: Path, port: Optional[int]) -> dict[str, Any]:
     if port:
         try:
@@ -1181,7 +1224,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def _phone_text(root: Path, port: int, today: Mapping[str, Any],
                 arrangements: Mapping[str, Any], projects: Mapping[str, Any],
-                state: Optional[Mapping[str, Any]] = None) -> str:
+                state: Optional[Mapping[str, Any]] = None,
+                timeline: Optional[Mapping[str, Any]] = None) -> str:
     lines = ["AI 手机读口（都是只读，打开不会让她行动）："]
     for name, url in _urls(port).items():
         lines.append("  %s：%s" % (name, url))
@@ -1227,6 +1271,16 @@ def _phone_text(root: Path, port: int, today: Mapping[str, Any],
         lines.append("作品：%d 件%s" % (len(rows), ("（%s）" % names) if names else ""))
     else:
         lines.append("作品：读不到（%s）" % (projects.get("reason_code") or "UNKNOWN"))
+    if isinstance(timeline, Mapping):
+        if timeline.get("ok"):
+            data = dict(timeline.get("data") or {})
+            ordering = dict(data.get("ordering") or {})
+            lines.append("时间线：%s 条（%s；%s）" % (
+                data.get("count"),
+                "同域可比较" if ordering.get("comparable") else "多时域，按域分组",
+                "只有骨架" if data.get("skeleton_only") else "含原入口引用"))
+        else:
+            lines.append("时间线：读不到（%s）" % (timeline.get("reason_code") or "UNKNOWN"))
     lines.extend(_config_lines(root))
     return "\n".join(lines)
 
@@ -1244,6 +1298,7 @@ def cmd_phone(args: argparse.Namespace) -> int:
     today = _today_read(root, port)
     arrangements = _arrangements_read(root, port)
     projects = _projects_read(root, port)
+    timeline = _timeline_read(root, port)
     try:
         state = _http_json(port, "/api/phone/state", timeout=10.0)
         # The CSRF token is for the page, not for an operator readout.
@@ -1252,11 +1307,11 @@ def cmd_phone(args: argparse.Namespace) -> int:
         state = {}
     payload = {"ok": True, "root": str(root), "port": port, "urls": _urls(port),
                "today": today, "arrangements": arrangements, "projects": projects,
-               "state": state, "config": _managed_config(root),
+               "timeline": timeline, "state": state, "config": _managed_config(root),
                "model_called": False}
     _emit(payload, as_json=json_output,
           text=None if json_output else _phone_text(root, port, today, arrangements, projects,
-                                                    state))
+                                                    state, timeline))
     return EXIT_OK
 
 

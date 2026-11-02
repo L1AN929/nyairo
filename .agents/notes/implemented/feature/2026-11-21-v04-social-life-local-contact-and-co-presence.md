@@ -67,3 +67,13 @@ Status: implemented
 不能把空decision写成DECLINED。真实国内DeepSeek一次HTTP200/stop但AG1 INVALID_SCHEMA，
 这次行为验证失败、请求账本0→1后关闭；历史错误投影保留不改写。合法JSON错误schema的
 正式回归验证UNKNOWN及私人活动逐字段不变，WSL单项exit0。
+
+2026-11-01：`tests/test_life_v1_integration.py` 的共同时间闭环不再调用旧
+`FiniteCoPresence.begin`（PAUSE→WAIT 在新前台语义下必被拒），改走 `begin_from_decision`；
+Decision/内容仍为脚本替身，全部轮次显式 `observed_at`。生产零改动。
+
+同一功能返修澄清两点：DEFER 后强制 `reconsideration.release` 是测试侧绕开同状态静默，
+不是产品的自然重新考虑，已撤销；`NO_ACTION` 只证「Decision 没选共同时间」，不等于
+「已提交 START 后采纳失败」。真正的采纳失败负控改在正式 START Decision 之后的采纳边界注入
+测试侧 LR-2 start 故障，按产品已有 stranded 合同断言 `HANDOFF_STRANDED`、
+`PARKED_NO_JOINT` 与私人 Activity 的 LR-4 恢复，不报 started。

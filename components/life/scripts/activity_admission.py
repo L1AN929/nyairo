@@ -45,6 +45,13 @@ TRANSITION_KINDS = frozenset(
         "EXPIRE",
         "CHECKPOINT",
         "PROGRESS",
+        # 2026-10-28: BLOCKED is a non-terminal suspension the owner applies from an explicit
+        # blocking basis; FAILED is the owner's assessed terminal.  Neither is a model verb.
+        "BLOCK",
+        "FAIL",
+        # External stop: a durable local-operator intent (never a model verb) and the terminal
+        # that follows it once the owner reaches a safe boundary.
+        "STOP_INTENT",
     }
 )
 
@@ -61,9 +68,14 @@ REASON_KIND_AGENCY_CHOICE = "AGENCY_CHOICE"
 STATUS_ACTIVE = "ACTIVE"
 STATUS_PAUSED = "PAUSED"
 STATUS_WAITING = "WAITING"
-NON_TERMINAL_ACTIVITY_STATUSES = frozenset({STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING})
+STATUS_BLOCKED = "BLOCKED"
+STATUS_FAILED = "FAILED"
+# BLOCKED is non-terminal: the Activity has not been given up, it cannot advance right now.
+NON_TERMINAL_ACTIVITY_STATUSES = frozenset(
+    {STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED}
+)
 TERMINAL_ACTIVITY_STATUSES = frozenset(
-    {"COMPLETED", "ABANDONED", "CANCELLED", "CANCELED", "EXPIRED"}
+    {"COMPLETED", "ABANDONED", "CANCELLED", "CANCELED", "EXPIRED", STATUS_FAILED}
 )
 
 # Literal copy of activity_continuity.VALID_EVIDENCE_PREFIXES.
@@ -464,6 +476,69 @@ class InterruptionProposal:
     observed_at: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class BlockedProposal:
+    """S09/suspension owner: a named basis says this Activity cannot advance now.
+
+    Non-terminal by construction.  It carries the basis the owner read, never a model word
+    and never a timer; a later recovery still needs an explicit condition plus a fresh
+    Decision RESUME.
+    """
+
+    activity_id: str
+    expected_revision: int
+    proposal_id: str
+    blocked_on_ref: str
+    blocked_reason_code: str = "BLOCKED_BY_CONDITION"
+    blocked_criteria_refs: tuple[str, ...] = ()
+    blocked_assessment: Optional[Mapping[str, Any]] = None
+    idempotency_key: Optional[str] = None
+    source_refs: tuple[str, ...] = ()
+    causal_parent_refs: tuple[str, ...] = ()
+    occurred_at: Optional[str] = None
+    observed_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class FailureProposal:
+    """S09 owner: an explicit assessed failure of this Activity's goal scope.
+
+    The payload is produced by the owner gate (``activity_outcome_assessment``) and is
+    re-verified with owner evidence inside admission.  It is not a completion, not an
+    Action outcome, and it never rewrites an UNKNOWN as a failure.
+    """
+
+    activity_id: str
+    expected_revision: int
+    proposal_id: str
+    failure_assessment: Mapping[str, Any]
+    idempotency_key: Optional[str] = None
+    source_refs: tuple[str, ...] = ()
+    causal_parent_refs: tuple[str, ...] = ()
+    occurred_at: Optional[str] = None
+    observed_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ExternalStopProposal:
+    """Local-operator stop: a durable "stop this Activity" fact, not a cancel.
+
+    The payload was built by the composition root after the operator credential was checked;
+    it names no actor, subject or authority of its own.  The owner accepts it, and from then
+    on every new dispatch for this Activity is blocked until the terminal is reached.
+    """
+
+    activity_id: str
+    expected_revision: int
+    proposal_id: str
+    external_stop: Mapping[str, Any]
+    idempotency_key: Optional[str] = None
+    source_refs: tuple[str, ...] = ()
+    causal_parent_refs: tuple[str, ...] = ()
+    occurred_at: Optional[str] = None
+    observed_at: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Typed ports: the composition root hands out exactly one port per producer.
 # ---------------------------------------------------------------------------
@@ -554,6 +629,85 @@ class ActivityConsequencePort:
         kwargs.setdefault("consequence_capability", self._capability)
         kwargs.setdefault("proposal_ref", kwargs.get("idempotency_key"))
         return self._command.update_checkpoint(**kwargs)
+
+    def propose_blocked(self, proposal: BlockedProposal) -> Any:
+        return self._command.block_activity(
+            activity_id=proposal.activity_id,
+            expected_revision=proposal.expected_revision,
+            idempotency_key=proposal.idempotency_key
+            or f"lr2_block:{proposal.proposal_id}",
+            source_refs=list(proposal.source_refs) or [proposal.blocked_on_ref],
+            blocked_on_ref=proposal.blocked_on_ref,
+            blocked_reason_code=proposal.blocked_reason_code,
+            blocked_criteria_refs=list(proposal.blocked_criteria_refs),
+            blocked_assessment=proposal.blocked_assessment,
+            causal_parent_refs=list(proposal.causal_parent_refs),
+            occurred_at=proposal.occurred_at,
+            observed_at=proposal.observed_at,
+            consequence_capability=self._capability,
+            proposal_ref=proposal.proposal_id,
+        )
+
+    def propose_failure(self, proposal: FailureProposal) -> Any:
+        return self._command.fail_activity(
+            activity_id=proposal.activity_id,
+            expected_revision=proposal.expected_revision,
+            idempotency_key=proposal.idempotency_key
+            or f"lr2_fail:{proposal.proposal_id}",
+            source_refs=list(proposal.source_refs) or ["foassess:missing"],
+            failure_assessment=proposal.failure_assessment,
+            causal_parent_refs=list(proposal.causal_parent_refs),
+            occurred_at=proposal.occurred_at,
+            observed_at=proposal.observed_at,
+            consequence_capability=self._capability,
+            proposal_ref=proposal.proposal_id,
+        )
+
+    def propose_external_stop(self, proposal: ExternalStopProposal) -> Any:
+        return self._command.record_external_stop(
+            activity_id=proposal.activity_id,
+            expected_revision=proposal.expected_revision,
+            idempotency_key=proposal.idempotency_key
+            or f"opstop_intent:{proposal.proposal_id}",
+            source_refs=list(proposal.source_refs) or [proposal.proposal_id],
+            external_stop=dict(proposal.external_stop),
+            causal_parent_refs=list(proposal.causal_parent_refs),
+            occurred_at=proposal.occurred_at,
+            observed_at=proposal.observed_at,
+            consequence_capability=self._capability,
+            proposal_ref=proposal.proposal_id,
+        )
+
+    def propose_external_cancel(
+        self,
+        *,
+        activity_id: str,
+        expected_revision: int,
+        intent_id: str,
+        idempotency_key: str,
+        source_refs: Sequence[str],
+        occurred_at: Optional[str] = None,
+        observed_at: Optional[str] = None,
+        causal_parent_refs: Sequence[str] = (),
+    ) -> Any:
+        """Finish a durable stop as CANCELLED at the owner-confirmed safe boundary.
+
+        The capability must also carry CANCEL; the verifier re-reads the live Activity and
+        refuses when the pending intent named here is not the one the owner already accepted.
+        """
+
+        return self._command.cancel_activity(
+            activity_id=activity_id,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            source_refs=list(source_refs) or [intent_id],
+            causal_parent_refs=list(causal_parent_refs),
+            reason_code="CANCELLED_BY_EXTERNAL_OPERATOR",
+            occurred_at=occurred_at,
+            observed_at=observed_at,
+            consequence_capability=self._capability,
+            proposal_ref=intent_id,
+        )
 
 
 def _wait_reason_code(reason_kind: str) -> str:
@@ -773,6 +927,109 @@ def build_interruption_evidence_verifier(
     return verify
 
 
+def build_blocked_evidence_verifier(activity_reader: Any):
+    """ACTIVITY_CONSEQUENCE evidence for BLOCK: a named basis an owner can re-read.
+
+    BLOCKED is not a model verb and not a "give up": it is the owner recording that the
+    Activity cannot advance under the current conditions.  The verifier refuses a transition
+    with no structured basis, no source refs, a stale store revision, or a terminal/unknown
+    Activity.  It answers no question about *why* the basis holds -- that is the owner read
+    service's job (``activity_outcome_assessment``), and no new authority is created here.
+    """
+
+    from activity_outcome_assessment import (
+        BlockedBasisError,
+        validate_blocked_payload_against_activity,
+    )
+
+    def verify(
+        transition: Mapping[str, Any], canonical_state: Any = None
+    ) -> Mapping[str, Any]:
+        activity_id = transition.get("activity_id")
+        expected_revision = transition.get("expected_revision")
+        if not isinstance(activity_id, str) or not activity_id.strip():
+            raise ConsequenceRejected("CONSEQUENCE_MISSING_ACTIVITY_ID")
+        act = _canonical_activity(canonical_state, activity_reader, activity_id)
+        if act is None:
+            raise ConsequenceRejected("CONSEQUENCE_UNKNOWN_ACTIVITY_LINEAGE")
+        status = act.get("status")
+        if status not in NON_TERMINAL_ACTIVITY_STATUSES:
+            raise ConsequenceRejected(f"CONSEQUENCE_ACTIVITY_STATUS_FORBIDS_BLOCK:{status}")
+        if int(expected_revision if expected_revision is not None else -2) != (
+            _canonical_state_revision(canonical_state, activity_reader)
+        ):
+            raise ConsequenceRejected("CONSEQUENCE_STALE_ACTIVITY_REVISION")
+        if not list(transition.get("source_refs") or []):
+            raise ConsequenceRejected("CONSEQUENCE_BLOCK_REQUIRES_SOURCE_REFS")
+        try:
+            summary = validate_blocked_payload_against_activity(
+                act, transition.get("blocked_assessment")
+            )
+        except BlockedBasisError as exc:
+            raise ConsequenceRejected(f"CONSEQUENCE_BLOCK_BASIS_REJECTED:{exc}") from exc
+        return {
+            "activity_id": activity_id,
+            "activity_revision": int(act.get("revision", -1)),
+            "activity_status": status,
+            **summary,
+        }
+
+    return verify
+
+
+def build_failure_evidence_verifier(activity_reader: Any, evidence_resolver: Callable[[str], Mapping[str, Any]]):
+    """S09 ACTIVITY_CONSEQUENCE evidence for FAIL: owner-assessed, evidence re-read.
+
+    The transition carries the assessment the S09 owner gate produced.  This verifier does not
+    trust a bare ``verified: true`` or a model/HTTP field: it re-checks the exact Activity and
+    its revision, the stated scope of the goal, the named criteria, and asks the composition
+    root's ``evidence_resolver`` (existing owner reads) for every evidence ref.  Any refusal is
+    a typed rejection -- which is not a FAILED outcome.
+    """
+
+    from activity_outcome_assessment import (
+        FailureAssessmentError,
+        validate_failure_payload_against_activity,
+    )
+
+    if not callable(evidence_resolver):
+        raise TypeError("evidence_resolver must be callable")
+
+    def verify(
+        transition: Mapping[str, Any], canonical_state: Any = None
+    ) -> Mapping[str, Any]:
+        activity_id = transition.get("activity_id")
+        expected_revision = transition.get("expected_revision")
+        if not isinstance(activity_id, str) or not activity_id.strip():
+            raise ConsequenceRejected("CONSEQUENCE_MISSING_ACTIVITY_ID")
+        act = _canonical_activity(canonical_state, activity_reader, activity_id)
+        if act is None:
+            raise ConsequenceRejected("CONSEQUENCE_UNKNOWN_ACTIVITY_LINEAGE")
+        status = act.get("status")
+        if status in TERMINAL_ACTIVITY_STATUSES:
+            raise ConsequenceRejected(f"CONSEQUENCE_ACTIVITY_ALREADY_TERMINAL:{status}")
+        if int(expected_revision if expected_revision is not None else -2) != (
+            _canonical_state_revision(canonical_state, activity_reader)
+        ):
+            raise ConsequenceRejected("CONSEQUENCE_STALE_ACTIVITY_REVISION")
+        try:
+            summary = validate_failure_payload_against_activity(
+                act,
+                transition.get("failure_assessment"),
+                evidence_resolver=evidence_resolver,
+            )
+        except FailureAssessmentError as exc:
+            raise ConsequenceRejected(f"CONSEQUENCE_FAILURE_ASSESSMENT_REJECTED:{exc}") from exc
+        return {
+            "activity_id": activity_id,
+            "activity_revision": int(act.get("revision", -1)),
+            "activity_status": status,
+            **summary,
+        }
+
+    return verify
+
+
 def build_activity_lineage_verifier(activity_reader: Any):
     """Minimal lineage check for LR-5 CHECKPOINT/PROGRESS consequences."""
 
@@ -801,6 +1058,83 @@ def build_activity_lineage_verifier(activity_reader: Any):
             "activity_id": activity_id,
             "activity_revision": actual_revision,
             "activity_status": status,
+        }
+
+    return verify
+
+
+def build_external_stop_evidence_verifier(activity_reader: Any, *, subject_id: Optional[str] = None):
+    """ACTIVITY_CONSEQUENCE check for one durable local-operator stop intent.
+
+    The request body never grants this: the composition root builds the payload after the
+    operator credential was verified, and this verifier re-reads the live Activity so a stale
+    revision, a different Activity or a terminal one is refused inside the store lock.
+    """
+
+    def verify(
+        transition: Mapping[str, Any], canonical_state: Any = None
+    ) -> Mapping[str, Any]:
+        from activity_continuity import validate_external_stop_payload
+
+        activity_id = transition.get("activity_id")
+        act = _canonical_activity(canonical_state, activity_reader, activity_id)
+        if act is None:
+            raise ConsequenceRejected("CONSEQUENCE_UNKNOWN_ACTIVITY_LINEAGE")
+        if act.get("status") in TERMINAL_ACTIVITY_STATUSES:
+            raise ConsequenceRejected(
+                "CONSEQUENCE_ACTIVITY_ALREADY_TERMINAL:%s" % act.get("status"))
+        expected_revision = transition.get("expected_revision")
+        if int(expected_revision if expected_revision is not None else -2) != (
+            _canonical_state_revision(canonical_state, activity_reader)
+        ):
+            raise ConsequenceRejected("CONSEQUENCE_STALE_ACTIVITY_REVISION")
+        payload = transition.get("external_stop")
+        if not isinstance(payload, Mapping):
+            raise ConsequenceRejected("EXTERNAL_STOP_PAYLOAD_REQUIRED")
+        validated = validate_external_stop_payload(
+            payload, activity=act, subject_id=subject_id)
+        return {
+            "verified": True,
+            "owner": "local_operator_stop",
+            "activity_id": activity_id,
+            "activity_revision": int(act.get("revision", -1)),
+            "intent_id": validated["intent_id"],
+            "reason_code": validated["reason_code"],
+        }
+
+    return verify
+
+
+def build_external_stop_cancel_verifier(activity_reader: Any):
+    """CANCEL is admitted only while the exact accepted stop intent is still pending."""
+
+    def verify(
+        transition: Mapping[str, Any], canonical_state: Any = None
+    ) -> Mapping[str, Any]:
+        activity_id = transition.get("activity_id")
+        act = _canonical_activity(canonical_state, activity_reader, activity_id)
+        if act is None:
+            raise ConsequenceRejected("CONSEQUENCE_UNKNOWN_ACTIVITY_LINEAGE")
+        if act.get("status") in TERMINAL_ACTIVITY_STATUSES:
+            raise ConsequenceRejected(
+                "CONSEQUENCE_ACTIVITY_ALREADY_TERMINAL:%s" % act.get("status"))
+        expected_revision = transition.get("expected_revision")
+        if int(expected_revision if expected_revision is not None else -2) != (
+            _canonical_state_revision(canonical_state, activity_reader)
+        ):
+            raise ConsequenceRejected("CONSEQUENCE_STALE_ACTIVITY_REVISION")
+        stop = act.get("external_stop") or {}
+        if not isinstance(stop, Mapping) or stop.get("state") != "PENDING":
+            raise ConsequenceRejected("EXTERNAL_STOP_INTENT_NOT_PENDING")
+        intent_id = str(transition.get("proposal_ref") or "")
+        if intent_id != str(stop.get("intent_id") or ""):
+            raise ConsequenceRejected("EXTERNAL_STOP_INTENT_MISMATCH")
+        return {
+            "verified": True,
+            "owner": "local_operator_stop",
+            "activity_id": activity_id,
+            "activity_revision": int(act.get("revision", -1)),
+            "intent_id": intent_id,
         }
 
     return verify

@@ -56,3 +56,16 @@ CAS 与权限。
   不增条、同 key 换文字明确拒绝、列时间、读回正文、普通 operator 读面扣留、正规停服后同根
   重开仍可读，14 项结果全 yes；另跑 `tests.test_phone_tool` 13 例与 `tests.test_phone_api`
   的 state 单例。未跑全库，未提交/部署。
+- **2026-10-27 边界复核**：写入侧不是靠 `X-Phone-Actor` 放行，而是走既有 Life Supply
+  `commit_markdown` 的 Governance grant（`COMMIT_MANAGED_ARTIFACT` / `artifact:personal` /
+  `workspace:<id>`）和 `ManagedArtifact` 的 `WriterFence` epoch + SQLite 写守卫，旧 writer /
+  第二 writer 会在提交前被拒。读取侧仍只有客户端声明：本机回环上的任何客户端都能自行发
+  `X-Phone-Actor: model` 取得正文；CSRF token 由 `GET /api/phone/state` 发放，只是跨站防护，
+  不是身份。服务端可核验的 model/operator 凭据尚未实现，按停止门交
+  [私人日记可信身份方案](../../../../docs/engineering/private-diary-authority-options-20261027.md)。
+- **2026-10-27 已补本地能力凭据**：每次 serve 签发绑定 subject + 实际 endpoint 的 0600
+  不透明凭据，日记正文读取与主体写入必须持有；缺失/错误/无法安全存储时 fail closed，
+  operator 元数据与其它手机面不变。威胁边界仍是“能读凭据文件/同 uid/管理员在外”，
+  不承诺仅她可读。决定与取舍见
+  [phone-diary-capability](2026-10-27-phone-diary-capability.md)；旧 note 的
+  “只有客户端声明”限制到此为止，但 S14/S13 整体仍未全过。

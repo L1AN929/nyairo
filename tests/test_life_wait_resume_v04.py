@@ -36,6 +36,7 @@ import os
 import sys
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +48,10 @@ import life_wait_basis as lwb  # noqa: E402
 import waiting_ref_vocab  # noqa: E402
 
 POSIX_ONLY = unittest.skipUnless(os.name == "posix", "life modules import fcntl (POSIX only)")
-TS = "2026-10-28T05:00:00+00:00"
+#: The bounded reconsideration ledger expires its entries against *wall* time, so a frozen
+#: date would make this fixture's own seed look stale.  One instant, captured now, is used
+#: for both the recorded no_change and the round it must still be visible in.
+TS = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 OWNER_ID = "artifact:0f8f9a1c2b3d4e5f60718293a4b5c6d7"
 HEAD_V3 = "artifact-version:3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
 HEAD_V4 = "artifact-version:4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"

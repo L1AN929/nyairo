@@ -171,8 +171,15 @@ class LifeExperiencePort:
         max_chars: int = DEFAULT_MAX_CHARS,
         authority_db: Optional[str | Path] = None,
         authority_min_seq: Optional[int] = None,
+        forget_gate: Any = None,
+        recovery_gate: Any = None,
     ) -> None:
         self.evidence_db = Path(evidence_db)
+        #: Optional F-153/F-154 gate (read + admission).  ``None`` keeps the legacy path.
+        self.forget_gate = forget_gate
+        #: A recovered copy stays closed until its retained sweep has activated it.  ``None``
+        #: keeps every ordinary instance unchanged.
+        self.recovery_gate = recovery_gate
         self.controls_db = Path(controls_db) if controls_db else self.evidence_db
         self.subject = str(subject)
         # ``None`` means "resolve the configured fourth name from this process"; ``""`` disables
@@ -193,8 +200,26 @@ class LifeExperiencePort:
 
     # -- in ----------------------------------------------------------------------------
 
+    def _recovery_check(self, operation: str) -> None:
+        if self.recovery_gate is not None:
+            # A marker that names a path is not enough: the evidence/controls half is checked
+            # again here, on every read and write, so an older backup swapped in at the same path
+            # is refused before any body is opened.
+            verify = getattr(self.recovery_gate, "verify_copy", None)
+            if verify is not None:
+                verify(evidence=self.evidence_db, controls=self.controls_db)
+            self.recovery_gate.ensure(operation)
+
     def append_outcome(self, event: EvidenceEvent) -> dict[str, Any]:
-        """Append through the single M0 writer.  Returns the writer's own status."""
+        """Append through the single M0 writer.  Returns the writer's own status.
+
+        A retained forget barrier is checked *before* the write: an event whose source refs are
+        covered cannot be re-admitted under a new event id.  An unverifiable gate refuses too.
+        """
+        if self.forget_gate is not None and self.forget_gate.blocks_event(event):
+            return {"status": "refused", "event_id": event.event_id,
+                    "reason": "FORGET_SOURCE_WITHHELD"}
+        self._recovery_check("append_outcome")
         store = EvidenceStore(self.evidence_db)
         result = store.append(event)
         return {"status": result.status, "event_id": result.event_id}
@@ -215,8 +240,10 @@ class LifeExperiencePort:
         want = self.limit if limit is None else max(0, int(limit))
         if want == 0:
             return []
+        self._recovery_check("recent")
         store = EvidenceStore(self.evidence_db)
         rows = store.recent_verified_outcomes(memory_owner=self.subject, limit=want, since=since)
+        rows = [row for row in rows if not int(row.get("payload_erased") or 0)]
         records = [self._to_record(row) for row in rows]
         if not records:
             return []
@@ -225,6 +252,8 @@ class LifeExperiencePort:
             # Governance state is not established: nothing may enter a model context.
             return []
         kept, _corrections = projection.recalls(records)
+        if self.forget_gate is not None:
+            kept = self.forget_gate.filter_records(kept)
         return [self._trim(record) for record in kept]
 
     @staticmethod
@@ -310,6 +339,18 @@ class LifeExperiencePort:
             "governance_healthy": None,
             "controls": None,
         }
+        if self.recovery_gate is not None:
+            state = self.recovery_gate.state()
+            out["recovery_state"] = state
+            if state.get("status") != "OPEN":
+                return self._not_ready(
+                    out, str(state.get("reason") or "RECOVERY_NOT_ACTIVATED"),
+                    state.get("detail"))
+            try:
+                self.recovery_gate.ensure("readiness")
+            except Exception as exc:
+                return self._not_ready(out, getattr(exc, "code", "RECOVERY_GATE_UNAVAILABLE"),
+                                       str(exc))
         for key, path in (("database", evidence), ("controls", controls)):
             try:
                 info = path.lstat()
@@ -364,6 +405,13 @@ class LifeExperiencePort:
                         "reason": "MEMORY_GOVERNANCE_PROBE_FAILED",
                         "detail": "%s: %s" % (type(exc).__name__, exc)})
             return out
+        if self.forget_gate is not None:
+            gate_state = dict(self.forget_gate.state())
+            out["forget_gate_healthy"] = bool(gate_state.get("healthy"))
+            if not gate_state.get("healthy"):
+                return self._not_ready(
+                    out, str(gate_state.get("reason") or "FORGET_GATE_UNHEALTHY"),
+                    gate_state.get("detail"))
         out["governance_healthy"] = bool(getattr(projection, "healthy", False))
         out["controls"] = int(getattr(projection, "controls", 0) or 0)
         out["authority_operations"] = getattr(projection, "authority_operations", None) \
@@ -401,11 +449,13 @@ class LifeExperiencePort:
         want = self.limit if limit is None else max(0, int(limit))
         if want == 0:
             return []
+        self._recovery_check("search")
         readiness = self.readiness()
         if not readiness.get("recall_ready"):
             raise MemoryReadUnavailable(str(readiness.get("reason") or "MEMORY_BINDING_UNUSABLE"),
                                         readiness.get("detail"))
         rows = self._select_rows(_query_terms(query), want=want, since=since)
+        rows = [row for row in rows if not int(row.get("payload_erased") or 0)]
         records = [self._to_record(row) for row in rows]
         if not records:
             return []
@@ -413,6 +463,8 @@ class LifeExperiencePort:
         if not getattr(projection, "healthy", False):
             raise MemoryReadUnavailable("MEMORY_CONTROLS_UNHEALTHY")
         kept, _corrections = projection.recalls(records)
+        if self.forget_gate is not None:
+            kept = self.forget_gate.filter_records(kept)
         return [self._trim(record) for record in kept]
 
     def read(self, experience_id: str) -> Optional[LifeExperienceRecord]:
@@ -422,6 +474,7 @@ class LifeExperiencePort:
         The three are deliberately indistinguishable so that a governance decision cannot be
         probed, and a stale body is never returned for any of them.
         """
+        self._recovery_check("read")
         key = str(experience_id or "").strip()
         if not key:
             raise ValueError("experience_id is required")
@@ -438,11 +491,17 @@ class LifeExperiencePort:
             connection.close()
         if row is None:
             return None
-        record = self._to_record(self._as_dict(row))
+        data = self._as_dict(row)
+        if int(data.get("payload_erased") or 0):
+            # An erased row keeps its identity but has no payable body: it is not recallable.
+            return None
+        record = self._to_record(data)
         projection = self._projection()
         if not getattr(projection, "healthy", False):
             raise MemoryReadUnavailable("MEMORY_CONTROLS_UNHEALTHY")
         kept, _corrections = projection.recalls([record])
+        if self.forget_gate is not None:
+            kept = self.forget_gate.filter_records(kept)
         return self._trim(kept[0]) if kept else None
 
     def _select_rows(self, terms: list[str], *, want: int,

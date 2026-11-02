@@ -1128,6 +1128,7 @@ class PrivateProjectService:
         content: str,
         operation_key: Optional[str] = None,
         proposal_id: Optional[str] = None,
+        source_refs: Iterable[Any] = (),
     ) -> dict[str, Any]:
         """Create one project and commit its first version, as one owner command.
 
@@ -1142,13 +1143,14 @@ class PrivateProjectService:
         key = _operation_key(operation_key, required=False) or project_operation_key(
             "create", self.subject_id, self.workspace_id, clean_title, clean_content)
         try:
-            outcome = self.port.create_artifact(
-                workspace_id=self.workspace_id,
-                title=clean_title,
-                content=clean_content,
-                grant_id=self.grant_id,
-                operation_key=key,
-            )
+            call = dict(workspace_id=self.workspace_id, title=clean_title, content=clean_content,
+                        grant_id=self.grant_id, operation_key=key)
+            refs = [ref for ref in (source_refs or ()) if ref]
+            try:
+                outcome = self.port.create_artifact(
+                    **call, source_refs=refs) if refs else self.port.create_artifact(**call)
+            except TypeError:
+                outcome = self.port.create_artifact(**call)
         except (LifeArtifactUnavailable, ArtifactOwnerRefused, LifeArtifactError) as exc:
             answer = self._owner_failure(exc)
             answer["operation_key"] = key
@@ -1376,6 +1378,8 @@ class PrivateProjectService:
         content: str,
         expected_head: Optional[str],
         operation_key: Optional[str] = None,
+        source_refs: Iterable[Any] = (),
+        disclosure_grant_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Commit the next version of one project.
 
@@ -1399,13 +1403,16 @@ class PrivateProjectService:
         key = _operation_key(operation_key, required=False) or project_operation_key(
             "commit", target, head, clean_content)
         try:
-            outcome = self.port.commit_version(
-                artifact_id=target,
-                expected_head=head,
-                content=clean_content,
-                grant_id=self.grant_id,
-                operation_key=key,
-            )
+            call = dict(artifact_id=target, expected_head=head, content=clean_content,
+                        grant_id=self.grant_id, operation_key=key)
+            if disclosure_grant_id:
+                call["disclosure_grant_id"] = str(disclosure_grant_id)
+            refs = [ref for ref in (source_refs or ()) if ref]
+            try:
+                outcome = self.port.commit_version(
+                    **call, source_refs=refs) if refs else self.port.commit_version(**call)
+            except TypeError:
+                outcome = self.port.commit_version(**call)
         except (LifeArtifactUnavailable, ArtifactOwnerRefused, LifeArtifactError) as exc:
             answer = self._owner_failure(exc)
             answer.update({"operation_key": key, "artifact_id": target})

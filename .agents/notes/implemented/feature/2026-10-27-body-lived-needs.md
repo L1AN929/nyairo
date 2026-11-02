@@ -109,3 +109,30 @@ Status: implemented
 - **升级触发条件**：若需要“吃半份/多口”或真实份量，应先做份量/支付 owner，
   不应把 `lived_need_effects` 扩成库存；若要把需求接入更多动作，应继续由 World
   声明 + Body owner 执行，不在 Life 层直接改档位。
+- **手机路由补漏（2026-11-01）**：`TOILET {facility_id}` 早已由 World 的
+  `PhoneWorld.VERBS` / `PARAM_SPEC` 声明，但手机侧两层白名单
+  （`phone_service.WORLD_ACTIONS`、`phone_server.WORLD_ACTION_FIELDS`）没有列出它，
+  `POST /api/phone/world/actions` 因此在转给 owner 之前就以 `UNKNOWN_WORLD_ACTION`
+  拒绝。本次只把既有动词与它唯一的 `facility_id` 补进这两层；设施是否存在/在当前
+  地点/营业、声明效果、一次性票与 CAS 仍全部由 World/Body owner 判定，手机不新增
+  生理规则、默认 gate 或强制行为。
+- **手机路由验证边界**：`tests/test_room_living_api.py` 用桩 owner 证明手机精确转发
+  `facility_id`、拒绝缺参/坏参/身份与效果字段、以及 owner 拒绝原样透传，**不是**
+  World 物理效果或设施声明的验收；那条真链仍由 `tests/test_body_lived_needs.py` 与
+  `body_lived_needs_demo.py` 覆盖。
+- **门面归一化补漏（2026-11-01）**：同一漏洞还有最里一层——`PhoneWorld._normalize_params`
+  没有 `TOILET` 分支，`PARAM_SPEC` 已要求 `facility_id`，但归一化返回 `params={}`，
+  owner 只能以缺参拒绝。本次按既有 `PARAM_SPEC` 补上该分支（仅 `_bounded` 的
+  strip/长度上限，不折叠大小写、不加前缀），设施是否存在、是否在当前地点、是否营业、
+  声明效果与一次性票/CAS 仍全部由 World/Body owner 判定；词表、schema、gate 与身体
+  规则零变化。
+- **门面验证边界（2026-11-01）**：`tests/test_toilet_phone_chain.py` 复用
+  `PhoneWorldBase` 的真实新根（真 `WorldBodyService`/gateway socket/Resolver/账本/
+  票注册表）与夹具显式声明，验证：成功动作的账本引用与已消费票的 args digest 都带
+  精确 `facility_id`、Body 档位真实降至 `none`；缺参在门面内就拒绝（零票/零账本）、
+  未声明与异地声明的拒绝来自 owner（`NOT_DECLARED` / `NOT_HERE`）、Body 无需求档位时
+  暴露门拒绝（`TOILET_NOT_NEEDED`，零账本）、本地 owner 绑定关闭时拒写且不伪造回执。
+  初始需求值是夹具显式合成值，不读过去经历；
+  这不是自然模型采用、G1 或 24h。`scripts/phone_route_release_fixture.py --real-world`
+  是同一真实新根的本地 HTTP 预览（默认 stub 模式不变），只起本进程自有服务，
+  不打印 CSRF 或能力/正文。

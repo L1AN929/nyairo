@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from lifesupply.artifact.store import ManagedArtifactStore
-from lifesupply.governance.authority import GovernanceAuthority, UNKNOWN
+from lifesupply.service.life_supply import claims_share_envelope, parse_share_envelope, parse_share_send_envelope
+from lifesupply.governance.authority import (
+    DISCLOSE_CAPABILITY,
+    DISCLOSURE_AUTHORITY_SCOPE,
+    GovernanceAuthority,
+    UNKNOWN,
+)
 from lifesupply.ports.governance_client import GovernanceSocketPort
 from lifesupply.workspace.store import WorkspaceStore
 from lifesupply.fencing import FenceHeld, StaleWriter, WriterFence
@@ -30,11 +36,33 @@ def _read_peer_uid(sock: socket.socket) -> int | None:
         return None
 
 
+def _is_local_share_delivery(content: Any) -> bool:
+    """Is this text a v1 share envelope in ``LOCAL_DELIVERED`` (or a malformed look-alike)?
+
+    The legacy ``server`` entry hosts the same owners but has no operator-facing disclosure
+    lookup; it therefore refuses such a write instead of letting a delivery bypass the permit
+    check that the Life Supply service entry performs.  It uses the *same* parser as that entry
+    (and the same grammar the Sharing owner accepts) rather than a looser header scan, so a
+    duplicate/malformed header cannot be treated as ordinary text and slip through.
+    """
+    if parse_share_send_envelope(content) is not None:
+        return True
+    return claims_share_envelope(content) and parse_share_envelope(content) is None
+
+
+def _authority_scope_for(capability: str) -> str:
+    if capability == DISCLOSE_CAPABILITY:
+        return DISCLOSURE_AUTHORITY_SCOPE
+    return ("life-supply.workspace.v1"
+            if capability in {"PROVISION_PERSONAL_WORKSPACE", "WRITE_OPEN_INQUIRY"}
+            else "life-supply.artifact.v1")
+
+
 def _reservation_response(port: GovernanceSocketPort, *, grant_id: str,
                           subject: str, capability: str, scope: str,
                           target: str, action_key: str, payload: Any) -> dict[str, Any]:
     result = port.call({"op": "reserve_use", "grant_id": grant_id, "request": {
-        "authority_scope": ("life-supply.workspace.v1" if capability in {"PROVISION_PERSONAL_WORKSPACE", "WRITE_OPEN_INQUIRY"} else "life-supply.artifact.v1"),
+        "authority_scope": _authority_scope_for(capability),
         "subject": subject, "capability": capability, "scope": scope,
         "target": target, "action_key": action_key, "payload": payload,
     }})
@@ -231,7 +259,7 @@ class Api:
             request = dict(req.get("request") or {})
             request["actor_uid"] = peer_uid  # overwrite, never trust a UID supplied in JSON
             supplied_scope = request.pop("authority_scope", None)
-            expected_scope = "life-supply.workspace.v1" if request.get("capability") in {"PROVISION_PERSONAL_WORKSPACE", "WRITE_OPEN_INQUIRY"} else "life-supply.artifact.v1"
+            expected_scope = _authority_scope_for(str(request.get("capability") or ""))
             if supplied_scope is not None and supplied_scope != expected_scope:
                 return {"status": "DENY", "detail": "authority scope mismatch"}
             request["authority_scope"] = expected_scope
@@ -450,6 +478,15 @@ class Api:
                     "expected_revision": int(body.get("expected_revision", -1))}
             else:
                 return {"status": "DENY", "detail": "unknown artifact operation"}
+            if op in {"create_artifact", "commit_markdown"} and _is_local_share_delivery(
+                    str(body.get("content") or "")):
+                # Fail closed here rather than deliver without the disclosure admission that the
+                # Life Supply service entry performs.  This entry has no operator lookup port, so
+                # it neither admits a delivery nor lets a malformed look-alike through as text.
+                return {"status": "BLOCKED",
+                        "reason": "DISCLOSURE_ADMISSION_UNAVAILABLE",
+                        "detail": "this entry does not check disclosure permits; use the Life "
+                                  "Supply service entry for a local share delivery"}
             reservation = _reservation_response(port, grant_id=grant_id, subject=subject,
                 capability="COMMIT_MANAGED_ARTIFACT", scope="artifact:personal",
                 target=f"workspace:{workspace['workspace_id']}", action_key=key,

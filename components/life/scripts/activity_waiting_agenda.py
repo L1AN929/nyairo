@@ -70,6 +70,7 @@ from activity_continuity import (
     OPEN_ACTIVITY_STATUSES,
     PRODUCTION_CUTOVER_ENV,
     STATUS_ACTIVE,
+    STATUS_BLOCKED,
     STATUS_PAUSED,
     STATUS_WAITING,
     TERMINAL_ACTIVITY_STATUSES,
@@ -162,6 +163,12 @@ ALL_CONDITION_STATUSES = OPEN_CONDITION_STATUSES + TERMINAL_CONDITION_STATUSES
 #: ``parameters`` mapping -- this is not a new condition kind, field, store or eligibility path.
 PARAM_PAUSE_BOUND = "pause_bound"
 
+#: 2026-10-28: the same aggregate, evaluator and eligibility builder, bound to a BLOCKED host.
+#: BLOCKED is non-terminal ("cannot advance under the current conditions"), so the condition is
+#: the only door back: the owner satisfies it, emits one OPEN eligibility, and a fresh Decision
+#: must still choose RESUME.  No timer and no automatic recovery is introduced.
+PARAM_BLOCK_BOUND = "block_bound"
+
 
 def _condition_field(condition: Any, name: str, default: Any = None) -> Any:
     """Read one field from either a ``ResumeCondition`` or its stored mapping."""
@@ -183,13 +190,21 @@ def is_pause_bound_condition(condition: Any) -> bool:
     return bool(isinstance(parameters, Mapping) and parameters.get(PARAM_PAUSE_BOUND) is True)
 
 
+def is_block_bound_condition(condition: Any) -> bool:
+    """Is this condition bound to a BLOCKED Activity by the S09 outcome owner?"""
+
+    parameters = _condition_field(condition, "parameters")
+    return bool(isinstance(parameters, Mapping) and parameters.get(PARAM_BLOCK_BOUND) is True)
+
+
 def condition_host_is_live(condition: Any, activity: Any) -> bool:
     """Is this condition's bound Activity still the host its own binding named?
 
     * a WAITING condition is live only while the Activity is WAITING at the bound revision;
     * a PAUSE-bound condition is live only while the Activity is PAUSED at the bound revision
       (v0.4 background pause: the PAUSE itself released the foreground slot but does not change
-      the Activity again until RESUME).
+      the Activity again until RESUME);
+    * a BLOCK-bound condition is live only while the Activity is BLOCKED at the bound revision.
 
     ``False`` for a missing Activity, a different revision and any other status.  A terminal
     Activity is handled separately by the callers (cancelled, not merely stale).
@@ -201,7 +216,12 @@ def condition_host_is_live(condition: Any, activity: Any) -> bool:
         _condition_field(condition, "activity_revision_at_bind", -2)
     ):
         return False
-    expected = STATUS_PAUSED if is_pause_bound_condition(condition) else STATUS_WAITING
+    if is_pause_bound_condition(condition):
+        expected = STATUS_PAUSED
+    elif is_block_bound_condition(condition):
+        expected = STATUS_BLOCKED
+    else:
+        expected = STATUS_WAITING
     return str(activity.get("status") or "") == expected
 
 # Section 7 & 34: Bounded Condition Kinds
@@ -2210,7 +2230,7 @@ class WaitingCoordinator:
                 # (SRC-0719:10-13: PAUSED becomes READY again when its own recovery condition
                 # holds). LR-2 ``resume_activity`` already accepts PAUSED and WAITING, so the
                 # revision/episode checks below -- not the status alone -- decide staleness.
-                act.get("status") not in (STATUS_WAITING, STATUS_PAUSED)
+                act.get("status") not in (STATUS_WAITING, STATUS_PAUSED, STATUS_BLOCKED)
                 or int(act.get("revision", 0)) != int(edict.get("activity_revision", -1))
                 or (
                     act.get("waiting_episode_id") is not None
@@ -2502,27 +2522,112 @@ class WaitingCoordinator:
         adoption_ref: Optional[str] = None,
         fault_hook: Optional[Callable[[str], None]] = None,
     ) -> dict[str, Any]:
-        """Bind one explicit ResumeCondition to an already-PAUSED Activity -- no transition.
+        return self._bind_suspended_condition(
+            activity_id=activity_id,
+            expected_revision=expected_revision,
+            waiting_on_ref=waiting_on_ref,
+            condition_kind=condition_kind,
+            parameters=parameters,
+            source_refs=source_refs,
+            idempotency_key=idempotency_key,
+            causal_parent_refs=causal_parent_refs,
+            condition_expires_at=condition_expires_at,
+            occurred_at=occurred_at,
+            observed_at=observed_at,
+            decision_ref=decision_ref,
+            adoption_ref=adoption_ref,
+            fault_hook=fault_hook,
+            _host_status=STATUS_PAUSED,
+            _param_key=PARAM_PAUSE_BOUND,
+            _label="pause",
+            _require_agency_refs=True,
+        )
 
-        This is the *only* way a PAUSED Activity gets a resume condition, and it deliberately does
-        not reuse ``enter_waiting_with_condition``: a conditional PAUSE stays PAUSED (v0.4
-        background pause: the PAUSE itself has already released the foreground slot, and this
+    def bind_blocked_condition(
+        self,
+        *,
+        activity_id: str,
+        expected_revision: int,
+        waiting_on_ref: Optional[str],
+        condition_kind: str,
+        parameters: Mapping[str, Any],
+        source_refs: Sequence[str],
+        idempotency_key: str,
+        causal_parent_refs: Optional[Sequence[str]] = None,
+        condition_expires_at: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        observed_at: Optional[str] = None,
+        fault_hook: Optional[Callable[[str], None]] = None,
+    ) -> dict[str, Any]:
+        """Bind one explicit ResumeCondition to an already-BLOCKED Activity -- no transition.
+
+        Same aggregate, evaluator, store and eligibility builder as the PAUSE binding.  The only
+        difference is the host-status predicate marker: only the owner's own explicit condition
+        can make BLOCKED recoverable, and satisfying it still requires a fresh Decision RESUME.
+        There is no Decision/Adoption here because BLOCKED is a suspension the owner records from
+        its own basis, not a model choice.
+        """
+
+        return self._bind_suspended_condition(
+            activity_id=activity_id,
+            expected_revision=expected_revision,
+            waiting_on_ref=waiting_on_ref,
+            condition_kind=condition_kind,
+            parameters=parameters,
+            source_refs=source_refs,
+            idempotency_key=idempotency_key,
+            causal_parent_refs=causal_parent_refs,
+            condition_expires_at=condition_expires_at,
+            occurred_at=occurred_at,
+            observed_at=observed_at,
+            fault_hook=fault_hook,
+            _host_status=STATUS_BLOCKED,
+            _param_key=PARAM_BLOCK_BOUND,
+            _label="block",
+            _require_agency_refs=False,
+        )
+
+    def _bind_suspended_condition(
+        self,
+        *,
+        activity_id: str,
+        expected_revision: int,
+        waiting_on_ref: Optional[str],
+        condition_kind: str,
+        parameters: Mapping[str, Any],
+        source_refs: Sequence[str],
+        idempotency_key: str,
+        causal_parent_refs: Optional[Sequence[str]] = None,
+        condition_expires_at: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        observed_at: Optional[str] = None,
+        decision_ref: Optional[str] = None,
+        adoption_ref: Optional[str] = None,
+        fault_hook: Optional[Callable[[str], None]] = None,
+        _host_status: str = STATUS_PAUSED,
+        _param_key: str = PARAM_PAUSE_BOUND,
+        _label: str = "pause",
+        _require_agency_refs: bool = True,
+    ) -> dict[str, Any]:
+        """Bind one explicit ResumeCondition to an already-suspended Activity -- no transition.
+
+        Shared implementation for the PAUSE binding and the 2026-10-28 BLOCKED binding.  It
+        deliberately does not reuse ``enter_waiting_with_condition``: a conditional PAUSE or
+        BLOCK stays suspended (the transition already released the foreground slot, and this
         binding changes no Activity field), so the Activity owner is not asked to change status
-        again.  The owner's own
-        CAS is the ``expected_revision`` read here: the caller has just adopted the PAUSE and the
-        condition is bound at the revision that PAUSE really produced.
+        again.  The owner's own CAS is the ``expected_revision`` read here.
 
-        Every other authority is the existing one: the same ``ResumeCondition`` aggregate, the same
-        condition store (with its lease/capability), the same evaluator, and the same eligibility
-        builder.  The only new bit is the ``PARAM_PAUSE_BOUND`` marker, which lets maintenance and
-        reconciliation apply ``PAUSED`` instead of ``WAITING`` as the host status.  Nothing here
-        resumes, emits an eligibility or schedules a timer: satisfying the condition is still a
-        later event, and coming back is still a later Decision.
+        Every other authority is the existing one: the same ``ResumeCondition`` aggregate, the
+        same condition store (with its lease/capability), the same evaluator, and the same
+        eligibility builder.  The only difference is the host-status marker, which lets
+        maintenance and reconciliation apply the right status instead of ``WAITING``.  Nothing
+        here resumes, emits an eligibility or schedules a timer: satisfying the condition is
+        still a later event, and coming back is still a later Decision.
         """
 
         now_iso = _require_iso(occurred_at, "occurred_at") if occurred_at else _iso(now())
         obs_iso = _require_iso(observed_at, "observed_at") if observed_at else now_iso
-        if not (decision_ref and adoption_ref):
+        if _require_agency_refs and not (decision_ref and adoption_ref):
             raise WriterCapabilityError(
                 "a PAUSE condition requires both a Decision and an Adoption authorization"
             )
@@ -2531,26 +2636,28 @@ class WaitingCoordinator:
         act = (can_state.get("activities") or {}).get(activity_id)
         if act is None:
             raise StaleResumeConditionError(f"activity_id={activity_id!r} not found")
-        if str(act.get("status") or "") != STATUS_PAUSED:
+        if str(act.get("status") or "") != _host_status:
             raise WaitingAgendaError(
-                "PAUSE_CONDITION_REQUIRES_PAUSED: a pause condition can only be bound to an "
-                "Activity the owner already reports as PAUSED")
+                "%s_CONDITION_REQUIRES_%s: a %s condition can only be bound to an Activity the "
+                "owner already reports as %s"
+                % (_label.upper(), _host_status, _label, _host_status))
         if int(act.get("revision", -1)) != int(expected_revision):
             raise StaleResumeConditionError(
                 f"activity revision={act.get('revision')} does not match expected_revision="
                 f"{expected_revision}")
 
         # The synthetic waiting episode is this binding's own identity.  It is not an LR-2
-        # ``waiting_episode_id`` (the PAUSED Activity has none), it never leaves LR-4's condition /
-        # eligibility records, and it makes replacement of an older pause binding detectable.
-        ep_seed = "wep:pause:%s:%s:%s" % (activity_id, expected_revision, idempotency_key)
+        # ``waiting_episode_id`` (the suspended Activity has none), it never leaves LR-4's
+        # condition / eligibility records, and it makes replacement of an older binding
+        # detectable.
+        ep_seed = "wep:%s:%s:%s:%s" % (_label, activity_id, expected_revision, idempotency_key)
         waiting_episode_id = "wep:%s" % sha256_hex(ep_seed)[:16]
-        cond_seed = "rcond:pause:%s:%s:%s:%s" % (
-            activity_id, waiting_episode_id, condition_kind, idempotency_key)
+        cond_seed = "rcond:%s:%s:%s:%s:%s" % (
+            _label, activity_id, waiting_episode_id, condition_kind, idempotency_key)
         condition_id = "rcond:%s" % sha256_hex(cond_seed)[:16]
 
         bound_parameters = dict(parameters)
-        bound_parameters[PARAM_PAUSE_BOUND] = True
+        bound_parameters[_param_key] = True
         preview_condition = ResumeCondition(
             condition_id=condition_id,
             schema_version=SCHEMA_RESUME_CONDITION,
@@ -2568,7 +2675,7 @@ class WaitingCoordinator:
             created_at=now_iso,
             observed_at=obs_iso,
             expires_at=condition_expires_at,
-            idempotency_key=f"cond_pause:{idempotency_key}",
+            idempotency_key=f"cond_{_label}:{idempotency_key}",
         )
 
         cond_state = self.condition_store.load_state()
@@ -2595,7 +2702,7 @@ class WaitingCoordinator:
                 sup = copy.deepcopy(dict(existing_cdict))
                 sup["status"] = COND_STATUS_SUPERSEDED
                 sup["cancelled_at"] = now_iso
-                sup["resolution_reason_code"] = "SUPERSEDED_BY_NEW_PAUSE_CONDITION"
+                sup["resolution_reason_code"] = "SUPERSEDED_BY_NEW_%s_CONDITION" % _label.upper()
                 records_to_commit.append(sup)
         records_to_commit.append(preview_condition.to_dict())
 
@@ -2605,15 +2712,15 @@ class WaitingCoordinator:
             lease=self.lease,
             capability=self.condition_capability,
             records=records_to_commit,
-            action="BIND_PAUSE_RESUME_CONDITION",
+            action="BIND_%s_RESUME_CONDITION" % _label.upper(),
             idempotency_key=preview_condition.idempotency_key,
             fault_hook=fault_hook,
         )
         if fault_hook is not None:
             fault_hook("after_condition_commit")
 
-        # A PAUSE that replaces an older episode cannot leave an older OPEN eligibility behind:
-        # that would let a RESUME consume a condition the new pause was not bound to.
+        # A suspension that replaces an older episode cannot leave an older OPEN eligibility
+        # behind: that would let a RESUME consume a condition the new binding was not bound to.
         elig_state = self.eligibility_store.load_state()
         sup_eligs: list[dict[str, Any]] = []
         for eid, edict in (elig_state.get("eligibilities") or {}).items():
@@ -2624,15 +2731,15 @@ class WaitingCoordinator:
             ):
                 sup_e = copy.deepcopy(dict(edict))
                 sup_e["status"] = ELIG_STATUS_SUPERSEDED
-                sup_e["resolution_reason_code"] = "SUPERSEDED_BY_NEW_PAUSE_CONDITION"
+                sup_e["resolution_reason_code"] = "SUPERSEDED_BY_NEW_%s_CONDITION" % _label.upper()
                 sup_eligs.append(sup_e)
         if sup_eligs:
             self.eligibility_store.commit_records(
                 lease=self.lease,
                 capability=self.eligibility_capability,
                 records=sup_eligs,
-                action="SUPERSEDE_PRIOR_ELIGIBILITIES_ON_PAUSE_CONDITION",
-                idempotency_key="elig_pause_sup:%s" % idempotency_key,
+                action="SUPERSEDE_PRIOR_ELIGIBILITIES_ON_%s_CONDITION" % _label.upper(),
+                idempotency_key="elig_%s_sup:%s" % (_label, idempotency_key),
             )
 
         return {
@@ -3248,9 +3355,13 @@ class WaitingCoordinator:
         # v0.4 B1: AG-1 already offers RESUME for a PAUSED Activity that carries an OPEN
         # eligibility, and LR-2 ``resume_activity`` accepts both PAUSED and WAITING.  Narrowing
         # this entry to WAITING alone would refuse an option the legal set already offered.
-        if act is None or act.get("status") not in (STATUS_WAITING, STATUS_PAUSED):
+        # 2026-10-28: BLOCKED is the same case -- its OPEN eligibility is the only recovery and a
+        # fresh Decision still has to choose RESUME.
+        if act is None or act.get("status") not in (
+            STATUS_WAITING, STATUS_PAUSED, STATUS_BLOCKED,
+        ):
             raise EligibilityNotOpenError(
-                f"target activity {elig.activity_id!r} is not in WAITING or PAUSED status"
+                f"target activity {elig.activity_id!r} is not in WAITING, PAUSED or BLOCKED status"
             )
         if int(act.get("revision", -1)) != elig.activity_revision:
             raise StaleResumeConditionError(

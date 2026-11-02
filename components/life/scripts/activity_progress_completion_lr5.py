@@ -1938,6 +1938,15 @@ class ActivityProgressPolicyRegistry:
         target_refs = set(binding.get("target_refs") or [])
         corr_ids = set(binding.get("correlation_ids") or [])
 
+        # Sections 38/39/98: a SETTLED_RESULT_CORRECTION_EVENT is the successor form of a
+        # settled result for the very same Action.  A binding that admits settled results
+        # therefore admits their corrections too; otherwise a real AR-1 correction is dropped
+        # as SOURCE_KIND_NOT_ALLOWED_BY_BINDING before the terminal/conflict handler ever sees
+        # it.  This only widens the *source-kind* alias -- targets, authority domains and
+        # correlation ids are still enforced exactly as before.
+        if SOURCE_KIND_SETTLED_EVENT in allowed_kinds:
+            allowed_kinds.add(SOURCE_KIND_CORRECTION_EVENT)
+
         if evidence.source_kind not in allowed_kinds:
             return False, "SOURCE_KIND_NOT_ALLOWED_BY_BINDING"
         if evidence.authority_domain not in allowed_auths:
@@ -2506,6 +2515,23 @@ class ActivityProgressReadService:
         state = self.progress_store.load_state(_mutable=True)
         return copy.deepcopy(state["checkpoint_updates_by_activity"].get(activity_id, []))
 
+    def list_consumed_settlement_refs(self, activity_id: str) -> list[str]:
+        """Read-only: AR-1 settlement refs this Activity's progress actually consumed.
+
+        A settlement that produced no checkpoint change still leaves a consumed-evidence
+        record; this exposes that binding without changing any progress/completion rule.
+        """
+        state = self.progress_store.load_state(_mutable=True)
+        refs: list[str] = []
+        for rec in state["consumed_evidences_by_id"].values():
+            if str(rec.get("bound_activity_id") or "") != str(activity_id):
+                continue
+            evidence = rec.get("evidence") or {}
+            ref = evidence.get("settlement_ref")
+            if ref and str(ref) not in refs:
+                refs.append(str(ref))
+        return refs
+
     def list_completion_eligibilities(self, *, activity_id: Optional[str] = None) -> list[dict[str, Any]]:
         state = self.progress_store.load_state(_mutable=True)
         items = list(state["completion_eligibilities_by_id"].values())
@@ -2775,6 +2801,45 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
             raise TypeError("LR-5 requires an ActivityConsequencePort")
         self.progress_consequence_port = port
 
+    def _authoritative_settled_event_rejection(self, event: Mapping[str, Any]) -> Optional[str]:
+        """Cross-domain source identity check for an AR-1 settled/correction event.
+
+        The consumer must verify the notification against the AR-1 owner's own stored event
+        and settlement record instead of trusting the caller's ``action_id``/``activity_ref``
+        self-report (design VIII.13 Q44).  ``receipt_id`` references an action; a receipt or a
+        notification for another Action/Activity must never become this Activity's progress.
+
+        Returns a reason code when the event is not authoritative for its claimed identity, or
+        ``None`` when the attached read port cannot answer (no settlement authority wired).
+        """
+        if self.settlement_read is None:
+            return None
+        event_id = str(event.get("event_id") or "")
+        settlement_ref = str(event.get("settlement_ref") or "")
+        action_id = str(event.get("action_id") or "")
+        event_getter = getattr(self.settlement_read, "get_outbox_event", None)
+        if callable(event_getter):
+            stored_ev = event_getter(event_id)
+            if not stored_ev:
+                return "SETTLEMENT_EVENT_NOT_FOUND_IN_AUTHORITY"
+            if str(stored_ev.get("action_id") or "") != action_id:
+                return "SETTLEMENT_ACTION_MISMATCH"
+            if str(stored_ev.get("settlement_ref") or "") != settlement_ref:
+                return "SETTLEMENT_REF_MISMATCH"
+            declared_activity = event.get("activity_ref")
+            stored_activity = stored_ev.get("activity_ref")
+            if declared_activity is not None or stored_activity is not None:
+                if str(declared_activity or "") != str(stored_activity or ""):
+                    return "SETTLEMENT_ACTIVITY_MISMATCH"
+        settlement_getter = getattr(self.settlement_read, "get_settlement_by_id", None)
+        if callable(settlement_getter):
+            record = settlement_getter(settlement_ref)
+            if not record:
+                return "SETTLEMENT_NOT_FOUND_IN_AUTHORITY"
+            if str(record.get("action_id") or "") != action_id:
+                return "SETTLEMENT_ACTION_MISMATCH"
+        return None
+
     def ingest_progress_evidence(
         self,
         evidence_input: LifeProgressEvidence | Mapping[str, Any] | str,
@@ -2790,6 +2855,7 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
         if fault_hook is not None:
             fault_hook("before_evidence_consume")
 
+        authority_rejection: Optional[str] = None
         # 1. Validate & normalize input (reject free-form strings, LLM narration, arbitrary %, raw receipts)
         if isinstance(evidence_input, str):
             self.reject_untrusted_input(evidence_input)
@@ -2814,6 +2880,7 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
                     settlement_record=s_rec,
                     observed_facts_override=evidence_input.get("observed_facts_override"),
                 )
+                authority_rejection = self._authoritative_settled_event_rejection(evidence_input)
             elif evidence_input.get("schema_version") == "chiyo.action_reality.receipt.v1" or "receipt_id" in evidence_input:
                 # Section 6 & 97: Do NOT bypass AR-1 Settlement to read raw ActionReceipt!
                 raise UntrustedProgressEvidenceError(
@@ -2879,6 +2946,48 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
                 "checkpoint_ref": act_now["checkpoint_ref"] if act_now else None,
                 "completion_status": ps["completion_status"] if ps else EVAL_NOT_COMPLETE,
                 "activity_status": act_now["status"] if act_now else None,
+                "completed_transition": False,
+            }
+
+        # 2b. Cross-domain source identity (F-167): a settled event whose action/activity/refs
+        # do not match the AR-1 owner's own stored event and receipt is not this Activity's
+        # progress.  Record the refusal for audit but never bind it, advance a checkpoint or
+        # satisfy a completion contract.  It is deliberately NOT written to the idempotency
+        # index, so a later *authoritative* delivery of the same event id is still consumable.
+        if authority_rejection is not None:
+            rejection_entry = {
+                "progress_evidence_id": evidence.progress_evidence_id,
+                "source_ref": evidence.source_ref,
+                "target_ref": evidence.target_ref,
+                "reason": authority_rejection,
+                "recorded_at": evidence.recorded_at,
+            }
+            already_logged = any(
+                entry.get("source_ref") == rejection_entry["source_ref"]
+                and entry.get("reason") == authority_rejection
+                for entry in state["unbound_evidence_log"]
+            )
+            if not already_logged:
+                state["unbound_evidence_log"].append(rejection_entry)
+                self.progress_store.commit_mutation(
+                    lease=self.lease,
+                    capability=self.progress_capability,
+                    next_state=state,
+                    journal_payload={
+                        "event_type": "REJECTED_UNTRUSTED_SETTLED_EVENT",
+                        "progress_evidence_id": evidence.progress_evidence_id,
+                        "source_ref": evidence.source_ref,
+                        "reason": authority_rejection,
+                    },
+                )
+            return {
+                "idempotent_replay": False,
+                "disposition": authority_rejection,
+                "activity_id": None,
+                "progress_state": PROGRESS_STATE_UNKNOWN,
+                "checkpoint_ref": None,
+                "completion_status": EVAL_NOT_COMPLETE,
+                "activity_status": None,
                 "completed_transition": False,
             }
 
@@ -3079,6 +3188,11 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
             "progress_state": prog_state_val,
             "checkpoint_ref": new_chk or prior_chk,
             "completion_status": comp_eval_status,
+            # Pure read projection of the evaluation that just ran: the reason and the
+            # evidence it looked at.  No new state, no new rule -- a caller that only sees
+            # ``completion_status`` cannot tell "not yet" from "blocked by a conflict".
+            "completion_reason": comp_eval.get("reason"),
+            "completion_evidence_refs": list(comp_eval.get("satisfying_evidence_refs") or []),
             "provable_percentage": evidence.provable_percentage,
             "re_evaluated_from_stale_hint": re_evaluated_from_stale_hint,
         }
@@ -3368,6 +3482,79 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
             "eligibility": copy.deepcopy(elig),
         }
 
+    @staticmethod
+    def _completion_basis_settlement_refs(
+        state: Mapping[str, Any], activity: Mapping[str, Any]
+    ) -> set[str]:
+        """The AR-1 settlement refs behind an Activity's own completion.
+
+        The completion transition names a *canonical evidence ref* (usually an AR-0
+        ``aevid:`` attestation), so the settlement basis is read from the consumed
+        ``ActivityCompletionEligibility`` that actually completed this Activity (its
+        ``settlement_refs`` and any settled evidence it names).  The Activity's own
+        ``completion_evidence_ref`` is used as a secondary source when it is an LR-5
+        progress evidence the store still holds.  An Activity without a readable basis
+        answers an empty set, which callers treat as a named refusal -- never as
+        permission to attach any settlement of the subject.
+        """
+        act_id = str(activity.get("activity_id") or "")
+        basis: set[str] = set()
+
+        def _add(value: Any) -> None:
+            if isinstance(value, str) and value.startswith("rset"):
+                basis.add(value)
+
+        def _add_evidence(ref: Any) -> None:
+            if not isinstance(ref, str) or not ref:
+                return
+            record = (state.get("consumed_evidences_by_id") or {}).get(ref) or {}
+            evidence = record.get("evidence") or {}
+            _add(evidence.get("settlement_ref"))
+            for parent in evidence.get("causal_parent_refs") or ():
+                _add(parent)
+
+        done = (state.get("completed_once_by_activity") or {}).get(act_id) or {}
+        elig_id = done.get("eligibility_id")
+        eligibility = (state.get("completion_eligibilities_by_id") or {}).get(elig_id) \
+            if elig_id else None
+        if isinstance(eligibility, Mapping):
+            for ref in eligibility.get("settlement_refs") or ():
+                _add(ref)
+            for ref in eligibility.get("evidence_refs") or ():
+                _add_evidence(ref)
+        _add_evidence(activity.get("completion_evidence_ref"))
+        return basis
+
+    def _correction_relation_rejection(
+        self,
+        state: Mapping[str, Any],
+        activity: Mapping[str, Any],
+        evidence: LifeProgressEvidence,
+    ) -> Optional[str]:
+        """Name why a correction is not about this Activity's completion, or ``None``.
+
+        The supersession chain is walked through the AR-1 owner's own settlement records
+        (``supersedes_ref``), so a correction of a later correction is still related to the
+        original completion basis.  Without the AR-1 read port only the direct hop and the
+        recorded causal parents are checked; an unprovable relation is refused, never guessed.
+        """
+        basis_refs = self._completion_basis_settlement_refs(state, activity)
+        if not basis_refs:
+            return "COMPLETION_BASIS_UNVERIFIABLE"
+        if any(ref in basis_refs for ref in (evidence.causal_parent_refs or ())):
+            return None
+        seen: set[str] = set()
+        ref: Optional[str] = evidence.supersedes_settlement_ref
+        while ref and ref not in seen and len(seen) < 64:
+            if ref in basis_refs:
+                return None
+            seen.add(ref)
+            if self.settlement_read is None:
+                break
+            record = self.settlement_read.get_settlement_by_id(ref) or {}
+            ref = str(record.get("supersedes_ref") or "") or None
+        return "CORRECTION_TARGETS_UNRELATED_COMPLETION_EVIDENCE"
+
     def _handle_evidence_on_terminal_activity(
         self,
         *,
@@ -3385,6 +3572,56 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
         act_status = str(activity["status"])
         ev_dict = evidence.to_dict()
         ev_dict["activity_id"] = act_id
+
+        # Sections 38/39/98: a correction on a terminal Activity may only speak about the
+        # evidence that Activity was really completed from.  The AR-1 owner already checked
+        # Action/settlement identity; here the *completion relation* is checked against the
+        # Activity's own canonical completion_evidence_ref.  A correction for some other
+        # settlement of the same subject must be refused before any conflict is recorded.
+        if act_status == STATUS_COMPLETED and (
+            evidence.source_kind == SOURCE_KIND_CORRECTION_EVENT
+            or evidence.supersedes_settlement_ref is not None
+        ):
+            relation_reason = self._correction_relation_rejection(state, activity, evidence)
+            if relation_reason is not None:
+                rejection_entry = {
+                    "progress_evidence_id": evidence.progress_evidence_id,
+                    "source_ref": evidence.source_ref,
+                    "target_ref": evidence.target_ref,
+                    "reason": relation_reason,
+                    "recorded_at": evidence.recorded_at,
+                }
+                already_logged = any(
+                    entry.get("source_ref") == rejection_entry["source_ref"]
+                    and entry.get("reason") == relation_reason
+                    for entry in state["unbound_evidence_log"]
+                )
+                if not already_logged:
+                    state["unbound_evidence_log"].append(rejection_entry)
+                    self.progress_store.commit_mutation(
+                        lease=self.lease,
+                        capability=self.progress_capability,
+                        next_state=state,
+                        journal_payload={
+                            "event_type": "REJECTED_UNRELATED_COMPLETION_CORRECTION",
+                            "activity_id": act_id,
+                            "progress_evidence_id": evidence.progress_evidence_id,
+                            "source_ref": evidence.source_ref,
+                            "reason": relation_reason,
+                        },
+                        fault_hook=fault_hook,
+                    )
+                return {
+                    "idempotent_replay": False,
+                    "disposition": relation_reason,
+                    "activity_id": act_id,
+                    "progress_state": PROGRESS_STATE_UNKNOWN,
+                    "checkpoint_ref": activity.get("checkpoint_ref"),
+                    "completion_status": act_status,
+                    "reconciliation": None,
+                    "activity_status": act_status,
+                    "completed_transition": False,
+                }
 
         is_conflicting_correction = False
         if act_status == STATUS_COMPLETED:
@@ -3488,7 +3725,22 @@ class ActivityProgressCoordinator(ResultConsumerProtocol):
         disp_str = res["disposition"]
         if disp_str == "COMPLETION_CONFLICT_RECORDED" or res.get("progress_state") == PROGRESS_STATE_BLOCKED:
             disposition = DISPOSITION_CONFLICT
-        elif disp_str in {"UNBOUND_EVIDENCE", "IRRELEVANT_TARGET_REF", "NO_BINDING_FOR_ACTIVITY", "ACTIVITY_ID_MISMATCH"}:
+        elif disp_str in {
+            "UNBOUND_EVIDENCE",
+            "IRRELEVANT_TARGET_REF",
+            "NO_BINDING_FOR_ACTIVITY",
+            "ACTIVITY_ID_MISMATCH",
+            # F-167: the AR-1 owner does not confirm this event/action/activity identity.
+            "SETTLEMENT_EVENT_NOT_FOUND_IN_AUTHORITY",
+            "SETTLEMENT_NOT_FOUND_IN_AUTHORITY",
+            "SETTLEMENT_ACTION_MISMATCH",
+            "SETTLEMENT_REF_MISMATCH",
+            "SETTLEMENT_ACTIVITY_MISMATCH",
+            # A correction that does not point at the Activity's own completion basis was
+            # refused before any conflict record; it is not this Activity's progress.
+            "COMPLETION_BASIS_UNVERIFIABLE",
+            "CORRECTION_TARGETS_UNRELATED_COMPLETION_EVIDENCE",
+        }:
             disposition = DISPOSITION_IGNORE
         else:
             disposition = DISPOSITION_ACCEPT

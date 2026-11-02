@@ -1,5 +1,7 @@
 # v0.2 B8-7 / E13：全新 profile 的真实安装走通记录、版本口径与发布门禁
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 分支 `v0.2-autonomous-life`，本批起点 `e471241`。本批**只改文档**（`INSTALL.md`、
 `docs/USER_GUIDE.zh-CN.md`、`TESTING.md`、`KNOWN_ISSUES.md`、`README.md` 与本文件），
 没有修改任何运行时代码、没有改安装器、没有创建标签或 Release。
@@ -96,7 +98,7 @@ rc6 更新验收）保持原样。**没有改任何安装器**：网站脚本本
    不会碰到；隔离/多主体实验必须显式知道这一点。
 
 另外，B8-5 记录里"网关从隔离环境不可达"的阻塞**现在不再成立**：本轮从同一环境真实完成了
-2 次 provider 调用（`gemini-3.8-flash-high`，`https://gw.929711.xyz/v1`，探测 `REACHABLE`）。
+2 次 provider 调用（`gemini-3.8-flash-high`，`https://gw.example.invalid/v1`，探测 `REACHABLE`）。
 本轮没有复跑实验 B 的真实模型半边，所以那只说明"可达"，不等于那半边已经跑过。
 
 ## 5. 证据层级与门禁

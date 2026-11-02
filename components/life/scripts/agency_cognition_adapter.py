@@ -164,9 +164,10 @@ bounded present-tense `situation_context`, and it is the *first* thing to read:
 * `situation_context.pause_condition` is the one condition a **PAUSE** may be tied to, and it is
   the same basis the round already offered for WAIT.  `available: true` means: if you choose
   **PAUSE** and copy its `condition_ref` exactly into `reevaluation_hint_ref`, the Activity stays
-  PAUSED, keeps the foreground and keeps its place, and the owner alone decides when that
-  condition holds.  When it holds, an OPEN eligibility is only the right to ask: coming back is a
-  later **RESUME you have to choose yourself**, and choosing NO_ACTION leaves it PAUSED.  An
+  PAUSED, releases the execution slot so another activity may start meanwhile, and keeps its
+  place; the owner alone decides when that condition holds.  When it holds, an OPEN eligibility
+  is only the right to ask: coming back is a later **RESUME you have to choose yourself**, and
+  choosing NO_ACTION leaves it PAUSED.  An
   unconditional PAUSE (no `reevaluation_hint_ref`) is still legal, but it creates no condition
   and can never become a resume candidate.  Never invent a condition ref: with
   `available: false` there is nothing to name, and `why_not` says why.
@@ -197,6 +198,12 @@ bounded present-tense `situation_context`, and it is the *first* thing to read:
   until a condition, and any other answer declines it.  Accepting means the running Activity is
   set down at its own checkpoint and one bounded joint time starts; coming back to the old work
   afterwards is a **new** decision, never automatic, and silence is not an answer.
+* `situation_context.claims` is what she currently has reason to believe: one bounded row per
+  current claim with its predicate, scope, `status` (`SUPPORTED` / `DISPUTED` / `STALE` /
+  `UNKNOWN`), reason, `source_kind` (`OBSERVED` / `REPORTED` / `INFERRED`) and a short value.
+  `DISPUTED` means two sources really disagree and are shown side by side; `STALE` means the
+  revalidation deadline passed; `UNKNOWN` means no qualifying evidence, **not** false.  This is
+  fact/uncertainty context only: it authorizes no action, updates no World and writes no Memory.
 
 This is **one continuous day**, not a task list: she may keep at what she is doing, prepare
 something in passing, go out and come back to the same piece, or end a thing and pick something
@@ -478,7 +485,9 @@ def _bounded_pause_condition(raw: Any) -> dict[str, Any]:
     round already offered for WAIT.  This applies the prompt bound with an explicit whitelist --
     the condition ref, the owning activity, the dependency ref, what would satisfy it and the
     words that say nothing resumes by itself.  It is a reference for the model's answer, never a
-    permission or a Candidate.
+    permission or a Candidate.  ``how`` is one whole sentence about what choosing PAUSE does and
+    costs (including the PAUSED ABANDON cost), so it keeps its own wider bound instead of being
+    cut mid-clause.
     """
 
     if not isinstance(raw, Mapping) or not raw:
@@ -488,7 +497,8 @@ def _bounded_pause_condition(raw: Any) -> dict[str, Any]:
                 "satisfied_by", "how", "not_automatic"):
         value = raw.get(key)
         if value is not None and str(value).strip():
-            out[key] = " ".join(str(value).split())[:240]
+            limit = 680 if key == "how" else 240
+            out[key] = " ".join(str(value).split())[:limit]
     if raw.get("keeps_foreground") is not None:
         out["keeps_foreground"] = bool(raw.get("keeps_foreground"))
     return out
@@ -1323,6 +1333,43 @@ class ProductionAgencyCognitionAdapter:
                     block_out[name] = _text(practice.get(name), 120)
             if block_out:
                 out["practice"] = block_out
+        # S03: bounded current claims -- what she observed, what a source reported, what was
+        # inferred, and whether it is DISPUTED / STALE / UNKNOWN.  Only short values leave the
+        # aggregate; a withheld payload stays withheld.  This is fact/uncertainty context, not a
+        # permission, not World truth and not a Memory write.
+        claims = raw.get("claims")
+        if isinstance(claims, Mapping) and claims.get("available") is not False:
+            claim_rows: list[dict[str, Any]] = []
+            for row in list(claims.get("claims") or [])[:6]:
+                if not isinstance(row, Mapping):
+                    continue
+                value = row.get("value")
+                if isinstance(value, str):
+                    value = value[:60]
+                elif not isinstance(value, (bool, int, float)):
+                    value = None
+                claim_rows.append({
+                    "predicate": str(row.get("predicate") or "")[:40],
+                    "scope": str(row.get("scope") or "")[:60],
+                    "status": str(row.get("status") or "")[:24],
+                    "reason": str(row.get("reason") or "")[:40],
+                    "source_kind": str(row.get("source_kind") or "")[:16],
+                    "value": value,
+                    "observed_at": str(row.get("observed_at") or "")[:40],
+                    "recorded_at": str(row.get("recorded_at") or "")[:40],
+                    "valid_to": str(row.get("valid_to") or "")[:40],
+                    "withheld": bool(row.get("withheld")),
+                })
+            out["claims"] = {
+                "claims": claim_rows,
+                "conflicts": [{"predicate": str(item.get("predicate") or "")[:40],
+                               "scope": str(item.get("scope_id") or "")[:60],
+                               "distinct_answers": int(item.get("distinct_answers") or 0)}
+                              for item in (claims.get("conflicts") or [])[:3]
+                              if isinstance(item, Mapping)],
+                "not_permission": True,
+                "actions_authorized": 0,
+            }
         return out
 
     # -- output budget / strict JSON entry -------------------------------------------

@@ -468,8 +468,12 @@ class LifeOwnerAdapterTest(unittest.TestCase):
         listed = self.service.list_projects()
         self.assertEqual([row["title"] for row in listed["projects"]], ["从疑问长出来的一页"])
         self.assertEqual(listed["counts"]["total"], 1)
-        # A 的 display ref（去掉 ``artifact:`` 前缀的十六进制）服务也认：同一件工件。
-        self.assertEqual(detail["artifact_id"], "artifact:" + artifact_id)
+        # The gateway now hands back the owner's own **wrapped** id verbatim (the ManagedArtifact
+        # owner answers NOT_FOUND for a bare one); the service still normalises the bare display
+        # form back to the same wrapped artifact.
+        self.assertEqual(detail["artifact_id"], artifact_id)
+        bare = artifact_id[len("artifact:"):] if artifact_id.startswith("artifact:") else artifact_id
+        self.assertEqual(self.service.read_project(bare)["artifact_id"], artifact_id)
 
     def test_adapter_refuses_a_foreign_workspace(self) -> None:
         answer = self.owner.create_project(title="别的世界", seed_text="正文",

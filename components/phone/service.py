@@ -12,7 +12,7 @@
 钱包/虚拟店/物品/消耗        ``world_property_economy`` + ``world_body_substrate``
                             + Resolver（全部经 W 的 ``PhoneShopping``）
 实体店/交付/布置/灯         同上一个 owner（``PhoneShopping.store`` / ``store_purchase`` /
-                            世界动词 ``ARRANGE`` / ``TOGGLE_FIXTURE``）；P 只透传
+                            世界动词 ``ARRANGE`` / ``TOGGLE_FIXTURE`` / ``TOILET``）；P 只透传
 操作来源（用户/模型）        ``<root>/phone/operations.jsonl``（只追加的窄日志）
 ==========================  ==================================================
 
@@ -59,11 +59,13 @@ APPS: tuple[str, ...] = ("notes", "diary", "references", "reading", "wallet", "s
 
 #: The World actions a local owner may ask for.  The first five are the frozen v0.4 set
 #: (``docs/engineering/v04-world-body-contract.md`` §3.1); ``ARRANGE`` and ``TOGGLE_FIXTURE`` are
-#: this round's room verbs, exactly as C's ``PhoneWorld.VERBS`` / ``PARAM_SPEC`` name them.
-#: P never renames an action: the owner's own ``actions.verbs``, its parameter table and its
-#: reason codes stay the authority, and P translates none of them.
+#: this round's room verbs, and ``TOILET`` is the optional lived-needs facility verb
+#: (``2026-10-27-body-lived-needs``), exactly as C's ``PhoneWorld.VERBS`` / ``PARAM_SPEC``
+#: name them.  P never renames an action:
+#: the owner's own ``actions.verbs``, its parameter table and its reason codes stay the
+#: authority, and P translates none of them.
 WORLD_ACTIONS: tuple[str, ...] = ("MOVE", "PICK_UP", "PLACE", "POSE", "REST",
-                                  "ARRANGE", "TOGGLE_FIXTURE")
+                                  "ARRANGE", "TOGGLE_FIXTURE", "TOILET")
 
 #: The light switch is an absolute state, never a blind toggle.
 FIXTURE_STATES: frozenset[str] = frozenset({"on", "off"})
@@ -360,6 +362,23 @@ def memo_reading_anchor(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
 # ---------------------------------------------------------------------------------------------
 
 
+def canonical_life_subject(state_root: Path | str) -> str:
+    """The Life subject this state root belongs to, or ``""`` when it is not readable.
+
+    Callers use it to bind the operator-stop credential to the same scope the stop route
+    really acts on.  A missing/broken file yields an empty string -- never a guess.
+    """
+
+    path = Path(state_root) / "canonical_life_state.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("subject_id") or "").strip()
+
+
 def instance_path(root: Path | str) -> Path:
     return Path(root) / INSTANCE_FILENAME
 
@@ -480,6 +499,11 @@ class PhoneService:
         reading: Optional[Any] = None,
         sharing: Optional[Any] = None,
         contact: Optional[Any] = None,
+        #: Injected participant registry (F-140, tests / an outer composition).  ``None`` =
+        #: build the instance's own registry over its Life state root and subject.  It is a
+        #: **read-only** surface here: creation, endpoint binding and event linking are local
+        #: operator CLI acts, never phone HTTP or model actions.
+        participants: Optional[Any] = None,
         #: Injected shared-practice owner (A's ``shared_practice_service``).  ``None`` = build it
         #: here from this instance's own bindings (A's factory, ``actor="user"``).
         shared_practice: Optional[Any] = None,
@@ -488,6 +512,15 @@ class PhoneService:
         #: This is a **port**, never a substitute service: A's shared-practice owner is still
         #: built here, by A's own factory, with ``actor="user"``.
         project_port: Optional[Any] = None,
+        #: 2026-10-28: the live Life runtime's external-stop service when phone and resident
+        #: share one process (the demo).  ``None`` is the normal production case: the phone
+        #: mails the request to the resident's own Life state root instead of writing the
+        #: Activity owner itself -- it holds no lease and must never pretend it did.
+        activity_stop: Optional[Any] = None,
+        #: 2026-10-28: when the caller already knows the Life state root (a same-process
+        #: composition, an isolated demo), bind it explicitly instead of letting the phone
+        #: infer a nested layout it does not have.  ``None`` keeps the existing inference.
+        life_state_root: Optional[Path | str] = None,
     ) -> None:
         self.instance = dict(instance)
         self.root = Path(str(self.instance["root"]))
@@ -523,6 +556,9 @@ class PhoneService:
         #: Injected visit facade (tests / an outer composition).  ``None`` = build it here from
         #: this instance's own Life state root, subject and home (never from a client value).
         self._contact = contact
+        #: F-140 participant identity (A's ``ParticipantRegistry``).  Identity only: no message
+        #: body, no grant, no capability.  Read-only from the phone's side.
+        self._participants = participants
         #: Injected shared-practice owner (A's ``shared_practice_service``).  ``None`` = A has not
         #: published it into this composition: the surface then answers a named
         #: ``SHARED_PRACTICE_UNBOUND`` instead of inventing a second work/chat store.
@@ -530,6 +566,19 @@ class PhoneService:
         self._shared_practice: Any = None
         self._project_port = project_port
         self._shared_practice_error = ""
+        #: 2026-10-28 external stop.  When present it is the *real* runtime service in this
+        #: process; otherwise stop requests go through the Life-state-root mailbox.
+        self._activity_stop = activity_stop
+        self._life_state_root_override = (
+            Path(life_state_root).expanduser() if life_state_root is not None else None)
+
+    def _stop_state_root(self) -> Optional[Path]:
+        """The Life state root this stop route reads: explicit first, inferred otherwise."""
+
+        if self._life_state_root_override is not None:
+            return (self._life_state_root_override
+                    if self._life_state_root_override.is_dir() else None)
+        return self._contact_state_root()
 
     # -- binding -------------------------------------------------------------------------
 
@@ -1541,7 +1590,7 @@ class PhoneService:
         这份文件保留每一条 Activity（终态的也在，只清前台指针），所以「今天做过的」就是
         按每条自己的 ``started_at`` 落在当天的那几条。读不到就返回具名原因 + 空列表，
         绝不把「读不到」报成「没做事」。``status`` 就是结果（ACTIVE/PAUSED/WAITING/
-        COMPLETED/ABANDONED），终态另带 owner 自己的原因码。
+        BLOCKED/COMPLETED/FAILED/ABANDONED），终态与 BLOCKED 另带 owner 自己的原因码。
         """
 
         path = Path(str(state_root)) / CANONICAL_ACTIVITY_FILENAME
@@ -1573,16 +1622,37 @@ class PhoneService:
             started = today_moment(act.get("started_at"))
             if started is None or started.date().isoformat() != day:
                 continue
+            status = str(act.get("status") or "")
+            blocked_reason = act.get("blocked_reason_code")
             rows.append({
                 "ref": str(ref),
                 "title": str(act.get("title") or ""),
                 "kind": str(act.get("activity_kind") or ""),
-                "status": str(act.get("status") or ""),
+                "status": status,
                 "started_at": started.isoformat(timespec="seconds"),
                 "ended_at": today_iso(act.get("ended_at")),
                 "terminal_reason_code": act.get("terminal_reason_code"),
+                # 2026-10-28: FAILED/BLOCKED keep the owner's own reason code and only
+                # structured refs; the private body never enters this projection.
+                "status_reason_code": act.get("terminal_reason_code") or blocked_reason,
+                "blocked_reason_code": blocked_reason,
+                "blocked_on_ref": act.get("blocked_on_ref"),
+                "failure_assessment_ref": act.get("failure_assessment_ref"),
             })
         rows.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("ref") or "")))
+        # Read-only recovery projection: whether an OPEN eligibility / PENDING condition
+        # exists for this Activity, and the one entry the owner facts support.  It never
+        # invents a timer or a resume, and an unreadable store stays visibly unknown.
+        try:
+            from . import own_day_read as _odr
+            facts, recovery_source = _odr.activity_recovery_projection(state_root)
+            for row in rows:
+                row["recovery"] = _odr.recovery_row(row, facts)
+            source["recovery"] = recovery_source
+        except Exception as exc:  # a projection failure must not hide the Activity list
+            source["recovery"] = {"state": "unavailable",
+                                  "reason_code": "RECOVERY_PROJECTION_FAILED",
+                                  "detail": type(exc).__name__}
         source["count"] = len(rows)
         source["activities_without_started_at"] = sum(
             1 for act in activities.values()
@@ -1712,6 +1782,130 @@ class PhoneService:
         return own_day_read.arrangements_envelope(
             state_root=state_root, subject_id=self.subject, clock=clock)
 
+    def decision_review(self, *, decision_id: Optional[str] = None,
+                        limit: int = 10) -> dict[str, Any]:
+        """``GET /api/phone/decisions/review``：决定的有限摘要与 Adoption 状态，纯读。
+
+        只读 AG-1 的不可变 DecisionRecord/处置表与 AG-2 自己的 Adoption 记录。
+        rationale 正文在手机读面始终扣留；实时适用性复核需要正式 AG-2 准入读口，手机侧
+        不复制规则，明确报 NOT_EVALUATED。不启动服务、不调用模型、不写任何状态。
+        """
+
+        from . import own_day_read
+
+        state_root = self._today_state_root()
+        if state_root is None:
+            return unavailable("TODAY_LIFE_STATE_UNBOUND",
+                               note="没有可读的 Life 实例；不把读不到说成没有决定")
+        return own_day_read.decision_review_envelope(
+            state_root=state_root, decision_id=decision_id, limit=limit)
+
+    def day_timeline(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/today/timeline``：她今天有记录的事，按来源合并成只读时间线。
+
+        纯读：只读既有的 Activity 权威、日计划、World execution ledger、日记/相册/钱包
+        facade。它不新建 store、不写日志、不启动服务、不调用模型。`subject_view` 只控制
+        「骨架之外是否给出原入口引用」；正文/caption/图片字节永远不进入聚合读面。
+        """
+
+        from . import day_timeline
+
+        state_root = self._today_state_root()
+        if state_root is not None:
+            clock = today_business_day(state_root)
+        else:
+            moment = datetime.now(tz=TODAY_TZ).replace(microsecond=0)
+            clock = {"source": "system_clock", "reason_code": "LIFE_STATE_UNBOUND",
+                     "logical_at": moment.isoformat(timespec="seconds"),
+                     "day": moment.date().isoformat(), "run_id": None, "domain_id": None}
+        return day_timeline.timeline_envelope(
+            service=self, state_root=state_root, subject_id=self.subject, clock=clock,
+            subject_view=bool(subject_view), world_home=Path(self.world_home),
+            world_clock_injected=self._world_clock is not None)
+
+    # -- S03 current claims ----------------------------------------------------------------
+
+    def _s03_claims(self):
+        """The instance's own claim aggregate.  No graph, no cache, no second store."""
+
+        path = str(self.instance.get("s03_claims_db") or "").strip()
+        if not path:
+            raise PhoneUnavailable("S03_CLAIMS_UNBOUND")
+        from s03_claims import S03ClaimService, S03ClaimsError
+
+        subject = str(self.instance.get("s03_claims_subject") or self.subject)
+        try:
+            return S03ClaimService(path, subject=subject)
+        except S03ClaimsError as exc:
+            raise PhoneUnavailable("S03_CLAIMS_UNAVAILABLE",
+                                   type(exc).__name__) from exc
+
+    def claims(self, *, limit: int = 8) -> dict[str, Any]:
+        """``GET /api/phone/claims``: bounded current claims, observed at the phone clock.
+
+        Pure read: no World read, no model call, no Memory write.  Each row names its
+        scope/context/status/source kind; conflicts stay side by side.
+        """
+
+        try:
+            view = self._s03_claims().current_view(now=self._clock(), limit=limit)
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception:
+            return unavailable("S03_CLAIMS_READ_FAILED")
+        return envelope(True, STATUS_OK, view)
+
+    def claim_slot(self, slot_id: str) -> dict[str, Any]:
+        """``GET /api/phone/claims/<slot>``: one slot's current state and revision chain."""
+
+        from s03_claims import S03ClaimsRefused, S03ClaimsError
+
+        try:
+            service = self._s03_claims()
+            slot = service.slot_view(slot_id=slot_id, now=self._clock())
+            if slot.get("reason_code") == "NO_SLOT":
+                # A slot that was never asked is UNKNOWN, not a refused read: there is
+                # no history to return and inventing one would be a second store.
+                history = {"ok": True, "slot_id": slot_id, "claims": [],
+                           "reason_code": "NO_SLOT", "read_only": True}
+            else:
+                history = service.history(slot_id=slot_id, now=self._clock())
+        except S03ClaimsRefused as exc:
+            return rejected(exc.reason_code)
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except S03ClaimsError:
+            return unavailable("S03_CLAIMS_READ_FAILED")
+        return envelope(True, STATUS_OK, {"slot": slot, "history": history})
+
+    def claim_observe(self, operation_key: str) -> dict[str, Any]:
+        """``POST /api/phone/claims/observations``: one formal World read -> evidence.
+
+        The payload carries only the operation key.  The observation itself is taken
+        here, from the World owner's own snapshot facade; a client cannot submit a
+        "world fact", a role, an authority or an arbitrary world id.
+        """
+
+        from s03_claims import S03ClaimsRefused
+
+        try:
+            service = self._s03_claims()
+            world = self._world_instance()
+            snapshot = world.snapshot()
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception:
+            return unavailable("S03_WORLD_OBSERVATION_UNAVAILABLE")
+        try:
+            result = service.observe_world(snapshot, now=self._clock(),
+                                           operation_key=operation_key)
+        except S03ClaimsRefused as exc:
+            return rejected(exc.reason_code)
+        except Exception:
+            return unavailable("S03_CLAIMS_WRITE_FAILED")
+        status = STATUS_ALREADY if str(result.get("status")) == "ALREADY_APPLIED" \
+            else STATUS_OK
+        return envelope(True, status, result)
 
     def create_derived_project(self, *, title: str, content: str, source_artifact_id: str,
                                source_version_id: str, purpose: str, note: str = "",
@@ -2355,6 +2549,199 @@ class PhoneService:
             },
         }
 
+    # -- external stop (local operator; the Activity owner is still LR-2) -------------------
+
+    def _life_canonical_state(self) -> tuple[Optional[dict[str, Any]], str]:
+        """Read-only view of the Life canonical state file.  Never written, never guessed."""
+
+        state_root = self._stop_state_root()
+        if state_root is None:
+            return None, "LIFE_STATE_ROOT_UNBOUND"
+        path = Path(state_root) / "canonical_life_state.json"
+        if path.is_symlink() or not path.is_file():
+            return None, "CANONICAL_STATE_MISSING"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None, "CANONICAL_STATE_UNREADABLE"
+        if not isinstance(payload, dict) or not isinstance(payload.get("activities"), dict):
+            return None, "CANONICAL_STATE_MALFORMED"
+        return payload, ""
+
+    def _owner_stop_truth(self, activity_id: Any) -> tuple[str, str]:
+        """``(activity status, stop state)`` straight from the canonical owner record."""
+
+        state, _reason = self._life_canonical_state()
+        if state is None:
+            return "", ""
+        act = (state.get("activities") or {}).get(str(activity_id or ""))
+        if not isinstance(act, dict):
+            return "", ""
+        stop = act.get("external_stop") or {}
+        stop_state = str(stop.get("state") or "") if isinstance(stop, dict) else ""
+        return str(act.get("status") or ""), stop_state
+
+    def _queued_stop_request(self, activity_id: str) -> Optional[dict[str, Any]]:
+        """A mailbox request that the owner has not accepted yet, or ``None``.
+
+        The read face must not call this "stopped": it is a *queued* request waiting for the
+        resident.  Only entries that name this Activity and still sit in the mailbox count.
+        """
+
+        import activity_external_stop as aes
+
+        state_root = self._stop_state_root()
+        if state_root is None:
+            return None
+        try:
+            channel = aes.StopControlChannel(state_root)
+            for payload in channel.list_requests():
+                if str(payload.get("activity_id") or "") != str(activity_id or ""):
+                    continue
+                return {
+                    "operation_key": payload.get("operation_key"),
+                    "intent_id": payload.get("intent_id"),
+                    "reason_code": payload.get("reason_code"),
+                    "requested_at": payload.get("requested_at"),
+                    "epoch": payload.get("epoch"),
+                }
+        except Exception:
+            return None
+        return None
+
+    def activity_stop_state(self, activity_id: str) -> dict[str, Any]:
+        """The stop/terminal state of one Activity -- no body, no token, no private text."""
+
+        state, reason = self._life_canonical_state()
+        if state is None:
+            return unavailable(reason)
+        act = (state.get("activities") or {}).get(str(activity_id))
+        if not isinstance(act, dict):
+            return rejected("ACTIVITY_NOT_FOUND", activity_id=str(activity_id))
+        stop = dict(act.get("external_stop") or {})
+        queued = None if stop else self._queued_stop_request(str(activity_id))
+        return envelope(True, "OK", {
+            # ``stop_state`` is the owner's word only.  ``QUEUED`` is a separate, weaker fact:
+            # a request is on disk and no owner has accepted it (never read as PENDING).
+            "stop_state": stop.get("state") or ("QUEUED" if queued else None),
+            "queued_request": queued,
+            "activity_id": act.get("activity_id"),
+            "activity_status": act.get("status"),
+            "activity_revision": act.get("revision"),
+            "intent_id": stop.get("intent_id"),
+            "reason_code": stop.get("reason_code"),
+            "requested_at": stop.get("requested_at"),
+            "accepted_at": stop.get("accepted_at"),
+            "finalized_at": stop.get("finalized_at"),
+            "boundary_mode": stop.get("boundary_mode"),
+            "unresolved_action_refs": list(stop.get("unresolved_action_refs") or []),
+            "terminal_reason_code": act.get("terminal_reason_code"),
+            "checkpoint_ref": act.get("checkpoint_ref"),
+            "last_action_ref": act.get("last_action_ref"),
+            "read_only": True,
+        })
+
+    def request_activity_stop(self, *, activity_id: Any, expected_revision: Any,
+                              operation_key: Any, reason_code: Any,
+                              epoch: Optional[str],
+                              stop_credential: Optional[Any] = None) -> dict[str, Any]:
+        """One local-operator stop request.  Authentication already happened in the handler.
+
+        With a live runtime in this process the owner answers directly.  Otherwise the request
+        is written to the Life state root mailbox *signed with this serve's credential* and the
+        answer is an explicit ``PENDING`` that names ``RUNTIME_MAILBOXED`` -- never a fabricated
+        CANCELLED.  Without a credential nothing is written: the mailbox is not authority.
+        """
+
+        import activity_external_stop as aes
+
+        if stop_credential is None:
+            return unavailable("OPERATOR_STOP_UNAVAILABLE")
+        state, reason = self._life_canonical_state()
+        if state is None:
+            return unavailable(reason)
+        act = (state.get("activities") or {}).get(str(activity_id or ""))
+        if not isinstance(act, dict):
+            return rejected("ACTIVITY_NOT_FOUND", activity_id=str(activity_id or ""))
+        subject_id = str(state.get("subject_id") or "")
+        if not subject_id:
+            return unavailable("CANONICAL_SUBJECT_MISSING")
+        # The credential names the Life subject it may stop; a phone wired to a different
+        # canonical state cannot stop here just because it holds a valid token.
+        life_subject = str(getattr(stop_credential, "life_subject", "") or "")
+        if not life_subject or life_subject != subject_id:
+            return rejected("SUBJECT_MISMATCH")
+        try:
+            request = aes.build_request(
+                activity_id=activity_id,
+                expected_revision=expected_revision,
+                operation_key=operation_key,
+                reason_code=reason_code,
+                subject_id=subject_id,
+                epoch=epoch,
+                boundary_mode="IMMEDIATE",
+            )
+        except aes.ExternalStopRefused as exc:
+            return rejected(exc.reason_code)
+        if self._activity_stop is not None:
+            try:
+                result = self._activity_stop.handle(request)
+            except aes.ExternalStopRefused as exc:
+                return rejected(exc.reason_code, detail=exc.detail)
+            return envelope(result.get("status") not in {
+                aes.STATUS_REFUSED, "REFUSED"}, str(result.get("status") or "UNKNOWN"),
+                {**result, "mailboxed": False})
+        state_root = self._stop_state_root()
+        if state_root is None:
+            return unavailable("LIFE_STATE_ROOT_UNBOUND")
+        instance_root = aes.instance_root_for_state_root(state_root)
+        if instance_root is None:
+            return unavailable("INSTANCE_ROOT_UNRESOLVED")
+        channel = aes.StopControlChannel(state_root)
+        try:
+            channel.submit(request, key=aes.mailbox_key(
+                getattr(stop_credential, "token", "")), instance=instance_root)
+        except aes.ExternalStopRefused as exc:
+            return unavailable(exc.reason_code)
+        # Whatever the resident wrote back is only a *report*.  The status this route returns
+        # is re-derived from the canonical Activity, so a forged result file cannot make the
+        # phone announce a CANCELLED the owner never committed.
+        owner_status, owner_stop = self._owner_stop_truth(request.activity_id)
+        settled = channel.read_result(request.operation_key)
+        if isinstance(settled, dict) and (
+                str(settled.get("operation_key") or "") not in ("", request.operation_key)
+                or str(settled.get("intent_id") or "") not in ("", request.intent_id)):
+            settled = None  # a result for a different operation is not this answer
+        base = {
+            "activity_id": request.activity_id,
+            "intent_id": request.intent_id,
+            "operation_key": request.operation_key,
+            "mailboxed": True,
+            "owner_activity_status": owner_status,
+            "owner_stop_state": owner_stop,
+            "result_report": settled,
+        }
+        if owner_status == "CANCELLED":
+            return envelope(True, aes.STATUS_CANCELLED, {**base, "accepted_as_stop": True})
+        if owner_stop == "PENDING":
+            return envelope(True, aes.STATUS_PENDING, {
+                **base, "accepted_as_stop": True,
+                "reason_code": "STOP_INTENT_PENDING",
+                "detail": ("the owner accepted the durable intent; it blocks further dispatch "
+                           "and becomes CANCELLED at the next safe boundary")})
+        if isinstance(settled, dict) and settled.get("status") == aes.STATUS_REFUSED:
+            return envelope(False, aes.STATUS_REFUSED, {
+                **base, "accepted_as_stop": False,
+                "reason_code": str(settled.get("reason_code") or "STOP_REFUSED"),
+                "detail": str(settled.get("detail") or "")[:200]})
+        return envelope(True, aes.STATUS_PENDING, {
+            **base,
+            "accepted_as_stop": False,
+            "reason_code": "RUNTIME_MAILBOXED",
+            "detail": ("the request is durable on disk and not yet accepted by the owner; the "
+                       "live resident applies it at its own boundary -- this is not a stop yet"),
+        })
+
     # -- local visits / co-presence (A's ``LocalContactInbox``; P only delivers) -----------
 
     def _contact_state_root(self) -> Optional[Path]:
@@ -2366,6 +2753,12 @@ class PhoneService:
         here: a root that does not exist stays honestly unbound.
         """
 
+        # F-140: an explicitly bound Life state root (same-process composition, isolated demo)
+        # wins over inference.  It is the same root the caller already gave for the stop route;
+        # nothing is created if the directory does not exist.
+        if self._life_state_root_override is not None:
+            return (self._life_state_root_override
+                    if self._life_state_root_override.is_dir() else None)
         from . import life as phone_life
 
         try:
@@ -2440,9 +2833,139 @@ class PhoneService:
         return self._contact_call("listing", limit=limit)
 
     def contact_event(self, event_ref: str, *, include_body: bool = False) -> dict[str, Any]:
-        """``GET /contact/events/<ref>``: one event; the text only on explicit ask."""
+        """``GET /contact/events/<ref>``: one event; the text only on explicit ask.
 
-        return self._contact_call("event", event_ref, include_body=include_body)
+        F-140: the answer also carries the participant **resolution** (``LINKED`` /
+        ``UNRESOLVED`` / ``UNREADABLE``).  That is a read-only join over the instance's own
+        participant registry; the inbox event itself is unchanged, and an arrival nobody linked
+        stays honestly unresolved instead of being attributed to the instance subject.
+        """
+
+        answer = self._contact_call("event", event_ref, include_body=include_body)
+        if isinstance(answer, dict) and answer.get("ok") is True \
+                and isinstance(answer.get("data"), dict):
+            answer["data"]["participant"] = self.participant_for_event(event_ref)
+        return answer
+
+    # -- participants (F-140: A's ``ParticipantRegistry``; identity only, read-only here) ---
+
+    def _participant_registry(self):
+        """A's registry over **this** instance's Life state root and subject.
+
+        Nothing is created here: a fresh instance simply has no database yet, and every read
+        says ``ledger_state=ABSENT`` instead of inventing people.  The phone never writes this
+        owner -- creation / endpoint binding / event linking are local operator CLI acts.
+        """
+
+        if self._participants is not None:
+            return self._participants
+        state_root = self._contact_state_root()
+        if state_root is None:
+            raise PhoneUnavailable("PARTICIPANTS_STATE_ROOT_UNBOUND")
+        from participant_registry import ParticipantRegistry
+
+        self._participants = ParticipantRegistry(state_root, subject_id=self.subject)
+        return self._participants
+
+    def _participant_call(self, method: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """One call on the registry; ``unavailable`` is the only thing P adds."""
+
+        try:
+            answer = getattr(self._participant_registry(), method)(*args, **kwargs)
+        except PhoneUnavailable as exc:
+            return unavailable(exc.reason_code)
+        except Exception as exc:  # a broken owner is never "nobody is known"
+            return unavailable("PARTICIPANTS_UNAVAILABLE", error_type=type(exc).__name__)
+        if not isinstance(answer, Mapping):
+            return unavailable("PARTICIPANTS_UNAVAILABLE")
+        return dict(answer)
+
+    @staticmethod
+    def _participant_envelope(answer: Mapping[str, Any]) -> dict[str, Any]:
+        status = str(answer.get("status") or "")
+        reason = str(answer.get("reason_code") or "")
+        if answer.get("ok"):
+            out = dict(answer)
+            out.setdefault("reason_code", "")
+            return out
+        if status in ("absent", "not_found") or reason == "PARTICIPANT_NOT_FOUND":
+            return envelope(False, STATUS_NOT_FOUND, dict(answer.get("data") or {}),
+                            reason or "PARTICIPANT_NOT_FOUND")
+        if status in ("rejected", "conflict"):
+            return rejected(reason or "PARTICIPANTS_REQUEST_INVALID")
+        return unavailable(reason or "PARTICIPANTS_UNAVAILABLE")
+
+    def participants(self, limit: Optional[int] = None) -> dict[str, Any]:
+        """``GET /participants``: the bounded identity list.  Pure read, no message body."""
+
+        return self._participant_envelope(self._participant_call("list_participants",
+                                                                 limit=limit))
+
+    def participant(self, participant_id: str) -> dict[str, Any]:
+        """``GET /participants/<id>``: one participant, its endpoints and linked event refs.
+
+        The endpoint's raw ``account_key`` is operator-bound identity material, not something a
+        phone reader (or her model-side tool) needs: it is redacted here, while the provider and
+        the opaque endpoint id stay visible so the binding is still auditable.
+        """
+
+        answer = self._participant_envelope(self._participant_call("get_participant",
+                                                                   participant_id))
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else None
+        participant = data.get("participant") if isinstance(data, Mapping) else None
+        if isinstance(participant, dict):
+            endpoints = participant.get("endpoints")
+            if isinstance(endpoints, list):
+                for endpoint in endpoints:
+                    if isinstance(endpoint, dict) and "account_key" in endpoint:
+                        endpoint.pop("account_key", None)
+                        endpoint["account_key_redacted"] = True
+        return answer
+
+    def participant_for_event(self, event_ref: str) -> dict[str, Any]:
+        """Resolve one arrival's attribution.  Never raises; unknown stays ``UNREADABLE``."""
+
+        answer = self._participant_call("resolve_event", event_ref)
+        payload = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        if not answer.get("ok"):
+            return {
+                "status": "UNREADABLE",
+                "resolution": "UNREADABLE",
+                "reason_code": str(answer.get("reason_code") or "PARTICIPANTS_UNAVAILABLE"),
+                "participant": None,
+                "endpoint": None,
+                "link_source": "",
+                "linked_at": "",
+                "private_text_included": False,
+                "note": "参与者账本读不出来：这条来话属于谁仍然未知，不是「没有关联」",
+            }
+        participant = payload.get("participant") if isinstance(
+            payload.get("participant"), Mapping) else None
+        endpoint = payload.get("endpoint") if isinstance(
+            payload.get("endpoint"), Mapping) else None
+        link = payload.get("link") if isinstance(payload.get("link"), Mapping) else {}
+        resolution = str(payload.get("resolution") or answer.get("status") or "UNRESOLVED")
+        return {
+            "status": resolution,
+            "resolution": resolution,
+            "reason_code": "",
+            "participant": ({
+                "participant_id": str(participant.get("participant_id") or ""),
+                "display_name": str(participant.get("display_name") or ""),
+                "aliases": [str(item) for item in (participant.get("aliases") or [])],
+            } if participant else None),
+            "endpoint": ({
+                "endpoint_id": str(endpoint.get("endpoint_id") or ""),
+                "provider": str(endpoint.get("provider") or ""),
+            } if endpoint else None),
+            "link_source": str(link.get("link_source") or ""),
+            "linked_at": str(link.get("linked_at") or ""),
+            "ledger_state": str(payload.get("ledger_state") or ""),
+            "private_text_included": False,
+            "note": ("这条来话已由本机 operator 显式关联到一位参与者"
+                     if resolution == "LINKED" else
+                     "这条来话还没有被显式关联：它不属于任何人，不是本实例主体，也不按名字猜"),
+        }
 
     def contact_operation(self, operation_key: str) -> dict[str, Any]:
         """``GET /contact/operations/<key>``: reconcile one original key.  Pure read."""

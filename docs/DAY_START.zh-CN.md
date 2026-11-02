@@ -71,6 +71,53 @@ python3 scripts/nyairo_day.py import --root "$HOME/nyairo-day" --file ./演示�
 - `import`：把 UTF-8 文本导入成她的阅读材料，由真实 owner 建件并回读。**给材料不等于强迫她读**；服务正在运行时，新绑定下次 `start` 后生效。
 - 刚建好、还没跑过一天时，「今天」「安排」会明确返回 `CANONICAL_STATE_ABSENT`（读不到就说读不到，不假装成空白的一天）；「作品」与阅读材料读口正常。
 
+### 她今天的时间线（只读）
+
+`GET /api/phone/today/timeline`（`chiyo_phone` 的 `day_timeline` 动作）把**已经有记录**的
+几件事合成一条时间线：当天开始的 Activity、她自己排进今天的计划（只表示排定，不表示已执行）、
+World 动作、日记写入、相册保存、钱包交易。它不补空白、不按当前状态反推过去，也不生成总结。
+
+```bash
+curl -s http://127.0.0.1:3831/api/phone/today/timeline | python3 -m json.tool
+```
+
+- 每条都带 `time_basis`；Activity/计划用实例自己的 Life 时钟，日记/相册/钱包用各自 owner 的
+  记录时间。不同时钟域不会硬排成全序：`ordering.comparable=false` 时按域分组，域内再按时间。
+- operator（普通页面，无 `X-Phone-Actor`）默认只有骨架，`skeleton_only=true`；日记正文、
+  相册 caption/scene/生成提示词、钱包私有备注都不进聚合。她的工具（`X-Phone-Actor: model`）
+  拿到原入口 `detail_ref`，要正文仍走 `diary_read` / `album_image`，权限与扣留规则不变。
+- body 只给读取时的当前快照（`history=NOT_RECORDED`），不插进过去。
+- 零产品模型调用。想机械复现一次真实写入 → 时间线 → 同根重开：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/phone_day_timeline_demo.py
+```
+
+### 日记正文与主体写入：本机能力凭据
+
+日记的正文读取和“她自己的写入”现在还需要**本次 serve 的本地能力凭据**，不再只凭
+`X-Phone-Actor: model` 这句客户端自述：
+
+- 每次 `start` / `serve` 在实例根的 `run/phone-capability.json` 生成一个不透明凭据
+  （WSL/Linux 下真实 0600，原子替换），正常停服删除，重启轮换。
+- `chiyo_phone` 从 profile 的 `phone.capability_file` 读路径；省略时默认
+  `<phone.profile_home>/run/phone-capability.json`。它每次调用重新读文件，并在发送前核对
+  凭据绑定的 endpoint 与 subject；不匹配就不发请求。
+- operator 的普通页面/目录仍只看到数量、日期、字数，正文保持扣留。声明 `model` 但没有
+  有效凭据的读取会明确被拒（不是空正文成功）；没有凭据的主体日记写入零条目、零版本。
+- 同一实例根同时只允许一个 serve 轮换凭据；后启动的 serve 不会覆盖正在服务的凭据。
+- **边界**：能读取这个文件的同 uid 进程、能读该文件的账号或管理员仍在保护边界外；
+  这不是“仅她可读”，也不是完整的管理员隔离。
+
+如果平台无法确认文件私有权限（例如 Windows 未核验 NTFS ACL），本次 serve 不会写凭据，
+私人日记明确不可用（fail closed）；元数据和其它手机功能仍可用。
+
+机械复现真实 serve + 真实 Supply + 正式工具的完整路径（0 产品模型调用）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/private_diary_authority_demo.py
+```
+
 ### 街区包自带的内容（营业时间、阅读材料、真实店面）
 
 `daily_neighborhood_v1` 的 `content.json` 自带一份公版阅读材料
@@ -105,6 +152,21 @@ operator 手填；不会每天自动生成、不补写、不进 Memory、不外�
 operator 的普通读面（手机状态和 `GET /api/phone/diary`）默认只看到数量、日期和字数，正文不随
 普通读取返回；只有她自己的工具路径（`X-Phone-Actor: model`）读得到正文。这是**普通读面的默认
 边界**，不是本机管理员隔离，也不承诺挡住能直接读文件的人。
+
+`X-Phone-Actor` 目前仍是客户端声明，服务端不核验；任何能访问回环接口的客户端都可以自行声明
+`model`。服务端可核验的 model/operator 身份尚未实现，方案与待批事项见
+[私人日记可信身份](engineering/private-diary-authority-options-20261027.md)。写入侧另走 Supply
+的 Governance grant 与 `ManagedArtifact` 写入者围栏，不靠这个声明放行。
+
+写入准入的实际边界（`scripts/existing_authority_admission_demo.py`，不调模型、只打状态和计数）：
+
+- grant 的撤销、过期、scope/target/payload 绑定与 use 计数，在每次真实写提交时重新检查；
+  撤销前已成功的版本和 receipt 保留，不被倒写，也不自动补偿。
+- “内容与 head 相同”的 `NO_CHANGE` 快捷路径不是权限：它同样先做一次只读 grant 检查，
+  已撤销/过期的 grant 不能靠重复内容拿到成功答复。这一步只读，不 reserve、不消耗 use。
+- writer 轮替走正规停服→起新服务，epoch 由 fence 自己推进；旧 writer 对象不能再写库。
+- 这只证明本机 Supply 的 `COMMIT_MANAGED_ARTIFACT` 路径。调用者身份仍是本机 service
+  principal 的 `SO_PEERCRED`，不是真实人 grantor；也不代表整个 Python 后端或网络面都被覆盖。
 
 想单独看这条链是否通（不调用模型、不打印正文）：
 
@@ -302,3 +364,387 @@ wsl -e bash -lc 'cd /mnt/d/nyairo-rc1-body-backend && { set -a; . /root/.nyairo-
 - 没选拍就是 `NOT_COVERED`（0 图），拒绝不是故障；翻译失败就停在转换处，不重造英文。
 - 结果在 `.agents/worker-runs/20261027-autonomous-camera-result.md`；本窗口只做到 prepare/status/readback，
   真实主体判断尚未发生。
+
+## 她当前有理由相信什么（S03 主张，0 产品模型）
+
+S03 只回答「现在有理由相信什么」，不回答「世界实际上是什么」，也不授权任何动作：
+
+- 每条主张带 **来源类别**：`OBSERVED`（她通过正式 World 读面真的观察到）、
+  `REPORTED`（某个明确来源报告过，只证明来源说过）、`INFERRED`（绑定已有主张的推断，
+  不是新证据）；
+- 每条主张带 **范围与时间**：谓词、地点/对象、营业日 context、`valid_time`、
+  `observed_at`、`recorded_at` 分开；适用时间未知就是 null，不拿抓取时间冒充；
+- 状态是离散的：`SUPPORTED` / `DISPUTED`（两个来源真的不一致，并排显示）/
+  `STALE`（过了复核期限，期限不会因为再读一次而重置）/ `UNKNOWN`（没有合格证据，
+  不是 false）/ `SUPERSEDED`（被明确更正替换，历史仍可查）。
+
+新 root 由 `prepare` 在 `s03/claims.sqlite3` 建自己的绑定；旧 root 没有绑定，读面如实
+`S03_CLAIMS_UNBOUND`，不会在读取时新建第二个库。手机工具用 `claims` 读当前主张、
+`claim_slot` 读同一 slot 的修订历史、`claim_observe` 对 World 做一次正式观察并登记证据
+（请求体只有 operation key，客户端不能提交「我是 World」或任意 world id）。
+
+隔离演示（真实 Supply、真实 `PhoneWorld` 快照、真实 phone HTTP、一次正式
+`evaluate_once`；Decision/内容是脚本替身，0 产品模型、0 外网）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/s03_claims_demo.py
+# 只跑协议/持久回归：
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B -m unittest tests.test_s03_claims
+```
+
+演示覆盖：观察到位置并带观察回执 → 两个报告冲突 `DISPUTED` → 一次源更正让旧解释退出
+当前且历史保留 → 推断随 basis 过期 `STALE` → 无证据 slot `UNKNOWN` → 同根重开状态保留
+→ 撤回来源后旧正文在 current/history 都扣留 → 主张不写 World、不写 Memory、不授权动作。
+
+## 一件活动怎么停下、等、回来和真正结束（S09，0 产品模型）
+
+S09 不新造 Activity，也不新增 Decision 词：它把既有的 START/CONTINUE/WAIT/PAUSE/RESUME/ABANDON、
+LR-2/LR-3/LR-4/LR-5 与 AR-0/AR-1 串成一条能实际理解的链：
+
+- **停点**：Activity 自己的 `checkpoint_ref` 与 owner 当前 head 一起构成停点；回来是同一个
+  Activity id 的 RESUME，不是第二次 START。
+- **安全边界**：`SAFE_BOUNDARY` 的 PAUSE 只登记 pending，Activity 保持 ACTIVE，直到真实的
+  boundary event 才变 PAUSED；`ATOMIC` 直接拒绝 PAUSE，不强停。
+- **等待**：writer 明确 `no_change` 后，WAIT 绑定 owner head 依赖；WAITING 不占执行槽（另一件
+  真实活动可以开始），只有 owner head 真变了 LR-4 才发一个 OPEN 资格；`NO_ACTION` 仍保持
+  WAITING，不自动恢复。
+- **版本变化**：RESUME 读 fresh owner head；并发 head 变化让旧 expected head 被 owner 明确拒，
+  不静默 rebase；新的 Decision 在新 head 上继续。同根重装配保留 Activity/停点/条件/资格/未决。
+- **完成**：落一版不等于完成整件作品；有界收尾 Activity 只有在 owner 自己的归档回执满足
+  LR-5 完成合同后才 COMPLETED，并带 `completion_evidence_ref`。
+- **区别**：主动 ABANDON、Action FAILED、Action UNKNOWN（用原 owner operation 对账）、
+  Activity 仍 ACTIVE/WAITING 的 blocked/失败证据分开展示。当前 Activity 枚举没有
+  FAILED/BLOCKED 终态，也没有生产 CANCEL authority capability；这两项是具名缺口，不伪造。
+
+手机 `/today` 与 timeline 的 Activity 行新增只读 `recovery`：有 OPEN 资格才给 `RESUME`，
+PENDING 条件只说条件未满足，终态与 ACTIVE 分开；资格 store 读不到时写
+`ELIGIBILITY_UNREADABLE`，不把「不知道」说成「没有」。
+
+隔离演示（真实 Supply/Activity/LR-2/LR-3/LR-4/LR-5/AR-0/AR-1；Decision 与内容是脚本替身，
+0 产品模型、0 外网）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/s09_continuation_demo.py
+```
+
+## 作品 Markdown：外部编辑只观察，导入要显式确认（S01，0 产品模型）
+
+受管作品的正身始终是 owner 里的 canonical 版本；工作区里的 `.md` 只是可重建投影。
+两件健康分开报：
+
+- `content_health`：`AVAILABLE` / `UNAVAILABLE` / `CORRUPT`，说的是 owner 正文；
+- `representation_health`：`CURRENT` / `MISSING` / `DIVERGED` / `UNBOUND`，说的是那个文件。
+
+投影丢了照样能读正文；显式 `rebuild` 只修 `MISSING`/`UNBOUND`，`DIVERGED` 不覆盖。
+用受管路径外部改过的文件只会变成候选：作者标 `EXTERNAL_UNKNOWN`，canonical head 不动。
+导入必须带这一条候选和它被编辑时的基线版本（CAS），`--confirm` 不能省；头已前进就
+`HEAD_MOVED` 冲突，不三方合并、不悄悄 rebase。导入成功的新版本来历是
+`EXPLICIT_IMPORT`，不是「她本人创作」。
+
+```bash
+# 读两个健康域（纯读，不打印正文）
+python3 scripts/s01_projection_cli.py --socket <owner.sock> --subject <subject> \
+    status --artifact <artifact-id>
+# 外部编辑后看候选
+python3 scripts/s01_projection_cli.py --socket <owner.sock> --subject <subject> \
+    observe --artifact <artifact-id>
+# 明确确认导入（grant 用已有的 COMMIT_MANAGED_ARTIFACT）
+python3 scripts/s01_projection_cli.py --socket <owner.sock> --subject <subject> \
+    import --artifact <artifact-id> --candidate <candidate-id> \
+    --base-version <被编辑时的版本> --grant <grant-id> \
+    --operation-key s01:import-1 --confirm
+# 只修缺失/未绑定的投影
+python3 scripts/s01_projection_cli.py --socket <owner.sock> --subject <subject> \
+    rebuild --artifact <artifact-id>
+```
+
+隔离演示（真实 Supply owner、真实受管 Markdown、真实 CAS 与重启；0 产品模型、0 外网）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/s01_projection_demo.py
+```
+
+## 她当时选了什么、没选什么（S04 决定摘要，0 产品模型）
+
+一条已提交的决定可以直接查，但只给**记录里真正有的东西**：
+
+- **摘要**：`decision`、理由代码、`short_rationale` 是否存在；没有就写 `NOT_RECORDED`，
+  不用模型事后补一句「她当时想……」。
+- **选中与未选**：选中项来自 `selected_candidate_ref`；未选/延期/硬拒/当前不可执行项来自
+  AG-1 提交时一并落盘的处置表。普通未选候选不保证长期保存，读到什么就是什么。
+- **Decision 与 Adoption 分开**：`DECIDED_NOT_ADOPTED` / `DECIDED_ADOPTION_REJECTED` /
+  `DECIDED_AND_ADOPTED` 三态。决定是历史，只有 S09 的 Adoption 产生当前约束。
+- **旧决定复核**：用正式 `validate_decision_for_adoption` 纯读复核，会给出具名拒绝
+  （例如 `STALE_ACTIVITY_REVISION`）；即使复核通过也只是可以重新走进既定流程，
+  不继承旧许可、不自动执行。CLI 没有接正式 runtime 时明确报 `NOT_EVALUATED`。
+- **rationale 扣留**：手机读面永远不返回正文；本地 CLI 默认只报长度，`--show-rationale`
+  才在操作者自己的终端显示。
+
+```bash
+python scripts/s04_decision_cli.py --instance <life-instance> --list
+python scripts/s04_decision_cli.py --instance <life-instance> --decision-id dec:xxxxxxxx
+```
+
+手机只读面：`GET /api/phone/decisions/review?decision_id=dec:xxxxxxxx`（缺省只列最近骨架）。
+读取不写 Decision/Adoption/Activity。
+
+隔离演示（真实 Supply/AG-1/AG-2/Activity owner、正式 `evaluate_once`；Decision 与内容是脚本
+替身，机械业务时钟，0 产品模型、0 外网）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/s04_decision_review_demo.py
+```
+
+## 一次经历到底记住了没有（S05 交接 / 准入 / 召回分层，0 产品模型）
+
+**交接成功不等于还记着。** S05 读面把三件事分开：
+
+- **源事件**：AG-2 的 handoff 身份（`lexp:result:` 或旧的 Activity 粒度）、动作 / 结算 /
+  作品 / 版本 refs；只给不透明 ref，不回显正文。
+- **准入 receipt**：AG-2 持久化的投递记录（`ACCEPT` / `DUPLICATE` / `DEFER`）与尝试次数。
+  这是**历史**结果，不是「现在仍可召回」。
+- **当前召回**：走既有治理投影后的 Memory 读面。控制记录生效后是
+  `NOT_RECALLABLE`，但投递 receipt 仍保留原来的 `ACCEPT`。这是既有 epoch 规则，
+  不是逐源隔离；本组演示没有下发任何控制，所以不展示这一段。
+- **分层**：源证据与已接纳的 M0 记录是 `AVAILABLE`（F-069 的 raw 层）；
+  Episode 分组、episode summary（F-069 的 summary 层）、embedding/检索索引与派生失效
+  （F-070）在当前实现里**不存在**，一律报 `NOT_IMPLEMENTED`，不造空表。
+- **合法“零新记录”**：同一结果重投时 M0 自己的幂等准入返回 `DUPLICATE`（零新行、零新版本，
+  F-068 现有存储层）；设计 F-071 的语义 `NO_CHANGE` / `DO_NOT_ADMIT` 评估器尚未实现，
+  也如实报 `NOT_IMPLEMENTED`，不拿 writer 的 `no_change` 或一个 `DUPLICATE` 冒充完整评价。
+- **其余未证**：F-066 只到 M0 source 可证，Episode 未实现；重启只是额外验证，不是 F-071。
+
+```bash
+python scripts/s05_memory_review_cli.py --instance <life-instance> --list
+python scripts/s05_memory_review_cli.py --instance <life-instance> --handoff lexp:result:xxxxxxxx
+```
+
+隔离演示（真实 Supply / M0 / 控制账本 / AG-1 / AG-2 / 正式 `evaluate_once`，脚本 Decision
+与内容，0 产品模型、0 外网。治理 DELETE/CORRECT 的扣留链标 NOT_RUN，改为一次可撤的
+读端故障注入，验证读失败具名 `UNAVAILABLE` 且撤除后恢复，不是撤权）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/s05_memory_reliability_demo.py
+```
+
+## 一次动作到底做到哪一步（S10 请求 / 尝试 / receipt / 对账，0 产品模型）
+
+**请求不是尝试，尝试不是 provider 受理，受理不是到达/用户收到，timeout 不是 FAILED。**
+S10 的只读 CLI 把 AR-0 已有的五类事实分开列：
+
+- **请求**：`PREPARED` 只表示请求已冻结（`REQUESTED_FROZEN`），不表示已 dispatch、更不表示
+  已经发出去；AR-0 没有独立的 DispatchAdmitted 记录，就报 `NOT_RECORDED`。
+- **尝试**：`attempt.started_at` 只证明本地尝试开始；它不等于 provider 收到请求。
+  只有 `DEFINITE_PRE_SUBMISSION_FAILURE` 的尝试才允许 `not_sent=true`。
+- **receipt**：`ACCEPTED` / `DELIVERED` / `READ` 各自显示；`ACCEPTED` 不是到达，
+  本地收件箱/草稿也不是用户已收到，`user_received` 默认 `NOT_RECORDED`。
+- **观测效果**：owner 重新读到的 `ResultEvidence`（`verified`）与 provider 回执分开。
+- **对账**：每次 `reconciliation` 的 strategy/result/前后状态都列出来；`UNKNOWN` 保持
+  `UNKNOWN`，查询耗尽也不会自动改成 `FAILED`。
+- **具名缺口**：AR-0 没有 child/DAG/PARTIAL 结果向量，也没有 `QUIESCED_UNRESOLVED` 或
+  bounded query scheduler（delays/maxQueries），一律报 `NOT_IMPLEMENTED`，不造平行 store、
+  不加私有 timer。相同内容/hash 只是相容性证据，不能证明本次 Action 成功。
+- **纯读**：发现未回收的提交 WAL 直接报 `WAL_PENDING_RECOVERY`，不替旧 writer 重放。
+
+```bash
+python scripts/s10_action_review_cli.py --instance <life-instance> --limit 20
+python scripts/s10_action_review_cli.py --instance <life-instance> --action-id actn:xxxxxxxx
+python scripts/s10_action_review_cli.py --state-root <instance>/life/state --format text
+```
+
+隔离演示（真实 Supply / AR-0 / AR-1 / 正式 `evaluate_once` + CLI 子进程，脚本 Decision 与内容，
+0 产品模型、0 外网；有序停启不是 crash 矩阵）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/s10_action_outcomes_demo.py
+```
+
+## 未来事项、今天的计划与 operator 义务是四件不同的事（S08 F-093～F-097，0 产品模型）
+
+**认领不是承诺，未来的事不是当前 Activity，operator 的义务不是她自选。**
+S08 的只读 CLI 把谁拥有什么分开列：
+
+- **未来事项**（`fitem:`）：由她**已提交的 Decision** 的 `later_item` 真正写出的延期意向；
+  `decision_ref` 是用同一个公开意向键重算出来的归属，不是猜的。取消/完成事项不删记录，
+  也不复活；没有 Decision 记录就报 `NO_DECISION_RECORD_FOUND`。
+- **今天的计划**（`plan:`）：`plan_today` 只是把一件**已有**的 OPEN 事项排进今天，
+  记录里带提交它的 `decision_ref`；排计划不是开始做。
+- **operator 义务**（`oblig:`）：外部给的当日安排，`writable_by_subject=false`；
+  她可以去做，但不能改期/取消。指向 `oblig:` 的 `future_item_actions` 会在域名层被拒绝。
+- **当前 Activity**（S09）：只列已经采用的现在，`status`/`decision_ref` 来自 Activity owner。
+- **Agenda / Eligibility**（LR-4）：只是"条件满足后的恢复资格"，不执行任何动作；
+  有前台时不抢占、不消费。
+- **Commitment**：S08 **还没有承诺 owner**。`fitem:`、`oblig:`、Agenda 都不会被改叫承诺，
+  也不存在 `promised=true`；F-095 与 F-097 的重新协商部分因此报
+  `NOT_IMPLEMENTED`，方案见 `docs/engineering/s08-future-organization-options-20261027.md`。
+
+```bash
+python scripts/s08_future_review_cli.py --instance <life-instance>
+python scripts/s08_future_review_cli.py --state-root <instance>/life/state --format text --now 2026-10-27T21:00:00+08:00
+```
+
+隔离演示（真实 Supply / AG-1 / AG-2 / LR-4 / 正式 `evaluate_once` + 同根重装配，脚本 Decision
+与内容，0 产品模型、0 外网；有序停启不是 crash 矩阵）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/s08_future_organization_demo.py
+```
+
+## 动作效果、活动生命周期与后果域分开看（INFRA F155～F160，0 产品模型）
+
+**文件已保存不等于所有生活后果都已结算。** 这条只读读口把一次真实动作拆成三条轴：
+
+- **动作结果**（AR-0 + AR-1）：Action 状态、attempt、receipt、effect claims、
+  `settlement_status`/`outcome_kind` 各自显示；`SETTLED` 只说明结果已结算。
+- **活动生命周期**（LR-2 + LR-5）：Activity 仍是 ACTIVE 就报 ACTIVE，动作成功不会自动结束它；
+  LIFE 域是否“已处理”只认 LR-5 自己消费过、带这次 `settlement_ref` 的证据。
+- **后果 envelope**：设计 VIII.7 的 `ConsequenceEnvelope` / obligation compiler /
+  target-owner receipt 在本仓库**不存在**，一律 `NOT_IMPLEMENTED`；AR-1 的 outbox 只是
+  通知扇出，不冒充 envelope closure。
+
+分域时两件事分开：AR-1 的 `memory` 通知按生产策略是 `DELIVERY_FAILED`
+（`ProductionExecutionRefused`），它不是 Memory 的真实后果；Memory 的真实后果是 AG-2
+经历交接（`lexp:*`）投递到 M0，读面按 `source_ref` 精确核实。没有绑定 Memory 时报
+`UNVERIFIED`，不报“没有记录”。交接失败/挂起（`FAILED_PENDING_RETRY`）时，写入与 AR-1
+结算照旧成功，但复核会明确写“不是所有后果域都已处理”；恢复后走既有
+`dispatch_experience_handoffs` 重投原 handoff，同一身份、一次新记录，再投是 M0 的
+存储幂等 `DUPLICATE`（不是语义 NO_CHANGE）。
+
+```bash
+python scripts/infra_settlement_review_cli.py --instance <life-instance> --limit 20
+python scripts/infra_settlement_review_cli.py --instance <life-instance> --action-id actn:xxxxxxxx
+python scripts/infra_settlement_review_cli.py --state-root <instance>/life/state --format text
+```
+
+隔离演示（真实 Supply / AR-0 / AR-1 / AG-2 / LR-5 / M0 Memory / 正式 `evaluate_once` +
+CLI 子进程，脚本 Decision 与内容，0 产品模型、0 外网；有序停启不是 crash 矩阵）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/infra_consequence_settlement_demo.py
+```
+
+## 启动或重启前先做一次恢复只读检查（INFRA F161～F167，0 产品模型）
+
+**正常重启不等于备份恢复。** 先看清这个实例是哪一种：可以正常装配、需要走已有恢复入口、
+文件读不出来、还是必须人工先停掉另一个写者。这条检查只读：不取 writer lease、不重放 WAL、
+不启动 runtime、不写业务数据，也不发模型请求。
+
+```bash
+python scripts/infra_runtime_recovery_cli.py --instance <life-instance>
+python scripts/infra_runtime_recovery_cli.py --instance <life-instance> --json
+# 想同时向 Supply owner 查未决动作的原始 operation（只读）：
+python scripts/infra_runtime_recovery_cli.py --instance <life-instance> \
+    --supply-socket <life-supply.sock> --subject <subject>
+```
+
+结论四档：
+
+- `ASSEMBLABLE`：正常入口可启动；
+- `NEEDS_EXISTING_RECOVERY`：有未恢复提交（WAL）或未决 Action；走既有
+  `LifeIntegrationCoordinator.recover_all_and_reconcile(auto_reconcile_unknown_actions=True)`，
+  按**原 operation** 对账，不新造 key、不重放成功动作；
+- `MANUAL`：另一个活进程持有写者权威，先用它自己的入口 stop；
+- `READ_BLOCKED` / `UNKNOWN`：文件不可读或证据不足，停下来看具名原因，不要删文件“解锁”。
+
+退出码：`0` 可行动（前两档），`3` 需人工（`MANUAL`/`READ_BLOCKED`），`4` 证据不足。
+**不拿“进程不在了”当 lease 已释放的证明**；检查本身不探测 flock，报告里会写清未评估项。
+
+隔离演示（真实 Supply owner / 真 runtime / 真 SIGKILL 到 `response_lost_after_write` /
+同根新进程恢复 / 旧 revision CAS 拒写 / 认知阻塞时只读仍可继续，脚本 Decision 与内容，
+0 产品模型、0 外网）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/infra_runtime_recovery_demo.py
+```
+
+## 她的通讯录（参与者身份，F-140）
+
+来话账本只记“有人来过”，不记“谁”。想知道某条来话属于谁，需要本机 operator 显式登记参与者并
+关联来话；**没有登记的事件就是 `UNRESOLVED`，不会按显示名或来源猜人**。
+
+入口只认实例，不认调用方自报的 state root / subject：
+
+```bash
+INSTANCE="$HOME/nyairo-day"    # 有 instance.json 的那一层
+
+# 登记两个人（同名也不会合并）
+python scripts/participant_registry_cli.py --instance "$INSTANCE" \
+  create --display-name "小林" --alias "Kobayashi" --operation-key operator:create-1
+python scripts/participant_registry_cli.py --instance "$INSTANCE" \
+  create --display-name "小林" --operation-key operator:create-2
+
+# 给同一人显式绑第二个通道；已有 endpoint 指向别人会被拒绝
+python scripts/participant_registry_cli.py --instance "$INSTANCE" \
+  bind-endpoint --participant participant:... --provider telegram --account-key 42 \
+  --operation-key operator:endpoint-2
+
+# 把一条真实来话显式关联到某人（先 resolve-event 看它现在是否为 UNRESOLVED）
+python scripts/participant_registry_cli.py --instance "$INSTANCE" \
+  link-event --event-ref contact_evt:... --participant participant:... \
+  --operation-key operator:link-1
+
+# 只读：这次会算出哪个 state root / subject / home
+python scripts/participant_registry_cli.py --instance "$INSTANCE" binding
+```
+
+`--instance` 用仓库已有的加载器读实例文件，自己算出三件事：Life state root（标准实例是
+`<实例>/one-day/life/state`；嵌套 Life 实例记录过 `NYA02_RESIDENT_STATE` 就以它为准）；
+subject（手机实例自己的 `subject`，也就是来话 inbox 和手机读面用的同一个值；实例文件是
+Life one-day 格式时取 `subject_id`）；home（与手机来访面同一套来源顺序）。`canonical_life_state.json`
+里的 Life/global subject 是另一个域，会如实报告但不与实例 subject 比较。
+
+`--state-root` / `--subject` 只作兼容：只有该根上已有能核对的身份（同 subject 的来话
+inbox，或已有参与者账本）时才允许，**空目录 + 调用方自报 subject 不能开第一本账**；第一次
+登记用 `--instance`。根上已有另一个 subject 的来话时直接具名拒绝，不落库。
+
+写入口只在本机 POSIX 下工作：状态根与账本必须属于当前 uid、不能是 symlink、不能 group/other
+可写；不满足就具名拒绝且不落库。Windows 没有可核的 ACL，写入口 fail closed（手机读取不受
+影响）。`created_by=operator:cli` 是来源标签，不是对“真人”的认证；同一 uid 的其它进程或
+root 不在这个边界内。
+
+她的手机工具只能看、不能建：
+
+- `chiyo_phone(action="participants")`：列出她认识谁（稳定 id、显示名/别名、来源、关联来话计数）；
+- `chiyo_phone(action="participant", participant_id=...)`：一位参与者的端点与关联来话引用；
+- 手机 HTTP 只有 `GET /api/phone/participants[/<id>]`，没有创建/绑定/发送写接口。
+
+参与者只是身份：不继承任何权限、不表示关系，也不等于用户已收到消息。同一套本机演示（0 产品模型、
+0 外发、数据保留）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/participant_registry_demo.py
+```
+
+## 显式忘记一个来源（F-153/F-154）
+
+本机 operator 用实例自己的绑定提出请求；没有 HTTP 写路由，模型也没有删除工具：
+
+```bash
+python scripts/forget_request_cli.py --instance <手机/Life 实例根> \
+    request --operation-key operator:forget-1 \
+    --source-ref artifact:... --retention-pending
+python scripts/forget_request_cli.py --instance <实例根> status  --case forget:...
+python scripts/forget_request_cli.py --instance <实例根> retry   --case forget:...
+python scripts/forget_request_cli.py --instance <实例根> confirm --case forget:...
+```
+
+- 协调库必须在实例环境里显式配 `NYA02_FORGET_CASE_DB`，并与 authority 一样放在实例备份集之外；
+  CLI 的 `--case-db` 只能与它相同，运行时 gate 也读同一个名字。
+- 派生 owner 用实例环境显式配置：`NYA02_SUPPLY_ARTIFACT_DB` 与 `NYA02_SUPPLY_PROJECTION_ROOT`。
+  没配置时，事件指向的 artifact 会作为显式未覆盖面，不会假装清过。
+- `--hold` 立刻扣留指定 source/event，但不写 DELETE、不擦正文；跨重开仍扣留，不会自动超时释放。
+  之后要真删，用 `confirm` 显式确认同一个 case；`retry` 不会把 hold 升级。
+- 屏障先落保留权威（event id + typed 来源 `{kind, namespace, ref}` 两个独立域），再由 M0 的
+  `MemoryControlLedger.erase` 与 Supply 的 `ManagedArtifactStore.erase_source` 各自清理；
+  两者都要已提交屏障、只接受本 owner 的 scope，且按 operation 幂等。
+- M0 擦除保留 event 身份但清空正文/来源 JSON（`payload_erased=1`），并 `secure_delete +
+  checkpoint + VACUUM`；Supply 清每个版本正文（`content_erased=1`）和绑定投影文件。
+- `COMPLETE` 由 owner ack + 布尔物理读共同决定；离线备份未擦、显式未覆盖面、物理正文残留都会
+  停在 `WAITING_RETENTION` 并具名原因。备份副本仍含正文属于 retention，不当成“所有副本已擦”。
+- 恢复副本先跑 `recovery_apply`（RECOVERY_ONLY）校验保留权威并重施屏障/派生清理，再开放读取；
+  权威缺失或低于 floor 一律 `BLOCKED`，不用新 floor 掩盖旧代际。
+- 隔离演示（0 产品模型、夹具保留）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/forget_generation_demo.py
+```

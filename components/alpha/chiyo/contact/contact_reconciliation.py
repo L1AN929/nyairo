@@ -158,7 +158,7 @@ class ContactReconciliationAuthority:
         if kinds & positive_delivery:
             return "DELIVERED", "CORRECTED" if corrected else "EVIDENCE_OBSERVED"
         if "DELIVERY_FAILED" in kinds or "STATUS_UNKNOWN" in kinds or "TRANSPORT_ERROR" in kinds:
-            return "UNKNOWN", "UNKNOWN_PROVIDER_STATE"
+            return "UNKNOWN", ContactReconciliationAuthority._unknown_reason(kinds)
         if "FAILED_BEFORE_ACCEPT" in kinds:
             return "FAILURE", "CORRECTED" if corrected else "EVIDENCE_OBSERVED"
         if "PROVIDER_ACCEPTED" in kinds:
@@ -166,6 +166,23 @@ class ContactReconciliationAuthority:
         if "SUBMIT_OBSERVED" in kinds:
             return "SUBMITTED", "CORRECTED" if corrected else "EVIDENCE_OBSERVED"
         return "UNKNOWN", "RECOVERY_GAP" if not kinds else "STILL_UNKNOWN"
+
+    @staticmethod
+    def _unknown_reason(kinds: frozenset[str]) -> str:
+        """Name how far the action got before the outcome became unknown.
+
+        The state stays ``UNKNOWN``; only the already-defined reason vocabulary is
+        used.  ``PROVIDER_ACCEPTED``/``SUBMIT_OBSERVED`` are observed facts, so an
+        accepted-then-lost reply is ``UNKNOWN_AFTER_ACCEPT`` rather than the
+        stage-less ``UNKNOWN_PROVIDER_STATE``.  A lone uncertain observation with
+        no submit/accept fact keeps the old stage-less reason, because the receipt
+        kind set alone cannot prove whether submission happened.
+        """
+        if "PROVIDER_ACCEPTED" in kinds:
+            return "UNKNOWN_AFTER_ACCEPT"
+        if "SUBMIT_OBSERVED" in kinds:
+            return "UNKNOWN_AFTER_SUBMIT"
+        return "UNKNOWN_PROVIDER_STATE"
 
 
 __all__ = ["ContactReconciliationAuthority", "ContactReconciliationRecord", "REASONS", "STATES"]

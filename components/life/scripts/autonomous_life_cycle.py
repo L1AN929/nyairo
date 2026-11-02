@@ -1040,6 +1040,12 @@ class AutonomousLifeCycle:
         situation_source: Any = None,
         continuity_source: Any = None,
         appraisal_source: Any = None,
+        #: S03 (``s03_claims.S03ClaimService``) or ``None``.  With one wired, the
+        #: decision situation carries a bounded block of *current claims* -- what was
+        #: observed, what a source reported, what was inferred, and whether it is
+        #: DISPUTED / STALE / UNKNOWN.  It is context, never a permission, never
+        #: World truth and never a Memory write; ``None`` keeps the old prompt exactly.
+        claims_service: Any = None,
         work_artifact_id: Optional[str] = None,
         continuity_state_root: Optional[Path | str] = None,
         artifact_exclusions: Optional[Sequence[str]] = None,
@@ -1167,6 +1173,10 @@ class AutonomousLifeCycle:
         #: *consideration* context -- it never turns one into a Candidate, a permission or a
         #: stable fact, and it defines no store of its own (there is no S07 owner to ask).
         self.appraisal_source = appraisal_source
+        #: S03 Perception/Belief: the current-claim aggregate (or ``None``).  Its read
+        #: is bounded and read-only; with none wired the situation context is byte-for-byte
+        #: the previous shape and no claim can be invented.
+        self.claims_service = claims_service
         self.continuity_state_root = (Path(continuity_state_root) if continuity_state_root
                                       else self.state_root)
         #: D (life-v1): the work artifact this instance continues, bound *explicitly*.  With it
@@ -2091,10 +2101,22 @@ class AutonomousLifeCycle:
         It is the *same* basis the round already offers for WAIT (never a second source): a body
         the owner really reports as limited, a work/material whose owner owes a next version, or
         a time she herself named in this Decision.  The block says only what the condition is,
-        that a PAUSE keeps the foreground, and that she has to choose RESUME later.  It grants
-        nothing and creates nothing; without a basis ``available: false`` carries a reason code.
+        that a *successful* PAUSE releases the execution slot (so another activity may start
+        meanwhile), that a satisfied condition only grants eligibility and never resumes by
+        itself, that a background RESUME never preempts another foreground activity, and that a
+        later Decision may choose RESUME.  It grants nothing and creates nothing; without a basis
+        ``available: false`` carries a reason code.
+
+        The same sentences also state one system-known cost of the *current* state: while the
+        Activity is PAUSED, ABANDON is not available through the formal decision path.  That is
+        the PAUSED state, not a permanent loss of the exit -- once the Activity is ACTIVE again
+        the formal path may offer ABANDON as before.  The words are a fact about what the system
+        accepts, not advice about whether to pause.
         """
 
+        abandon_cost = ("While the Activity is PAUSED, ABANDON is not available through the "
+                        "formal decision path; if you want to abandon it, make that choice "
+                        "while it is still ACTIVE.")
         if not isinstance(basis, Mapping) or not str(basis.get("basis_ref") or ""):
             return {
                 "schema_version": "chiyo.life.pause_condition.v1",
@@ -2102,7 +2124,7 @@ class AutonomousLifeCycle:
                 "why_not": "NO_OFFERED_CONDITION",
                 "how": ("a conditional PAUSE needs a condition this round can really check; "
                         "without one PAUSE is still allowed, but it is unconditional and can "
-                        "never become a resume candidate"),
+                        "never become a resume candidate. " + abandon_cost),
             }
         source = str(basis.get("source") or "")
         if source == lwb.SOURCE_BODY_REST:
@@ -2115,11 +2137,14 @@ class AutonomousLifeCycle:
             satisfied_by = ("the owner of the named work/material reporting a new head version "
                             "after the one recorded in the baseline")
         how = ("choose PAUSE and copy condition_ref into reevaluation_hint_ref: the Activity "
-               "stays PAUSED and keeps the foreground, the owner alone decides when the "
-               "condition holds, and a later Decision may choose RESUME")
+               "stays PAUSED and a successful PAUSE releases the execution slot for another "
+               "activity, the owner alone decides when the condition holds, only then is an "
+               "eligibility OPEN and nothing resumes by itself, and a later Decision may choose "
+               "RESUME; a background RESUME never preempts another foreground activity")
         if source == lfi.PARK_SOURCE:
             how += ("; the instant comes from this same answer's later_item with "
                     "park_current=true -- there is no default timer")
+        how += " " + abandon_cost
         return {
             "schema_version": "chiyo.life.pause_condition.v1",
             "available": True,
@@ -2129,7 +2154,8 @@ class AutonomousLifeCycle:
                              or (self._last_foreground_record or {}).get("activity_ref")
                              or (self._last_foreground_record or {}).get("activity_id")),
             "waiting_on_ref": basis.get("waiting_on_ref"),
-            "keeps_foreground": True,
+            # 描述位：成功 PAUSE 已释放执行槽；无正式逻辑消费本字段，仅随提示透传。
+            "keeps_foreground": False,
             "satisfied_by": satisfied_by,
             "how": how,
             "not_automatic": ("an OPEN eligibility is only the right to ask; nothing resumes by "
@@ -3682,6 +3708,18 @@ class AutonomousLifeCycle:
         #: and the local drafts sourced from it.  Association is by owner refs only; a work with
         #: no readable result says so instead of borrowing an unrelated method.
         ctx["work"] = self.work_context_view()
+        #: S03 Perception/Belief: a bounded block of *current claims* -- observed,
+        #: reported and inferred; each row carries its slot, status (SUPPORTED /
+        #: DISPUTED / STALE / UNKNOWN) and source kind.  It is data only: nothing here
+        #: authorizes an action, updates the World or writes Memory, and an unbound
+        #: aggregate leaves the key out entirely (the previous prompt is unchanged).
+        if self.claims_service is not None:
+            try:
+                ctx["claims"] = self.claims_service.prompt_block(now=now)
+            except Exception as exc:  # a broken read is reported, never faked as empty
+                ctx["claims"] = {"available": False,
+                                 "reason_code": "CLAIMS_READ_FAILED",
+                                 "detail": ("%s: %s" % (type(exc).__name__, exc))[:160]}
         reading = self.private_material_situation() or {}
         if isinstance(reading, Mapping) and reading:
             material = reading.get("material") if isinstance(reading.get("material"), Mapping) else {}
@@ -5056,10 +5094,19 @@ class AutonomousLifeCycle:
             "foreground_activity": None,
             "continuable_artifact": None,
             "source_availability": {},
+            "blocked_activities": [],
         }
         try:
             state = self.runtime.canonical_state()
             found["foreground_activity"] = state.get("foreground_activity_ref")
+            # 2026-10-28: a BLOCKED Activity released the slot, so it is neither the foreground
+            # nor (when unconditional) a parked resume.  It is still unfinished work with one
+            # legal owner exit, so it is material in its own right; without this the round is
+            # NO_MATERIAL before AG-0 ever runs and the exit can never be chosen.
+            found["blocked_activities"] = [
+                str(row.get("activity_id"))
+                for row in (state.get("activities") or {}).values()
+                if isinstance(row, Mapping) and str(row.get("status") or "") == "BLOCKED"]
         except Exception as exc:  # pragma: no cover - owner read failure
             found["canonical_read_error"] = f"{type(exc).__name__}: {exc}"
 
@@ -5141,6 +5188,9 @@ class AutonomousLifeCycle:
         # material: an empty appraisal never makes a round happen (it cannot starve or wake
         # anything), it only adds bounded context when it is valid.
         found["appraisal_wired"] = self.appraisal_source is not None
+        # S03: whether a current-claim aggregate is bound.  It reports wiring only;
+        # the claims themselves are read per round and are never a candidate source.
+        found["claims_wired"] = self.claims_service is not None
 
         # B6-5: ask the World what she can actually perceive right now.  This is a bounded read
         # through the gateway, not a model call, and it is the only way AG-0 may ever see a
@@ -5212,11 +5262,21 @@ class AutonomousLifeCycle:
             "error": (self.last_practice_error or self.practice.last_error or None),
         }
 
+        # 2026-10-28: a bound work the owner reports as no longer continuable (archived, failed,
+        # gone) used to make the whole round NO_MATERIAL even when other real artifacts were
+        # waiting.  That hid every *new* opportunity and made "B can start after A failed"
+        # impossible.  The count below is the already-admitted PERSONAL_OPPORTUNITY source's own
+        # number of continuable artifacts; it only says "there is material to consider", it does
+        # not retarget the bound work and it is not a CONTINUE permission.
+        personal = (found.get("source_availability", {}) or {}).get("PERSONAL_OPPORTUNITY") or {}
+        other_artifacts = int(personal.get("continuable_count") or 0)
         found["has_material"] = bool(
             found["foreground_activity"] or found["continuable_artifact"] or observed
             or found.get("reading_material") or self._round_future_items
             or self._round_project_options or self._round_reserved_options
-            or int((found.get("parked_candidates") or {}).get("count") or 0) > 0)
+            or int((found.get("parked_candidates") or {}).get("count") or 0) > 0
+            or found.get("blocked_activities")
+            or other_artifacts > 0)
         return found
 
     # -- v0.4 day-life: read-only step readiness + the bounded reconsideration ledger -----
@@ -5239,16 +5299,17 @@ class AutonomousLifeCycle:
         return [dict(row) for row in rows if isinstance(row, Mapping)]
 
     def _paused_activity_targets(self) -> set[str]:
-        """Artifact ids that already have a PAUSED/WAITING Activity of their own.
+        """Artifact ids that already have a PAUSED/WAITING/BLOCKED Activity of their own.
 
-        This is the seam the personal-opportunity source reads: such an object is *resume*'s
-        business (LR-4 eligibility plus the owner's own RESUME path), so offering it as a fresh
-        START would be a second Activity for the same object and would bypass that eligibility.
+        This is the seam the personal-opportunity source reads: such an object is resume's or
+        the suspension's business (LR-4 eligibility plus the owner's own RESUME path, or the
+        BLOCKED exit candidate), so offering it as a fresh START would be a second Activity
+        for the same object and would bypass the owner rules that already govern it.
         """
 
         wanted: set[str] = set()
         for activity in self.open_activities():
-            if str(activity.get("status") or "") not in {"PAUSED", "WAITING"}:
+            if str(activity.get("status") or "") not in {"PAUSED", "WAITING", "BLOCKED"}:
                 continue
             for ref in self._activity_target_refs(activity):
                 identity = self._artifact_identity(ref)
@@ -9640,6 +9701,8 @@ class AutonomousLifeCycle:
             # A (life-v1): the projection is a read-only context, so status may only report
             # whether one is wired and what the last read said -- never a feeling of its own.
             "appraisal_wired": self.appraisal_source is not None,
+            #: S03: a current-claim aggregate is bound (read-only context, no authority).
+            "claims_wired": self.claims_service is not None,
             # v0.4 day-life: read-only projections of the two things this round's suppression is
             # built on.  They report; they authorize nothing.
             "step_readiness": self.last_step_readiness,
@@ -9655,6 +9718,7 @@ def autonomous_life_cycle_from_env(runtime: Any, *, artifact_port: LifeArtifactP
                                    situation_source: Any = None,
                                    continuity_source: Any = None,
                                    appraisal_source: Any = None,
+                                   claims_service: Any = None,
                                    work_artifact_id: Optional[str] = None,
                                    env: Optional[Mapping[str, str]] = None) -> AutonomousLifeCycle:
     """Assemble the cycle with the switches and budget read from the environment."""
@@ -9669,6 +9733,7 @@ def autonomous_life_cycle_from_env(runtime: Any, *, artifact_port: LifeArtifactP
         situation_source=situation_source,
         continuity_source=continuity_source,
         appraisal_source=appraisal_source,
+        claims_service=claims_service,
         env=env,
     )
 

@@ -130,3 +130,9 @@ fix 脚本。
 - 给 A 的接缝：`LifeSharingService(projects, *, clock=None)`、`sharing_from_env(env)`、
   以及 `is_share_title` / `share_title` / `share_text_title` / `parse_share_content` 等 helper 与只读常量。精确签名与返回见
   `docs/engineering/v04-sharing-service-result.md` §1。
+
+## 后续（2026-10-29）
+
+本轮新增的披露许可不改本 note 的信封/状态机/本地投递语义；它只在 owner 的发送提交处增加一张
+可撤销的精确许可，旧草稿仍可读、可延后、可丢弃，发送需要许可。见
+[2026-10-29-revocable-disclosure-authority](../architecture/2026-10-29-revocable-disclosure-authority.md)。

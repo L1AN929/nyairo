@@ -36,6 +36,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Mapping, Optional
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,11 +84,15 @@ class ScriptedCognition:
     def __init__(self) -> None:
         self.call_count = 0
         self.script = None
+        #: The raw requests the real AG-1 path built (used by tests that must prove a
+        #: context block really reached the model, not only a helper's return value).
+        self.requests: list = []
 
     def invoke(self, request, *, schema_retry_index: int = 0):
         import agency_decision_ag1 as ag1
 
         self.call_count += 1
+        self.requests.append(request)
         allowed = [str(code) for code in (getattr(request, "allowed_reason_codes", []) or [])]
         reason = allowed[:1] or ["NO_LEGAL_CANDIDATE"]
         if self.script is not None:
@@ -131,8 +136,13 @@ def _fresh_root(tag: str) -> Path:
     return root
 
 
-def build_chain(tag: str):
-    """One fully isolated real-owner chain; returns its objects (caller closes)."""
+def build_chain(tag: str, *, extra_env: Optional[Mapping[str, str]] = None):
+    """One fully isolated real-owner chain; returns its objects (caller closes).
+
+    ``extra_env`` is merged into the instance environment *before* assembly, so a
+    caller can bind one additional explicit owner (for example the S03 claim
+    aggregate) without changing this fixture's defaults for anyone else.
+    """
 
     import autonomous_life_assembly as assembly
     import life_artifact_port as lap
@@ -182,6 +192,12 @@ def build_chain(tag: str):
         if data.get("private_items_artifact_id"):
             env.setdefault("CHIYO_LIFE_PRIVATE_ITEMS_ARTIFACT_ID",
                            str(data["private_items_artifact_id"]))
+        if data.get("s03_claims_db"):
+            # A prepared root names its own aggregate; keep the cycle and the phone on
+            # the same database unless the caller explicitly overrides it.
+            env.setdefault("CHIYO_S03_CLAIMS_DB", str(data["s03_claims_db"]))
+        if extra_env:
+            env.update({str(key): str(value) for key, value in extra_env.items()})
         cognition = ScriptedCognition()
         client = ScriptedClient()
         writer = ModelContinuationWriter(client, max_new_chars=300)

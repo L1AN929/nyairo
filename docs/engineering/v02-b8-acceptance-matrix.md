@@ -1,12 +1,14 @@
 # v0.2 E12.3 验收矩阵：T01–T20
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 分支 `v0.2-autonomous-life`。本表只写**实际跑过的**结果。
 `PASS` 只在实跑通过时给出；证据不足的一律 `NOT_RUN` 或 `DEFERRED`。
 
 **证据层级**：`TESTED_ISOLATED` = 隔离环境、真实 owner、受控认知替身；`E2E_VERIFIED` = 真实
 owner 端到端（含真实 World 进程）**且**决定与内容都来自真实供应商（没有替身）；`SOAK_VERIFIED`
 = 跑满 24 小时的完整观察窗；`DEPLOYED` = 真实生产切换。B8-8 起本批**真的调用了付费模型**
-（`gemini-3.8-flash-high`，`https://gw.929711.xyz/v1`），凡是由替身给出的决定一律注明。
+（`gemini-3.8-flash-high`，`https://gw.example.invalid/v1`），凡是由替身给出的决定一律注明。
 
 **B8-8（本批）新增的唯一入口**：`components/life/tests/v02/run_e14_chain.sh`
 （`chain` = E14 六阶段单实例长链；`lifecycle` = T06/T07 的暂停/放弃生命周期；

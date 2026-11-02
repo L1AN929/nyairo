@@ -174,3 +174,103 @@ PAUSE 已经释放前台，补绑前可能有另一件 Activity 占用了槽位�
   [AG-1 只提供 owner 会接受的决策](../architecture/2026-10-26-v04-day-life-decision-legality.md)、
   [PAUSED 资格对齐](../bug-fix/2026-10-23-paused-resume-eligibility-alignment.md)、
   [有效搁置候选供给](2026-10-24-eligible-parked-candidate-supply.md)。
+
+## 2026-10-30 修订：提示文案对齐，不改任何行为
+
+`AutonomousLifeCycle.pause_condition_view` 的描述文本此前仍写“PAUSE keeps the foreground”，
+与上面第 1 条的“成功 PAUSE 释放执行槽”相反。本次只改这段描述：
+
+- docstring 与可绑条件分支的 `how` 改为：成功 PAUSE 释放执行槽，条件满足只给 OPEN 资格、
+  不自动恢复，回来仍由新的 Decision 选 RESUME，后台 RESUME 不抢占另一件前台活动；
+- 描述字段 `keeps_foreground` 由 `True` 改为 `False`。该字段只被
+  `agency_cognition_adapter._bounded_pause_condition` 白名单透传进提示，没有正式逻辑读取它；
+  字段名与结构不变。
+
+不改条件、资格、排序、TTL、owner、恢复入口或默认 gate；没有 basis 时的
+`available: false` / `NO_OFFERED_CONDITION` 文案原样保留，不新增“永远回不来”的断言。
+
+边界：这是提示输入的变化，模型看到的条件块文字与旧版不同，因此与本次之前的历史运行
+（含 A 的恢复观察）不构成逐字可比的提示输入；它不证明会自然返回、不改变“条件满足只给资格”
+的既有语义，也不解决 A 未返回的问题。
+
+## 2026-10-30 修订二：让「PAUSED 时放弃被扣留」这一代价进入提示材料
+
+**事实依据**：2026-10-30 的真实离线实验已逐跳跑通 ACTIVE 阶段的正式放弃链（AG-1 合法集 →
+AG-2 授权 → LR-2 `ABANDONED`），见
+[active-abandon-reachable-20261030.md](../../../../docs/engineering/active-abandon-reachable-20261030.md)；
+而 PAUSED 后台的正式 `ABANDON` 仍被 `PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE` 扣留（上面第 6 条）。
+同一轮对既有 PAUSE 提示材料的有限核查**没有找到**任何一句明确说明“PAUSED 后放弃不可用”，
+但这只说明材料未写明，不能推断模型不知道或不理解。
+
+**本次改动**：`pause_condition_view` 的可见材料是「新增事实句 + 恢复被240截断的完整规则尾段」，不是只加一句；其中新增的系统确知事实是——
+「While the Activity is PAUSED, ABANDON is not available through the formal decision path;
+if you want to abandon it, make that choice while it is still ACTIVE.」
+有 basis 与无 basis 两个分支都写；语气是客观陈述，不劝阻暂停。该句限定当前 PAUSED 状态，
+不写成永久失去（Activity 恢复成 ACTIVE 后正式路径仍可提供 ABANDON）。
+`agency_cognition_adapter._bounded_pause_condition` 的白名单键集合不变，只把 `how` 的截断
+上限从 240 提到 680 字符，避免这句（以及既有的 park 说明）在投影时被从中间截掉；
+240处原来还截掉了通用尾段：OPEN资格、不自动恢复、新Decision自选RESUME与后台不抢占；
+放宽后这些既有说明也新增可见，不只是新事实句和park说明。逐字差额见
+[有限材料差额](../../../../docs/engineering/pause-cost-material-delta-20261030.md)。
+
+**静态系统提示变更（独立项）**：原先称PAUSE“保留前台”的静态系统提示改为“释放执行槽”。
+这不是注释；使用该正式adapter构造请求时，每轮共有的基础说明都已改变，影响不局限于暂停视图。
+
+**未改变**：AG-1 合法集、AG-2/LR-2/LR-4、条件、资格、状态机、TTL、排序、owner 合同、
+默认 gate 与预算均未动；没有新增键、schema 或字段。红线内容（“只有你能解”“条件永不满
+足”“等自己的作品所以等不到”）没有进入模型材料。
+
+**边界**：这是**模型输入的变化，且每轮基础材料同时变化**，不只是条件块多一句话。
+与 a/b/c 三批真实运行使用的提示输入不同，新观测不能当同输入/同策略横向比较，
+多因素同时变化，不能把行为差异归因于放弃提醒或任一单独变动：输入变了，行为是否变、为什么变，未知。
+改前240字符文本仅按本单变动重建，没有独立前快照，不是历史现场；当前park拼接的`ACTIVE.;`
+是已知文案瑕疵，原样保留，本单不扩范围修正。它只让代价可见，不保证她会因此继续做，也不恢复 r23 里已经
+不再合法的 CONTINUE；不声称解决了原 A 的返回问题，也不构成 G1 证据。新增测试
+`tests/test_pause_abandon_cost_copy.py` 只证明该字符串能通过正式 adapter 白名单投影，
+且正式 AG-1 对最小 PAUSED 形状仍不给 ABANDON（ACTIVE 对照仍给），不证明完整最终 prompt
+已发送或模型已理解。
+
+## 2026-11-01 测试夹具对齐（不改行为）
+
+`tests/test_paused_abandon_existing_path.py` 原先假设「PAUSED 仍占前台，并被 AG-0 投影成
+CONTINUE_CURRENT」。PAUSE 释放执行槽之后这不再成立，夹具改为：断言 PAUSED 记录带
+`foreground_released`、`foreground_activity_ref is None`、AG-0 投影 0 个候选；AG-1 的
+`PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE` 与 AG-2 的同类拒绝仍由「伪造 ABANDON 命名该
+PAUSED Activity」打到（两处都是状态判定，与前台指针无关）。没有改条件、资格、排序、owner、
+默认 gate。共同活动路径在 PAUSE→WAIT 顺序下被 LR-2 拒绝属于独立的生产接线问题，不在本修订
+内处理，也未用测试替身绕开。
+
+## 2026-11-01 修订二：上句「生产接线问题」的判断被纠正（四红是旧测试入口）
+
+上面的判断只对**旧入口** `FiniteCoPresence.begin` 成立，它不是生产路径：生产由
+`life_social_contacts` 调用 `begin_from_decision`——Decision 先行，前台交接是采纳自己的
+第一条命令（LR-4 WAITING + release，见
+[来访决定先行](2026-11-21-v04-social-life-local-contact-and-co-presence.md)）。旧 `begin`
+的「先 LR-3 PAUSE、再 WAIT」在新前台语义下必被 LR-2 拒（PAUSE 已释放前台），这是旧入口与
+新规则的组合，不是正式共处链的缺陷。
+
+`tests/test_life_v1_integration.py` 的四个红（共同时间闭环、读不消费资格、只记录实际消费、
+未采纳不报 started）此前都直接走旧 `begin`，现已改走正式 `begin_from_decision`（Decision/
+内容仍为脚本替身）。同时按既有规则对齐测试侧事实，未改任何生产行为：
+
+- 每个自然轮显式给 `observed_at`，与邀请、end 事件同一时间轴；邀请声明 2 小时窗口，使有界
+  等待条件覆盖整段测试时间线（默认 15 分钟窗口短于测试的 end 时刻）。
+- 一件 Activity 真实占着唯一前台时，另一件资格不再被要求「仍可选 RESUME」——按不抢占规则
+  断言它保持 OPEN 但不供给，而不是放宽 AG-0。
+
+2026-11-01 同一功能返修（上一版测试未被验收的两点）：
+
+- 上一版在 DEFER 后显式 `reconsideration.release(key=…)` 再继续，是把**强制解除静默**当成
+  自然重新考虑，违反产品「同状态不再问」的规则。此处撤销两处 release：DEFER 之后下一同状态
+  轮断言 `QUIET`/`llm_calls == 0`、资格仍 `OPEN`、水位未记录采纳；要验「之后仍可消费」改为
+  另起独立新根的正常路径（从未 DEFER，end → 一次 RESUME 消费，第二次不再是 RESUME），两条
+  分开证明，不拼成同一条自然轨迹。
+- 上一版用 `NO_ACTION`（Decision 根本没选共同时间）冒充「采纳失败」，与原负控不等价。现拆成
+  两条：`NO_ACTION` 仍单独作为「Decision 未选择即不报 started、私人状态原样」的负控；真正的
+  采纳失败用测试侧可控的 LR-2 start 命令故障，在**已提交 START Decision 之后、采纳边界**触发
+  ——产品既有的 stranded 边界：`HANDOFF_STRANDED` / `JOINT_START_FAILED_AFTER_HANDOFF`，
+  私人 Activity 被 LR-4 置为 WAITING、交接释放为真实 OPEN 资格、session 为 `PARKED_NO_JOINT`，
+  不报 started、无 joint Activity。生产源码零改动，只测试端命令端口故障。
+
+验收：WSL `owned_test_runner --files test_life_v1_integration.py` 全例 OK、exit 0；本单
+`components/` 零改动。

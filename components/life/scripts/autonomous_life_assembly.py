@@ -405,6 +405,41 @@ def resolve_situation_source(environment: Mapping[str, str], *, home: Any = None
             "body_seam": body["status"], "body_seam_reason": body["reason"]}
 
 
+def resolve_claims_service(environment: Mapping[str, str], *,
+                           subject_id: Optional[str] = None) -> dict[str, Any]:
+    """The S03 current-claim aggregate, or a named reason there is none.
+
+    Only an *explicitly bound* database is used (``CHIYO_S03_CLAIMS_DB``, written by
+    a new-root prepare).  An old root has no such binding and stays exactly as it
+    was: no file is created here, no empty aggregate is invented.
+    """
+
+    env = dict(environment or {})
+    path = str(_first(env, ("CHIYO_S03_CLAIMS_DB", "NYAIRO_S03_CLAIMS_DB")) or "").strip()
+    if not path:
+        return {"service": None, "status": "UNBOUND", "reason": "S03_CLAIMS_NOT_BOUND",
+                "detail": "no CHIYO_S03_CLAIMS_DB in this profile"}
+    if not Path(path).exists():
+        return {"service": None, "status": "UNAVAILABLE", "reason": "S03_CLAIMS_NOT_FOUND",
+                "path": path}
+    subject = str(subject_id or _first(env, ("NYAIRO_LIFE_SUBJECT", "NYA02_SUBJECT"))
+                  or "").strip()
+    if not subject:
+        return {"service": None, "status": "UNAVAILABLE", "reason": "S03_SUBJECT_MISSING",
+                "path": path}
+    try:
+        here = str(Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import s03_claims
+        service = s03_claims.S03ClaimService(path, subject=subject)
+    except Exception as exc:  # an unreadable aggregate is reported, never faked
+        return {"service": None, "status": "UNAVAILABLE", "reason": "S03_CLAIMS_UNREADABLE",
+                "detail": "%s: %s" % (type(exc).__name__, exc), "path": path}
+    return {"service": service, "status": "READY", "reason": "", "path": path,
+            "subject_id": subject}
+
+
 def resolve_world_provider(environment: Mapping[str, str], *,
                            bridge_dir: Optional[str] = None,
                            clock: Any = None) -> dict[str, Any]:
@@ -579,6 +614,59 @@ def _practice_responder(environment: Mapping[str, str], *, timeout_s: float = 30
     return spl.ModelPracticeResponder(client, max_output_tokens=700)
 
 
+def _local_reply_responder(environment: Mapping[str, str], *, timeout_s: float = 30.0,
+                           client: Any = None, requests: Any = None,
+                           admission: Any = None, pause_guard: Any = None) -> dict[str, Any]:
+    """The ordinary-message reply responder, over the instance's own provider -- or a reason.
+
+    An ordinary local message is answered with real words, so the answer is a real request: the
+    *same* profile resolution, the same transport (with the same pause send guard) and the same
+    persisted request ledger as the other writers, one reservation at the HTTP boundary.  With no
+    usable provider the result is ``NOT_CONFIGURED`` with a name -- never a template, because a
+    canned sentence would be a lie about what she said.
+
+    ``client`` is the documented bottom-level injection point (a caller that already holds a
+    client -- a fixture, a different transport -- hands it in); everything above it is the
+    production path.
+    """
+
+    try:
+        import local_message_responder as lmr
+    except Exception as exc:
+        return {"responder": None, "status": "NOT_CONFIGURED",
+                "reason_code": "LOCAL_REPLY_MODULE_UNAVAILABLE",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    if client is None:
+        config = _model_config(environment)
+        if config is None:
+            return {"responder": None, "status": "NOT_CONFIGURED",
+                    "reason_code": "LOCAL_REPLY_MODEL_NOT_CONFIGURED",
+                    "detail": "the instance profile resolves no usable model provider, so an "
+                              "ordinary message is observed and not answered"}
+        try:
+            from profile_model_transport import OpenAICompatibleTransport
+            from agency_model_client import AgencyModelClient
+        except Exception as exc:
+            return {"responder": None, "status": "NOT_CONFIGURED",
+                    "reason_code": "LOCAL_REPLY_MODEL_UNAVAILABLE",
+                    "detail": "%s: %s" % (type(exc).__name__, exc)}
+        transport = OpenAICompatibleTransport(
+            base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
+            provider=config.get("provider") or "custom", timeout_s=timeout_s,
+            purpose="local_reply", request_json_object=False, pause_guard=pause_guard)
+        client = AgencyModelClient(config=config, transport=transport, purpose="local_reply",
+                                   timeout_s=timeout_s,
+                                   max_output_tokens=lmr.DEFAULT_MAX_OUTPUT_TOKENS)
+    if requests is not None:
+        from life_request_budget import BudgetedModelClient
+
+        client = BudgetedModelClient(client, requests, admission=admission)
+    responder = lmr.LocalMessageResponder(client,
+                                          max_output_tokens=lmr.DEFAULT_MAX_OUTPUT_TOKENS)
+    return {"responder": responder, "status": "READY", "reason_code": "", "detail": "",
+            "describe": responder.describe()}
+
+
 def _model_reading_response(environment: Mapping[str, str], *, timeout_s: float = 30.0,
                             requests: Any = None, admission: Any = None,
                             pause_guard: Any = None) -> Any:
@@ -745,7 +833,8 @@ def resolve_shared_practice(runtime: Any, *, cycle: Any, env: Mapping[str, str],
 
 def resolve_local_contacts(runtime: Any, *, cycle: Any, state_root: Path | str, env: Mapping[str, str],
                           subject_id: Any, admission: Any = None,
-                          requests: Any = None) -> dict[str, Any]:
+                          requests: Any = None, local_reply_client: Any = None,
+                          local_reply_requests: Any = None) -> dict[str, Any]:
     """v0.4 B: A's local-contact inbox, the co-presence protocol, and the resident's pass.
 
     All three are built from *this instance's* identity -- the Supply subject it already feeds
@@ -780,13 +869,26 @@ def resolve_local_contacts(runtime: Any, *, cycle: Any, state_root: Path | str, 
     # *before* the port so the port can hold it, and its status is reported either way.
     practice = resolve_shared_practice(runtime, cycle=cycle, env=env, subject_id=subject,
                                        inbox=inbox, admission=admission, requests=requests)
+    # The ordinary-message reply: a real responder over the instance's own provider, or a named
+    # reason why there is none.  It is what turns ``LOCAL_REPLY_NOT_WIRED`` into an answer that
+    # is archived on the arrival and readable through the local CLI.
+    reply = _local_reply_responder(env, client=local_reply_client,
+                                   requests=(local_reply_requests if local_reply_requests
+                                             is not None else requests),
+                                   admission=admission, pause_guard=admission)
     port = lsc.SocialContactPort(runtime, state_root=state_root, subject_id=subject, home=home,
                                  inbox=inbox, protocol=protocol, cycle=cycle,
-                                 practice=practice.get("service"))
+                                 practice=practice.get("service"),
+                                 responder=reply.get("responder"),
+                                 responder_note={"reason_code": reply.get("reason_code") or "",
+                                                 "detail": reply.get("detail") or ""})
     return {"status": "READY", "inbox": inbox, "protocol": protocol, "port": port,
             "subject_id": subject, "home_ref": home,
             "shared_practice": {key: value for key, value in practice.items()
                                 if key != "service"},
+            "local_reply": {"status": reply.get("status"), "wired": reply.get("responder")
+                            is not None, "reason_code": reply.get("reason_code") or "",
+                            "describe": reply.get("describe")},
             "ledger_path": str(getattr(inbox, "path", "") or "")}
 
 
@@ -807,6 +909,8 @@ def assemble_autonomous_life(
     appraisal_source: Any = None,
     work_artifact_id: Optional[str] = None,
     clock: Optional[Callable[[], Any]] = None,
+    local_reply_client: Any = None,
+    local_reply_requests: Any = None,
 ) -> dict[str, Any]:
     """Build the cycle, the runner and the feed poller on top of ``runtime``.
 
@@ -892,6 +996,9 @@ def assemble_autonomous_life(
     # none, the cycle offers no draft/action at all -- and nothing pretends a share was delivered.
     sharing = resolve_sharing_service(env, subject_id=supply["subject_id"],
                                       grant_id=supply["artifact_grant_id"])
+    # S03 Perception/Belief: only a new root's explicit binding is opened.  With none,
+    # the cycle gets ``None``, the prompt keeps its previous shape and no claim exists.
+    claims = resolve_claims_service(env, subject_id=supply["subject_id"])
 
     # D (life-v1): the two injected readers and the explicit work binding.
     #   * ``situation`` is A's view: the Body column comes from the instance's own gateway
@@ -1022,6 +1129,10 @@ def assemble_autonomous_life(
         # open drafts and the sources she could share from, and one owner call settles the single
         # sharing request a Decision may make.  ``LOCAL_DELIVERED`` stays a local-inbox fact.
         sharing_service=sharing["service"],
+        # S03: bounded current claims (observed / reported / inferred) as *data* in the
+        # decision situation.  ``None`` keeps the previous prompt; the aggregate never
+        # becomes a candidate, a permission or a World/Memory write.
+        claims_service=claims["service"],
         # 显式压缩演示模式的业务时钟。``None`` 是普通真实时间路径，行为与以前一致；
         # 传入后 cycle 的业务到期/事件时间与 runner 的自然窗口都读同一个域。
         clock=clock,
@@ -1032,7 +1143,9 @@ def assemble_autonomous_life(
     # to the cycle (bounded cognition view) and handed back as ``contact_port`` for the resident's
     contacts = resolve_local_contacts(runtime, cycle=cycle, state_root=root, env=env,
                                       subject_id=supply["subject_id"], admission=admission,
-                                      requests=requests)
+                                      requests=requests,
+                                      local_reply_client=local_reply_client,
+                                      local_reply_requests=local_reply_requests)
     if contacts.get("status") == "READY":
         cycle.social_contacts = contacts["port"]
         cycle.contact_inbox = contacts["inbox"]
@@ -1104,6 +1217,8 @@ def assemble_autonomous_life(
         # the cycle, where the seam owns it).
         "sharing": {key: value for key, value in sharing.items() if key != "service"},
         "practice": {key: value for key, value in practice.items() if key != "service"},
+        # S03: what was bound, said plainly.  The aggregate object stays on the cycle.
+        "claims": {key: value for key, value in claims.items() if key != "service"},
         # v0.4 B: the local-contact seam, said plainly -- which identity it was bound to, whether
         # A's ledger exists yet, and the live port the resident step drives.  The inbox and the
         # protocol objects are not re-exported here; they live on the cycle, where the seam owns
@@ -1198,6 +1313,7 @@ __all__ = [
     "ENV_RUN_ID",
     "request_budget",
     "resolve_situation_source",
+    "resolve_claims_service",
     "resolve_sharing_service",
     "resolve_shared_practice",
     "resolve_body_port",

@@ -29,8 +29,10 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 for entry in (str(ROOT), str(ROOT / "components"),
@@ -58,6 +60,19 @@ REST_START_REF = "bodyact:rest:start:rest"
 
 #: 正文特征串：证明它从不进入 observed_facts / 报告。
 MATERIAL_SENTINEL = "窗外是一条街"
+
+
+def _observed_clock(at: str = OBSERVED_AT):
+    """把再考虑台账的 TTL 时钟钉到夹具的 ``OBSERVED_AT``。
+
+    ``ReconsiderationLedger.expired`` 在没有显式 ``at`` 时回落到
+    ``life_step_readiness._now_iso``；而 ``cycle.step_readiness`` 调 ``no_change`` 时正是不传
+    ``at`` 的。夹具在 ``OBSERVED_AT``（2026-10-26）写入记录，六小时 TTL 若按真实墙钟计算，
+    每条记录一读就已经"过期"，于是三条用例都退化成 ``ARTIFACT_STEP_AVAILABLE``。这里只钉住
+    这一个模块级 callable（with 结束即还原），台账自己的 TTL 规则原样保留。
+    """
+
+    return mock.patch.object(lsr, "_now_iso", return_value=at)
 
 
 def _situation(*, state: str, available: bool, version: str = "rev-1",
@@ -738,7 +753,8 @@ class DayLifeContinuityTest(unittest.TestCase):
         cycle.runtime.candidate_read.candidates["cand:work"] = {
             "candidate_id": "cand:work", "target_refs": [WORK_ID, "artifactversion:h1"]}
 
-        ready = cycle.step_readiness(act=True)
+        with _observed_clock():
+            ready = cycle.step_readiness(act=True)
         self.assertEqual(ready.target_ref, WORK_ID, ready.to_dict())
         self.assertEqual(ready.source_revision, "artifact-version:h1", ready.to_dict())
         self.assertIs(ready.available, False, ready.to_dict())
@@ -901,7 +917,8 @@ class DayLifeContinuityTest(unittest.TestCase):
             "candidate_id": self._PARENT_WORK_CANDIDATE,
             "target_refs": ["artifact:artifact:%s" % self._PARENT_WORK_ID.split(":", 1)[-1],
                             self._PARENT_WORK_HEAD]}
-        out = self._round(first)
+        with _observed_clock():
+            out = self._round(first)
         self.assertEqual(out["step_readiness"]["target_ref"], self._PARENT_WORK_ID,
                          out["step_readiness"])
         self.assertEqual(out["step_readiness"]["source_revision"], self._PARENT_WORK_HEAD,
@@ -916,7 +933,8 @@ class DayLifeContinuityTest(unittest.TestCase):
         # recognised instead of being asked about again, and nothing is hidden or switched off.
         rebuilt = self._cycle(state_root=root, work_id=self._PARENT_WORK_ID,
                               **self._parent_work_state(port))
-        again = self._round(rebuilt)
+        with _observed_clock():
+            again = self._round(rebuilt)
         self.assertEqual(again["step_readiness"]["target_ref"], self._PARENT_WORK_ID,
                          again["step_readiness"])
         self.assertEqual(again["step_readiness"]["reason_code"], lsr.REASON_WORK_NO_CHANGE,
@@ -957,11 +975,31 @@ class DayLifeContinuityTest(unittest.TestCase):
         cycle = self._cycle(activities={"activity:work-1": _work_activity_with_lineage()},
                             foreground="activity:work-1", situation=None, artifact_port=port,
                             state_root=root)
-        ready = cycle.step_readiness(act=True)
+        with _observed_clock():
+            ready = cycle.step_readiness(act=True)
         self.assertEqual(ready.target_ref, WORK_ID, ready.to_dict())
         self.assertEqual(ready.source_revision, "artifact-version:h1", ready.to_dict())
         self.assertIs(ready.available, False, ready.to_dict())
         self.assertEqual(ready.fact_keys(), {FACT_KEY: True}, ready.to_dict())
+
+    def test_a_no_change_record_still_expires_when_the_ledger_clock_passes_the_ttl(self):
+        """钉住的是夹具自己的时刻，不是把 TTL 关掉：过六小时后同一条记录必须查不到。"""
+
+        root = self._root()
+        ledger = lsr.ReconsiderationLedger(root)
+        self.assertIsNotNone(ledger.record(
+            readiness=lsr.StepReadiness(available=False, reason_code=lsr.REASON_WORK_NO_CHANGE),
+            outcome=alc.OUTCOME_NO_ACTION, at=OBSERVED_AT,
+            target_ref=WORK_ID, source_revision="artifact-version:h1",
+            reason_code=lsr.REASON_WORK_NO_CHANGE))
+
+        with _observed_clock():
+            self.assertIsNotNone(ledger.no_change(WORK_ID, "artifact-version:h1"))
+
+        after_ttl = (datetime.fromisoformat(OBSERVED_AT)
+                     + timedelta(seconds=lsr.DEFAULT_TTL_SECONDS + 1)).isoformat()
+        with _observed_clock(at=after_ttl):
+            self.assertIsNone(ledger.no_change(WORK_ID, "artifact-version:h1"))
 
 
 if __name__ == "__main__":

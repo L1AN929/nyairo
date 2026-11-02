@@ -1,5 +1,7 @@
 # v0.4 父级结果：有内容的相处与可延续共同作品
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 Status: MECHANISM_AND_LOCAL_BROWSER_PASSED / REAL_MODEL_VALIDATION_FAILED。
 
 结论：正常 owner 机制与真实手机浏览器路径已接通；**自然模型整段目标尚未证明，不报全目标完成**。
@@ -118,7 +120,7 @@ A契约59、真Supply14；B正常整链3、seam29、social14（WSL0skip）；C�
 
 ## 8. 用户换端点后的追加真实验证（2026-10-21）
 
-用户指定 `https://gw.929711.xyz/v1` / `cline-pass/deepseek-v4.1-flash`，并明确要求立即验证。
+用户指定 `https://gw.example.invalid/v1` / `cline-pass/deepseek-v4.1-flash`，并明确要求立即验证。
 本次独立隔离验证复用正常 Life 场景与严格 parser，只换 transport；旧cn验证账本保持封存。
 网关凭据从原实例one-day/model_env只读到内存，不修改文件、不回显、不落盘。
 

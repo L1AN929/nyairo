@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -143,9 +144,236 @@ def build_decision_reader(state_root: Path | str):
         raise _ReadersUnavailable("DECISION_READER_UNAVAILABLE", _detail(exc)) from exc
 
 
+def _decision_review_module():
+    """S04's read-only decision projection (same package tree as the AG-1 readers)."""
+
+    import decision_review as _dr
+    return _dr
+
+
+def decision_review_envelope(*, state_root: Path | str, decision_id: Optional[str] = None,
+                             limit: int = 10) -> dict[str, Any]:
+    """``GET /api/phone/decisions/review``：决定的有限摘要、已记录未选项、Adoption 状态。
+
+    纯读：只读 AG-1 的不可变 ``DecisionRecord``/处置表与 AG-2 自己的 Adoption 记录。
+    rationale 正文在手机读面**始终扣留**（只报是否记录、长度）；实时适用性复核需要正式
+    AG-2 准入读口，手机侧不复制规则，明确报 ``NOT_EVALUATED``。读取不写任何状态。
+    """
+
+    dr = _decision_review_module()
+    try:
+        readers = dr.open_readers(state_root)
+    except Exception as exc:
+        return phone_service.unavailable(
+            "DECISION_REVIEW_READERS_UNAVAILABLE", read_only=True,
+            detail="%s: %s" % (type(exc).__name__, exc),
+            note="决定读口起不来；不把读不到说成没有决定。")
+    if decision_id:
+        row = dr.summarize_decision(
+            readers["decision_read"], readers["integration_read"], decision_id,
+            include_rationale=False)
+        row["live_applicability"] = dr.review_live_applicability(
+            readers["decision_read"], decision_id)
+        return phone_service.envelope(
+            True, phone_service.STATUS_OK,
+            {"read_only": True, "decision": row})
+    rows = dr.list_recent_decisions(readers["decision_read"], limit=limit)
+    return phone_service.envelope(
+        True, phone_service.STATUS_OK,
+        {
+            "read_only": True,
+            "limit": max(1, min(int(limit), 50)),
+            "count": len(rows),
+            "decisions": rows,
+            "note": "只返回有限骨架；选中项/未选项/adoption 需按 decision_id 单查。",
+        })
+
+
 # ---------------------------------------------------------------------------------------------
 # today's activities (canonical authority; same day boundary as ``/today``)
 # ---------------------------------------------------------------------------------------------
+
+
+#: Activity statuses which are final; a successor is a new Activity, not a resume.
+#: 2026-10-28: FAILED is terminal (the goal scope was assessed unreachable).  BLOCKED is
+#: deliberately NOT in this set: it is suspended and can come back through an OPEN eligibility.
+TERMINAL_ACTIVITY_STATUSES = frozenset(
+    {"COMPLETED", "FAILED", "ABANDONED", "CANCELLED", "EXPIRED"})
+
+RECOVERY_ELIGIBILITY_OPEN = "RESUME_ELIGIBILITY_OPEN"
+RECOVERY_CONDITION_PENDING = "RESUME_CONDITION_PENDING"
+RECOVERY_NO_OPEN_ELIGIBILITY = "NO_OPEN_ELIGIBILITY"
+RECOVERY_ACTIVE = "ACTIVE"
+RECOVERY_TERMINAL_PREFIX = "TERMINAL_"
+RECOVERY_ELIGIBILITY_UNREADABLE = "ELIGIBILITY_UNREADABLE"
+RECOVERY_STATE_UNRECOGNIZED = "STATUS_UNRECOGNIZED"
+
+
+def _load_waiting_store(state_root: Path | str, *parts: str
+                        ) -> tuple[Optional[dict[str, Any]], str]:
+    """Read one LR-4 aggregate state file; never turn a read failure into "no facts".
+
+    Returns ``(payload, state)`` where ``state`` is ``"ok"``, ``"absent"`` (the store
+    has simply never been created -- the normal empty case), ``"unreadable"`` or
+    ``"corrupt"``.  Only ``ok``/``absent`` mean "there is no such record"; the other
+    two are reported by name so a caller can say *unknown* instead of *none*.
+    """
+
+    path = Path(str(state_root)).joinpath(*parts)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}, "absent"
+    except OSError:
+        return None, "unreadable"
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None, "corrupt"
+    return (data if isinstance(data, dict) else None), "ok"
+
+
+def _eligibility_is_open(row: Mapping[str, Any], now: datetime) -> bool:
+    if str(row.get("status") or "") != "OPEN":
+        return False
+    expires = row.get("expires_at")
+    if not expires:
+        return True
+    try:
+        moment = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment > now
+
+
+def activity_recovery_projection(state_root: Path | str
+                                 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Read-only owner facts: can this Activity come back, and through which entry?
+
+    The projection deliberately speaks only what the LR-4 stores already say:
+
+    * an ``OPEN`` (unexpired) ``ResumeEligibility`` for this Activity -> ``RESUME``;
+    * a ``PENDING`` ``ResumeCondition`` -> the dependency is still pending, no entry;
+    * a terminal Activity -> no resume (a successor is a new Activity);
+    * an open normal Activity with neither -> ``NO_OPEN_ELIGIBILITY`` (no invented timer);
+    * an ``ACTIVE`` foreground -> ``ACTIVE`` (CONTINUE legality also depends on step
+      readiness, which is not a phone fact, so no next entry is claimed).
+
+    A missing store file is the ordinary empty case.  An unreadable/corrupt store is
+    reported as ``ELIGIBILITY_UNREADABLE`` and never silently treated as "none".
+    """
+
+    eligibility_state, eligibility_read = _load_waiting_store(
+        state_root, "waiting_agenda", "eligibility", "resume_eligibility_state.json")
+    condition_state, condition_read = _load_waiting_store(
+        state_root, "waiting_agenda", "resume_conditions", "resume_conditions_state.json")
+    unreadable = eligibility_read in {"unreadable", "corrupt"} \
+        or condition_read in {"unreadable", "corrupt"}
+    now = datetime.now(timezone.utc)
+    open_eligibility: dict[str, dict[str, Any]] = {}
+    for row in ((eligibility_state or {}).get("eligibilities") or {}).values():
+        if isinstance(row, Mapping) and _eligibility_is_open(row, now):
+            activity_id = str(row.get("activity_id") or "")
+            if activity_id:
+                open_eligibility[activity_id] = dict(row)
+    pending_condition: dict[str, dict[str, Any]] = {}
+    for row in ((condition_state or {}).get("conditions") or {}).values():
+        if isinstance(row, Mapping) and str(row.get("status") or "") == "PENDING":
+            activity_id = str(row.get("activity_id") or "")
+            if activity_id:
+                pending_condition[activity_id] = dict(row)
+    source = {
+        "state": "ok" if not unreadable else "unavailable",
+        "eligibility": eligibility_read,
+        "condition": condition_read,
+        "reason_code": RECOVERY_ELIGIBILITY_UNREADABLE if unreadable else None,
+    }
+    return {
+        "eligibility": open_eligibility,
+        "condition": pending_condition,
+        "unreadable": unreadable,
+        "source": source,
+    }, source
+
+
+def recovery_row(activity: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str, Any]:
+    """One Activity's recovery view, purely from the owner facts handed in."""
+
+    status = str(activity.get("status") or "")
+    activity_id = str(activity.get("ref") or activity.get("activity_id") or "")
+
+    def _with_blocked(row: dict[str, Any]) -> dict[str, Any]:
+        # BLOCKED is not a failure and not a pause: show the owner's own basis/reason next to
+        # the recovery fact.  Only structured refs/reason codes leave the owner; no free text.
+        if status == "BLOCKED":
+            row.setdefault("blocked_on_ref", activity.get("blocked_on_ref"))
+            row.setdefault("blocked_reason_code", activity.get("blocked_reason_code"))
+        return row
+
+    if status in TERMINAL_ACTIVITY_STATUSES:
+        return _with_blocked({"recoverable": False,
+                              "reason_code": RECOVERY_TERMINAL_PREFIX + status,
+                              "next_legal_entry": None})
+    if facts.get("unreadable"):
+        return _with_blocked({"recoverable": None,
+                              "reason_code": RECOVERY_ELIGIBILITY_UNREADABLE,
+                              "next_legal_entry": None})
+    if status == "ACTIVE":
+        return _with_blocked({"recoverable": None, "reason_code": RECOVERY_ACTIVE,
+                              "next_legal_entry": None})
+    eligibility = (facts.get("eligibility") or {}).get(activity_id)
+    if eligibility is not None:
+        return _with_blocked({"recoverable": True, "reason_code": RECOVERY_ELIGIBILITY_OPEN,
+                              "next_legal_entry": "RESUME",
+                              "eligibility_ref": eligibility.get("eligibility_id"),
+                              "activity_revision": eligibility.get("activity_revision")})
+    condition = (facts.get("condition") or {}).get(activity_id)
+    if condition is not None:
+        return _with_blocked({"recoverable": False, "reason_code": RECOVERY_CONDITION_PENDING,
+                              "next_legal_entry": None,
+                              "condition_ref": condition.get("condition_id"),
+                              "waiting_on_ref": condition.get("waiting_on_ref")})
+    if status in {"WAITING", "PAUSED", "BLOCKED"}:
+        return _with_blocked({"recoverable": False,
+                              "reason_code": RECOVERY_NO_OPEN_ELIGIBILITY,
+                              "next_legal_entry": None})
+    return _with_blocked({"recoverable": None, "reason_code": RECOVERY_STATE_UNRECOGNIZED,
+                          "next_legal_entry": None})
+
+
+def _external_stop_projection(act: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """The durable stop intent, read-only.  ``None`` when this Activity never had one."""
+
+    stop = act.get("external_stop")
+    if not isinstance(stop, Mapping):
+        return None
+    refs = stop.get("unresolved_action_refs")
+    return {
+        "state": str(stop.get("state") or "") or None,
+        "intent_id": str(stop.get("intent_id") or "") or None,
+        "reason_code": str(stop.get("reason_code") or "") or None,
+        "requested_at": stop.get("requested_at"),
+        "accepted_at": stop.get("accepted_at"),
+        "finalized_at": stop.get("finalized_at"),
+        "boundary_mode": str(stop.get("boundary_mode") or "") or None,
+        "unresolved_action_refs": ([str(value) for value in refs if isinstance(value, str)][:20]
+                                   if isinstance(refs, (list, tuple)) else []),
+        "by_local_operator": str(stop.get("authority") or "") == "LOCAL_OPERATOR",
+    }
+
+
+def read_today_activities(state_root: Path | str, day: str
+                          ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Public alias of the canonical Activity read used by ``/today``'s day rule.
+
+    ``day_timeline`` (2026-10-27) reuses this instead of parsing the canonical file a third
+    time: one day rule, one set of named failure codes, and the same ``decision_ref`` the
+    arrangement association already relies on.  It stays a pure read.
+    """
+
+    return _read_activities(state_root, day)
 
 
 def _read_activities(state_root: Path | str, day: str
@@ -195,18 +423,49 @@ def _read_activities(state_root: Path | str, day: str
         refs = act.get("source_refs")
         source_refs = [str(value) for value in refs if isinstance(value, str)][:20] \
             if isinstance(refs, (list, tuple)) else []
+        # 2026-10-28: the read face carries the owner's status vocabulary as-is.  FAILED and
+        # BLOCKED add only structured refs and reason codes; no private content is projected.
+        status = str(act.get("status") or "")
+        blocked_reason = act.get("blocked_reason_code")
+
+        def _owner_refs(key: str, limit: int = 20) -> list[str]:
+            """Only the owner's own structured refs; never free text or private content."""
+            raw = act.get(key)
+            if not isinstance(raw, (list, tuple)):
+                return []
+            return [str(value) for value in raw if isinstance(value, str)][:limit]
+
         rows.append({
             "ref": str(ref),
+            # 2026-10-28: an external stop is the *operator's* act, so the read face says so
+            # by name instead of letting a CANCELLED row look like her own choice.  Only
+            # structured refs and codes; never a body or a token.
+            "external_stop": _external_stop_projection(act),
             "title": str(act.get("title") or "")[:200],
             "kind": str(act.get("activity_kind") or ""),
-            "status": str(act.get("status") or ""),
+            "status": status,
             "started_at": started.isoformat(timespec="seconds"),
             "ended_at": phone_service.today_iso(act.get("ended_at")),
             "terminal_reason_code": act.get("terminal_reason_code"),
+            "status_reason_code": act.get("terminal_reason_code") or blocked_reason,
+            "blocked_reason_code": blocked_reason,
+            "blocked_on_ref": act.get("blocked_on_ref"),
+            "blocked_criteria_refs": _owner_refs("blocked_criteria_refs"),
+            "failure_assessment_ref": act.get("failure_assessment_ref"),
+            # The judged criterion and the re-readable evidence are owner facts; the next
+            # round must be able to read them here instead of seeing only a generic status.
+            "failure_criteria_refs": _owner_refs("failure_criteria_refs"),
+            "failure_evidence_refs": _owner_refs("failure_evidence_refs"),
+            "unresolved_action_refs": _owner_refs("unresolved_action_refs"),
+            "unresolved_action_count": len(act.get("unresolved_action_refs") or []),
             "decision_ref": str(act.get("decision_ref") or "") or None,
             "source_refs": source_refs,
         })
     rows.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("ref") or "")))
+    facts, recovery_source = activity_recovery_projection(state_root)
+    for row in rows:
+        row["recovery"] = recovery_row(row, facts)
+    source["recovery"] = recovery_source
     source["count"] = len(rows)
     if len(rows) > MAX_ACTIVITY_ROWS:
         rows = rows[:MAX_ACTIVITY_ROWS]
@@ -779,4 +1038,5 @@ __all__ = [
     "arrangements_envelope",
     "build_action_reader",
     "build_decision_reader",
+    "read_today_activities",
 ]

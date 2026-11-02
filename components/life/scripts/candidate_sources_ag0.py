@@ -35,6 +35,7 @@ from activity_continuity import (
     OPEN_ACTIVITY_STATUSES,
     STATUS_ABANDONED,
     STATUS_ACTIVE,
+    STATUS_BLOCKED,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_EXPIRED,
@@ -89,6 +90,10 @@ SOURCE_COMMITMENT = "COMMITMENT"
 SOURCE_EXPLICIT_GOAL = "EXPLICIT_GOAL"
 SOURCE_WORLD_OPPORTUNITY = "WORLD_OPPORTUNITY"
 SOURCE_PERSONAL_OPPORTUNITY = "PERSONAL_OPPORTUNITY"
+#: 2026-10-28: a BLOCKED Activity is neither the foreground (it released the slot) nor a
+#: resume-eligible one (an unconditional BLOCK has no OPEN eligibility).  Its one legal exit
+#: from this source is ABANDON, chosen by a fresh Decision; the source signs no exit itself.
+SOURCE_BLOCKED_ACTIVITY = "BLOCKED_ACTIVITY"
 
 VALID_CANDIDATE_SOURCE_KINDS = frozenset(
     {
@@ -99,6 +104,7 @@ VALID_CANDIDATE_SOURCE_KINDS = frozenset(
         SOURCE_EXPLICIT_GOAL,
         SOURCE_WORLD_OPPORTUNITY,
         SOURCE_PERSONAL_OPPORTUNITY,
+        SOURCE_BLOCKED_ACTIVITY,
     }
 )
 
@@ -139,6 +145,8 @@ CANDIDATE_KIND_PURSUE_GOAL_STEP = "PURSUE_GOAL_STEP"
 CANDIDATE_KIND_CONSIDER_EXPLICIT_GOAL = "CONSIDER_EXPLICIT_GOAL"
 CANDIDATE_KIND_CONSIDER_WORLD_OPPORTUNITY = "CONSIDER_WORLD_OPPORTUNITY"
 CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY = "CONSIDER_PERSONAL_OPPORTUNITY"
+#: A suspended Activity that can only be ended (ABANDON) unless its own LR-4 condition opens.
+CANDIDATE_KIND_BLOCKED_ACTIVITY = "BLOCKED_ACTIVITY"
 
 VALID_CANDIDATE_KINDS = frozenset(
     {
@@ -150,6 +158,7 @@ VALID_CANDIDATE_KINDS = frozenset(
         CANDIDATE_KIND_CONSIDER_EXPLICIT_GOAL,
         CANDIDATE_KIND_CONSIDER_WORLD_OPPORTUNITY,
         CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY,
+        CANDIDATE_KIND_BLOCKED_ACTIVITY,
     }
 )
 
@@ -1154,6 +1163,12 @@ class CurrentActivityCandidateSource(CandidateSourceAdapter):
         status = raw_item.get("status")
         if status in TERMINAL_STATUSES:
             return False, f"ACTIVITY_TERMINAL_{status}"
+        # 2026-10-28: a durable external stop intent already owns this Activity.  Offering a
+        # CONTINUE would spend a request on a step the submit gate will refuse; the round is
+        # told the reason by name instead of silently seeing "nothing to do".
+        stop = raw_item.get("external_stop") or {}
+        if isinstance(stop, Mapping) and stop.get("state") == "PENDING":
+            return False, "ACTIVITY_EXTERNAL_STOP_PENDING"
         if status == STATUS_WAITING:
             return False, "ACTIVITY_WAITING_NOT_CONTINUE_CANDIDATE"
         if status == STATUS_PAUSED:
@@ -1263,6 +1278,206 @@ class CurrentActivityCandidateSource(CandidateSourceAdapter):
                 observed_at=obs_iso,
                 new_status=CANDIDATE_STATUS_STALE,
             )
+        return copy.deepcopy(candidate)
+
+
+# ---------------------------------------------------------------------------
+# 1b. BlockedActivityCandidateSource (2026-10-28)
+# ---------------------------------------------------------------------------
+
+
+class BlockedActivityCandidateSource(CandidateSourceAdapter):
+    """One projection per BLOCKED Activity: the *existence* of the suspension, not an exit.
+
+    A BLOCKED Activity has already released the foreground slot (LR-2's own BLOCK branch), and
+    an unconditional BLOCK carries no LR-4 condition, so neither ``CURRENT_ACTIVITY`` nor
+    ``RESUME_ELIGIBLE`` reads it.  Without this source the suspension would be invisible to the
+    next Decision and the object could be silently STARTed again as a second Activity.
+
+    The only decision this projection can carry is ABANDON (AG-1 adds it for this kind); the
+    source itself signs nothing.  It is withheld -- by name, never offered as pseudo-legal --
+    when the Activity is ATOMIC, when an unresolved Action still depends on it, or when that
+    dependency cannot be read at all ("cannot prove it is safe" is not "safe").
+    """
+
+    source_kind = SOURCE_BLOCKED_ACTIVITY
+    canonical_owner = "life_activity_authority (LR-2 CanonicalActivityStore)"
+
+    #: Why a BLOCKED Activity was not projected.  Each is a fact about this read, not an exit.
+    WITHHELD_ATOMIC = "BLOCKED_ATOMIC_NOT_EXITABLE"
+    WITHHELD_UNRESOLVED = "BLOCKED_UNRESOLVED_EFFECT"
+    WITHHELD_SAFETY_UNREAD = "BLOCKED_EXIT_SAFETY_UNREAD"
+
+    def __init__(
+        self,
+        activity_read: Optional[ActivityReadService],
+        *,
+        per_source_cap: int = DEFAULT_PER_SOURCE_CAP,
+        unresolved_effect_provider: Optional[Callable[[str], Mapping[str, Any]]] = None,
+    ) -> None:
+        super().__init__(per_source_cap=per_source_cap)
+        self.activity_read = activity_read
+        self.unresolved_effect_provider = unresolved_effect_provider
+        #: The most recent read's named refusals (empty means every BLOCKED item was offered).
+        self.last_withheld: list[dict[str, Any]] = []
+
+    def is_enabled(self) -> bool:
+        return self.activity_read is not None
+
+    def availability_status(self) -> dict[str, Any]:
+        return {
+            "source_kind": self.source_kind,
+            "status": ADAPTER_STATUS_READY if self.is_enabled() else ADAPTER_STATUS_DISABLED,
+            "canonical_owner": self.canonical_owner,
+            "reason_code": "READY" if self.is_enabled() else "ACTIVITY_READ_SERVICE_NOT_ATTACHED",
+        }
+
+    def _withheld_reason(self, act: Mapping[str, Any]) -> Optional[str]:
+        if str(act.get("interruptibility") or "") == "ATOMIC":
+            return self.WITHHELD_ATOMIC
+        if self.unresolved_effect_provider is None:
+            return self.WITHHELD_SAFETY_UNREAD
+        try:
+            answer = dict(self.unresolved_effect_provider(str(act.get("activity_id") or "")) or {})
+        except Exception:
+            return self.WITHHELD_SAFETY_UNREAD
+        if not isinstance(answer, Mapping):
+            return self.WITHHELD_SAFETY_UNREAD
+        # An empty/partial answer is not a clean bill: the provider must positively report a
+        # complete read, otherwise "cannot prove it is safe" stays withheld.
+        if answer.get("readable") is not True:
+            return self.WITHHELD_SAFETY_UNREAD
+        if bool(answer.get("unresolved")):
+            return self.WITHHELD_UNRESOLVED
+        return None
+
+    def discover(self, *, observed_at: str) -> tuple[list[dict[str, Any]], str, dict[str, int]]:
+        obs_iso = _require_iso(observed_at, "observed_at")
+        self.last_withheld = []
+        if self.activity_read is None:
+            return [], "snap:BLOCKED_ACTIVITY:disabled", {
+                "discovered": 0, "emitted": 0, "cap": self.per_source_cap}
+        try:
+            rows = list(self.activity_read.list_open_activities() or [])
+        except Exception:
+            # A failed owner read is never "there is no suspended Activity" -- it yields no
+            # candidate and a named refusal, exactly like the disabled case.
+            self.last_withheld = [{"activity_id": None, "reason_code": "BLOCKED_READ_FAILED"}]
+            return [], "snap:BLOCKED_ACTIVITY:read_failed", {
+                "discovered": 0, "emitted": 0, "cap": self.per_source_cap}
+        kept: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, Mapping):
+                continue
+            act = dict(raw)
+            if str(act.get("status") or "") != STATUS_BLOCKED:
+                continue
+            reason = self._withheld_reason(act)
+            if reason is not None:
+                self.last_withheld.append({
+                    "activity_id": str(act.get("activity_id") or ""),
+                    "reason_code": reason,
+                    "blocked_on_ref": act.get("blocked_on_ref"),
+                })
+                continue
+            kept.append(act)
+        kept = kept[: self.per_source_cap]
+        snap_ref = f"snap:BLOCKED_ACTIVITY:{sha256_hex(obs_iso)[:16]}"
+        return kept, snap_ref, {
+            "discovered": len(rows), "emitted": len(kept), "cap": self.per_source_cap}
+
+    def validate_source(
+        self, raw_item: Mapping[str, Any], *, observed_at: str
+    ) -> tuple[bool, Optional[str]]:
+        if not isinstance(raw_item, Mapping):
+            return False, "INVALID_ACTIVITY_OBJECT"
+        if raw_item.get("subject_id", GLOBAL_SUBJECT_ID) != GLOBAL_SUBJECT_ID:
+            raise SubjectIsolationError("Cross-subject activity rejected")
+        status = str(raw_item.get("status") or "")
+        if status in TERMINAL_ACTIVITY_STATUSES:
+            return False, f"ACTIVITY_TERMINAL_{status}"
+        if status != STATUS_BLOCKED:
+            return False, f"ACTIVITY_STATUS_{status}_NOT_BLOCKED"
+        return True, None
+
+    def materialize(
+        self, *, observed_at: str
+    ) -> tuple[list[CandidateRecord], str, dict[str, int]]:
+        obs_iso = _require_iso(observed_at, "observed_at")
+        items, snap_ref, meta = self.discover(observed_at=obs_iso)
+        results: list[CandidateRecord] = []
+        for act in items:
+            ok, _reason = self.validate_source(act, observed_at=obs_iso)
+            if not ok:
+                continue
+            act_id = str(act["activity_id"])
+            act_rev = int(act["revision"])
+            target_refs: list[str] = []
+            for sref in act.get("subject_refs") or []:
+                if _STRUCTURED_REF_RE.fullmatch(str(sref)) and str(sref) not in target_refs:
+                    target_refs.append(str(sref))
+            for key in ("target_ref", "checkpoint_ref"):
+                value = str(act.get(key) or "")
+                if value and _STRUCTURED_REF_RE.fullmatch(value) and value not in target_refs:
+                    target_refs.append(value)
+            if not target_refs:
+                target_refs.append(act_id)
+            cand_id = f"cand:{sha256_hex(f'BLOCKED_ACTIVITY:{act_id}:v{act_rev}')[:16]}"
+            results.append(CandidateRecord(
+                candidate_id=cand_id,
+                subject_id=GLOBAL_SUBJECT_ID,
+                candidate_kind=CANDIDATE_KIND_BLOCKED_ACTIVITY,
+                source_kind=SOURCE_BLOCKED_ACTIVITY,
+                source_ref=act_id,
+                source_refs=[act_id],
+                source_revision=act_rev,
+                activity_ref=act_id,
+                target_refs=target_refs,
+                availability_status=CANDIDATE_STATUS_OPEN,
+                created_at=obs_iso,
+                observed_at=obs_iso,
+                recorded_at=obs_iso,
+                causal_parent_refs=[act_id],
+                provenance_refs=[act_id, f"act_rev:{act_id}:v{act_rev}", snap_ref],
+                provenance_chain=[
+                    {"step": "candidate", "ref": cand_id,
+                     "kind": CANDIDATE_KIND_BLOCKED_ACTIVITY},
+                    {"step": "adapter", "ref": "adapter:BLOCKED_ACTIVITY",
+                     "owner": self.canonical_owner},
+                    {"step": "canonical_source", "ref": act_id, "revision": act_rev,
+                     "status": STATUS_BLOCKED,
+                     "blocked_on_ref": act.get("blocked_on_ref")},
+                ],
+                idempotency_key=f"idem_cand:blocked_activity:{act_id}:v{act_rev}",
+            ))
+        return results, snap_ref, meta
+
+    def refresh(self, candidate: CandidateRecord, *, observed_at: str) -> CandidateRecord:
+        obs_iso = _require_iso(observed_at, "observed_at")
+        if self.activity_read is None or not candidate.activity_ref:
+            return self.invalidate(candidate, reason_code="SOURCE_UNAVAILABLE",
+                                   observed_at=obs_iso, new_status=CANDIDATE_STATUS_INVALID)
+        act = self.activity_read.get_activity(candidate.activity_ref)
+        if act is None:
+            return self.invalidate(candidate, reason_code="SOURCE_ACTIVITY_MISSING",
+                                   observed_at=obs_iso, new_status=CANDIDATE_STATUS_INVALID)
+        status = str(act.get("status") or "")
+        if status in TERMINAL_ACTIVITY_STATUSES:
+            return self.invalidate(candidate,
+                                   reason_code=f"ACTIVITY_BECAME_TERMINAL_{status}",
+                                   observed_at=obs_iso, new_status=CANDIDATE_STATUS_STALE)
+        if status != STATUS_BLOCKED:
+            # It moved on (resumed) or changed suspension; this projection is about the old one.
+            return self.invalidate(candidate,
+                                   reason_code=f"ACTIVITY_NO_LONGER_BLOCKED_{status}",
+                                   observed_at=obs_iso, new_status=CANDIDATE_STATUS_STALE)
+        if int(act["revision"]) != int(candidate.source_revision or -1):
+            return self.invalidate(candidate, reason_code="ACTIVITY_REVISION_ADVANCED",
+                                   observed_at=obs_iso, new_status=CANDIDATE_STATUS_STALE)
+        reason = self._withheld_reason(act)
+        if reason is not None:
+            return self.invalidate(candidate, reason_code=reason, observed_at=obs_iso,
+                                   new_status=CANDIDATE_STATUS_WITHDRAWN)
         return copy.deepcopy(candidate)
 
 
@@ -1486,7 +1701,13 @@ class ResumeEligibleCandidateSource(CandidateSourceAdapter):
             return "TARGET_SOURCE_READ_NOT_WIRED"
         for ref in refs:
             try:
-                view = reader.read_artifact(ref)
+                # 2026-10-28: the admitted PERSONAL_OPPORTUNITY candidate projects its target as
+                # ``artifact:artifact:<id>`` (the source prefix plus the owner's own id).  The
+                # owner read takes ``artifact:<id>``; strip exactly the extra wrapper and never
+                # invent or remap an id.  Without this, a BLOCKED work that was started from
+                # that source could never be offered for RESUME even though the owner is fine.
+                view = reader.read_artifact(
+                    ref[len("artifact:"):] if ref.startswith("artifact:artifact:") else ref)
             except Exception:
                 # A typed owner refusal (revoked/tombstoned/unreachable) and an unreadable answer
                 # are the same fact here: the source is not proven available.
@@ -3184,6 +3405,8 @@ class CandidateReplayVerifier:
 
 __all__ = [
     "SOURCE_PERSONAL_OPPORTUNITY",
+    "SOURCE_BLOCKED_ACTIVITY",
+    "CANDIDATE_KIND_BLOCKED_ACTIVITY",
     "CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY",
     "ADAPTER_STATUS_DISABLED",
     "ADAPTER_STATUS_PARTIAL",
@@ -3220,6 +3443,7 @@ __all__ = [
     "CandidateSourceRegistry",
     "CommitmentCandidateSource",
     "CurrentActivityCandidateSource",
+    "BlockedActivityCandidateSource",
     "DEFAULT_GLOBAL_CANDIDATE_CAP",
     "DEFAULT_PER_SOURCE_CAP",
     "DisabledCandidateSourceError",

@@ -7,7 +7,11 @@ What is real here
   written by the real ``MemoryAdmissionExperienceConsumer`` through the real
   ``LifeExperiencePort``, governed by the real ``MemoryControlLedger``, and read back
   through that same port.  The handoff events are real ``LifeExperienceHandoffEvent``
-  objects from ``life_integration_ag2`` (the AG-2 producer type), not hand-rolled dicts;
+  objects from ``life_integration_ag2`` (the AG-2 producer type), not hand-rolled dicts.
+  The AG-2 handoff *store* is a test-owned stand-in: this fixture files each delivered
+  event before handing it to the consumer, and the consumer still compares it field by
+  field against the filed record, so an unfiled id or a tampered copy is refused (the real
+  owner's own store is exercised by ``scripts/maintenance_experience_boundary_demo.py``);
 * the **unfinished / waiting** column is a *fixture*: no Activity can legally be created
   without the owner-backed Decision+Adoption admission pair, so this file does not fake an
   Activity write.  Instead it feeds read-only fixture records built from the **owning
@@ -64,9 +68,12 @@ NOW = "2026-10-16T12:00:00+00:00"
 NATIVE_FIXTURE_ROOT = Path("/tmp/nyaw05r.jdK3q")
 
 
-def _fixture_dir(prefix: str) -> tempfile.TemporaryDirectory:
+def _fixture_dir(prefix: str) -> Path:
+    #: ``mkdtemp``, not a ``TemporaryDirectory``: these roots are evidence for this run and
+    #: nothing here removes them (``cleanup`` would delete the M0/controls files it is
+    #: asserting against).
     base = NATIVE_FIXTURE_ROOT if NATIVE_FIXTURE_ROOT.is_dir() else None
-    return tempfile.TemporaryDirectory(prefix=prefix, dir=str(base) if base else None)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=str(base) if base else None))
 
 
 def binding(**overrides) -> "lci.ContinuityBinding":
@@ -83,7 +90,16 @@ def binding(**overrides) -> "lci.ContinuityBinding":
 
 
 class MemoryFixture:
-    """Real M0 + real control ledger + the real boundary port and admission consumer."""
+    """Real M0 + real control ledger + the real boundary port and admission consumer.
+
+    This fixture also plays the AG-2 *owner*: the handoffs these cases deliver are the ones
+    this store really persisted, and the consumer may only see them through its read port.
+    The registry is not a blanket "yes" -- the consumer still compares every field of the
+    delivered event against the persisted record, so an id that was never filed is
+    ``HANDOFF_SOURCE_NOT_FOUND`` and a tampered copy is ``HANDOFF_SOURCE_MISMATCH`` (both are
+    pinned in ``test_maintenance_experience_boundary``; the local case at the bottom of this
+    section repeats the negative control for this fixture).
+    """
 
     def __init__(self, root: Path) -> None:
         os.chmod(root, 0o700)
@@ -96,10 +112,23 @@ class MemoryFixture:
         self.ledger.initialize()
         self.port = LifeExperiencePort(self.evidence_db, controls_db=self.controls_db,
                                        subject=MEMORY_OWNER)
-        self.consumer = MemoryAdmissionExperienceConsumer(self.port, enabled=True)
+        #: The owner's persisted handoff store, seen by the consumer only through ``.get``.
+        self.owner_handoffs: dict[str, dict] = {}
+        self.consumer = MemoryAdmissionExperienceConsumer(
+            self.port, enabled=True, handoff_verifier=self.owner_handoffs.get)
+
+    def persist(self, event: dict) -> dict:
+        """File *event* as a record the owner really persisted; return what is delivered."""
+        record = ag2.LifeExperienceHandoffEvent.from_dict(event).to_dict()
+        self.owner_handoffs[record["handoff_id"]] = record
+        return dict(record)
+
+    def deliver(self, event: dict) -> dict:
+        """Deliver without persisting: only a record the owner already filed may be accepted."""
+        return self.consumer.receive_experience_handoff(event)
 
     def admit(self, event: dict) -> dict:
-        return self.consumer.receive_experience_handoff(event)
+        return self.deliver(self.persist(event))
 
     def rows(self, limit: int = 10) -> list[dict]:
         return self.store.recent_verified_outcomes(memory_owner=MEMORY_OWNER, limit=limit)
@@ -307,17 +336,9 @@ PAST_READS = {"recent", "subject"}
 
 
 class ContinuityTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        self._dirs: list[tempfile.TemporaryDirectory] = []
-
-    def tearDown(self) -> None:
-        for handle in self._dirs:
-            handle.cleanup()
-
     def make_dir(self, prefix: str) -> Path:
-        handle = _fixture_dir(prefix)
-        self._dirs.append(handle)
-        return Path(handle.name)
+        #: Kept, not removed: the M0 and control databases are this run's evidence.
+        return _fixture_dir(prefix)
 
     def memory(self) -> MemoryFixture:
         return MemoryFixture(self.make_dir("c-continuity-memory-"))
@@ -412,6 +433,30 @@ class DuplicateRoots(ContinuityTestCase):
         memory.admit(handoff("lexp:r1", activity_ref="actv_a", settlement_refs=("settle:owner-1",)))
         memory.admit(handoff("lexp:r2", activity_ref="actv_a", settlement_refs=("settle:owner-2",)))
         self.assertEqual(memory.reader().read().evidence_roots, 2)
+
+
+class FixtureProvenance(ContinuityTestCase):
+    """The fixture's owner store is a read port, not a blanket accept.
+
+    The store is a *test-owned stand-in* for the AG-2 handoff store: this is the only place
+    that pretends to be the owner, and it must still refuse anything the owner did not file.
+    """
+
+    def test_an_unfiled_handoff_is_refused_before_m0(self):
+        memory = self.memory()
+        receipt = memory.deliver(handoff("lexp:neverfiled", activity_ref="actv_a",
+                                         settlement_refs=("settle:owner-1",)))
+        self.assertEqual(receipt["reason"], "HANDOFF_SOURCE_NOT_FOUND", receipt)
+        self.assertEqual(memory.rows(), [])
+
+    def test_a_tampered_copy_of_a_filed_handoff_is_refused(self):
+        memory = self.memory()
+        real = memory.persist(handoff("lexp:tampered", activity_ref="actv_a",
+                                      settlement_refs=("settle:owner-1",)))
+        tampered = dict(real, settlement_refs=list(real["settlement_refs"]) + ["settle:forged"])
+        receipt = memory.deliver(tampered)
+        self.assertEqual(receipt["reason"], "HANDOFF_SOURCE_MISMATCH", receipt)
+        self.assertEqual(memory.rows(), [])
 
 
 # ---------------------------------------------------------------------------------------

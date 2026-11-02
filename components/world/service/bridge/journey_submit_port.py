@@ -211,6 +211,11 @@ class FormalOwnerMoveSubmitPort:
     def _as_owner_status(ai: Any, result: Mapping[str, Any]) -> dict[str, Any]:
         status = str(result.get("intent_status") or "")
         outcome = str(result.get("outcome") or "")
+        # 正式拒因在 executor 结果的 ``reason`` 字段：gateway 只转发 Resolver 归一后的
+        # canonical 码（例如 ``NOT_ALLOWED``）；``outcome`` 只是闭环词表里的
+        # ``FAILURE``/``TIMEOUT`` 等传输结论，不是拒因。这里不扩回执协议，
+        # 只把已有字段翻译成 owner-status 形状。
+        reason = str(result.get("reason") or "")
         detail = str(result.get("detail") or "")[:200]
         if status == ai.STATUS_APPLIED:
             return {"kind": "MOVE_TO", "status": "applied", "formal": True,
@@ -221,8 +226,10 @@ class FormalOwnerMoveSubmitPort:
                     "reason_code": "STALE_STATE", "detail": detail,
                     "intent_status": status, "execution_id": result.get("execution_id")}
         if status == ai.STATUS_REJECTED:
+            # 优先已有 canonical 拒因；缺失时保留原来的保守回落（不把通用
+            # ``FAILURE`` 伪装成某个 canonical 码，也不新增码）。
             return {"kind": "MOVE_TO", "status": "rejected", "formal": True,
-                    "reason_code": outcome or "INTENT_REJECTED", "detail": detail,
+                    "reason_code": reason or outcome or "INTENT_REJECTED", "detail": detail,
                     "intent_status": status, "execution_id": result.get("execution_id")}
         if status == ai.STATUS_PROPOSED:
             return {"kind": "MOVE_TO", "status": "rejected", "formal": True,

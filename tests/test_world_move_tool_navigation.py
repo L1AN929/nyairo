@@ -19,6 +19,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(ROOT / "tests" / "fixtures") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tests" / "fixtures"))
 
 from components.worldgen import schema
 from components.worldgen.instance import init_instance
@@ -27,6 +29,7 @@ from components.worldgen.loader import load as load_package
 from components.worldgen.tests._setup import WorldGenTestCase, make_valid_docs
 
 from chiyo_bundle import world_move_tool as tool
+from world_gateway_fixture import WorldGatewayFixture
 
 posix_only = unittest.skipIf(
     os.name == "nt", "世界移动链路需要 POSIX 文件锁（在 WSL/Linux 上运行）"
@@ -68,10 +71,36 @@ class CustomWorldMoveToolTest(WorldGenTestCase):
         self.package = load_package(self.package_dir)
         self.home = Path(self.temp_dir(prefix="w01-road-inst-")) / "instance"
         init_instance(self.package_dir, self.home)
+        # The intent executor resolves the action lifecycle from ``os.environ`` (not the
+        # handler's ``environment`` mapping), so bind it to this case's own home.  Without
+        # this the repository's historical ledger is read and every segment is refused as
+        # DUPLICATE_EXECUTION.
+        self._saved_lifecycle_env = {key: os.environ.get(key) for key in
+                                     ("WORLD_ACTION_LIFECYCLE_PATH", "CHIYO_WORLD_HOME",
+                                      "WORLD_BODY_INTENT_MUTATION_GATE")}
+        os.environ["WORLD_ACTION_LIFECYCLE_PATH"] = str(
+            self.home.parent / "action_lifecycle.jsonl")
+        os.environ["CHIYO_WORLD_HOME"] = str(self.home)
+        os.environ["WORLD_BODY_INTENT_MUTATION_GATE"] = "canonical"
         self.env = self._env(travel=False)
+        # 计时旅程的每一段都是新的 Action：本 case 自己的真实 gateway + registry。
+        # 服务侧 Resolver 用 config.environment 判断 MOVE 是否按计时出发提交，
+        # 与计时用例的请求环境保持一致。
+        self.gateway = WorldGatewayFixture(
+            self.home, world_id=self.package.world_id,
+            environment=dict(self.env, CHIYO_WORLD_TRAVEL_TIME_ENABLED="true"),
+            now=self.now)
+        self.addCleanup(self.gateway.stop)
+        self.gateway_env = self.gateway.request_environment()
+        self.env.update(self.gateway_env)
 
     def tearDown(self) -> None:
         self.wrd.reset_cache()
+        for key, value in getattr(self, "_saved_lifecycle_env", {}).items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         super().tearDown()
 
     # -- 夹具 ---------------------------------------------------------------
@@ -131,9 +160,14 @@ class CustomWorldMoveToolTest(WorldGenTestCase):
                 "CHIYO_WORLD_SOCIAL_PRESENCE_ENABLED": "0",
             }
         )
+        gateway_env = getattr(self, "gateway_env", None)
+        if gateway_env:
+            env.update(gateway_env)
         return env
 
     def move(self, location, env=None, now=None):
+        # 业务时刻同时交给 gateway 的 Resolver，travel 时间与旅程账本同一时间域。
+        self.gateway.set_now(now or self.now)
         return json.loads(
             tool.move_handler(
                 {"location": location}, environment=env or self.env, now=now or self.now
@@ -253,6 +287,12 @@ class CustomWorldMoveToolTest(WorldGenTestCase):
         self.assertEqual(result["estimated_minutes"], 5)
         self.assertEqual(result["route"], [s1, s2, s4])
         self.assertIn("中转", result["message"])
+        # 这一段确实走了正式授权口：同 execution 的一次性票已被 gateway 消费。
+        segment = json.loads(
+            (self.home / "data/world/world_journey.json").read_text(encoding="utf-8")
+        )["active"]["segments"][0]
+        issued = {row["execution_id"]: row for row in self.gateway.authorizations()}
+        self.assertEqual(str(issued[segment["execution_id"]]["state"]).upper(), "CONSUMED")
         # 起点没被瞬移；在途状态由 travel 记录表达，不写 world_state。
         self.assertEqual(self.position(env), "home")
         self.assertEqual(self.revision(env), revision_before)
@@ -280,7 +320,9 @@ class CustomWorldMoveToolTest(WorldGenTestCase):
         }) as apply:
             result = self.move(s4, env=env)
         self.assertFalse(result["ok"])
-        self.assertEqual(result["reason_code"], "LOCATION_CLOSED")
+        # 计时段走正式 gateway：Resolver 把 owner 的 legacy 拒因归一成 canonical
+        # NOT_ALLOWED 后只转发 canonical 码；legacy LOCATION_CLOSED 不在回执保证内。
+        self.assertEqual(result["reason_code"], "NOT_ALLOWED")
         self.assertEqual(apply.call_count, 1)
         self.assertEqual(result["location_id"], "home")
         self.assertEqual(self.state_bytes(env), before)

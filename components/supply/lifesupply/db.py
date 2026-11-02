@@ -349,6 +349,7 @@ MERGED_SCHEMA_DDL = """
         content_sha256 TEXT NOT NULL,
         created_at REAL NOT NULL,
         operation_key TEXT NOT NULL UNIQUE,
+        content_erased INTEGER NOT NULL DEFAULT 0,
         UNIQUE(artifact_id,version_number)
     );
     CREATE TRIGGER IF NOT EXISTS artifact_versions_no_update
@@ -390,6 +391,29 @@ MERGED_SCHEMA_DDL = """
         state TEXT NOT NULL CHECK(state IN ('DIRTY','CLEAN')),
         updated_at REAL NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS artifact_source_erasures(
+        operation_key TEXT PRIMARY KEY,
+        artifact_ids_json TEXT NOT NULL,
+        version_ids_json TEXT NOT NULL,
+        barrier_seq INTEGER NOT NULL,
+        fingerprint TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        created_at REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS artifact_source_edges(
+        child_kind TEXT NOT NULL,
+        child_id TEXT NOT NULL,
+        source_kind TEXT NOT NULL,
+        source_namespace TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        generation TEXT NOT NULL DEFAULT '',
+        created_at REAL NOT NULL,
+        PRIMARY KEY(child_kind, child_id, source_kind, source_namespace, source_ref)
+    );
+    CREATE INDEX IF NOT EXISTS artifact_source_edges_src
+        ON artifact_source_edges(source_kind, source_namespace, source_ref);
 """
 
 
@@ -832,6 +856,13 @@ class LifeSupplyDB:
             configure_journal(con)
             con.execute("PRAGMA synchronous=FULL")
             con.executescript(MERGED_SCHEMA_DDL)
+            # One-way widening for an existing owner file: the governed erasure marker is added
+            # without rewriting any version row.  New tables already exist via IF NOT EXISTS.
+            version_columns = {str(row[1]) for row in con.execute(
+                "PRAGMA table_info(artifact_versions)").fetchall()}
+            if "content_erased" not in version_columns:
+                con.execute("ALTER TABLE artifact_versions ADD COLUMN content_erased "
+                            "INTEGER NOT NULL DEFAULT 0")
             for owner in self.owners:
                 con.execute(
                     "INSERT OR IGNORE INTO c6_writer_epoch(owner,active_epoch,instance_id,writer_token) "

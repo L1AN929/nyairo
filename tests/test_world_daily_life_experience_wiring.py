@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,6 +71,11 @@ def _resident_ports(environment: dict) -> tuple:
     """``AutonomousLifeResident._memory_ports`` with only the environment it really reads."""
 
     holder = SimpleNamespace(env=dict(environment), last_error=None)
+    # ``_memory_ports`` also reads the retained deletion authority through ``self.env``;
+    # bind the real method so the fixture exercises the production path instead of
+    # stubbing it out.
+    holder._memory_authority = types.MethodType(
+        resident.AutonomousLifeResident._memory_authority, holder)
     return resident.AutonomousLifeResident._memory_ports(holder)
 
 

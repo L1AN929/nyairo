@@ -31,10 +31,13 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(ROOT / "tests" / "fixtures") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tests" / "fixtures"))
 
 from test_world_journey import JourneyTestCase, _clean_env, posix_only  # noqa: E402
 
 from chiyo_bundle import world_control, world_journey, world_runner  # noqa: E402
+from world_gateway_fixture import WorldGatewayFixture  # noqa: E402
 
 GATES = {
     "CHIYO_WORLD_LIVING_SKELETON_ENABLED": "1",
@@ -44,13 +47,55 @@ GATES = {
 
 @posix_only
 class RunnerTestCase(JourneyTestCase):
-    """共用夹具：世界实例 + runner 环境 + 子进程/注入时钟工具。"""
+    """共用夹具：世界实例 + 真实 World gateway + runner 环境 + 子进程/注入时钟工具。"""
+
+    def make_world(self, **kwargs):
+        world = super().make_world(**kwargs)
+        # 旅程每一段（包括 runner 推进的第二、三段）都经正式授权口：给这个实例
+        # 起一个真实 gateway/registry，并把请求环境补上 socket/integration mode。
+        gateway = WorldGatewayFixture(
+            world.home, world_id=world.package.world_id,
+            environment=dict(world.env), now=self.now)
+        self.addCleanup(gateway.stop)
+        world.gateway = gateway
+        world.env.update(gateway.request_environment())
+        return world
 
     def run_env(self, world=None) -> dict:
         world = world or self.world
+        overrides = dict(GATES)
+        overrides.update(world.gateway.environment)
         return world_runner.build_environment(
-            world.home, overrides=dict(GATES), world_package=str(world.package_dir)
+            world.home, overrides=overrides, world_package=str(world.package_dir)
         )
+
+    # 引擎推进不能再注入 DirectOwnerSubmitPort：走引擎自己的默认正式端口
+    # （由请求环境里的 WORLD_BODY_SOCKET 找到本实例 gateway），每段一张新票。
+    def accept(self, target, world=None, *, now=None, request_key=None) -> dict:
+        world = world or self.world
+        moment = now or self.now
+        world.gateway.set_now(moment)
+        return world_journey.accept_journey(
+            target=target, hermes_home=world.home, environment=world.env,
+            now=moment, request_key=request_key,
+        )
+
+    def advance(self, world=None, *, now=None) -> dict:
+        world = world or self.world
+        moment = now or self.now
+        world.gateway.set_now(moment)
+        return world_journey.advance_journey(
+            hermes_home=world.home, environment=world.env, now=moment
+        )
+
+    def move(self, location, world=None, *, now=None, env=None, request_key=None) -> dict:
+        world = world or self.world
+        moment = now or self.now
+        world.gateway.set_now(moment)
+        return super().move(location, world, now=moment, env=env, request_key=request_key)
+
+    def authorizations(self, world=None) -> list:
+        return (world or self.world).gateway.authorizations()
 
     # -- 注入时钟（不 sleep 猜时序）---------------------------------------
 
@@ -195,6 +240,11 @@ class RunLoopTest(RunnerTestCase):
             [record["execution_id"] for record in records],
             [segment["execution_id"] for segment in segments],
         )
+        # 每一段都是新的 Action：三段各自的 execution 都有一张被消费的一次性票。
+        issued = {row["execution_id"]: row for row in self.authorizations(world)}
+        for segment in segments:
+            self.assertEqual(str(issued[segment["execution_id"]]["state"]).upper(),
+                             "CONSUMED")
         self.assertTrue(all(record["status"] == "ARRIVED" for record in records))
         self.assertEqual(
             [segment["status"] for segment in segments],
@@ -427,9 +477,10 @@ class PauseSemanticsTest(RunnerTestCase):
         self.assertEqual(state["segments"][1]["status"], "pending")
         self.assertNotIn("blocked", json.dumps(state))
         # 没有持久暂停时，普通推进仍然只启动一段。
+        moment = self.now + timedelta(seconds=300)
+        world.gateway.set_now(moment)
         started = world_journey.advance_journey(
-            hermes_home=world.home, environment=environment,
-            now=self.now + timedelta(seconds=300),
+            hermes_home=world.home, environment=environment, now=moment,
         )
         self.assertEqual(started["status"], "started")
         self.assertEqual(started["destination_location_id"], s2)
@@ -464,6 +515,8 @@ class PauseSemanticsTest(RunnerTestCase):
         results = context.Queue()
         environment = dict(self.run_env(world))
         moment = self.now + timedelta(seconds=300)
+        # 子进程经 socket 提交，Resolver 在父进程的 gateway 线程里跑：业务时钟同步。
+        world.gateway.set_now(moment)
 
         def pauser():
             barrier.wait()

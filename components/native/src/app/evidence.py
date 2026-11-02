@@ -25,8 +25,9 @@ CHIYO_ORIGIN = "CHIYO_VISIBLE_OUTPUT"
 LIFE_ORIGIN = "LIFE_VERIFIED_OUTCOME"
 
 #: Highest migration this module knows how to produce.  v1 is the chat-only schema; v2 widens the
-#: origin CHECK so a verified execution outcome can be recorded (E07).
-SCHEMA_VERSION = 2
+#: origin CHECK so a verified execution outcome can be recorded (E07); v3 adds the governed
+#: payload-erasure marker (F-154) -- an erased row keeps its identity but no longer carries a body.
+SCHEMA_VERSION = 3
 USER_ROLE = "OBSERVED_EXTERNAL_EXPRESSION"
 CHIYO_ROLE = "SELF_EXPRESSION"
 LIFE_ROLE = "VERIFIED_EXECUTION_OUTCOME"
@@ -187,6 +188,8 @@ class EvidenceStore:
                         primary_source_ref_id TEXT NOT NULL,
                         source_refs_json TEXT NOT NULL,
                         created_at TEXT NOT NULL,
+                        payload_erased INTEGER NOT NULL DEFAULT 0,
+                        erased_at TEXT,
                         CHECK (
                             (source_origin='USER_VISIBLE_INPUT'
                              AND delivery_status='RECEIVED'
@@ -312,6 +315,27 @@ class EvidenceStore:
                     "INSERT INTO schema_migrations(version, applied_at) VALUES(2, ?)",
                     (utc_now(),),
                 )
+
+            # v3 (F-154): a governed erasure keeps the event row (identity, turn, audit) but
+            # clears the body and marks it.  Readers and the completion check treat a marked row
+            # as "no payable payload".  Existing rows are untouched and keep meaning 0.
+            applied_v3 = connection.execute(
+                "SELECT version FROM schema_migrations WHERE version=3"
+            ).fetchone()
+            if applied_v3 is None:
+                columns = {str(row[1]) for row in
+                           connection.execute("PRAGMA table_info(evidence_events)").fetchall()}
+                if "payload_erased" not in columns:
+                    connection.execute(
+                        "ALTER TABLE evidence_events ADD COLUMN payload_erased "
+                        "INTEGER NOT NULL DEFAULT 0")
+                if "erased_at" not in columns:
+                    connection.execute(
+                        "ALTER TABLE evidence_events ADD COLUMN erased_at TEXT")
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES(3, ?)",
+                    (utc_now(),),
+                )
             connection.commit()
         finally:
             connection.close()
@@ -331,6 +355,45 @@ class EvidenceStore:
                 ("primary_source_ref_id", event.primary_source_ref_id),
             )
         )
+
+    def stamp_recovery_incarnation(self, *, owner: str, conversation: str,
+                                   authority_seq: int, authority_digest: str,
+                                   generation: str,
+                                   kind: str = "evidence",
+                                   stamped_at: str | None = None) -> str:
+        """Record *this* M0 file as the incarnation a recovery sweep actually opened.
+
+        A recovery marker that only names a path cannot tell the swept file from an older backup
+        restored onto the same path.  The owner therefore keeps the generation inside its own
+        database; ordinary appends do not touch it, so a normal business write never looks like a
+        replaced copy.
+        """
+
+        if not str(generation or ""):
+            raise ValueError("an incarnation needs a generation")
+        connection = self._connect()
+        try:
+            configure_journal(connection)
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS recovery_incarnation ("
+                "kind TEXT PRIMARY KEY, generation TEXT NOT NULL, owner TEXT NOT NULL, "
+                "conversation TEXT NOT NULL, authority_seq INTEGER NOT NULL, "
+                "authority_digest TEXT NOT NULL, stamped_at TEXT NOT NULL)")
+            connection.execute(
+                "INSERT INTO recovery_incarnation"
+                "(kind,generation,owner,conversation,authority_seq,authority_digest,stamped_at)"
+                " VALUES(?,?,?,?,?,?,?)"
+                " ON CONFLICT(kind) DO UPDATE SET generation=excluded.generation,"
+                " owner=excluded.owner, conversation=excluded.conversation,"
+                " authority_seq=excluded.authority_seq,"
+                " authority_digest=excluded.authority_digest, stamped_at=excluded.stamped_at",
+                (str(kind), str(generation), str(owner), str(conversation),
+                 int(authority_seq), str(authority_digest or ""),
+                 str(stamped_at or datetime.now(timezone.utc).isoformat())))
+            connection.commit()
+        finally:
+            connection.close()
+        return str(generation)
 
     def append(self, event: EvidenceEvent) -> AppendResult:
         encoded_refs = json.dumps(
@@ -497,6 +560,98 @@ class EvidenceStore:
             }
         finally:
             connection.close()
+
+    def erase_payload(self, event_ids: list[str], *, grant: Any = None,
+                      operation_key: str | None = None) -> dict[str, Any]:
+        """M0's own governed erasure: clear the body, keep the event identity.
+
+        There is no ungoverned entry point: the caller must hand in an owner-issued grant that
+        names a *committed* retained decision (seq + digest) and whose closure contains every
+        requested event.  A positive integer, a missing grant or a wider scope is refused here,
+        so a direct ``EvidenceStore(...).erase_payload([...])`` cannot bypass the barrier.
+
+        This is the *only* place the append-only triggers are lifted, and only for one controlled
+        UPDATE per named event inside a single transaction.  The row stays (its id, turn and audit
+        remain), ``payload_erased=1`` marks it, and ``content``/``source_refs_json`` -- where the
+        sensitive text and refs live -- are cleared.  It is idempotent: an already-erased event
+        contributes ``0``.  After the update the file is compacted with ``secure_delete`` and a
+        WAL checkpoint + ``VACUUM`` so cleared bytes are not left in free pages.  A backup copy
+        elsewhere is a retention decision the caller must report, not something this method can
+        prove gone.
+        """
+
+        wanted = sorted({str(item) for item in (event_ids or []) if str(item)})
+        if not wanted:
+            return {"status": "DENY", "detail": "no event scope", "erased": 0}
+        if grant is None:
+            return {"status": "DENY", "detail": "a committed erasure grant is required",
+                    "erased": 0}
+        try:
+            if int(getattr(grant, "barrier_seq", 0) or 0) < 1:
+                return {"status": "DENY", "detail": "the grant carries no committed barrier",
+                        "erased": 0}
+            if not str(getattr(grant, "barrier_digest", "") or ""):
+                return {"status": "DENY", "detail": "the grant carries no decision digest",
+                        "erased": 0}
+            if not grant.covers(wanted):
+                return {"status": "DENY",
+                        "detail": "the requested events are outside the committed decision",
+                        "erased": 0}
+        except AttributeError:
+            return {"status": "DENY", "detail": "an owner-issued erasure grant is required",
+                    "erased": 0}
+        erased = 0
+        connection = self._connect()
+        try:
+            connection.execute("PRAGMA secure_delete=ON")
+            connection.execute("BEGIN IMMEDIATE")
+            placeholders = ",".join("?" for _ in wanted)
+            present = {str(row[0]) for row in connection.execute(
+                "SELECT event_id FROM evidence_events WHERE event_id IN (%s)"
+                % placeholders, tuple(wanted)).fetchall()}
+            todo = [event_id for event_id in wanted if event_id in present]
+            if todo:
+                connection.execute("DROP TRIGGER IF EXISTS evidence_no_update")
+                for event_id in todo:
+                    token = "erased:" + hashlib.sha256(event_id.encode("utf-8")).hexdigest()[:20]
+                    erased += int(connection.execute(
+                        "UPDATE evidence_events SET content='',source_refs_json=?,"
+                        "primary_source_ref_id=?,payload_erased=1,erased_at=? "
+                        "WHERE event_id=? AND payload_erased=0",
+                        (json.dumps([{"kind": "erased", "id": token}], separators=(",", ":")),
+                         token, utc_now(), event_id)).rowcount)
+                connection.execute(
+                    "CREATE TRIGGER IF NOT EXISTS evidence_no_update "
+                    "BEFORE UPDATE ON evidence_events BEGIN SELECT RAISE(ABORT,"
+                    "'M0 Evidence is append-only'); END")
+            connection.commit()
+        except sqlite3.Error as exc:
+            connection.rollback()
+            return {"status": "UNKNOWN", "detail": "%s: %s" % (type(exc).__name__, exc),
+                    "erased": 0}
+        finally:
+            connection.close()
+        compaction = self._compact()
+        return {"status": "APPLIED" if erased else "NO_CHANGE", "erased": erased,
+                "event_ids": wanted, "compaction": compaction, "operation_key": operation_key}
+
+    def _compact(self) -> dict[str, Any]:
+        """Return cleared pages to the OS: secure_delete + WAL checkpoint + VACUUM."""
+
+        try:
+            connection = self._connect()
+            try:
+                mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).upper()
+                connection.execute("PRAGMA secure_delete=ON")
+                if mode == "WAL":
+                    connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                connection.execute("VACUUM")
+                return {"journal_mode": mode, "vacuum": "OK"}
+            finally:
+                connection.close()
+        except sqlite3.Error as exc:
+            return {"journal_mode": None, "vacuum": "FAILED",
+                    "detail": "%s: %s" % (type(exc).__name__, exc)}
 
     def backup(self, destination: str | Path) -> Path:
         target = Path(destination)

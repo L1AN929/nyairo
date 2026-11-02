@@ -1076,6 +1076,11 @@ def _instance_payload(root: Path, prepared: Mapping[str, Any], *,
         "workspace_id": str(data["workspace_id"]),
         "artifact_grant_id": str(data["artifact_grant_id"]),
         "private_items_artifact_id": str(data.get("private_items_artifact_id") or ""),
+        # S03 Perception/Belief: written by this root's own prepare.  An old instance has
+        # no such binding: the phone then answers a named CLAIMS_UNBOUND instead of
+        # creating a second store on read.
+        "s03_claims_db": str(data.get("s03_claims_db") or ""),
+        "s03_claims_subject": str(data.get("subject_id") or ""),
         "reading_artifact_id": data.get("reading_artifact_id"),
         "work_artifact_id": str(data.get("work_artifact_id") or ""),
         "world_body_socket": str(world_home / "run" / "gateway.sock"),
@@ -1121,6 +1126,10 @@ def serve_instance(
     announce: bool = True,
     supervisor: Optional[Any] = None,
     reuse_address: bool = False,
+    #: 2026-10-28: the live Life runtime's external-stop service when this serve shares a
+    #: process with it (the zero-model demo).  Normal production passes ``None``: the route
+    #: mails the request to the resident's Life state root instead.
+    activity_stop: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Start the two child owners, bind loopback HTTP, serve until a stop signal.
 
@@ -1171,6 +1180,10 @@ def serve_instance(
     server = None
     thread = None
     retired: list[str] = []
+    capability = None
+    capability_lock = None
+    operator_stop = None
+    operator_stop_lock = None
     event = stop_event or threading.Event()
     try:
         # Narrow retention: a previous generation's sockets are *renamed* aside (never deleted),
@@ -1203,12 +1216,85 @@ def serve_instance(
             live_instance,
             feature_overrides=ROOM_LIVING_FEATURES if room_living else None,
             world_clock=world_clock,
+            activity_stop=activity_stop,
         )
         csrf_token = secrets.token_hex(32)
         server = create_server(service, csrf_token=csrf_token, port=port,
                                log_path=root_path / "logs" / "serve.log",
                                supervisor=supervisor, reuse_address=bool(reuse_address))
         bound_port = int(server.server_address[1])
+        # The private diary credential is minted only after the real loopback endpoint exists.
+        # It is bound to this serve's subject + actual endpoint, written owner-only under the
+        # instance's own ``run`` directory, and rotated on every serve.  If it cannot be stored
+        # privately (or another serve owns this root's credential), the server keeps ``None``
+        # and only the private diary fails closed; the rest of the phone stays available.
+        capability = None
+        capability_file: Optional[str] = None
+        capability_status = "UNAVAILABLE"
+        capability_lock = None
+        try:
+            from . import capability as phone_capability
+
+            capability_lock = phone_capability.acquire_lock(root_path)
+            if capability_lock is None:
+                capability_status = "UNAVAILABLE_LOCK_HELD"
+            else:
+                endpoint = "http://127.0.0.1:%d" % bound_port
+                issued_path, capability = phone_capability.issue(
+                    root_path, subject=str(live_instance.get("subject") or ""),
+                    endpoint=endpoint)
+                server.set_capability(capability)
+                capability_file = str(issued_path)
+                capability_status = "READY"
+        except Exception as exc:
+            # A typed capability refusal never contains the token; keep the reason code only.
+            reason = getattr(exc, "reason_code", None) or type(exc).__name__
+            capability_status = "UNAVAILABLE_%s" % str(reason)[:80]
+            if capability is not None:
+                try:
+                    phone_capability.discard(root_path, capability)
+                except Exception:
+                    pass
+            capability = None
+            server.set_capability(None)
+        # The local-operator stop credential is a *separate* file and lock: the diary token
+        # must never authorize a stop, and this token must never read her diary.  Failure to
+        # store it privately only closes the stop route; the rest of the phone is untouched.
+        operator_stop = None
+        operator_stop_file: Optional[str] = None
+        operator_stop_status = "UNAVAILABLE"
+        operator_stop_lock = None
+        try:
+            from . import operator_stop as phone_operator_stop
+
+            operator_stop_lock = phone_operator_stop.acquire_lock(root_path)
+            # The stop credential is bound to the Life subject the canonical state really
+            # has.  Without a readable canonical state there is no scope to bind, so the stop
+            # route stays closed instead of issuing a token with a guessed subject.
+            life_subject = phone_service.canonical_life_subject(root_path / "life" / "state")
+            if operator_stop_lock is None:
+                operator_stop_status = "UNAVAILABLE_LOCK_HELD"
+            elif not life_subject:
+                operator_stop_status = "UNAVAILABLE_NO_LIFE_SUBJECT"
+            else:
+                issued_path, operator_stop = phone_operator_stop.issue(
+                    root_path, subject=str(live_instance.get("subject") or ""),
+                    life_subject=life_subject,
+                    endpoint="http://127.0.0.1:%d" % bound_port)
+                server.set_operator_stop(operator_stop)
+                operator_stop_file = str(issued_path)
+                operator_stop_status = "READY"
+        except Exception as exc:
+            reason = getattr(exc, "reason_code", None) or type(exc).__name__
+            operator_stop_status = "UNAVAILABLE_%s" % str(reason)[:80]
+            if operator_stop is not None:
+                try:
+                    phone_operator_stop.discard(root_path, operator_stop)
+                except Exception:
+                    pass
+            operator_stop = None
+            server.set_operator_stop(None)
+
         announcement = {
             "ok": True,
             "url": "http://127.0.0.1:%d/" % bound_port,
@@ -1225,6 +1311,12 @@ def serve_instance(
             "world_intent_gate": world_intent_gate,
             "business_clock": str(business_clock) if business_clock else None,
             "clock_domain": str(clock_domain) if clock_domain else None,
+            # The path is public; the token is never in the announcement.
+            "capability_file": capability_file,
+            "capability_status": capability_status,
+            # Path only; the operator stop token is never in the announcement or the log.
+            "operator_stop_file": operator_stop_file,
+            "operator_stop_status": operator_stop_status,
         }
         if retired:
             announcement["retired_sockets"] = retired
@@ -1249,6 +1341,21 @@ def serve_instance(
             thread.join(timeout=5)
         for child in reversed(children):
             child.stop()
+        # Invalidate this serve's credential on a clean stop.  A crashed process leaves the
+        # file behind, but the next serve rotates it under the same lock and only the new
+        # in-memory token is accepted.
+        try:
+            if capability is not None:
+                from . import capability as phone_capability
+                phone_capability.discard(root_path, capability)
+            if operator_stop is not None:
+                from . import operator_stop as phone_operator_stop
+                phone_operator_stop.discard(root_path, operator_stop)
+        finally:
+            if capability_lock is not None:
+                capability_lock.release()
+            if operator_stop_lock is not None:
+                operator_stop_lock.release()
 
 
 def _wait_for_stop(event: threading.Event) -> None:

@@ -42,6 +42,22 @@ subject holds nothing there (an identity fact, not a relaxation).
 The owner's data root must be **fresh** (no artifacts yet): the first assertion is exactly that an
 empty owner yields no activity.  A non-empty owner is reported as ``ENVIRONMENT_NOT_FRESH`` rather
 than being silently accepted.
+
+Scenario isolation (state roots, not deleted ledgers)
+-----------------------------------------------------
+The question "did anything change since we last thought about it?" is real persisted state:
+``life_reconsideration.json`` deliberately refuses to reconsider the *same* situation twice.
+Independent scenarios (empty owner, NO_CHANGE, CONFLICT, UNKNOWN, budget, off switch) are
+different situations that happen to be run by one script, so each gets its **own** state root
+under the run's scratch root.  Nothing is deleted, released or time-shifted to make a section
+green: the ledger simply belongs to a different scenario.
+
+Continuity chains keep exactly **one** root, because the continuity is what is being tested:
+``[3] -> [4]`` is the same artifact and the same Activity, and ``[11] -> [12]`` is the same
+pending handoff and the same original AR-0 action across a restart.  Their round budget is the
+one persisted ledger under the originally defined cap (``MAX_ROUNDS``); it is never refunded or
+reset.  If a chain still hits the same-state guard, that is a real finding and must be reported
+as a failure, not worked around.
 """
 from __future__ import annotations
 
@@ -171,11 +187,31 @@ def main() -> int:
                                                str(point.head_version_id)))
             return (point.content or "") + "\n\n（我的这一笔）\n"
 
-    def build(*, enabled: bool, max_rounds: int, writer=None, drop_response: bool = False,
-              experience_consumer=None):
-        # Each section is a fresh consideration window.  The day budget is a real persisted
-        # counter, so the check clears it explicitly instead of pretending rounds are free.
-        (install_root / "autonomous_budget.json").unlink(missing_ok=True)
+    def scenario_root(name: str) -> Path:
+        """One state root per *independent* scenario, under the run's scratch root.
+
+        The reconsideration ledger is real production state: a situation considered once is not
+        reconsidered again.  Separate scenarios therefore get separate roots instead of having a
+        ledger deleted or a silence released.  Roots are never auto-cleaned (mkdtemp stays), so a
+        failure leaves everything on disk for inspection.
+        """
+        path = install_root.parent / f"life-state-{name}"
+        path.mkdir(parents=True, exist_ok=True)
+        os.chmod(path, 0o700)
+        print(f"  state root [{name}]: {path}")
+        return path
+
+    #: ``install_root`` (from ``NYA02_LIFE_STATE``) is the continuity chain's root: [3]->[4] is
+    #: the same work and Activity.  [11]->[12] is its own chain -- the same pending handoff and
+    #: the same original AR-0 action have to survive the restart inside one root.
+    continuity_root = install_root
+    restart_root = scenario_root("11-12-memory-restart")
+
+    def build(*, state_root: Path, enabled: bool, max_rounds: int, writer=None,
+              drop_response: bool = False, experience_consumer=None):
+        # The round budget is a real persisted counter under the state root.  An independent
+        # scenario starts from that root's natural initial value; a continuity chain keeps the
+        # one ledger and the originally defined cap -- nothing is refunded or reset.
         switches = ag2.LifeRuntimeKillSwitches(
             life_runtime_enabled=True, agency_enabled=True,
             action_execution_enabled=True, proactive_enabled=False)
@@ -185,8 +221,8 @@ def main() -> int:
             port, grant_id=grant_id, workspace_id=workspace_id,
             fault_injection_drop_response_after_write=drop_response)
         runtime = lrp.build_production_life_runtime(
-            install_root, kill_switches=switches, cognition_adapter=cognition,
-            install_root=install_root, artifact_action_adapter=adapter,
+            state_root, kill_switches=switches, cognition_adapter=cognition,
+            install_root=state_root, artifact_action_adapter=adapter,
             experience_consumer=experience_consumer)
         cycle = AutonomousLifeCycle(
             runtime, artifact_port=port, subject_id=subject, workspace_id=workspace_id,
@@ -198,7 +234,9 @@ def main() -> int:
 
     # ---- 1. an empty owner yields nothing to do, and costs nothing --------------------
     print("[1] empty owner")
-    runtime, port, cycle, adapter, cognition = build(enabled=True, max_rounds=MAX_ROUNDS)
+    empty_root = scenario_root("01-empty-owner")
+    runtime, port, cycle, adapter, cognition = build(
+        state_root=empty_root, enabled=True, max_rounds=MAX_ROUNDS)
     try:
         preexisting = port.list_artifacts()
         if preexisting:
@@ -230,7 +268,8 @@ def main() -> int:
 
     # ---- 3. first autonomous continuation, through AR-0 ------------------------------
     print("[3] first autonomous continuation (AR-0)")
-    runtime, port, cycle, adapter, cognition = build(enabled=True, max_rounds=MAX_ROUNDS)
+    runtime, port, cycle, adapter, cognition = build(
+        state_root=continuity_root, enabled=True, max_rounds=MAX_ROUNDS)
     try:
         second = cycle.evaluate_once(trigger_ref="evt:v02:check:2")
         check(second.get("step_path") == "AR0", "the step went through AR-0",
@@ -293,7 +332,10 @@ def main() -> int:
 
     # ---- 4. second round continues the same work -------------------------------------
     print("[4] second round continues the same work")
-    runtime, port, cycle, adapter, cognition = build(enabled=True, max_rounds=MAX_ROUNDS)
+    # Same root as [3]: continuing *the same* Activity is the assertion, and its budget ledger
+    # is the one that [3] already charged (cap stays MAX_ROUNDS, no reset).
+    runtime, port, cycle, adapter, cognition = build(
+        state_root=continuity_root, enabled=True, max_rounds=MAX_ROUNDS)
     try:
         third = cycle.evaluate_once(trigger_ref="evt:v02:check:3")
         check(third["outcome"] == OUTCOME_ACTED, "round acted", third.get("detail"))
@@ -350,8 +392,10 @@ def main() -> int:
 
     # ---- 6. NO_CHANGE: the action happened, the work did not change ------------------
     print("[6] NO_CHANGE")
+    no_change_root = scenario_root("06-no-change")
     runtime, port, cycle, adapter, cognition = build(
-        enabled=True, max_rounds=MAX_ROUNDS, writer=IdentityWriter())
+        state_root=no_change_root, enabled=True, max_rounds=MAX_ROUNDS,
+        writer=IdentityWriter())
     try:
         same = cycle.evaluate_once(trigger_ref="evt:v02:check:6")
         check(same["outcome"] == OUTCOME_ALREADY_DONE,
@@ -380,7 +424,9 @@ def main() -> int:
 
     # ---- 7. CONFLICT: a stale precondition is refused, never overwritten -------------
     print("[7] CONFLICT")
-    runtime, port, cycle, adapter, cognition = build(enabled=True, max_rounds=MAX_ROUNDS)
+    conflict_root = scenario_root("07-conflict")
+    runtime, port, cycle, adapter, cognition = build(
+        state_root=conflict_root, enabled=True, max_rounds=MAX_ROUNDS)
     racer = RacingWriter(port, artifact_id, grant_id)
     cycle.writer = racer
     try:
@@ -413,8 +459,11 @@ def main() -> int:
 
     # ---- 8. UNKNOWN: the answer is lost, and the original operation is queried -------
     print("[8] UNKNOWN and reconcile")
+    # The lost answer and its reconcile must live in the same root: reconciling is asking the
+    # owner about *that* original AR-0 action, not starting a fresh one somewhere else.
+    unknown_root = scenario_root("08-unknown")
     runtime, port, cycle, adapter, cognition = build(
-        enabled=True, max_rounds=MAX_ROUNDS, drop_response=True)
+        state_root=unknown_root, enabled=True, max_rounds=MAX_ROUNDS, drop_response=True)
     try:
         before = port.read_head(artifact_id)
         unknown = cycle.evaluate_once(trigger_ref="evt:v02:check:8")
@@ -467,7 +516,9 @@ def main() -> int:
 
     # ---- 9. budget exhaustion and the off switch cost nothing ------------------------
     print("[9] budget and off switch")
-    runtime, port, cycle, adapter, cognition = build(enabled=True, max_rounds=0)
+    budget_root = scenario_root("09-budget")
+    runtime, port, cycle, adapter, cognition = build(
+        state_root=budget_root, enabled=True, max_rounds=0)
     try:
         out = cycle.evaluate_once(trigger_ref="evt:v02:check:9")
         check(out["outcome"] == OUTCOME_BUDGET_EXHAUSTED, "spent budget -> BUDGET_EXHAUSTED",
@@ -477,7 +528,9 @@ def main() -> int:
     finally:
         runtime.close()
 
-    runtime, port, cycle, adapter, cognition = build(enabled=False, max_rounds=MAX_ROUNDS)
+    off_root = scenario_root("09-off-switch")
+    runtime, port, cycle, adapter, cognition = build(
+        state_root=off_root, enabled=False, max_rounds=MAX_ROUNDS)
     try:
         out = cycle.evaluate_once(trigger_ref="evt:v02:check:10")
         check(out["outcome"] == OUTCOME_DISABLED, "off switch -> DISABLED", out["outcome"])
@@ -492,7 +545,9 @@ def main() -> int:
 
     # ---- 10. the step journal records real receipts ----------------------------------
     print("[10] step journal")
-    journal = install_root / "life_step_journal.jsonl"
+    # The journal is per state root.  [3]->[4] is the chain that really stepped through AR-0, so
+    # this reads that chain's journal -- not an empty directory from another scenario's root.
+    journal = continuity_root / "life_step_journal.jsonl"
     receipts = ([json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
                 if journal.exists() else [])
     check(bool(receipts), "steps were journalled", len(receipts))
@@ -505,14 +560,17 @@ def main() -> int:
     from life_experience_port import LifeExperiencePort, life_conversation_id
     from memory_control import MemoryControlLedger
 
-    blocked_parent = install_root / "not-a-directory"
+    blocked_parent = restart_root / "not-a-directory"
     blocked_parent.write_text("this is a file, so no database can live under it\n",
                               encoding="utf-8")
     broken_consumer = MemoryAdmissionExperienceConsumer(
         LifeExperiencePort(blocked_parent / "evidence.sqlite", subject=subject),
         enabled=True)
+    # [11] and [12] share one root: the pending handoff, the AR-0 action and its settlement must
+    # survive the restart as the *same* identities, otherwise there is nothing to re-deliver.
     runtime, port, cycle, adapter, cognition = build(
-        enabled=True, max_rounds=MAX_ROUNDS, experience_consumer=broken_consumer)
+        state_root=restart_root, enabled=True, max_rounds=MAX_ROUNDS,
+        experience_consumer=broken_consumer)
     try:
         head_before = port.read_head(artifact_id) or {}
         versions_before = head_before.get("version_number")
@@ -529,7 +587,10 @@ def main() -> int:
               "the experience stays pending for a deterministic retry", handoff)
         check(refused.get("experience_handoff_error") is None,
               "a DEFER is a disposition, not an error", refused.get("experience_handoff_error"))
-        activity = runtime.canonical_state()["activities"].get(activity_ref) or {}
+        # Same expectation as before ("the Activity that just acted did not roll back"), read
+        # from the Activity *this* round adopted in this scenario's own root.
+        acted_activity_ref = str(refused.get("activity_ref") or "")
+        activity = runtime.canonical_state()["activities"].get(acted_activity_ref) or {}
         check(activity.get("status") == "ACTIVE",
               "the canonical Activity did not roll back either", activity.get("status"))
         restart_action = str(refused.get("action_id"))
@@ -538,8 +599,8 @@ def main() -> int:
 
     # ---- 12. an interruption before delivery is resumed after a restart --------------
     print("[12] a pending handoff is delivered after a restart")
-    evidence_db = install_root / "evidence.sqlite"
-    controls_db = install_root / "controls.sqlite"
+    evidence_db = restart_root / "evidence.sqlite"
+    controls_db = restart_root / "controls.sqlite"
     store = EvidenceStore(evidence_db)
     # M0 is read back under the memory owner the boundary actually writes, not under the Supply
     # workspace subject: see the module docstring.  The workspace subject holds nothing here, and
@@ -549,7 +610,7 @@ def main() -> int:
                         conversation=life_conversation_id(memory_owner)).initialize()
     live_port = LifeExperiencePort(evidence_db, controls_db=controls_db, subject=memory_owner)
     runtime, port, cycle, adapter, cognition = build(
-        enabled=True, max_rounds=MAX_ROUNDS,
+        state_root=restart_root, enabled=True, max_rounds=MAX_ROUNDS,
         experience_consumer=MemoryAdmissionExperienceConsumer(live_port, enabled=True))
     try:
         check(store.recent_verified_outcomes(memory_owner=memory_owner, limit=10) == [],

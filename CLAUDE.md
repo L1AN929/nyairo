@@ -13,6 +13,13 @@
 
 @AGENTS.md
 
+## 笔记留痕（write-notes）
+
+非平凡改动必须在 `.agents/notes/` 留一篇笔记，按分类放进 `implemented/` 或 `proposed/` 下的子目录。
+正文四段：Problem / Decision / Alternatives considered / Consequences；被否决的方案先写它最强的
+理由，再给否决原因。纯机械小改（样式、格式化、常规 CRUD）不写。
+规范细则见 AGENTS.md 第 1、2 节。
+
 ## 找文件和跑东西
 
 - 任务 → 文件的索引：`PROJECT_INDEX.md`

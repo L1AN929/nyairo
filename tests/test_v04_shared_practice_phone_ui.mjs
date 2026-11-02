@@ -325,6 +325,8 @@ function bootPhone(options = {}) {
     setTimeout: (fn) => { if (typeof fn === 'function') fn(); return 0; },
     clearTimeout: () => {},
     console: console,
+    /* window 级监听：真实浏览器 window 有 addEventListener('blur')；stub DOM 只建模 document。 */
+    addEventListener() {},
     fetch: async (url, init) => {
       const path = String(url);
       const method = (init && init.method) || 'GET';

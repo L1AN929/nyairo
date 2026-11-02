@@ -57,6 +57,30 @@ ACCEPTED_SUBJECT_ALIASES = frozenset({"chiyo.global", "chiyo", "Chiyo"})
 SCHEMA_CANONICAL_LIFE_STATE = "chiyo.life.canonical_state.v1"
 SCHEMA_ACTIVITY_INSTANCE = "chiyo.life.activity.v1"
 SCHEMA_LIFE_TRANSITION = "chiyo.life.transition.v1"
+# 2026-10-28 explicit vocabulary extension.  An Activity/transition that carries BLOCKED or
+# FAILED (or the failure/blocked assessment fields) is written as v2; every v1 record stays
+# readable and is never migrated in place.  A v1-only reader will reject v2 by name instead
+# of silently reading the new semantics as if they were old ones.
+SCHEMA_ACTIVITY_INSTANCE_V2 = "chiyo.life.activity.v2"
+SCHEMA_LIFE_TRANSITION_V2 = "chiyo.life.transition.v2"
+# 2026-10-28 external stop: an Activity that carries a durable local-operator stop intent is
+# written as v3.  The intent lives *inside* the Activity record the owner already has -- there
+# is no second stop store -- and v1/v2 records stay readable and are never migrated in place.
+SCHEMA_ACTIVITY_INSTANCE_V3 = "chiyo.life.activity.v3"
+SCHEMA_LIFE_TRANSITION_V3 = "chiyo.life.transition.v3"
+SCHEMA_EXTERNAL_STOP = "chiyo.life.external_stop.v1"
+READABLE_ACTIVITY_SCHEMAS = frozenset(
+    {SCHEMA_ACTIVITY_INSTANCE, SCHEMA_ACTIVITY_INSTANCE_V2, SCHEMA_ACTIVITY_INSTANCE_V3})
+READABLE_TRANSITION_SCHEMAS = frozenset(
+    {SCHEMA_LIFE_TRANSITION, SCHEMA_LIFE_TRANSITION_V2, SCHEMA_LIFE_TRANSITION_V3})
+
+#: Durable stop-intent states.  ``PENDING`` means the owner accepted the intent but the
+#: Activity is still at a boundary it cannot be safely torn out of; ``FINALIZED`` means the
+#: intent ended in CANCELLED.  A pending intent already blocks every new dispatch.
+EXTERNAL_STOP_PENDING = "PENDING"
+EXTERNAL_STOP_FINALIZED = "FINALIZED"
+EXTERNAL_STOP_STATES = (EXTERNAL_STOP_PENDING, EXTERNAL_STOP_FINALIZED)
+EXTERNAL_STOP_INTENT_PREFIXES = frozenset({"opstop", "extstop"})
 SCHEMA_LIFE_FRAME_VIEW = "chiyo.life.frame.read_view.v1"
 SCHEMA_LEGACY_MIGRATION_REPORT = "chiyo.life.legacy_v2_inspection.v1"
 SCHEMA_AUTHORITY_MARKER = "chiyo.life.authority.v1"
@@ -66,24 +90,32 @@ LIFE_STATE_IDLE = "IDLE"
 LIFE_STATE_ACTIVE = "ACTIVE"
 LIFE_STATE_PAUSED = "PAUSED"
 LIFE_STATE_WAITING = "WAITING"
+LIFE_STATE_BLOCKED = "BLOCKED"
 LIFE_STATES = (
     LIFE_STATE_IDLE,
     LIFE_STATE_ACTIVE,
     LIFE_STATE_PAUSED,
     LIFE_STATE_WAITING,
+    LIFE_STATE_BLOCKED,
 )
 
 STATUS_ACTIVE = "ACTIVE"
 STATUS_PAUSED = "PAUSED"
 STATUS_WAITING = "WAITING"
+STATUS_BLOCKED = "BLOCKED"
 STATUS_COMPLETED = "COMPLETED"
+STATUS_FAILED = "FAILED"
 STATUS_ABANDONED = "ABANDONED"
 STATUS_CANCELLED = "CANCELLED"
 STATUS_EXPIRED = "EXPIRED"
 
-OPEN_ACTIVITY_STATUSES = (STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING)
+# BLOCKED is suspended but not given up: it releases the single execution slot exactly like a
+# released PAUSE/WAIT, and a fresh Decision may RESUME the same Activity once the owner's
+# explicit condition opens.  FAILED is terminal: the goal scope was assessed unreachable.
+OPEN_ACTIVITY_STATUSES = (STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED)
 TERMINAL_ACTIVITY_STATUSES = (
     STATUS_COMPLETED,
+    STATUS_FAILED,
     STATUS_ABANDONED,
     STATUS_CANCELLED,
     STATUS_EXPIRED,
@@ -93,26 +125,35 @@ ALL_ACTIVITY_STATUSES = OPEN_ACTIVITY_STATUSES + TERMINAL_ACTIVITY_STATUSES
 TRANSITION_START = "START"
 TRANSITION_PAUSE = "PAUSE"
 TRANSITION_WAIT = "WAIT"
+TRANSITION_BLOCK = "BLOCK"
 TRANSITION_RESUME = "RESUME"
 TRANSITION_COMPLETE = "COMPLETE"
+TRANSITION_FAIL = "FAIL"
 TRANSITION_ABANDON = "ABANDON"
 TRANSITION_CANCEL = "CANCEL"
 TRANSITION_EXPIRE = "EXPIRE"
 TRANSITION_CHECKPOINT = "CHECKPOINT"
 TRANSITION_PROGRESS = "PROGRESS"
 TRANSITION_NOOP = "NOOP"
+# External stop is its own owner transition, not a CANCEL: it durable-accepts "stop this
+# Activity" and freezes further dispatch while the owner decides the safe boundary.  It never
+# changes lifecycle status and it is not a model verb.
+TRANSITION_STOP_INTENT = "STOP_INTENT"
 
 TRANSITION_TYPES = (
     TRANSITION_START,
     TRANSITION_PAUSE,
     TRANSITION_WAIT,
+    TRANSITION_BLOCK,
     TRANSITION_RESUME,
     TRANSITION_COMPLETE,
+    TRANSITION_FAIL,
     TRANSITION_ABANDON,
     TRANSITION_CANCEL,
     TRANSITION_EXPIRE,
     TRANSITION_CHECKPOINT,
     TRANSITION_PROGRESS,
+    TRANSITION_STOP_INTENT,
 )
 
 # Narrow Attention Occupancy (LR-3 Section 3)
@@ -148,8 +189,15 @@ REASON_CODES = frozenset(
         "RESUMED_BY_DECISION",
         "CHECKPOINT_ADVANCED",
         "COMPLETED_WITH_EVIDENCE",
+        "FAILED_BY_OWNER_ASSESSMENT",
+        "BLOCKED_BY_CONDITION",
+        "UNBLOCKED_BY_RESUME",
         "ABANDONED_BY_DECISION",
         "CANCELLED_BY_DECISION",
+        # 2026-10-28: a local operator stopped this Activity from outside.  It is deliberately
+        # distinct from ABANDONED (her own choice) and from CANCELLED_BY_DECISION.
+        "CANCELLED_BY_EXTERNAL_OPERATOR",
+        "EXTERNAL_STOP_REQUESTED",
         "EXPIRED_BY_TIMEOUT",
         "SPONTANEOUS_RECONSIDERATION",
         "OPAQUE",
@@ -332,6 +380,14 @@ from waiting_ref_vocab import (  # noqa: E402
 
 VALID_WAITING_REF_PREFIXES = _CANONICAL_WAITING_REF_PREFIXES
 
+# 2026-10-28: the owner assessment is its own structured reference; the goal scope and the
+# blocking basis reuse the vocabularies their real owners already emit (evidence refs and
+# waiting/fact refs).  No new fact domain is invented here.
+VALID_ASSESSMENT_PREFIXES = frozenset({"foassess", "fassess"})
+VALID_BLOCK_BASIS_PREFIXES = VALID_WAITING_REF_PREFIXES | VALID_EVIDENCE_PREFIXES | frozenset(
+    {"block_basis", "bcond"}
+)
+
 FORBIDDEN_SELF_TRUTH_KEYS = frozenset(
     {
         "goal",
@@ -478,6 +534,11 @@ def _validate_structured_ref(
     return text
 
 
+# Public read-only alias: the S09 assessment gate validates its own refs with the *same*
+# structured-reference grammar the canonical owner uses, without inventing a second one.
+validate_structured_ref = _validate_structured_ref
+
+
 def validate_adoption_provenance(
     *,
     decision_ref: Optional[str],
@@ -583,6 +644,115 @@ def validate_no_forbidden_self_truth(payload: Optional[Mapping[str, Any]]) -> No
         raise ContractViolationError(
             f"forbidden self-asserted truth fields in Activity payload: {sorted(illegal)}"
         )
+
+
+EXTERNAL_STOP_REASON_CODES = frozenset(
+    {
+        "OPERATOR_REQUEST",
+        "USER_REQUEST",
+        "SAFETY_HOLD",
+        "SERVICE_SHUTDOWN",
+    }
+)
+EXTERNAL_STOP_BOUNDARY_MODES = frozenset({"IMMEDIATE", "SAFE_BOUNDARY", "ATOMIC"})
+#: A request body may never smuggle these; ``authority``/``subject_id`` are written by the
+#: composition root itself (the request whitelist already refuses them from the client).
+EXTERNAL_STOP_FORBIDDEN_KEYS = frozenset(
+    {
+        "actor", "uid", "euid", "owner", "subject", "system", "operator", "model",
+        "token", "capability",
+    }
+)
+_ALLOWED_EXTERNAL_STOP_KEYS = frozenset(
+    {
+        "schema_version",
+        "intent_id",
+        "operation_key",
+        "activity_id",
+        "activity_revision",
+        "reason_code",
+        "requested_at",
+        "authority",
+        "subject_id",
+        "epoch",
+        "boundary_mode",
+        "unresolved_action_refs",
+        "state",
+    }
+)
+
+
+def validate_external_stop_payload(
+    payload: Mapping[str, Any],
+    *,
+    activity: Mapping[str, Any],
+    subject_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Validate one durable local-operator stop intent against the live Activity.
+
+    The payload is a fact the *composition root* writes after the operator credential has
+    already been checked; the request body can never name the subject, the authority or the
+    owner.  This function refuses a payload that tries to, and one whose Activity/revision
+    does not match the record the owner is about to accept it for.
+    """
+
+    if not isinstance(payload, Mapping) or not payload:
+        raise ContractViolationError("external stop payload must be a non-empty mapping")
+    forbidden = sorted(set(payload) & EXTERNAL_STOP_FORBIDDEN_KEYS)
+    if forbidden:
+        raise ContractViolationError(
+            "external stop payload carries identity fields: %s" % ",".join(forbidden))
+    unknown = sorted(set(payload) - _ALLOWED_EXTERNAL_STOP_KEYS)
+    if unknown:
+        raise ContractViolationError(
+            "external stop payload has unknown fields: %s" % ",".join(unknown))
+    intent_id = _validate_structured_ref(
+        payload.get("intent_id"), "external_stop.intent_id",
+        allowed_prefixes=EXTERNAL_STOP_INTENT_PREFIXES)
+    operation_key = payload.get("operation_key")
+    if not isinstance(operation_key, str) or not operation_key.strip():
+        raise ContractViolationError("external_stop.operation_key must be a non-empty string")
+    act_id = str(payload.get("activity_id") or "")
+    if act_id != str(activity.get("activity_id") or ""):
+        raise ContractViolationError("external stop names a different Activity")
+    try:
+        revision = int(payload.get("activity_revision"))
+    except (TypeError, ValueError):
+        raise ContractViolationError("external_stop.activity_revision must be an integer") from None
+    if revision != int(activity.get("revision", -1)):
+        raise RevisionConflictError(
+            f"external stop revision {revision} != live Activity revision "
+            f"{activity.get('revision')}")
+    if str(activity.get("status") or "") in TERMINAL_ACTIVITY_STATUSES:
+        raise TerminalActivityImmutableError(
+            "external stop was requested for an Activity that is already terminal")
+    reason = str(payload.get("reason_code") or "").strip().upper()
+    if reason not in EXTERNAL_STOP_REASON_CODES:
+        raise ContractViolationError(f"unknown external stop reason_code={reason!r}")
+    mode = str(payload.get("boundary_mode") or "IMMEDIATE").strip().upper()
+    if mode not in EXTERNAL_STOP_BOUNDARY_MODES:
+        raise ContractViolationError(f"unknown external stop boundary_mode={mode!r}")
+    if str(payload.get("authority") or "") != "LOCAL_OPERATOR":
+        raise ContractViolationError("external stop authority must be LOCAL_OPERATOR")
+    if subject_id is not None and str(payload.get("subject_id") or "") != str(subject_id):
+        raise SubjectIdentityError("external stop belongs to a different subject")
+    unresolved = normalize_ref_list(
+        payload.get("unresolved_action_refs") or [], "unresolved_action_refs", allow_empty=True)
+    return {
+        "schema_version": SCHEMA_EXTERNAL_STOP,
+        "intent_id": intent_id,
+        "operation_key": operation_key.strip(),
+        "activity_id": act_id,
+        "activity_revision": revision,
+        "reason_code": reason,
+        "requested_at": str(payload.get("requested_at") or ""),
+        "authority": "LOCAL_OPERATOR",
+        "subject_id": str(payload.get("subject_id") or ""),
+        "epoch": str(payload.get("epoch") or ""),
+        "boundary_mode": mode,
+        "unresolved_action_refs": unresolved,
+        "state": EXTERNAL_STOP_PENDING,
+    }
 
 
 def normalize_ref_list(refs: Optional[Sequence[str]], field_name: str, *, allow_empty: bool = False) -> list[str]:
@@ -865,7 +1035,7 @@ def build_life_frame_read_view(
                 "FOREGROUND_REF_NOT_OPEN",
                 f"foreground_activity_ref={fg_ref!r} has non-open status={act_status!r}",
             )
-        life_state = act_status  # ACTIVE | PAUSED | WAITING
+        life_state = act_status  # ACTIVE | PAUSED | WAITING (a released BLOCKED has no pointer)
         fg_kind = fg_act.get("activity_kind")
         fg_occupancy = fg_act.get("interruptibility", INTERRUPTIBILITY_LIGHT)
         action_reality_refs = {
@@ -1161,7 +1331,7 @@ class CanonicalActivityStore:
                     "JOURNAL_LINE_NOT_OBJECT",
                     f"journal line {line_no} is not a JSON object",
                 )
-            if entry.get("schema_version") != SCHEMA_LIFE_TRANSITION:
+            if entry.get("schema_version") not in READABLE_TRANSITION_SCHEMAS:
                 raise RecoveryRequiredError(
                     "UNKNOWN_JOURNAL_SCHEMA_VERSION",
                     f"journal line {line_no} has unsupported schema_version={entry.get('schema_version')!r}",
@@ -1285,7 +1455,7 @@ class CanonicalActivityStore:
         for act_id, act in activities.items():
             if not isinstance(act, dict) or act.get("activity_id") != act_id:
                 raise RecoveryRequiredError("CORRUPTED_SNAPSHOT", f"invalid activity record for {act_id!r}")
-            if act.get("schema_version") != SCHEMA_ACTIVITY_INSTANCE:
+            if act.get("schema_version") not in READABLE_ACTIVITY_SCHEMAS:
                 raise RecoveryRequiredError(
                     "UNKNOWN_SCHEMA_VERSION",
                     f"activity {act_id!r} has unknown schema_version={act.get('schema_version')!r}",
@@ -1300,7 +1470,8 @@ class CanonicalActivityStore:
                 # Activity released by a successful PAUSE carries the same marker, so more than
                 # one suspended Activity can coexist while at most one ACTIVE one holds the slot.
                 # A legacy PAUSED record has no marker and is still treated as foreground-bound.
-                if (status in (STATUS_WAITING, STATUS_PAUSED)
+                # 2026-10-28: BLOCKED always releases it -- the Activity cannot act right now.
+                if (status in (STATUS_WAITING, STATUS_PAUSED, STATUS_BLOCKED)
                         and act.get("foreground_released") is True):
                     continue
                 fg_bound_open_ids.append(act_id)
@@ -1780,6 +1951,7 @@ class ActivityCommandService:
         transition_type: str,
         target_activity_id: Optional[str],
         activity_kind: Optional[str] = None,
+        payload_fingerprint: Optional[str] = None,
     ) -> Optional[CommandResult]:
         if not isinstance(idempotency_key, str) or not idempotency_key.strip():
             raise ContractViolationError("idempotency_key must be a non-empty string")
@@ -1795,6 +1967,14 @@ class ActivityCommandService:
                     raise IdempotencyConflictError(
                         f"idempotency_key={key!r} already used for activity_id={entry.get('activity_id')!r}"
                     )
+                # 2026-10-28: an external stop replays only when the *payload* matches too.
+                # Reusing the stable operation key with a different intent must not return
+                # the earlier acceptance as if the new request had been honoured.
+                if payload_fingerprint is not None:
+                    if entry.get("payload_fingerprint") != payload_fingerprint:
+                        raise IdempotencyConflictError(
+                            f"idempotency_key={key!r} was used with a different stop payload"
+                        )
                 if transition_type == TRANSITION_START and activity_kind is not None:
                     snap = entry.get("activity_snapshot") or {}
                     if snap.get("activity_kind") != activity_kind:
@@ -2048,6 +2228,12 @@ class ActivityCommandService:
         checkpoint_ref: Optional[str] = None,
         last_action_ref: Optional[str] = None,
         completion_evidence_ref: Optional[str] = None,
+        blocked_on_ref: Optional[str] = None,
+        blocked_reason_code: Optional[str] = None,
+        blocked_criteria_refs: Optional[Sequence[str]] = None,
+        blocked_assessment: Optional[Mapping[str, Any]] = None,
+        failure_assessment: Optional[Mapping[str, Any]] = None,
+        external_stop: Optional[Mapping[str, Any]] = None,
         reason_code: str = "UNKNOWN",
         occurred_at: Optional[str] = None,
         observed_at: Optional[str] = None,
@@ -2091,6 +2277,56 @@ class ActivityCommandService:
         if transition_type == TRANSITION_WAIT and not waiting_on_ref:
             raise ContractViolationError("WAIT transition requires a structured waiting_on_ref")
 
+        norm_blocked_on: Optional[str] = None
+        norm_blocked_criteria: list[str] = []
+        if transition_type == TRANSITION_BLOCK:
+            norm_blocked_on = _validate_structured_ref(
+                blocked_on_ref,
+                "blocked_on_ref",
+                allowed_prefixes=VALID_BLOCK_BASIS_PREFIXES,
+            )
+            norm_blocked_criteria = normalize_ref_list(
+                blocked_criteria_refs or [], "blocked_criteria_refs", allow_empty=True
+            )
+            if blocked_assessment is not None and not isinstance(blocked_assessment, Mapping):
+                raise ContractViolationError("blocked_assessment must be a mapping when supplied")
+
+        norm_failure_assessment: Optional[dict[str, Any]] = None
+        if transition_type == TRANSITION_FAIL:
+            if not isinstance(failure_assessment, Mapping) or not failure_assessment:
+                raise ContractViolationError(
+                    "FAIL requires the S09 owner failure assessment payload; a bare reference "
+                    "or a model boolean is not an assessment")
+            norm_failure_assessment = copy.deepcopy(dict(failure_assessment))
+            assessment_ref = str(norm_failure_assessment.get("assessment_id") or "").strip()
+            if not assessment_ref:
+                raise ContractViolationError("FAIL assessment payload has no assessment_id")
+            _validate_structured_ref(
+                assessment_ref,
+                "failure_assessment.assessment_id",
+                allowed_prefixes=VALID_ASSESSMENT_PREFIXES,
+            )
+            if assessment_ref not in [str(ref) for ref in (source_refs or [])]:
+                raise ContractViolationError(
+                    "FAIL source_refs must carry the assessment ref that authorizes the terminal")
+
+        norm_external_stop: Optional[dict[str, Any]] = None
+        stop_fingerprint: Optional[str] = None
+        if transition_type == TRANSITION_STOP_INTENT:
+            if not isinstance(external_stop, Mapping) or not external_stop:
+                raise ContractViolationError(
+                    "STOP_INTENT requires the validated external stop payload")
+            norm_external_stop = dict(external_stop)
+            stop_fingerprint = sha256_hex(canonical_json_line({
+                "intent_id": norm_external_stop.get("intent_id"),
+                "reason_code": norm_external_stop.get("reason_code"),
+                "activity_revision": norm_external_stop.get("activity_revision"),
+                "boundary_mode": norm_external_stop.get("boundary_mode"),
+            }))
+        elif external_stop is not None:
+            raise ContractViolationError(
+                "external_stop is only valid on a STOP_INTENT transition")
+
         norm_episode_id: Optional[str] = None
         if waiting_episode_id is not None:
             norm_episode_id = _validate_structured_ref(
@@ -2119,6 +2355,7 @@ class ActivityCommandService:
                 idempotency_key=idempotency_key,
                 transition_type=transition_type,
                 target_activity_id=act_id,
+                payload_fingerprint=stop_fingerprint,
             )
             if replay_hit is not None:
                 return replay_hit
@@ -2162,6 +2399,7 @@ class ActivityCommandService:
                             )
                 elif transition_type in (
                     TRANSITION_COMPLETE,
+                    TRANSITION_FAIL,
                     TRANSITION_ABANDON,
                     TRANSITION_CANCEL,
                     TRANSITION_EXPIRE,
@@ -2171,8 +2409,11 @@ class ActivityCommandService:
                     # state-machine ability it had while it still held the pointer -- the
                     # separate PAUSED-ABANDON safety rule lives in AG-2, not here, and is
                     # unchanged.  Terminal transitions need no executing foreground.
+                    # 2026-10-28: a BLOCKED Activity never holds the slot, so the same rule
+                    # applies verbatim: the owner may still end it (FAIL/ABANDON/CANCEL/COMPLETE)
+                    # from its own assessed facts, which is what keeps BLOCKED from deadlocking.
                     if not (
-                        from_status in (STATUS_WAITING, STATUS_PAUSED)
+                        from_status in (STATUS_WAITING, STATUS_PAUSED, STATUS_BLOCKED)
                         and current_act.get("foreground_released") is True
                     ):
                         raise ForegroundConflictError(
@@ -2184,6 +2425,17 @@ class ActivityCommandService:
                     # the existing one and stays byte-for-byte.
                     if not (
                         from_status == STATUS_WAITING
+                        and current_act.get("foreground_released") is True
+                    ):
+                        raise ForegroundConflictError(
+                            f"activity {act_id!r} is not the current foreground activity ({fg_id!r})"
+                        )
+                elif transition_type == TRANSITION_STOP_INTENT:
+                    # An external operator may stop *this* suspended Activity without owning the
+                    # slot: it is already released and cannot be executing.  A live foreground
+                    # Activity other than the one named here is never stopped by implication.
+                    if not (
+                        from_status in (STATUS_WAITING, STATUS_PAUSED, STATUS_BLOCKED)
                         and current_act.get("foreground_released") is True
                     ):
                         raise ForegroundConflictError(
@@ -2201,7 +2453,8 @@ class ActivityCommandService:
 
             effective_to_status = (
                 from_status
-                if transition_type in (TRANSITION_CHECKPOINT, TRANSITION_PROGRESS)
+                if transition_type in (
+                    TRANSITION_CHECKPOINT, TRANSITION_PROGRESS, TRANSITION_STOP_INTENT)
                 else to_status
             )
 
@@ -2213,6 +2466,22 @@ class ActivityCommandService:
             updated_act["status"] = effective_to_status
             updated_act["updated_at"] = occ_stamp
             updated_act["last_transition_ref"] = trn_id
+            # 2026-10-28: a record that uses the new vocabulary (or already is v2) is written
+            # as v2.  v1 records that never touch BLOCKED/FAILED stay byte-for-byte v1.
+            uses_v3 = (
+                transition_type == TRANSITION_STOP_INTENT
+                or current_act.get("schema_version") == SCHEMA_ACTIVITY_INSTANCE_V3
+            )
+            uses_v2 = uses_v3 or (
+                transition_type in (TRANSITION_BLOCK, TRANSITION_FAIL)
+                or from_status in (STATUS_BLOCKED, STATUS_FAILED)
+                or effective_to_status in (STATUS_BLOCKED, STATUS_FAILED)
+                or current_act.get("schema_version") == SCHEMA_ACTIVITY_INSTANCE_V2
+            )
+            if uses_v3:
+                updated_act["schema_version"] = SCHEMA_ACTIVITY_INSTANCE_V3
+            elif uses_v2:
+                updated_act["schema_version"] = SCHEMA_ACTIVITY_INSTANCE_V2
 
             for src in norm_sources:
                 if src not in updated_act["source_refs"]:
@@ -2227,7 +2496,13 @@ class ActivityCommandService:
             if ext_refs["last_action_ref"] is not None:
                 updated_act["last_action_ref"] = ext_refs["last_action_ref"]
 
-            if transition_type in (TRANSITION_CHECKPOINT, TRANSITION_PROGRESS):
+            if transition_type == TRANSITION_STOP_INTENT:
+                # The intent is durable inside the Activity record; status, checkpoint, goal and
+                # every committed result stay exactly as they were.  Nothing is cancelled here.
+                updated_act["external_stop"] = copy.deepcopy(norm_external_stop)
+                updated_act["external_stop"]["accepted_at"] = occ_stamp
+                updated_act["external_stop"]["accepted_revision"] = result_rev
+            elif transition_type in (TRANSITION_CHECKPOINT, TRANSITION_PROGRESS):
                 # Non-lifecycle progress/checkpoint update: preserve existing status and waiting/paused fields
                 pass
             elif effective_to_status == STATUS_PAUSED:
@@ -2252,6 +2527,24 @@ class ActivityCommandService:
                     updated_act["foreground_released"] = True
                 else:
                     updated_act.pop("foreground_released", None)
+            elif effective_to_status == STATUS_BLOCKED:
+                # BLOCKED cannot advance under the current conditions; it is not a voluntary
+                # pause and not an external wait.  The basis and the criteria are kept as
+                # references, never as free text, and the single execution slot is released.
+                # No timer and no default recovery is created here.
+                updated_act["blocked_since"] = occ_stamp
+                updated_act["blocked_on_ref"] = norm_blocked_on
+                updated_act["blocked_reason_code"] = (blocked_reason_code or norm_reason)
+                updated_act["blocked_criteria_refs"] = norm_blocked_criteria
+                if blocked_assessment is not None:
+                    updated_act["blocked_assessment"] = copy.deepcopy(dict(blocked_assessment))
+                updated_act["paused_at"] = None
+                updated_act["waiting_since"] = None
+                updated_act["waiting_on_ref"] = None
+                updated_act["resume_condition_ref"] = None
+                updated_act.pop("waiting_episode_id", None)
+                updated_act["foreground_released"] = True
+                # The goal, checkpoint, last action and any committed result stay untouched.
             elif effective_to_status == STATUS_ACTIVE:
                 updated_act["paused_at"] = None
                 updated_act["waiting_since"] = None
@@ -2259,6 +2552,11 @@ class ActivityCommandService:
                 updated_act["resume_condition_ref"] = None
                 updated_act.pop("waiting_episode_id", None)
                 updated_act.pop("foreground_released", None)
+                # A RESUME from BLOCKED keeps the historical basis in the journal only; the
+                # live record no longer claims to be blocked.
+                updated_act["blocked_since"] = None
+                updated_act["blocked_on_ref"] = None
+                updated_act["blocked_reason_code"] = None
             elif effective_to_status in TERMINAL_ACTIVITY_STATUSES:
                 updated_act["ended_at"] = occ_stamp
                 updated_act["waiting_on_ref"] = None
@@ -2267,11 +2565,44 @@ class ActivityCommandService:
                 updated_act.pop("foreground_released", None)
                 updated_act["terminal_reason_code"] = norm_reason
                 updated_act["terminal_source_ref"] = norm_sources[0]
+                if effective_to_status == STATUS_CANCELLED and updated_act.get("external_stop"):
+                    # The stop intent is the reason this Activity ended; record that it reached
+                    # its terminal here instead of pretending the request was still pending.
+                    final_stop = dict(updated_act["external_stop"])
+                    final_stop["state"] = EXTERNAL_STOP_FINALIZED
+                    final_stop["finalized_at"] = occ_stamp
+                    final_stop["finalized_revision"] = result_rev
+                    final_stop["outcome"] = STATUS_CANCELLED
+                    updated_act["external_stop"] = final_stop
                 if effective_to_status == STATUS_COMPLETED:
                     updated_act["completion_evidence_ref"] = ext_refs["completion_evidence_ref"]
+                elif effective_to_status == STATUS_FAILED:
+                    # A failure is the activity's pursuit ending; it is not a completion and it
+                    # never rewrites an Action outcome.  The scope, criteria, owner evidence and
+                    # every still-unresolved Action reference stay attached to the record, and
+                    # checkpoint/last_action/real committed results are deliberately preserved.
+                    payload = norm_failure_assessment or {}
+                    assessment_ref = str(payload.get("assessment_id") or "")
+                    updated_act["failure_assessment_ref"] = assessment_ref
+                    updated_act["failure_scope_refs"] = [
+                        str(ref) for ref in (payload.get("goal_scope_refs") or [])
+                    ]
+                    updated_act["failure_criteria_refs"] = [
+                        str(ref) for ref in (payload.get("criterion_refs") or [])
+                    ]
+                    updated_act["failure_evidence_refs"] = [
+                        str(ref) for ref in (payload.get("evidence_refs") or [])
+                    ]
+                    updated_act["unresolved_action_refs"] = [
+                        str(ref) for ref in (payload.get("unresolved_action_refs") or [])
+                    ]
+                    updated_act["failure_assessed_at"] = payload.get("assessed_at")
+                    updated_act["terminal_source_ref"] = assessment_ref or norm_sources[0]
 
             transition_unsigned: dict[str, Any] = {
-                "schema_version": SCHEMA_LIFE_TRANSITION,
+                "schema_version": (
+                    SCHEMA_LIFE_TRANSITION_V3 if uses_v3
+                    else (SCHEMA_LIFE_TRANSITION_V2 if uses_v2 else SCHEMA_LIFE_TRANSITION)),
                 "transition_id": trn_id,
                 "activity_id": act_id,
                 "subject_id": GLOBAL_SUBJECT_ID,
@@ -2297,13 +2628,31 @@ class ActivityCommandService:
                 transition_unsigned["proposal_ref"] = proposal_ref
             if authority_reason_kind is not None:
                 transition_unsigned["authority_reason_kind"] = authority_reason_kind
+            if transition_type == TRANSITION_BLOCK:
+                transition_unsigned["blocked_on_ref"] = norm_blocked_on
+                transition_unsigned["blocked_reason_code"] = blocked_reason_code or norm_reason
+                transition_unsigned["blocked_criteria_refs"] = norm_blocked_criteria
+                if blocked_assessment is not None:
+                    transition_unsigned["blocked_assessment"] = copy.deepcopy(
+                        dict(blocked_assessment))
+            if transition_type == TRANSITION_FAIL:
+                # The assessment is part of the committed transition, not a side file: the
+                # admission verifier re-reads it against the live Activity and owner evidence.
+                transition_unsigned["failure_assessment"] = copy.deepcopy(
+                    norm_failure_assessment or {})
+            if norm_external_stop is not None:
+                transition_unsigned["external_stop"] = copy.deepcopy(norm_external_stop)
+                transition_unsigned["payload_fingerprint"] = stop_fingerprint
 
             new_state = copy.deepcopy(state)
             new_state["revision"] = result_rev
             new_state["updated_at"] = occ_stamp
             new_state["activities"][act_id] = updated_act
 
-            if transition_type in (TRANSITION_CHECKPOINT, TRANSITION_PROGRESS):
+            if transition_type in (
+                    TRANSITION_CHECKPOINT, TRANSITION_PROGRESS, TRANSITION_STOP_INTENT):
+                # A stop intent records a decision about the Activity; it never acquires the
+                # single execution slot and never releases somebody else's.
                 new_state["foreground_activity_ref"] = fg_id
             elif effective_to_status in TERMINAL_ACTIVITY_STATUSES:
                 if fg_id == act_id:
@@ -2315,6 +2664,12 @@ class ActivityCommandService:
                 # v0.4 background pause: the paused Activity keeps every field of its own record,
                 # but it no longer holds the one execution slot.  A later RESUME re-acquires it
                 # through the normal owner path (LR-4 eligibility, then LR-2 here).
+                if fg_id == act_id:
+                    new_state["foreground_activity_ref"] = None
+            elif effective_to_status == STATUS_BLOCKED:
+                # 2026-10-28: a blocked Activity cannot act right now, so it cannot hold the
+                # slot either.  It stays OPEN in its own record; recovery is an explicit
+                # condition plus a fresh Decision RESUME, never an automatic re-acquire.
                 if fg_id == act_id:
                     new_state["foreground_activity_ref"] = None
             else:
@@ -2454,6 +2809,106 @@ class ActivityCommandService:
             authority_reason_kind=authority_reason_kind,
         )
 
+    def block_activity(
+        self,
+        *,
+        activity_id: str,
+        expected_revision: int,
+        idempotency_key: str,
+        source_refs: Sequence[str],
+        blocked_on_ref: str,
+        blocked_reason_code: str = "BLOCKED_BY_CONDITION",
+        blocked_criteria_refs: Optional[Sequence[str]] = None,
+        blocked_assessment: Optional[Mapping[str, Any]] = None,
+        causal_parent_refs: Optional[Sequence[str]] = None,
+        reason_code: str = "BLOCKED_BY_CONDITION",
+        occurred_at: Optional[str] = None,
+        observed_at: Optional[str] = None,
+        enqueued_at: Optional[str] = None,
+        extra_fields: Optional[Mapping[str, Any]] = None,
+        fault_hook: Optional[Callable[[str], None]] = None,
+        consequence_capability: Optional[Any] = None,
+        proposal_ref: Optional[str] = None,
+        authority_reason_kind: Optional[str] = None,
+    ) -> CommandResult:
+        """Record that the Activity cannot advance under the current conditions.
+
+        Non-terminal.  It releases the single execution slot, keeps the goal/checkpoint/action
+        facts, and stores only structured references for the basis.  Recovery is never
+        automatic: the owner's explicit condition must open and a fresh Decision must RESUME.
+        """
+
+        return self._mutate_existing_activity(
+            activity_id=activity_id,
+            transition_type=TRANSITION_BLOCK,
+            allowed_from_statuses=(STATUS_ACTIVE,),
+            to_status=STATUS_BLOCKED,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            source_refs=source_refs,
+            causal_parent_refs=causal_parent_refs,
+            blocked_on_ref=blocked_on_ref,
+            blocked_reason_code=blocked_reason_code,
+            blocked_criteria_refs=blocked_criteria_refs,
+            blocked_assessment=blocked_assessment,
+            reason_code=reason_code,
+            occurred_at=occurred_at,
+            observed_at=observed_at,
+            enqueued_at=enqueued_at,
+            extra_fields=extra_fields,
+            fault_hook=fault_hook,
+            consequence_capability=consequence_capability,
+            proposal_ref=proposal_ref,
+            authority_reason_kind=authority_reason_kind,
+        )
+
+    def fail_activity(
+        self,
+        *,
+        activity_id: str,
+        expected_revision: int,
+        idempotency_key: str,
+        source_refs: Sequence[str],
+        failure_assessment: Mapping[str, Any],
+        causal_parent_refs: Optional[Sequence[str]] = None,
+        reason_code: str = "FAILED_BY_OWNER_ASSESSMENT",
+        occurred_at: Optional[str] = None,
+        observed_at: Optional[str] = None,
+        enqueued_at: Optional[str] = None,
+        extra_fields: Optional[Mapping[str, Any]] = None,
+        fault_hook: Optional[Callable[[str], None]] = None,
+        consequence_capability: Optional[Any] = None,
+        proposal_ref: Optional[str] = None,
+        authority_reason_kind: Optional[str] = None,
+    ) -> CommandResult:
+        """Terminal FAILED, authorized only by the S09 owner failure assessment.
+
+        An Action failure or UNKNOWN is evidence at most; it never reaches this command on its
+        own.  The exact Activity revision, goal scope, named criteria and owner evidence are all
+        re-verified by admission before anything is written.
+        """
+
+        return self._mutate_existing_activity(
+            activity_id=activity_id,
+            transition_type=TRANSITION_FAIL,
+            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED),
+            to_status=STATUS_FAILED,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            source_refs=source_refs,
+            causal_parent_refs=causal_parent_refs,
+            failure_assessment=failure_assessment,
+            reason_code=reason_code,
+            occurred_at=occurred_at,
+            observed_at=observed_at,
+            enqueued_at=enqueued_at,
+            extra_fields=extra_fields,
+            fault_hook=fault_hook,
+            consequence_capability=consequence_capability,
+            proposal_ref=proposal_ref,
+            authority_reason_kind=authority_reason_kind,
+        )
+
     def resume_activity(
         self,
         *,
@@ -2480,7 +2935,7 @@ class ActivityCommandService:
         return self._mutate_existing_activity(
             activity_id=activity_id,
             transition_type=TRANSITION_RESUME,
-            allowed_from_statuses=(STATUS_PAUSED, STATUS_WAITING),
+            allowed_from_statuses=(STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED),
             to_status=STATUS_ACTIVE,
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
@@ -2528,7 +2983,7 @@ class ActivityCommandService:
         return self._mutate_existing_activity(
             activity_id=activity_id,
             transition_type=TRANSITION_COMPLETE,
-            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING),
+            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED),
             to_status=STATUS_COMPLETED,
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
@@ -2575,7 +3030,7 @@ class ActivityCommandService:
         return self._mutate_existing_activity(
             activity_id=activity_id,
             transition_type=TRANSITION_ABANDON,
-            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING),
+            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED),
             to_status=STATUS_ABANDONED,
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
@@ -2594,6 +3049,48 @@ class ActivityCommandService:
             consequence_capability=consequence_capability,
             proposal_ref=proposal_ref,
             authority_reason_kind=authority_reason_kind,
+        )
+
+    def record_external_stop(
+        self,
+        *,
+        activity_id: str,
+        expected_revision: int,
+        idempotency_key: str,
+        source_refs: Sequence[str],
+        external_stop: Mapping[str, Any],
+        causal_parent_refs: Optional[Sequence[str]] = None,
+        occurred_at: Optional[str] = None,
+        observed_at: Optional[str] = None,
+        enqueued_at: Optional[str] = None,
+        fault_hook: Optional[Callable[[str], None]] = None,
+        consequence_capability: Optional[Any] = None,
+        proposal_ref: Optional[str] = None,
+    ) -> CommandResult:
+        """Durably accept one local-operator stop intent for this Activity.
+
+        This is *not* a cancel: the Activity keeps its status, checkpoint and every committed
+        result, and the intent itself is what blocks any further dispatch until the owner
+        either reaches a safe boundary (CANCEL) or keeps reporting the pending stop.
+        """
+
+        return self._mutate_existing_activity(
+            activity_id=activity_id,
+            transition_type=TRANSITION_STOP_INTENT,
+            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED),
+            to_status=STATUS_ACTIVE,  # ignored: the effective status is the from_status
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            source_refs=source_refs,
+            causal_parent_refs=causal_parent_refs,
+            reason_code="EXTERNAL_STOP_REQUESTED",
+            occurred_at=occurred_at,
+            observed_at=observed_at,
+            enqueued_at=enqueued_at,
+            external_stop=external_stop,
+            fault_hook=fault_hook,
+            consequence_capability=consequence_capability,
+            proposal_ref=proposal_ref,
         )
 
     def cancel_activity(
@@ -2621,7 +3118,7 @@ class ActivityCommandService:
         return self._mutate_existing_activity(
             activity_id=activity_id,
             transition_type=TRANSITION_CANCEL,
-            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING),
+            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED),
             to_status=STATUS_CANCELLED,
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
@@ -2667,7 +3164,7 @@ class ActivityCommandService:
         return self._mutate_existing_activity(
             activity_id=activity_id,
             transition_type=TRANSITION_EXPIRE,
-            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING),
+            allowed_from_statuses=(STATUS_ACTIVE, STATUS_PAUSED, STATUS_WAITING, STATUS_BLOCKED),
             to_status=STATUS_EXPIRED,
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
@@ -2768,16 +3265,19 @@ class ReplayRuntime:
             state["updated_at"] = entry["occurred_at"]
 
             prev_fg = state["foreground_activity_ref"]
-            if trn_type in (TRANSITION_CHECKPOINT, TRANSITION_PROGRESS):
+            if trn_type in (
+                    TRANSITION_CHECKPOINT, TRANSITION_PROGRESS, TRANSITION_STOP_INTENT):
                 state["foreground_activity_ref"] = prev_fg
             elif to_status in TERMINAL_ACTIVITY_STATUSES:
                 if prev_fg == act_id:
                     state["foreground_activity_ref"] = None
-            elif (to_status in (STATUS_WAITING, STATUS_PAUSED)
+            elif (to_status in (STATUS_WAITING, STATUS_PAUSED, STATUS_BLOCKED)
                   and snap.get("foreground_released") is True):
                 # v0.4 background pause: a released PAUSED Activity is OPEN in its own record
                 # but does not hold the foreground slot.  Legacy PAUSED transitions without the
                 # marker fall through to the old OPEN branch and keep their pointer.
+                # 2026-10-28: BLOCKED always carries the release marker; replay recognises it
+                # so a terminal history query never has to guess from a stale pointer.
                 if prev_fg == act_id:
                     state["foreground_activity_ref"] = None
             elif to_status in OPEN_ACTIVITY_STATUSES:

@@ -367,7 +367,7 @@ class ToolSchemaTest(unittest.TestCase):
         self.assertNotIn("RELOCATE", verbs)
         self.assertEqual(list(phone_tool.WORLD_ACTIONS),
                          ["MOVE", "PICK_UP", "PLACE", "POSE", "REST",
-                          "ARRANGE", "TOGGLE_FIXTURE"])
+                          "ARRANGE", "TOGGLE_FIXTURE", "TOILET"])
         params = schema["parameters"]["properties"]["params"]["properties"]
         self.assertIn("object_id", params)
         self.assertNotIn("fixture_id", params)

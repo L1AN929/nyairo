@@ -23,7 +23,15 @@ CAPABILITIES = frozenset({
     "PROVISION_PERSONAL_WORKSPACE",
     "WRITE_OPEN_INQUIRY",
     "COMMIT_MANAGED_ARTIFACT",
+    # One explicit permission to disclose one exact source version to the one local target.
+    # It never writes, never reads a body, and is checked by the owner at the sending commit.
+    "DISCLOSE_MANAGED_ARTIFACT",
 })
+#: The disclosure permit is its own authority domain.  Holding ``COMMIT_MANAGED_ARTIFACT`` never
+#: implies it and holding it never satisfies a write.
+DISCLOSE_CAPABILITY = "DISCLOSE_MANAGED_ARTIFACT"
+DISCLOSURE_AUTHORITY_SCOPE = "life-supply.disclosure.v1"
+DISCLOSURE_TARGET_LOCAL_OWNER = "local:owner"
 USE_MODES = frozenset({"ONE_SHOT", "REUSABLE"})
 ALLOW = "ALLOW"
 DENY = "DENY"
@@ -50,6 +58,18 @@ def _canonical(value: Any) -> str:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def disclosure_scope(artifact_id: Any, version_id: Any) -> str:
+    """The exact, structured scope of one disclosure permit.
+
+    Only the source artifact and its exact version are named; no body, no token, no share draft
+    id.  The same function is used by the owner (derived from the stored envelope), by the
+    operator CLI (composed from the two explicit arguments) and by the read-only lookup, so a
+    caller cannot widen the binding by formatting the string differently.
+    """
+    return "disclosure:" + _canonical({"artifact_id": str(artifact_id),
+                                       "version_id": str(version_id)})
 
 
 @dataclass(frozen=True)
@@ -557,6 +577,24 @@ class GovernanceAuthority:
                 return [dict(row) for row in rows]
         except sqlite3.Error:
             return []
+
+    def lookup_grants_exact(self, *, subject: str, capability: str, scope: str,
+                            target: str) -> list[dict[str, Any]] | None:
+        """Every grant (any revocation state) that is exactly bound to these four facts.
+
+        Used by the owner's disclosure admission: an *active* match is the permit, a *revoked*
+        match is why the answer says ``REVOKED`` instead of ``GRANT_REQUIRED``.  ``None`` means
+        the store could not be read, never "no matches".
+        """
+        try:
+            with self._connection() as con:
+                rows = con.execute(
+                    "SELECT * FROM permission_grants WHERE subject=? AND capability=? "
+                    "AND scope=? AND target=? ORDER BY created_at", (subject, capability, scope, target)
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error:
+            return None
 
     def list_active_grants(self, *, subject: str | None = None) -> list[dict[str, Any]] | None:
         now = float(self.clock())

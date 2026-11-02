@@ -107,6 +107,7 @@ from activity_waiting_agenda import (
     ResumeEligibilityStore,
 )
 from candidate_sources_ag0 import (
+    CANDIDATE_KIND_BLOCKED_ACTIVITY,
     CANDIDATE_KIND_CONSIDER_EXPLICIT_GOAL,
     CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY,
     CANDIDATE_KIND_CONSIDER_WORLD_OPPORTUNITY,
@@ -118,6 +119,7 @@ from candidate_sources_ag0 import (
     CANDIDATE_STATUS_OPEN,
     NAMESPACE_PRODUCTION,
     NAMESPACE_SHADOW_VERIFY,
+    SOURCE_BLOCKED_ACTIVITY,
     SOURCE_COMMITMENT,
     SOURCE_CURRENT_ACTIVITY,
     SOURCE_EXPLICIT_GOAL,
@@ -3051,6 +3053,25 @@ class DecisionOutputValidator:
             if intr != INTERRUPTIBILITY_ATOMIC:
                 legal.append(DECISION_PAUSE)
                 legal.append(DECISION_ABANDON)
+
+        # 2026-10-28: a BLOCKED Activity is not the foreground (LR-2's BLOCK released the
+        # slot) and an unconditional BLOCK has no OPEN eligibility, so neither the CONTINUE
+        # branch above nor the RESUME_ELIGIBLE branch below reaches it.  Its one formal exit
+        # is ABANDON, which ends *this* suspended Activity and touches nothing that is
+        # running: it is not a preemption and needs no foreground.  The source already
+        # withheld ATOMIC / unresolved / unreadable cases by name; a projection that still
+        # reaches here is exactly "this suspension can be ended legally".
+        if (
+            candidate.candidate_kind == CANDIDATE_KIND_BLOCKED_ACTIVITY
+            and candidate.source_kind == SOURCE_BLOCKED_ACTIVITY
+            and candidate.activity_ref
+            and candidate.availability_status == CANDIDATE_STATUS_OPEN
+            and candidate.activity_ref != cur_act
+            # A legacy PAUSED foreground already owns the exit decision (and its own ABANDON
+            # is withheld); offering a second suspended exit would be refused downstream.
+            and cur_status != STATUS_PAUSED
+        ):
+            legal.append(DECISION_ABANDON)
 
         # v0.4 PAUSED exit is WITHHELD, not offered.  SRC-0719:12-13 does let the owner judge
         # a PAUSED Activity ABANDONED, but only when nothing unresolved depends on it.  This

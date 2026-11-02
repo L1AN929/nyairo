@@ -1,10 +1,12 @@
 # NyAiro 0.4：等待恢复、作品收尾与原实例模型有限运行
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 ## 当前结论
 
 以 `D:\CHIYO-总体设计-v2.0-final.zip` 为标准，软件仍为0.4，唯一开发树为 `D:\nyairo-rc1-body-backend`，沿用rc1底座41e818f与全部此前未提交改动。没有重新下载/覆盖、提交、发布或部署。
 
-等待/收尾的父级隔离真实owner两进程链通过；最终gen3还覆盖每tick先维护、NOT_DUE不花钱、同tick资格可见。原实例已用用户指定 `https://gw.929711.xyz/v1` / `cn:deepseek-v4.1-flash` 真正进入Life请求链：首轮INVALID_JSON保留，输出分类修复后自然窗口新增一次请求，仍为OUTPUT_TRUNCATED，未形成有效决策。有效真实决策是当前具名阻塞，不因外层exit0、合成诊断JSON通过而称成功；不继续刷调用或自动抬上限。
+等待/收尾的父级隔离真实owner两进程链通过；最终gen3还覆盖每tick先维护、NOT_DUE不花钱、同tick资格可见。原实例已用用户指定 `https://gw.example.invalid/v1` / `cn:deepseek-v4.1-flash` 真正进入Life请求链：首轮INVALID_JSON保留，输出分类修复后自然窗口新增一次请求，仍为OUTPUT_TRUNCATED，未形成有效决策。有效真实决策是当前具名阻塞，不因外层exit0、合成诊断JSON通过而称成功；不继续刷调用或自动抬上限。
 
 ## 分包与精确证据
 

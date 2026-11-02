@@ -73,3 +73,32 @@ vendor/hermes/contributors/emails/uperLu@users.noreply.github.com -text
 *.ico      binary
 *.woff2    binary
 *.pdf      binary
+
+# ---------------------------------------------------------------------------
+# Release archive exclusions (v0.5.1, 2026-11-02)
+#
+# These rules affect `git archive` ONLY. They do not change checkout bytes, do
+# not untrack anything, and do not replace the whitelist used to build the
+# commit. They exist because some local runtime data is already tracked
+# (.memsearch/, .agents/continuity/, .claude/launch.json): leaving it out of
+# `git add` is not enough -- `git archive` would still ship it.
+#
+# The line-ending / sealed-byte rules above stay untouched: `-text` entries
+# such as components/native/native_recall/readonly_recall_adapter.py keep the
+# bytes their recorded sha256 seals.
+# ---------------------------------------------------------------------------
+/.memsearch/**                                                    export-ignore
+/.agents/continuity/**                                            export-ignore
+/.agents/worker-runs/**                                           export-ignore
+/.agents/release-id.txt                                           export-ignore
+/.claude/launch.json                                              export-ignore
+/dist/**                                                          export-ignore
+/.tmp_probe_e.py                                                  export-ignore
+/life_request_budget.lock                                         export-ignore
+/components/supply/lifysupply/**                                  export-ignore
+/components/supply/lifysupply_real/**                             export-ignore
+/docs/engineering/20261101-release-offline-final-guard-result.md  export-ignore
+/docs/engineering/20261101-release-offline-final-guard-result.json export-ignore
+/tests/fixtures/frozen_clock.py                                   export-ignore
+/tests/fixtures/frozen_site/**                                    export-ignore
+/tests/fixtures/direct_world_bridge/**                            export-ignore

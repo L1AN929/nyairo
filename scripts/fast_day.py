@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """显式压缩逻辑日（COMPRESSED_DEMO）的唯一入口。
 
-    python scripts/fast_day.py prepare --root /abs/new-root --run-id day-a
+    python scripts/fast_day.py prepare --root /abs/new-root --run-id day-a \\
+        --memory-authority /abs/outside-root/authority.db
     python scripts/fast_day.py status  --root /abs/new-root
     python scripts/fast_day.py start   --root /abs/new-root [--clock-only]
     python scripts/fast_day.py pause   --root /abs/new-root
@@ -10,6 +11,8 @@
 
 ``prepare`` 默认建一个**现成的**实例（真 Supply/World owner、本实例开关、新 Memory、
 operator 提供的公版节选）；``--clock-only`` 只准备时钟与实验额度，不建实例。
+Memory 的删除底账（``--memory-authority``）没有默认位置，非 clock-only 时必须由
+操作者显式给出一个实例业务根之外的绝对路径。
 ``start`` 在同一个有界窗口里起本根自己的 Supply/World 子进程与 resident（不绑
 HTTP），World 读同一个业务时钟域；零模型冒烟用 ``--no-act --offline-scripted``。
 
@@ -96,6 +99,11 @@ REASON_WALL_BUDGET_EXHAUSTED = clockmod.REASON_WALL_BUDGET_EXHAUSTED
 REASON_RESIDENT_EXITED = "RESIDENT_EXITED"
 REASON_INSTANCE_RUN_ID_MISMATCH = "INSTANCE_RUN_ID_MISMATCH"
 REASON_REQUEST_LIMIT_INVALID = "REQUEST_LIMIT_INVALID"
+#: Memory 的删除底账没有生产默认位置：非 clock-only 的 prepare 必须由操作者显式给出，
+#: 且必须落在实例业务根之外。拒绝码与 ``phone_life.enable_instance_memory`` 保持一致。
+REASON_MEMORY_AUTHORITY_REQUIRED = "MEMORY_AUTHORITY_PATH_REQUIRED"
+REASON_MEMORY_AUTHORITY_PATH_INVALID = "MEMORY_AUTHORITY_PATH_INVALID"
+REASON_MEMORY_AUTHORITY_INSIDE_ROOT = "MEMORY_AUTHORITY_PATH_INSIDE_INSTANCE"
 REASON_WORLD_GATE_INVALID = "FASTDAY_WORLD_GATE_INVALID"
 
 #: World 写闸门是**进程环境**开关（Intent Executor 直接读它）。显式 demo 只负责
@@ -277,12 +285,16 @@ def _inside_root(root: Path, candidate: Path) -> bool:
 
 def _provision_instance(root: Path, *, run_id: str,
                         request_total_limit: int = clockmod.HARD_CONFIG_MAX,
-                        max_cognition_calls_per_day: Optional[int] = None
+                        max_cognition_calls_per_day: Optional[int] = None,
+                        memory_authority: Optional[Path] = None
                         ) -> dict[str, Any]:
     """用一个全新根建**现成的**实例：真 Supply/World owner、自主开关、新 Memory、公版材料。
 
     全部复用既有入口（``demo.prepare_demo`` / ``autonomous_life_control.set_enabled`` /
     ``phone_life.enable_instance_memory``），不复制 prepare、不另造 owner、不写任何密钥。
+    ``memory_authority`` 是操作者显式给出的删除底账路径，原样交给既有
+    ``enable_instance_memory(authority_path=...)``：本模块不猜默认值、不从环境兜底，
+    也不新造恢复权威合同。
     返回 ``{"ok": bool, "reason_code": ..., "state_root": ..., "ledger_run_id": ...}``；
     失败时 ``partial`` 如实列出已经写下的东西，重试不会覆盖数据。
     """
@@ -355,7 +367,8 @@ def _provision_instance(root: Path, *, run_id: str,
     subject = str(prepared.get("subject") or phone.get("subject") or "").strip()
     try:
         memory = phone_life.enable_instance_memory(
-            root, subject, "fast-day:%s:memory" % run_id)
+            root, subject, "fast-day:%s:memory" % run_id,
+            authority_path=memory_authority)
     except Exception as exc:
         report.update({"reason_code": "MEMORY_BIND_FAILED",
                        "detail": "%s: %s" % (type(exc).__name__, exc)})
@@ -434,6 +447,7 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
             historical_requests: int = 0,
             max_cognition_calls_per_day: Optional[int] = None,
             state_root: Optional[Path] = None,
+            memory_authority: Optional[Path] = None,
             provision_instance: bool = False) -> dict[str, Any]:
     if not root.is_absolute():
         return {"ok": False, "reason_code": REASON_ROOT_REQUIRED,
@@ -481,11 +495,28 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
     if explicit_state_root is not None and not _inside_root(root, explicit_state_root):
         return {"ok": False, "reason_code": REASON_STATE_ROOT_OUTSIDE,
                 "detail": "状态根必须在实验根之内：%s" % explicit_state_root}
+    # Memory 底账的纯输入校验也放在任何写入之前：缺参数或路径不合法时不能先造出
+    # 半套实例再让 ``enable_instance_memory`` 事后拒绝。clock-only 不需要 Memory。
+    authority_path: Optional[Path] = None
+    if provision_instance:
+        if memory_authority is None:
+            return {"ok": False, "reason_code": REASON_MEMORY_AUTHORITY_REQUIRED,
+                    "detail": ("非 clock-only 的 prepare 必须用 --memory-authority 显式给出"
+                               "实例业务根之外的删除底账路径；本模块不猜默认位置")}
+        authority_path = Path(memory_authority).expanduser()
+        if not authority_path.is_absolute():
+            return {"ok": False, "reason_code": REASON_MEMORY_AUTHORITY_PATH_INVALID,
+                    "detail": "authority 必须是绝对路径：%s" % memory_authority}
+        if _inside_root(root, authority_path):
+            return {"ok": False, "reason_code": REASON_MEMORY_AUTHORITY_INSIDE_ROOT,
+                    "detail": ("删除底账必须落在实例业务根之外（%s）；根内文件会随实例"
+                               "自己的备份一起被回滚" % root)}
 
     if provision_instance:
         provision = _provision_instance(
             root, run_id=run_id, request_total_limit=int(request_total_limit),
-            max_cognition_calls_per_day=cognition_max)
+            max_cognition_calls_per_day=cognition_max,
+            memory_authority=authority_path)
         if provision.get("ok") is not True:
             return {"ok": False, **provision}
         state_root = Path(str(provision["state_root"]))
@@ -1274,6 +1305,10 @@ def cmd_prepare(argv: list[str]) -> int:
     parser.add_argument("--max-cognition-calls-per-day", type=int, default=None,
                         help="认知每日配置（默认等于总限：默认 96，显式 300 时为 300）")
     parser.add_argument("--state-root", default=None)
+    # Memory 的删除底账没有默认位置：非 clock-only 时必须由操作者显式给出，且必须
+    # 落在实例业务根之外。原样交给既有 enable 入口，不猜 root.parent、不从环境兜底。
+    parser.add_argument("--memory-authority", default=None,
+                        help="实例业务根之外的 Memory 删除底账路径（非 clock-only 时必填）")
     parser.add_argument("--clock-only", action="store_true",
                         help="只准备时钟/实验上限，不建实例（时钟冒烟用；不是可运行实例）")
     args = parser.parse_args(argv)
@@ -1296,6 +1331,8 @@ def cmd_prepare(argv: list[str]) -> int:
                                                   if args.max_cognition_calls_per_day is None
                                                   else int(args.max_cognition_calls_per_day)),
                      state_root=(Path(args.state_root) if args.state_root else None),
+                     memory_authority=(Path(args.memory_authority)
+                                       if args.memory_authority else None),
                      provision_instance=not args.clock_only)
     if rate is not None and result.get("ok"):
         result["rate"] = rate

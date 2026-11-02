@@ -273,6 +273,31 @@ class CloseoutSeamTest(unittest.TestCase):
         self.assertIn("closeout:artifact:" + OWNER_ID, list(closeout_cand.target_refs))
         self.assertNotIn("closeout:artifact:" + OWNER_ID, list(plain_cands[0].target_refs))
 
+    def test_a_paused_work_still_gets_its_wrap_up_but_no_fresh_continue(self):
+        """S09 gap: the continuation skip for a PAUSED target must not hide the wrap-up.
+
+        A PAUSED/WAITING Activity owns the object's *resume* path, so the source must not
+        offer a fresh START.  Wrapping the same work up is a different action and is still
+        legal while the owner work is ACTIVE; without this case ``_closeout_point`` would
+        authorise a candidate the source can never emit.
+        """
+
+        from artifact_continuation_source import ArtifactContinuationSource
+
+        bare = OWNER_ID.split(":", 1)[1]
+        source = ArtifactContinuationSource(
+            _Port(), subject_id="subject:test",
+            closeout_target_provider=lambda: {bare},
+            paused_target_provider=lambda: {bare})
+        items, _snap, _meta = source.discover(observed_at=TS)
+        wrap = [row for row in items if (row.get("detail") or {}).get("closeout_target")]
+        continuations = [row for row in items
+                         if not (row.get("detail") or {}).get("closeout_target")]
+        self.assertEqual(len(wrap), 1, items)
+        self.assertEqual(continuations, [], items)
+        self.assertEqual(wrap[0]["detail"]["closeout_target"],
+                         "closeout:artifact:" + OWNER_ID)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

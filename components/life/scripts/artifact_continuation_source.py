@@ -492,6 +492,22 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                 # Decision choose between "keep working" and "finish this", which is exactly the
                 # choice the design says must never be made for her by a fixed priority.
                 items.append(self._closeout_item_for(point, obs_iso))
+        # A wrap-up is a different action from "start/continue this work".  The continuation
+        # path deliberately skips an artifact whose Activity is PAUSED/WAITING (that object's
+        # way back is the owner's RESUME), but the closeout seam still names it as closable
+        # when its owner work is ACTIVE.  Without this branch the cycle's own ``_closeout_point``
+        # authorises a wrap-up that the source can never emit, so a paused-but-open work could
+        # not be ended at all.  Only the closeout item is added; no fresh START is offered.
+        represented = {self._bare_id(point.artifact_id) for point in points[: self.per_source_cap]}
+        for bare in sorted(self.last_closeout_targets):
+            if not bare or bare in represented:
+                continue
+            try:
+                point = self.port.resume_point("artifact:%s" % bare)
+            except (LifeArtifactUnavailable, ArtifactOwnerRefused):
+                continue
+            if point.resumable:
+                items.append(self._closeout_item_for(point, obs_iso))
         items.extend(extra_items)
         return items, self._snapshot_ref(len(items)), {
             "discovered": max(0, len(points) + extra_total - deduped),

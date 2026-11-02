@@ -150,7 +150,10 @@ def service_shim(state, moment):
     bound to this object; nothing about signal production is re-implemented.
     """
 
-    shim = NS(body_state=state, _now=moment)
+    # `_moment` reads `_clock` first and falls back to `_now`; the shim must carry
+    # both attributes or `body_summary` raises AttributeError before it can produce
+    # any signal (the real service sets `_clock` in `__init__`).
+    shim = NS(body_state=state, _now=moment, _clock=None)
     shim._moment = types.MethodType(WorldBodyService._moment, shim)
     shim.body_summary = types.MethodType(WorldBodyService.body_summary, shim)
     return shim

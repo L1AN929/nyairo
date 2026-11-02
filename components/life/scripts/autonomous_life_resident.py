@@ -364,7 +364,8 @@ class AutonomousLifeResident:
                  poll_seconds: int = DEFAULT_POLL_SECONDS, act: bool = True,
                  clock: Any = None, sleeper: Any = None, monotonic: Any = None,
                  segment_request_cap: Optional[int] = None,
-                 business_clock: Any = None, offline_scripted: bool = False) -> None:
+                 business_clock: Any = None, offline_scripted: bool = False,
+                 local_reply_client: Any = None, local_reply_requests: Any = None) -> None:
         """``segment_request_cap`` is *this process only*: at most that many more HTTP
         attempts than the persisted ledger had already spent when the segment started.
 
@@ -372,6 +373,14 @@ class AutonomousLifeResident:
         (``min(configured, used + cap)``): it never opens a run window, never resets the
         ledger and never raises a limit, so a short operator segment (for example 600s /
         6 requests) cannot buy itself a fresh allowance.
+
+        ``local_reply_client`` is the *bottom-level* provider client for ordinary local
+        replies -- the same documented injection point the contact factory already exposes
+        (a fixture or a different transport hands one in).  Everything above it stays the
+        production path, and with ``None`` the real provider is resolved.  ``local_reply_requests``
+        defaults to the instance's own persisted ledger, so an ordinary reply is reserved from
+        the same run/window as decisions and content; passing a separate ledger is only for an
+        explicit negative control and never becomes the production default.
         """
         self.state_root = Path(state_root)
         self.env = dict(os.environ if environment is None else environment)
@@ -391,6 +400,11 @@ class AutonomousLifeResident:
         #: 只为零模型冒烟：装配一个**不发请求**的既有确定性 writer 占位。它只能和
         #: ``act=False`` 一起用；summary 会明确标出，绝不当成她的写作或真实模型链。
         self.offline_scripted = bool(offline_scripted)
+        #: 最底层回复 client 的注入口（夹具/替身）。None = 解析真实 provider；
+        #: 上面（预算、prompt、边界、回复归档）全部仍是生产路径。
+        self.local_reply_client: Any = local_reply_client
+        #: None = 本实例自己的持久请求账本（与 cognition/内容同一本、同一 run）。
+        self.local_reply_requests: Any = local_reply_requests
         #: ``time.monotonic()`` is the only clock that can prove *this* process stayed up: it is
         #: per process and per boot, so it is never added to another process's measurement and
         #: never used to bridge a gap.  Injected in tests, real everywhere else.
@@ -398,6 +412,10 @@ class AutonomousLifeResident:
         self._sleeper = sleeper or time.sleep
         self.runtime: Any = None
         self.assembled: Any = None
+        #: The one local-message lane (an ordinary message may be answered while a step is in
+        #: flight).  It is owned here, started with the process and stopped with it; it is not
+        #: a second Life writer and it never touches the Action/Activity owners.
+        self.message_lane: Any = None
         self.last_tick: Optional[dict[str, Any]] = None
         self.last_error: Optional[str] = None
         #: W05: the last journey settlement record, kept for the tick record and the report.
@@ -415,6 +433,14 @@ class AutonomousLifeResident:
         #: Kept on the instance, so a later write (a tick, or a stop) cannot drop them.
         self.baseline_facts: dict[str, Any] = {}
         self.reconciled_at_start: list[dict[str, Any]] = []
+        #: Cold-start recovery across LR-3/LR-4/AG-2/AR-1 (FIX-2).  The runner's own
+        #: ``reconcile_pending`` only settles UNKNOWN AR-0 actions; the wider pass has to be
+        #: invoked explicitly or a half-finished previous process is never closed.
+        self.cold_recovery: dict[str, Any] = {}
+        #: Whether a REAL cognition adapter was attached (FIX-3).  The summary used to read the
+        #: runtime object, which always exists, so it reported cognition as wired even when the
+        #: caller was running a disabled/stand-in adapter.
+        self.cognition_is_real: Optional[bool] = None
         self.counters: dict[str, Any] = {
             "wakes": 0, "by_class": {}, "outcomes": {}, "model_calls": 0,
             "check_windows": 0, "event_wakes": 0, "real_events": 0,
@@ -1015,6 +1041,7 @@ class AutonomousLifeResident:
         cognition = assembly.model_cognition(self.env, requests=requests,
                                              admission=admission, pause_guard=admission,
                                              observer=self._cognition_diagnostic)
+        self.cognition_is_real = cognition is not None
         try:
             self.runtime = lrp.build_production_life_runtime(
                 self.state_root, kill_switches=switches, cognition_adapter=cognition,
@@ -1048,13 +1075,33 @@ class AutonomousLifeResident:
             requests=requests, continuity_source=continuity_source,
             appraisal_source=appraisal_source, writer=offline_writer,
             # 业务时钟只在这里贯通；真实墙钟仍留给进程覆盖/lease/真实超时。
-            clock=(self._business_now if self._business_clock is not None else None))
+            clock=(self._business_now if self._business_clock is not None else None),
+            # 普通本地回复：最底层 client 可以注入，账本默认就是上面这本实例账本
+            # （同 state root、同 run），不另开一个独立上限的演示预算。
+            local_reply_client=self.local_reply_client,
+            local_reply_requests=self.local_reply_requests)
         if assembled.get("state") != assembly.READY:
             self.assembled = assembled
             self.last_error = assembled.get("reason")
             return {"ok": False, "reason": assembled.get("reason", "NOT_READY"),
                     "detail": assembled.get("detail"), "missing": assembled.get("missing")}
         self.assembled = assembled
+        # 本地消息 lane：普通消息在步骤在途时也有人回。只消费普通消息，不碰任何 Life 写口；
+        # 起不来（端口缺失/线程拒绝）如实记录，不影响 resident 自己的串行步骤。
+        self.lane_start = self.start_message_lane()
+
+        # Cold-start recovery first (FIX-2): LR-3 attention, LR-4 waiting/agenda, AG-2 integration
+        # records, the AR-1 WAL/outbox requeue and pending experience handoffs all need their own
+        # pass.  It settles the truth of work that already crossed a submission boundary, starts
+        # nothing new, and spends no model calls -- so it is safe even with every switch off.
+        # A failure is recorded and does not block the start.
+        try:
+            self.cold_recovery = self.runtime.coordinator.recover_all_and_reconcile()
+        except Exception as exc:
+            self.last_error = "COLD_RECOVERY_FAILED: %s: %s" % (type(exc).__name__, exc)
+            self.cold_recovery = {"error": self.last_error}
+        self.counters["reconciliations"] += len(
+            self.cold_recovery.get("reconciled_integration_ids") or [])
 
         # One reconciliation before the loop: a result left UNKNOWN by a previous process is
         # settled here, under the original operation, before any new work is considered.
@@ -1065,11 +1112,14 @@ class AutonomousLifeResident:
         self.reconciled_at_start = list(reconciled)
         self.baseline_facts = self.baseline()
         payload["reconciled_at_start"] = self.reconciled_at_start
+        payload["cold_recovery"] = self.cold_recovery
         payload["baseline"] = self.baseline_facts
+        payload["message_lane"] = self.message_lane_stats()
         self._write_summary(payload)
         return {"ok": True, "reason": "", "state_root": str(self.state_root),
                 "world": assembled.get("world"), "feeds": assembled.get("feeds"),
                 "autonomous_enabled": assembled.get("enabled"),
+                "message_lane": self.message_lane_stats(),
                 "model": {"probe": self.model_probe, "cognition": cognition is not None,
                           # The assembly does not hand the writer back on its own key: the writer
                           # it built *is* the cycle's writer, and that is the one that will really
@@ -1127,6 +1177,50 @@ class AutonomousLifeResident:
             out["world_error"] = "%s: %s" % (type(exc).__name__, exc)
         return out
 
+    # -- the local-message lane ----------------------------------------------------------
+
+    def start_message_lane(self) -> dict[str, Any]:
+        """Start the one lane that answers ordinary local messages while a step is in flight.
+
+        It is built here, on the assembled contact port, so the same object the resident starts
+        is the only consumer of ordinary messages apart from the serial contact pass -- and the
+        inbox's own claim makes sure only one of them answers one arrival.  Invitations and ends
+        are never seen by this lane; they stay in ``runner_tick``/the serial step.
+        """
+
+        import local_message_lane as lml
+
+        if self.message_lane is not None and self.message_lane.is_running():
+            return {"ok": True, "started": False, "already_running": True,
+                    "stats": self.message_lane.stats()}
+        port = (self.assembled or {}).get("contact_port")
+        if port is None:
+            return {"ok": False, "started": False, "reason_code": "MESSAGE_LANE_PORT_UNAVAILABLE",
+                    "detail": "this assembly has no local-contact port, so nothing can be "
+                              "answered"}
+        if self.message_lane is None:
+            self.message_lane = lml.LocalMessageLane(port)
+        out = dict(self.message_lane.start() or {})
+        out["stats"] = self.message_lane.stats()
+        return out
+
+    def stop_message_lane(self, *, timeout: float = 5.0) -> dict[str, Any]:
+        """Signal and join the lane.  It is never killed and no claim is ever cleared here."""
+
+        if self.message_lane is None:
+            return {"ok": True, "stopped": True, "reason_code": "MESSAGE_LANE_NOT_STARTED"}
+        return dict(self.message_lane.stop(timeout=timeout) or {})
+
+    def message_lane_stats(self) -> Optional[dict[str, Any]]:
+        """Counts only -- never a message body and never a reply's words."""
+
+        if self.message_lane is None:
+            return None
+        try:
+            return dict(self.message_lane.stats() or {})
+        except Exception as exc:  # a stats failure is reported, not hidden
+            return {"error": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+
     def request_stop(self, *, reason: str = "operator") -> None:
         self._stop_reason = reason
         self._stop.set()
@@ -1134,8 +1228,13 @@ class AutonomousLifeResident:
     def stop(self) -> dict[str, Any]:
         """Release the runtime, and with it the canonical writer lease."""
 
+        # The lane first: it only consumes ordinary messages, and stopping it before the runtime
+        # closes means no reply is written to an inbox whose owner is already gone.
+        lane_stop = self.stop_message_lane()
         # Taken first, while the cycle is still attached: the payload keeps what the round read.
         payload = self.summary()
+        payload["message_lane"] = self.message_lane_stats()
+        payload["message_lane_stop"] = lane_stop
         runtime, self.runtime = self.runtime, None
         if runtime is not None:
             try:
@@ -1166,6 +1265,12 @@ class AutonomousLifeResident:
         if self.assembled is None or self.assembled.get("state") != assembly.READY:
             return {"ok": False, "reason": "NOT_STARTED"}
 
+        # 2026-10-28: a phone process cannot write the Activity owner (it holds no lease), so
+        # it mails the request here.  This is the *only* place the mailbox is drained, and the
+        # answer comes from the real owner path below.  An unreadable request is never turned
+        # into an accepted stop.
+        stop_results = self._drain_external_stop()
+
         # W05: real time first.  An already departed travel segment arrives on its own schedule,
         # and a journey that completed is turned into an arrival here -- against the World's own
         # observation, never against the requested target.  Nothing about a journey is settled by
@@ -1187,9 +1292,13 @@ class AutonomousLifeResident:
                   "events": list(result.get("events") or []),
                   "feed_errors": list(result.get("feed_errors") or []),
                   "due": result.get("due"), "reconciled": reconciled,
-                  "journey": settled}
+                  "journey": settled,
+                  # 本地消息 lane 的计数（只有数字；正文与回复永远不进 journal）。
+                  "message_lane": self.message_lane_stats()}
         self.ticks += 1
         self.last_tick = record
+        if stop_results:
+            record["external_stop"] = stop_results
         self._journal(record)
         self._accumulate(record)
         # R: the heartbeat is written every tick, so a crash leaves a *measured* last instant
@@ -1197,6 +1306,81 @@ class AutonomousLifeResident:
         self._update_process_record()
         self._write_summary(self.summary())
         return record
+
+    def _operator_credential(self) -> tuple[Any, str]:
+        """The *current* serve credential for this instance, or a named reason why not.
+
+        Located from the same instance root the runtime was assembled from (``<instance>``
+        holds ``run/operator-stop.json``).  A missing or unreadable credential closes the
+        mailbox instead of trusting whatever the queued file says.
+        """
+
+        import activity_external_stop as _aes
+
+        instance_root = _aes.instance_root_for_state_root(self.state_root)
+        if instance_root is None:
+            return None, "INSTANCE_ROOT_UNRESOLVED"
+        try:
+            return _aes.load_operator_credential(instance_root), ""
+        except Exception as exc:
+            reason = getattr(exc, "reason_code", None) or type(exc).__name__
+            return None, "OPERATOR_CREDENTIAL_%s" % str(reason)[:60]
+
+    def _drain_external_stop(self) -> list[dict[str, Any]]:
+        """Answer mailed local-operator stop requests through the real owner path.
+
+        The mailbox is optional and empty in a normal run.  A queued file is *not* authority:
+        before anything is accepted it must carry the issuer, instance, Life subject and serve
+        epoch of the credential this instance is currently serving, and a MAC the phone could
+        only produce from that serve's token.  Anything else is refused by name, answered, and
+        removed -- it is never turned into a stop, and a request left over from an earlier
+        serve never becomes a fresh authorization.
+        """
+
+        stop = getattr(self.runtime, "activity_stop", None)
+        if stop is None:
+            return []
+        import activity_continuity as _ac
+        import activity_external_stop as _aes
+
+        channel = _aes.StopControlChannel(self.state_root)
+        pending = channel.list_requests()
+        if not pending:
+            return []
+        credential, credential_error = self._operator_credential()
+        results: list[dict[str, Any]] = []
+        for payload in pending:
+            path = str(payload.pop("_path", "") or "")
+            try:
+                if credential is None:
+                    raise _aes.ExternalStopRefused(_aes.REFUSED_OPERATOR_CREDENTIAL,
+                                                   credential_error)
+                _aes.verify_mailbox_request(payload, credential=credential)
+                request = _aes.request_from_mailbox(payload)
+                if request.subject_id != _ac.GLOBAL_SUBJECT_ID:
+                    raise _aes.ExternalStopRefused(_aes.REFUSED_SUBJECT)
+                result = stop.handle(request)
+            except _aes.ExternalStopRefused as exc:
+                result = {"status": _aes.STATUS_REFUSED, "reason_code": exc.reason_code,
+                          "detail": exc.detail, "activity_id": payload.get("activity_id"),
+                          "operation_key": payload.get("operation_key"),
+                          "accepted_as_stop": False}
+            except Exception as exc:  # a broken mailbox entry is reported, never accepted
+                result = {"status": _aes.STATUS_REFUSED,
+                          "reason_code": "RUNTIME_ERROR",
+                          "detail": "%s: %s" % (type(exc).__name__, exc),
+                          "activity_id": payload.get("activity_id"),
+                          "operation_key": payload.get("operation_key"),
+                          "accepted_as_stop": False}
+            if path:
+                try:
+                    channel.write_result(path, result)
+                    channel.clear(path)
+                except OSError as exc:
+                    result = dict(result)
+                    result["result_write_error"] = type(exc).__name__
+            results.append(result)
+        return results
 
     def _projection_counter(self) -> projection_counts.ProjectionCounter:
         """读面去重状态；``__new__`` 构造的旧夹具（只设 counters）也能惰性拿到一份。"""
@@ -1673,7 +1857,9 @@ class AutonomousLifeResident:
             "pause": life_pause.read(self.state_root),
             "journey": self.journey_view(),
             "model": {"probe": self.model_probe,
-                      "cognition_attached": getattr(cycle, "runtime", None) is not None},
+                      # FIX-3: read the adapter that was actually attached, not the runtime
+                      # object (which always exists and made this report True unconditionally).
+                      "cognition_attached": self.cognition_is_real},
             "budget": budget,
             # Operator segment cap (lower-only).  Reported as it really was applied, so a
             # reader can tell "this segment could spend at most N more" from the instance's own
@@ -1685,6 +1871,7 @@ class AutonomousLifeResident:
             "model_calls_detail": self._model_calls_detail(),
             "baseline": self.baseline_facts,
             "reconciled_at_start": self.reconciled_at_start,
+            "cold_recovery": self.cold_recovery,
             "last_error": self.last_error,
         }
 

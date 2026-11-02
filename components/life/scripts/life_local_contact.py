@@ -148,6 +148,11 @@ MAX_RESULTS_PER_EVENT = 8
 MAX_ATTEMPTS_PER_EVENT = 8
 MAX_REF_CHARS = 200
 MAX_LIST = 50
+#: The local reply archive.  One ordinary message gets at most one bounded reply; the text is
+#: private to this machine and only leaves this module through :meth:`LocalContactInbox.get_reply`
+#: with an explicit ``include_text=True``.
+MAX_REPLY_CHARS = 600
+REPLY_KIND_LOCAL = "LOCAL_ORDINARY_REPLY"
 
 _REASON_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 _REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]{1,31}:[^\s]{1,200}$")
@@ -155,6 +160,7 @@ _EVENT_REF_PREFIX = "contact_evt"
 _OP_REF_PREFIX = "contact_op"
 _CLAIM_PREFIX = "contact_claim"
 _INVITATION_REF_PREFIX = "localinvite"
+_REPLY_REF_PREFIX = "contact_reply"
 
 #: The closed field whitelist of a ``submit`` payload.  Unknown keys are refused, so a
 #: caller can never smuggle an Activity status / pause flag / model prompt through here.
@@ -486,7 +492,10 @@ class LocalContactInbox:
                        "max_scope_chars": MAX_SCOPE_CHARS,
                        "max_results_per_event": MAX_RESULTS_PER_EVENT,
                        "max_attempts_per_event": MAX_ATTEMPTS_PER_EVENT,
-                       "max_list": MAX_LIST},
+                       "max_list": MAX_LIST, "max_reply_chars": MAX_REPLY_CHARS},
+            # One bounded local reply per ordinary message, readable only on request.
+            "owns_reply_archive": True,
+            "reply_kinds": [REPLY_KIND_LOCAL],
             "owns_transport_ledger": True,
             "owns_activity": False,
             "owns_relationship": False,
@@ -653,6 +662,9 @@ class LocalContactInbox:
                 "attempts": 0,
                 "results": [],
                 "result": None,
+                # The bounded local reply archive of an ordinary message.  It never carries an
+                # Activity/pause/engagement fact, and its text is not part of any summary.
+                "reply": None,
                 "revision": 1,
             })
             doc["events"][event_ref] = record
@@ -914,6 +926,9 @@ class LocalContactInbox:
             "session_ref": result.get("session_ref"),
             "attempts": event.get("attempts") or 0,
             "claimed_by": (event.get("claim") or {}).get("consumer"),
+            # Whether a bounded local reply is archived for this arrival -- never its text.
+            "reply_present": bool(event.get("reply")),
+            "reply_chars": int((event.get("reply") or {}).get("chars") or 0),
             "revision": event.get("revision"),
             "pause_requested": False,
             "activity_started": False,
@@ -943,6 +958,13 @@ class LocalContactInbox:
         out["claim"] = dict(event.get("claim") or {}) or None
         out["result"] = dict(event.get("result") or {}) or None
         out["results"] = [dict(row) for row in (event.get("results") or [])]
+        # The reply *archive* without its text: an id, a length and when it was recorded.  The
+        # words themselves only come out of :meth:`get_reply` with ``include_text=True``.
+        archived = dict(event.get("reply") or {})
+        out["reply"] = ({key: archived.get(key) for key in
+                         ("reply_ref", "kind", "chars", "recorded_at", "consumer",
+                          "responder_ref", "digest")} if archived else None)
+        out["reply_text_included"] = False
         out["body"] = event.get("body") if include_body else None
         out["body_included"] = bool(include_body and event.get("body"))
         out["private_text_included"] = bool(include_body and event.get("body"))
@@ -1160,6 +1182,7 @@ class LocalContactInbox:
         counts = {state: 0 for state in ALL_STATES}
         by_kind = {kind: 0 for kind in ALL_KINDS}
         bodies = 0
+        replies = 0
         oldest = newest = None
         if doc is not None:
             for event in (doc.get("events") or {}).values():
@@ -1170,6 +1193,7 @@ class LocalContactInbox:
                 by_kind[str(event.get("event_kind"))] = \
                     by_kind.get(str(event.get("event_kind")), 0) + 1
                 bodies += 1 if event.get("body_stored") else 0
+                replies += 1 if event.get("reply") else 0
                 seq = event.get("seq")
                 oldest = seq if oldest is None else min(oldest, seq)
                 newest = seq if newest is None else max(newest, seq)
@@ -1183,6 +1207,7 @@ class LocalContactInbox:
                          "counts": counts, "by_kind": by_kind,
                          "operation_count": len((doc or {}).get("operations") or {}),
                          "bodies_stored": bodies,
+                         "replies_stored": replies,
                          "oldest_seq": oldest, "newest_seq": newest,
                          "revision": (doc or {}).get("revision"),
                          "channel": CHANNEL_LOCAL_INBOX, "source": SOURCE_LOCAL,
@@ -1471,6 +1496,189 @@ class LocalContactInbox:
         return self._mutate(apply)
 
 
+    # -- the local reply archive ------------------------------------------------------
+
+    def record_reply(self, event_ref: str, *, claim_token: Optional[str], text: str,
+                     responder_ref: Optional[str] = None,
+                     kind: str = REPLY_KIND_LOCAL, now: Any = None) -> dict[str, Any]:
+        """Archive **one** bounded local reply for one claimed ordinary message.
+
+        What this is: the words this instance actually said to a local arrival, kept next to
+        the arrival so a later read (the CLI, a restarted process) can retrieve them instead of
+        re-asking the model.  What this is not: a delivery, a read receipt, an Activity fact or
+        an engagement -- it stores no status, pauses nothing and starts nothing.
+
+        Rules, all refused by name:
+
+        * only a ``LOCAL_MESSAGE`` event may carry a reply (an invitation is answered through
+          the Decision path, not here);
+        * only the consumer that holds the live claim may write it (the same token rule as
+          :meth:`record_result`), so two consumers cannot both answer the same arrival;
+        * the text is bounded and non-empty;
+        * an event keeps **one** reply: recording the identical text again replays
+          (``already_applied``), a different text is refused -- a restart must read the reply
+          it already has, never mint a second one.
+        """
+
+        ref = str(event_ref or "").strip()
+        if not ref:
+            return {"ok": False, "status": "rejected", "reason_code": "CONTACT_EVENT_REF_REQUIRED",
+                    "detail": "", "data": None, "writes_performed": 0}
+        body = str(text or "").strip()
+        if not body:
+            return {"ok": False, "status": "rejected", "reason_code": "CONTACT_REPLY_EMPTY",
+                    "detail": "an empty reply is not a reply", "event_ref": ref,
+                    "data": None, "writes_performed": 0}
+        if len(body) > MAX_REPLY_CHARS:
+            return {"ok": False, "status": "rejected", "reason_code": "CONTACT_REPLY_TOO_LONG",
+                    "detail": "%d > %d" % (len(body), MAX_REPLY_CHARS), "event_ref": ref,
+                    "data": None, "writes_performed": 0}
+        label = str(kind or REPLY_KIND_LOCAL).strip().upper()
+        if label != REPLY_KIND_LOCAL:
+            return {"ok": False, "status": "rejected",
+                    "reason_code": "CONTACT_REPLY_KIND_UNSUPPORTED", "detail": label[:40],
+                    "event_ref": ref, "data": None, "writes_performed": 0}
+        try:
+            who = _ref(responder_ref, "responder_ref")
+        except LocalContactError as exc:
+            return {"ok": False, "status": "rejected", "reason_code": exc.reason_code,
+                    "detail": exc.detail, "event_ref": ref, "data": None,
+                    "writes_performed": 0}
+        moment = _iso(_instant(now) or _instant(self._now()))
+        digest = "sha256:" + _sha(body)[:32]
+
+        def apply(doc: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+            event = doc["events"].get(ref)
+            if not isinstance(event, dict):
+                return False, {"ok": False, "status": "absent",
+                               "reason_code": "CONTACT_EVENT_NOT_FOUND", "detail": ref[:80],
+                               "event_ref": ref, "data": None, "writes_performed": 0}
+            event_kind = str(event.get("event_kind"))
+            if event_kind != KIND_MESSAGE:
+                return False, {"ok": False, "status": "rejected",
+                               "reason_code": "CONTACT_REPLY_NOT_FOR_KIND",
+                               "detail": "%s is not answered through the reply archive" % event_kind,
+                               "event_ref": ref, "data": None, "writes_performed": 0}
+            existing = event.get("reply")
+            if isinstance(existing, Mapping):
+                if str(existing.get("text")) == body:
+                    return False, {"ok": True, "status": "already_applied",
+                                   "reason_code": "", "detail": "", "event_ref": ref,
+                                   "replayed": True, "replied": True, "created": False,
+                                   "reply_ref": existing.get("reply_ref"),
+                                   "chars": int(existing.get("chars") or 0),
+                                   "writes_performed": 0,
+                                   "data": {"reply": self._reply_view(doc, ref)}}
+                return False, {"ok": False, "status": "rejected",
+                               "reason_code": "CONTACT_REPLY_ALREADY_RECORDED",
+                               "detail": "this arrival already has its one local reply "
+                                         "(%s chars); a restart reads it, never mints another"
+                                         % int(existing.get("chars") or 0),
+                               "event_ref": ref, "writes_performed": 0,
+                               "reply_ref": existing.get("reply_ref"),
+                               "data": {"reply": self._reply_view(doc, ref)}}
+            state = str(event.get("processing_state"))
+            claim = event.get("claim") or {}
+            if state != STATE_CLAIMED or not claim:
+                return False, {"ok": False, "status": "rejected",
+                               "reason_code": "CONTACT_EVENT_NOT_CLAIMED",
+                               "detail": "claim the arrival before answering it (state=%s)" % state,
+                               "event_ref": ref, "data": None, "writes_performed": 0}
+            if not claim_token or str(claim.get("claim_token")) != str(claim_token):
+                return False, {"ok": False, "status": "rejected",
+                               "reason_code": "CONTACT_CLAIM_MISMATCH",
+                               "detail": "the reply must be recorded by the consumer that holds "
+                                         "the claim",
+                               "event_ref": ref, "writes_performed": 0,
+                               "claim": dict(claim), "data": None}
+            reply_ref = "%s:%s" % (_REPLY_REF_PREFIX, _sha("%s|%s" % (ref, digest))[:16])
+            event["reply"] = {
+                "reply_ref": reply_ref,
+                "kind": label,
+                "text": body,
+                "chars": len(body),
+                "digest": digest,
+                "recorded_at": moment,
+                "consumer": str(claim.get("consumer") or ""),
+                "responder_ref": who,
+                "delivered_to_user": False,
+                "external_channel_sent": False,
+            }
+            event["revision"] = int(event.get("revision") or 1) + 1
+            return True, {"ok": True, "status": "applied", "reason_code": "", "detail": "",
+                          "event_ref": ref, "replayed": False, "replied": True,
+                          "created": True, "reply_ref": reply_ref, "chars": len(body),
+                          "writes_performed": 1,
+                          "data": {"reply": self._reply_view(doc, ref)}}
+
+        return self._mutate(apply)
+
+    def reply(self, ref: str, *, include_text: bool = False) -> dict[str, Any]:
+        """Read one event's local reply -- the only path its text may leave this module.
+
+        ``ref`` may be an ``event_ref``, an ``operation_key`` (the client's own id) or a
+        ``message_ref``.  ``include_text=True`` is an explicit local operator read; the default
+        answer is presence + length only, so routine views (health, journals, prompts) cannot
+        leak her words by accident.
+        """
+
+        wanted = str(ref or "").strip()
+        if not wanted:
+            return {"ok": False, "status": "rejected", "reason_code": "CONTACT_EVENT_REF_REQUIRED",
+                    "detail": "", "data": None, "writes_performed": 0}
+        doc, error = self._read_or_empty()
+        if error:
+            return self._empty_result(error, "the transport ledger cannot be read", data=None)
+        event_ref = self._resolve_ref(doc, wanted)
+        if not event_ref:
+            return {"ok": False, "status": "absent", "reason_code": "CONTACT_EVENT_NOT_FOUND",
+                    "detail": wanted[:80], "writes_performed": 0,
+                    "ledger_state": "ABSENT" if doc is None else "OK", "data": None}
+        view = self._reply_view(doc, event_ref, include_text=include_text)
+        return {"ok": True, "status": "ok" if view.get("reply_present") else "absent",
+                "reason_code": ("" if view.get("reply_present") else "CONTACT_REPLY_ABSENT"),
+                "detail": "" if view.get("reply_present") else "no local reply is archived yet",
+                "writes_performed": 0, "event_ref": event_ref, "data": {"reply": view}}
+
+    def _resolve_ref(self, doc: Optional[dict[str, Any]], wanted: str) -> Optional[str]:
+        """``event_ref`` / ``operation_key`` / ``message_ref`` -> the event it names."""
+
+        if doc is None:
+            return None
+        events = doc.get("events") or {}
+        if wanted in events:
+            return wanted
+        recorded = (doc.get("operations") or {}).get(wanted)
+        if isinstance(recorded, Mapping) and str(recorded.get("event_ref") or "") in events:
+            return str(recorded.get("event_ref"))
+        for event_ref in (doc.get("order") or []):
+            event = events.get(event_ref)
+            if isinstance(event, Mapping) and str(event.get("message_ref") or "") == wanted:
+                return str(event_ref)
+        return None
+
+    def _reply_view(self, doc: Optional[dict[str, Any]], event_ref: str,
+                    *, include_text: bool = False) -> dict[str, Any]:
+        event = (doc or {}).get("events", {}).get(event_ref) or {}
+        archived = dict(event.get("reply") or {})
+        out = {
+            "event_ref": event_ref,
+            "event_kind": event.get("event_kind"),
+            "processing_state": event.get("processing_state"),
+            "reply_present": bool(archived),
+            "reply_chars": int(archived.get("chars") or 0),
+            "reply_ref": archived.get("reply_ref"),
+            "recorded_at": archived.get("recorded_at"),
+            "consumer": archived.get("consumer"),
+            "delivered_to_user": False,
+            "external_channel_sent": False,
+            "text_included": bool(include_text and archived),
+        }
+        if include_text and archived:
+            out["text"] = str(archived.get("text") or "")
+        return out
+
+
 def inbox_from_environment(environment: Mapping[str, str], *,
                            state_root: Optional[Path | str] = None,
                            subject_id: Optional[str] = None,
@@ -1517,6 +1725,8 @@ __all__ = [
     "MAX_BODY_CHARS",
     "MAX_EVENTS",
     "MAX_LIST",
+    "MAX_REPLY_CHARS",
+    "REPLY_KIND_LOCAL",
     "OUTCOME_ACCEPTED",
     "OUTCOME_DECLINED",
     "OUTCOME_DEFERRED",

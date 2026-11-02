@@ -200,6 +200,11 @@ class AuthorityProjection:
     detail: Optional[str] = None
     blocked_events: set[str] = field(default_factory=set)
     blocked_turns: set[str] = field(default_factory=set)
+    #: Typed source facts: ``(kind, namespace, ref)``.  A separate domain from event ids; a
+    #: consumer matches an event's own ``source_refs`` entries against ``blocked_source_refs``
+    #: by exact ref (never by substring, name or content hash).
+    blocked_sources: set[tuple[str, str, str]] = field(default_factory=set)
+    blocked_source_refs: set[str] = field(default_factory=set)
     operations: int = 0
     seq: int = 0
     head_digest: Optional[str] = None
@@ -207,6 +212,10 @@ class AuthorityProjection:
     #: The floor actually applied (``None`` when currentness is unproven) and its origin.
     trusted_floor: Optional[int] = None
     floor_source: Optional[str] = None
+    #: One verified payload per committed decision of *this* owner/conversation, in seq order.
+    #: An owner authorising an erasure binds it to the exact record (seq + digest + scope); a
+    #: bare integer sequence is not proof of anything.
+    records: list[dict[str, Any]] = field(default_factory=list)
 
     def update_reason(self, reason: str, detail: Optional[str]) -> None:
         self.healthy = False
@@ -219,11 +228,56 @@ def _canonical(record: dict[str, Any]) -> bytes:
                       ensure_ascii=False).encode("utf-8")
 
 
+def normalize_sources(value: Any) -> list[dict[str, Any]]:
+    """Validate and canonicalise typed source facts.
+
+    A typed source is ``{kind, namespace, ref}`` with an optional ``generation``.  ``ref`` is an
+    opaque canonical id supplied by the caller (an artifact/experience id), never a body, name or
+    content hash.  Malformed entries raise ``ValueError``: a source barrier that cannot be
+    recorded exactly must not be stored approximately.
+    """
+
+    if value in (None, ""):
+        return []
+    items = value
+    if isinstance(items, (bytes, bytearray)):
+        items = json.loads(items.decode("utf-8"))
+    elif isinstance(items, str):
+        items = json.loads(items)
+    if not isinstance(items, (list, tuple)):
+        raise ValueError("blocked_sources must be a list")
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("blocked_sources entries must be objects")
+        kind = str(item.get("kind") or "").strip()
+        ref = str(item.get("ref") or "").strip()
+        namespace = str(item.get("namespace") or "").strip()
+        if not kind or not ref:
+            raise ValueError("a typed source needs a kind and an opaque ref")
+        entry: dict[str, Any] = {"kind": kind, "namespace": namespace, "ref": ref}
+        generation = item.get("generation")
+        if generation not in (None, ""):
+            entry["generation"] = str(generation)
+        out.append(entry)
+    out.sort(key=lambda item: (item["kind"], item["namespace"], item["ref"],
+                               item.get("generation", "")))
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for entry in out:
+        key = tuple(sorted(entry.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(entry)
+    return unique
+
+
 def _record_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     blocked = row["blocked_event_ids"]
     if isinstance(blocked, str):
         blocked = json.loads(blocked)
-    return {
+    payload = {
         "seq": int(row["seq"]),
         "operation_id": str(row["operation_id"]),
         "owner": str(row["owner"]),
@@ -234,6 +288,85 @@ def _record_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "fingerprint": str(row["fingerprint"]),
         "created_at": str(row["created_at"]),
     }
+    # The typed-source key is present only when there are sources: an older row (no column, or an
+    # empty default) keeps the exact legacy payload, so its stored digest still verifies.
+    try:
+        raw_sources = row["blocked_sources_json"]
+    except (KeyError, IndexError):
+        raw_sources = None
+    sources = normalize_sources(raw_sources)
+    if sources:
+        payload["blocked_sources"] = sources
+    return payload
+
+
+#: How a source fact is named when a consumer compares it: an explicit ``(kind, namespace, ref)``
+#: triple.  A bare ref is never enough -- the same opaque id in another kind/namespace is a
+#: different source.  Legacy records without a kind map through this table instead of guessing
+#: permissions from a string.
+NAMESPACE_BY_KIND: dict[str, str] = {
+    "artifact": "supply",
+    "artifactversion": "supply",
+    "album": "supply",
+    "memory": "memory",
+    "life_outcome": "memory",
+    "reading": "memory",
+}
+
+
+def source_key(item: Mapping[str, Any]) -> Optional[tuple[str, str, str]]:
+    """The comparable triple of one source fact, or ``None`` when it cannot be named exactly.
+
+    ``namespace`` falls back through ``NAMESPACE_BY_KIND`` for a known kind and to ``""`` for an
+    opaque one; a missing kind is never inferred from the ref text.
+    """
+
+    if not isinstance(item, Mapping):
+        return None
+    kind = str(item.get("kind") or "").strip()
+    ref = str(item.get("ref") or item.get("id") or "").strip()
+    if not kind or not ref:
+        return None
+    namespace = str(item.get("namespace") or "").strip()
+    if not namespace:
+        namespace = NAMESPACE_BY_KIND.get(kind, "")
+    return (kind, namespace, ref)
+
+
+@dataclass(frozen=True)
+class ErasureGrant:
+    """An owner-issued capability proving *which* committed decision authorises an erasure.
+
+    A caller cannot turn a positive integer into authority: the grant names the retained record
+    (``case_id``/seq/digest), the exact M0 closure that record decided, and the typed sources it
+    barred.  Every owner re-verifies the grant against the retained authority it trusts before it
+    clears a byte, so "same seq, same owner, different scope" is refused rather than accepted.
+    """
+
+    owner: str
+    conversation: str
+    case_id: str
+    barrier_seq: int
+    barrier_digest: str
+    target_event: str
+    event_ids: frozenset[str]
+    sources: tuple[tuple[str, str, str], ...] = ()
+    derived: tuple[tuple[str, str, str], ...] = ()
+    generation: str = ""
+
+    def covers(self, event_ids: Any) -> bool:
+        wanted = {str(item) for item in (event_ids or ()) if str(item)}
+        return bool(wanted) and wanted <= set(self.event_ids)
+
+    def source_keys(self) -> tuple[tuple[str, str, str], ...]:
+        return tuple(self.sources)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"owner": self.owner, "conversation": self.conversation,
+                "case_id": self.case_id, "barrier_seq": int(self.barrier_seq),
+                "barrier_digest": self.barrier_digest, "target_event": self.target_event,
+                "event_ids": sorted(self.event_ids), "sources": [list(item) for item in self.sources],
+                "derived": [list(item) for item in self.derived], "generation": self.generation}
 
 
 class MemoryDeletionAuthority:
@@ -277,6 +410,7 @@ class MemoryDeletionAuthority:
                 target_event TEXT NOT NULL,
                 turn_id TEXT,
                 blocked_event_ids TEXT NOT NULL,
+                blocked_sources_json TEXT NOT NULL DEFAULT '[]',
                 fingerprint TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 digest TEXT NOT NULL);
@@ -289,6 +423,15 @@ class MemoryDeletionAuthority:
                 seq INTEGER NOT NULL,
                 digest TEXT NOT NULL);
             ''')
+            # One-way widening for an existing authority file: the typed-source column is added
+            # with an empty default.  Older rows keep their exact payload (see ``_record_payload``),
+            # so their chain digests still verify; nothing is rewritten.
+            columns = {str(row[1]) for row in
+                       connection.execute("PRAGMA table_info(authority_records)").fetchall()}
+            if "blocked_sources_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE authority_records ADD COLUMN blocked_sources_json "
+                    "TEXT NOT NULL DEFAULT '[]'")
             row = connection.execute("SELECT seq FROM authority_head WHERE id=1").fetchone()
             if row is None:
                 connection.execute("INSERT INTO authority_head(id,seq,digest) VALUES(1,0,?)",
@@ -306,7 +449,8 @@ class MemoryDeletionAuthority:
             self._write_floor(0, GENESIS_DIGEST)
 
     def commit(self, *, operation_id: str, target_event: str, turn_id: Optional[str],
-               blocked_event_ids: list[str], fingerprint: str) -> str:
+               blocked_event_ids: list[str], fingerprint: str,
+               blocked_sources: Optional[list[dict[str, Any]]] = None) -> str:
         """Append one deletion decision.  Returns ``APPLIED`` or ``DUPLICATE``.
 
         The whole existing chain is verified first.  A configured authority that is missing,
@@ -336,6 +480,7 @@ class MemoryDeletionAuthority:
                 return "DUPLICATE"
             seq = int(head[0]) + 1
             created_at = datetime.now(timezone.utc).isoformat()
+            sources = normalize_sources(blocked_sources)
             record = {
                 "seq": seq,
                 "operation_id": str(operation_id),
@@ -347,6 +492,8 @@ class MemoryDeletionAuthority:
                 "fingerprint": str(fingerprint),
                 "created_at": created_at,
             }
+            if sources:
+                record["blocked_sources"] = sources
             digest = hashlib.sha256(
                 str(head[1]).encode("utf-8") + b"\n" + _canonical(record)).hexdigest()
             # Retain the new floor *before* the append lands: if either side fails, currentness
@@ -355,11 +502,12 @@ class MemoryDeletionAuthority:
             self._write_floor(seq, digest, created_at=created_at)
             connection.execute(
                 "INSERT INTO authority_records(seq,operation_id,owner,conversation,target_event,"
-                "turn_id,blocked_event_ids,fingerprint,created_at,digest) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "turn_id,blocked_event_ids,blocked_sources_json,fingerprint,created_at,digest) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (seq, record["operation_id"], record["owner"], record["conversation"],
                  record["target_event"], record["turn_id"],
                  json.dumps(record["blocked_event_ids"], separators=(",", ":")),
+                 json.dumps(record.get("blocked_sources", []), separators=(",", ":")),
                  record["fingerprint"], created_at, digest))
             connection.execute("UPDATE authority_head SET seq=?,digest=? WHERE id=1",
                                (seq, digest))
@@ -403,6 +551,79 @@ class MemoryDeletionAuthority:
         connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
         connection.row_factory = sqlite3.Row
         return connection
+
+    @staticmethod
+    def _operation_for(case_id: str) -> str:
+        text = str(case_id or "")
+        return text if text.startswith("forget-case:") else "forget-case:" + text
+
+    def authorize(self, *, case_id: str, event_ids: Any = (), derived: Any = (),
+                  sources: Any = None, generation: str = "") -> ErasureGrant:
+        """Issue an erasure grant bound to one exact committed decision.
+
+        The requested event ids must be inside that record's closure; a caller that names a
+        sibling's events under the same owner/seq is refused here, not at the payload layer.
+        """
+
+        projection = self.projection()
+        if not projection.healthy:
+            raise MemoryAuthorityUnavailable(projection.reason or REASON_UNAVAILABLE,
+                                             projection.detail)
+        operation_id = self._operation_for(case_id)
+        record = next((item for item in projection.records
+                       if str(item.get("operation_id")) == operation_id), None)
+        if record is None:
+            raise PermissionError("no committed retained decision for this case")
+        closure = {str(item) for item in record.get("blocked_event_ids") or ()}
+        wanted = {str(item) for item in (event_ids or ()) if str(item)}
+        if not wanted:
+            wanted = set(closure)
+        if not wanted <= closure:
+            raise PermissionError("the requested events are outside the committed decision")
+        recorded = tuple(sorted({key for key in
+                                 (source_key(item) for item in record.get("blocked_sources") or ())
+                                 if key}))
+        granted = recorded
+        if sources is not None:
+            asked = {key for key in (source_key(item) for item in (sources or ())) if key}
+            if asked and not asked <= set(recorded):
+                raise PermissionError("the requested sources are outside the committed decision")
+            granted = tuple(sorted(asked)) or recorded
+        claimed = {key for key in (source_key(item) for item in (derived or ())) if key}
+        return ErasureGrant(owner=self.owner, conversation=self.conversation,
+                            case_id=str(case_id), barrier_seq=int(record["seq"]),
+                            barrier_digest=str(record["digest"]),
+                            target_event=str(record.get("target_event") or ""),
+                            event_ids=frozenset(closure), sources=granted,
+                            derived=tuple(sorted(claimed)), generation=str(generation or ""))
+
+    def verify_grant(self, grant: Any) -> ErasureGrant:
+        """Re-prove a grant against the retained authority this owner trusts *right now*."""
+
+        if not isinstance(grant, ErasureGrant):
+            raise PermissionError("an owner-issued erasure grant is required")
+        if grant.owner != self.owner or grant.conversation != self.conversation:
+            raise PermissionError("the erasure grant belongs to another owner/conversation")
+        projection = self.projection()
+        if not projection.healthy:
+            raise MemoryAuthorityUnavailable(projection.reason or REASON_UNAVAILABLE,
+                                             projection.detail)
+        if int(projection.seq) < int(grant.barrier_seq):
+            raise PermissionError("the retained authority is older than the grant")
+        record = next((item for item in projection.records
+                       if int(item.get("seq") or 0) == int(grant.barrier_seq)), None)
+        if record is None or str(record.get("digest")) != str(grant.barrier_digest):
+            raise PermissionError("the erasure grant does not name a committed decision")
+        if str(record.get("operation_id")) != self._operation_for(grant.case_id):
+            raise PermissionError("the erasure grant names a different case")
+        closure = {str(item) for item in record.get("blocked_event_ids") or ()}
+        if not set(grant.event_ids) <= closure or not grant.covers(grant.event_ids):
+            raise PermissionError("the erasure grant's event closure is not the committed one")
+        recorded = {key for key in
+                    (source_key(item) for item in record.get("blocked_sources") or ()) if key}
+        if not set(grant.sources) <= recorded:
+            raise PermissionError("the erasure grant names sources the decision did not bar")
+        return grant
 
     def projection(self) -> AuthorityProjection:
         """The deletion set this authority can prove, or a named unhealthy state."""
@@ -481,8 +702,13 @@ class MemoryDeletionAuthority:
                 continue
             out.operations += 1
             out.blocked_events.update(payload["blocked_event_ids"])
+            for source in payload.get("blocked_sources", []):
+                out.blocked_sources.add((str(source["kind"]), str(source["namespace"]),
+                                         str(source["ref"])))
+                out.blocked_source_refs.add(str(source["ref"]))
             if payload["turn_id"]:
                 out.blocked_turns.add(payload["turn_id"])
+            out.records.append({**payload, "digest": str(row["digest"])})
             if out.latest_created_at is None or payload["created_at"] > out.latest_created_at:
                 out.latest_created_at = payload["created_at"]
         if previous != head_digest:
@@ -565,6 +791,7 @@ def main() -> None:
         "head_digest": projection.head_digest,
         "blocked_events": sorted(projection.blocked_events),
         "blocked_turns": sorted(projection.blocked_turns),
+        "blocked_sources": sorted(list(item) for item in projection.blocked_sources),
         "latest_created_at": projection.latest_created_at,
     }, ensure_ascii=False))
 

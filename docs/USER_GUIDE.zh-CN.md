@@ -1,5 +1,7 @@
 # nyairo：第一版使用教程
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 本文帮助你在自己的电脑或服务器上安装 nyairo，开始聊天，再按需要连接机器人和额外功能。网页只放教程，聊天在实际程序里进行。
 
 当前公开发行版本是 v0.4.0（GitHub prerelease 预发布版，不是稳定版），使用配套的 Hermes 0.21.0；v0.4.0、v0.2.0-rc3 以及更早的 rc9、rc8、rc7、rc6 是历史发行版，历史验收记录保持原样。世界与身体相关套件已全绿，但这次没有单独跑隔离新装与升级/回滚实测，也未对现有实例/生产升级或真实模型一天/24h 验收。已知问题与实际检查结果在后面的对应章节说明。
@@ -1041,7 +1043,7 @@ PY
 ```
 
 ```text
-{'provider': 'custom', 'model': 'gemini-3.8-flash-high', 'base_url': 'https://gw.929711.xyz/v1', 'key_env': None, 'api_key_present': True, 'hermes_home': '/srv/nya02/inst/profile', 'resolved_by': 'profile_shape_resolver', 'usable': True}
+{'provider': 'custom', 'model': 'gemini-3.8-flash-high', 'base_url': 'https://gw.example.invalid/v1', 'key_env': None, 'api_key_present': True, 'hermes_home': '/srv/nya02/inst/profile', 'resolved_by': 'profile_shape_resolver', 'usable': True}
 ```
 
 ```bash
@@ -1115,7 +1117,7 @@ bash components/life/tests/v02/run_resident.sh foreground --once
 # 真实输出的关键字段（其余字段省略）
  "autonomous_enabled": true,
  "feeds": ["resume_eligibility", "artifact_head"],
- "model": {"cognition": true, "probe": {"host": "gw.929711.xyz", "port": 443, "status": "REACHABLE"}},
+ "model": {"cognition": true, "probe": {"host": "gw.example.invalid", "port": 443, "status": "REACHABLE"}},
  "world": {"status": "UNAVAILABLE", "reason": "WORLD_NOT_CONFIGURED"},
  "counters": {"wakes": 2, "outcomes": {"ACTED": 1}, "owner_confirmed_versions": 1, "actions": 1,
               "model_calls": 1, "pending_unknown_last": 0, "pending_unknown_max": 0},

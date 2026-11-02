@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from memory_authority import (MemoryDeletionAuthority, authority_min_seq_from_env,
-                              resolve_authority_path)
+                              resolve_authority_path, source_key)
 
 
 def readonly(path: Path) -> sqlite3.Connection:
@@ -30,6 +30,8 @@ def readonly(path: Path) -> sqlite3.Connection:
 class MemoryProjection:
     blocked_events: set[str] = field(default_factory=set)
     blocked_turns: set[str] = field(default_factory=set)
+    #: Typed source refs from the retained authority: exact-match, not event ids.
+    blocked_source_refs: set[str] = field(default_factory=set)
     replacements: dict[str, Any] = field(default_factory=dict)
     corrected_events: dict[str, str] = field(default_factory=dict)
     healthy: bool = True
@@ -138,11 +140,52 @@ class MemoryControlLedger:
               BEGIN SELECT RAISE(ABORT,'memory controls are append-only'); END;
               CREATE TRIGGER IF NOT EXISTS controls_no_delete BEFORE DELETE ON memory_controls
               BEGIN SELECT RAISE(ABORT,'memory controls are append-only'); END;
+              CREATE TABLE IF NOT EXISTS memory_erasures(
+                operation_id TEXT PRIMARY KEY, owner TEXT NOT NULL,
+                conversation TEXT NOT NULL, event_ids_json TEXT NOT NULL,
+                barrier_seq INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+                result_json TEXT NOT NULL, created_at TEXT NOT NULL);
             ''')
             c.commit()
         finally:
             c.close()
         os.chmod(self.path, 0o600)
+
+    def stamp_recovery_incarnation(self, *, authority_seq: int, authority_digest: str,
+                                   generation: str, kind: str = 'controls',
+                                   stamped_at: Optional[str] = None) -> str:
+        """Stamp *this* control ledger as the incarnation the recovery sweep read.
+
+        The controls half is what says which M0 bodies were forgotten; a backup restored onto the
+        same path carries the pre-deletion rows.  The generation lives in the ledger itself and is
+        not touched by ordinary ``apply``/``erase`` writes.
+        """
+        if not str(generation or ''):
+            raise ValueError('an incarnation needs a generation')
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                'CREATE TABLE IF NOT EXISTS recovery_incarnation ('
+                'kind TEXT PRIMARY KEY, generation TEXT NOT NULL, owner TEXT NOT NULL, '
+                'conversation TEXT NOT NULL, authority_seq INTEGER NOT NULL, '
+                'authority_digest TEXT NOT NULL, stamped_at TEXT NOT NULL)')
+            connection.execute(
+                'INSERT INTO recovery_incarnation'
+                '(kind,generation,owner,conversation,authority_seq,authority_digest,stamped_at)'
+                ' VALUES(?,?,?,?,?,?,?)'
+                ' ON CONFLICT(kind) DO UPDATE SET generation=excluded.generation,'
+                ' owner=excluded.owner, conversation=excluded.conversation,'
+                ' authority_seq=excluded.authority_seq,'
+                ' authority_digest=excluded.authority_digest, stamped_at=excluded.stamped_at',
+                (str(kind), str(generation), self.owner, self.conversation,
+                 int(authority_seq), str(authority_digest or ''),
+                 str(stamped_at or datetime.now(timezone.utc).isoformat())))
+            connection.commit()
+        finally:
+            connection.close()
+        os.chmod(self.path, 0o600)
+        return str(generation)
 
     def _event(self, c: sqlite3.Connection, event_id: str) -> dict:
         row = c.execute('SELECT * FROM evidence_events WHERE event_id=? AND conversation_id=?',
@@ -199,6 +242,102 @@ class MemoryControlLedger:
         finally:
             c.close()
 
+    # -- governed payload erasure (F-154) -------------------------------------------------
+
+    def _ensure_erasure_table(self) -> None:
+        connection = sqlite3.connect(self.path, timeout=3)
+        try:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS memory_erasures("
+                "operation_id TEXT PRIMARY KEY, owner TEXT NOT NULL, conversation TEXT NOT NULL,"
+                "event_ids_json TEXT NOT NULL, barrier_seq INTEGER NOT NULL,"
+                "fingerprint TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL)")
+            connection.commit()
+        finally:
+            connection.close()
+
+    def erase(self, *, operation_id: str, event_ids: list[str], actor: str,
+              grant: Any) -> dict[str, Any]:
+        """Physically clear this owner's M0 bodies, bound to one committed decision.
+
+        The caller cannot assert the barrier: it must hand in the owner-issued
+        :class:`~memory_authority.ErasureGrant`.  This ledger re-proves it against the retained
+        authority (healthy, current, exact seq + digest + case) and verifies every requested
+        event is inside that decision's closure.  A sibling's events under the same owner and
+        the same sequence are refused.  There is no ``operator=true`` shortcut and no default
+        barrier.  Scope is re-verified against the evidence file, so a caller cannot erase
+        another owner's conversation by passing ids.
+        """
+
+        if actor != self.owner:
+            raise PermissionError('memory erase owner mismatch')
+        if not operation_id:
+            raise ValueError('an explicit operation id is required')
+        wanted = sorted({str(item) for item in (event_ids or []) if str(item)})
+        if not wanted:
+            raise ValueError('no event scope')
+        if grant is None:
+            raise PermissionError('a committed erasure grant is required')
+        authority = self._authority()
+        if authority is None:
+            raise PermissionError('this binding has no retained deletion authority')
+        if str(getattr(grant, 'owner', '')) != self.owner \
+                or str(getattr(grant, 'conversation', '')) != self.conversation:
+            raise PermissionError('the erasure grant belongs to another owner/conversation')
+        if not grant.covers(wanted):
+            raise PermissionError('the requested events are outside the committed decision')
+        authority.verify_grant(grant)
+        fingerprint = hashlib.sha256(json.dumps(
+            [self.owner, self.conversation, wanted, int(grant.barrier_seq),
+             str(grant.barrier_digest), str(grant.case_id)],
+            separators=(',', ':')).encode()).hexdigest()
+        self._ensure_erasure_table()
+        connection = sqlite3.connect(self.path, timeout=3)
+        try:
+            connection.execute('BEGIN IMMEDIATE')
+            old = connection.execute(
+                'SELECT fingerprint,result_json FROM memory_erasures WHERE operation_id=?',
+                (operation_id,)).fetchone()
+            if old is not None:
+                if str(old[0]) != fingerprint:
+                    raise ValueError('operation identity collision')
+                connection.rollback()
+                return json.loads(old[1])
+            evidence = readonly(self.evidence)
+            try:
+                for event_id in wanted:
+                    row = evidence.execute(
+                        'SELECT event_id FROM evidence_events WHERE event_id=? '
+                        'AND conversation_id=? AND memory_owner=?',
+                        (event_id, self.conversation, self.owner)).fetchone()
+                    if row is None:
+                        raise ValueError('evidence absent or outside owner conversation')
+            finally:
+                evidence.close()
+            from app.evidence import EvidenceStore
+            erased = EvidenceStore(self.evidence).erase_payload(wanted, grant=grant,
+                                                               operation_key=operation_id)
+            if erased.get('status') not in ('APPLIED', 'NO_CHANGE'):
+                raise RuntimeError('M0 payload erasure failed: %s'
+                                   % (erased.get('detail') or erased.get('status')))
+            result = {'status': erased['status'], 'erased': int(erased.get('erased') or 0),
+                      'event_ids': wanted, 'barrier_seq': int(grant.barrier_seq),
+                      'case_id': str(grant.case_id),
+                      'compaction': erased.get('compaction')}
+            connection.execute(
+                'INSERT INTO memory_erasures(operation_id,owner,conversation,event_ids_json,'
+                'barrier_seq,fingerprint,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)',
+                (operation_id, self.owner, self.conversation, json.dumps(wanted),
+                 int(grant.barrier_seq), fingerprint, json.dumps(result),
+                 datetime.now(timezone.utc).isoformat()))
+            connection.commit()
+            return result
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def command(self, text: str, source_ref: str) -> str:
         parts = text.split(maxsplit=3)
         if parts == ['/memory', 'list']:
@@ -207,12 +346,33 @@ class MemoryControlLedger:
                 raise ValueError(projection.reason or 'control ledger unavailable')
             c = readonly(self.evidence)
             try:
-                rows = c.execute('SELECT event_id,content FROM evidence_events WHERE conversation_id=? '
-                    'AND speaker=? AND source_origin=? ORDER BY rowid DESC LIMIT 100',
+                rows = c.execute('SELECT event_id,content,source_refs_json FROM evidence_events '
+                    'WHERE conversation_id=? AND speaker=? AND source_origin=? '
+                    'ORDER BY rowid DESC LIMIT 100',
                     (self.conversation, 'user', 'USER_VISIBLE_INPUT')).fetchall()
             finally:
                 c.close()
+
+            def blocked_by_source(row: sqlite3.Row) -> bool:
+                """A typed source the authority blocks, matched as ``(kind, namespace, ref)``.
+
+                A bare ref id is not enough: the same opaque id in another kind or namespace is
+                a different source and must stay visible.  Unparseable provenance is withheld
+                too: a listing that cannot prove where a row came from must not show it.
+                """
+
+                try:
+                    items = json.loads(row['source_refs_json'] or '[]')
+                except ValueError:
+                    return True
+                blocked = set(projection.blocked_sources)
+                if not blocked:
+                    return False
+                return any(source_key(item) in blocked
+                           for item in items if isinstance(item, dict))
+
             visible = [r for r in rows if r['event_id'] not in projection.blocked_events
+                       and not blocked_by_source(r)
                        and not r['content'].startswith('/memory ')]
             return '\n\n'.join(str(r['event_id']) + '\n' + r['content'][:120] for r in visible[:10]) or '目前没有可列出的记忆。'
         if len(parts) < 3 or parts[1] not in ('delete', 'correct') or (parts[1] == 'correct' and len(parts) != 4):
@@ -291,6 +451,8 @@ class MemoryControlLedger:
                     out.authority_seq = authority_projection.seq
                     out.blocked_events.update(authority_projection.blocked_events)
                     out.blocked_turns.update(authority_projection.blocked_turns)
+                    out.blocked_source_refs.update(
+                        str(item) for item in authority_projection.blocked_source_refs)
                     if authority_projection.latest_created_at:
                         epochs.append(authority_projection.latest_created_at)
                 # Historical output may repeat a forgotten fact. Once a control exists,

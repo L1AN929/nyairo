@@ -35,6 +35,7 @@ for entry in (str(ROOT), str(ROOT / "components"),
 
 import life_artifact_port as lap  # noqa: E402
 from chiyo_bundle import phone_tool  # noqa: E402
+from components.phone import capability as phone_capability  # noqa: E402
 from components.phone import server as phone_server  # noqa: E402
 from components.phone import service as phone_service  # noqa: E402
 
@@ -157,7 +158,7 @@ def _instance(root: Path, owner: Owner, workspace_id: str, grant_id: str,
     return instance
 
 
-def _write_tool_profile(root: Path, base_url: str) -> Path:
+def _write_tool_profile(root: Path, base_url: str, capability_file: str) -> Path:
     """The real CLI profile ``chiyo_phone`` loads: loopback phone + entry binding."""
 
     profile = root / "profile"
@@ -171,22 +172,28 @@ def _write_tool_profile(root: Path, base_url: str) -> Path:
             "profile_home": str(root),
             "write_enabled": True,
             "private_artifacts": True,
+            "capability_file": capability_file,
         },
     }, ensure_ascii=False), encoding="utf-8")
     return profile
 
 
-def _start_phone(instance: dict) -> tuple[object, threading.Thread, str]:
+def _start_phone(instance: dict) -> tuple[object, threading.Thread, str, str]:
     service = phone_service.PhoneService(instance, environment={})
     httpd = phone_server.create_server(service, csrf_token=CSRF, port=0)
+    base_url = "http://127.0.0.1:%d" % int(httpd.server_address[1])
+    path, capability = phone_capability.issue(
+        Path(str(instance["root"])), subject=str(instance["subject"]), endpoint=base_url)
+    httpd.set_capability(capability)
     thread = threading.Thread(target=httpd.serve_forever,
                               kwargs={"poll_interval": 0.05}, daemon=True)
     thread.start()
-    return httpd, thread, "http://127.0.0.1:%d" % int(httpd.server_address[1])
+    return httpd, thread, base_url, str(path)
 
 
-def _stop_phone(httpd, thread) -> None:
+def _stop_phone(httpd, thread, root: Path) -> None:
     if httpd is not None:
+        phone_capability.discard(root, getattr(httpd, "capability", None))
         httpd.shutdown()
         httpd.server_close()
     if thread is not None:
@@ -244,8 +251,8 @@ def main() -> int:
         items_id = _create_private_items(owner, workspace_id, grant_id)
         instance = _instance(root, owner, workspace_id, grant_id, items_id)
 
-        httpd, thread, base_url = _start_phone(instance)
-        profile = _write_tool_profile(root, base_url)
+        httpd, thread, base_url, capability_file = _start_phone(instance)
+        profile = _write_tool_profile(root, base_url, capability_file)
 
         # 2) the subject's own path: write two entries through the real tool handler.
         first = _tool(profile, "diary_write", body=FIRST_ENTRY,
@@ -327,7 +334,7 @@ def main() -> int:
         facts["surfaces_checked"] = len(surfaces)
 
         # 6) normal close, then reopen the same root and read the old entry again.
-        _stop_phone(httpd, thread)
+        _stop_phone(httpd, thread, root)
         httpd = thread = None
         owner.stop()
         owner = None
@@ -336,8 +343,8 @@ def main() -> int:
         instance = phone_service.load_instance(root)
         instance["supply_socket"] = str(owner.socket_path)
         phone_service.write_instance(root, instance)
-        httpd, thread, base_url = _start_phone(instance)
-        profile = _write_tool_profile(root, base_url)
+        httpd, thread, base_url, capability_file = _start_phone(instance)
+        profile = _write_tool_profile(root, base_url, capability_file)
 
         restart_list = _tool(profile, "diary")
         restart_result = restart_list.get("result") if isinstance(
@@ -353,7 +360,7 @@ def main() -> int:
             op_after.get("body_withheld") is True
             and "body" not in (op_after.get("entry") or {}))
     finally:
-        _stop_phone(httpd, thread)
+        _stop_phone(httpd, thread, root)
         if owner is not None:
             owner.stop()
 

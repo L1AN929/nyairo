@@ -76,6 +76,10 @@ REASON_HANDLER_FAILED = "CONTACT_HANDLER_FAILED"
 REASON_KIND_UNHANDLED = "CONTACT_EVENT_KIND_UNHANDLED"
 REASON_END_NOT_BOUND = "CO_PRESENCE_END_NOT_BOUND"
 
+#: The word for "this ordinary message got its local reply".  It is a bounded expression, not a
+#: delivery: nothing leaves the machine, and no one is told the user has read it.
+RESPONSE_KIND_LOCAL_REPLY = "LOCAL_ORDINARY_REPLY"
+
 #: The only text that may appear in a bounded view: the invitation's own scope label.
 MAX_SCOPE_CHARS = 120
 
@@ -99,13 +103,31 @@ def _text(value: Any, limit: int = 200) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
+def _responder_ref(responder: Any) -> Optional[str]:
+    """A structured reference for the reply archive -- who said it, not what it said."""
+
+    explicit = str(getattr(responder, "responder_ref", "") or "").strip()
+    if explicit:
+        return explicit
+    kind = type(responder).__name__
+    describe = getattr(responder, "describe", None)
+    if callable(describe):
+        try:
+            kind = str((describe() or {}).get("kind") or kind)
+        except Exception:  # a describe failure must not cost the reply its archive row
+            kind = type(responder).__name__
+    name = "".join(ch for ch in kind if ch.isalnum() or ch in "_-")[:32] or "responder"
+    return "responder:%s" % name
+
+
 class SocialContactPort:
     """One bounded, resident-driven pass over the local-contact ledger."""
 
     def __init__(self, runtime: Any, *, state_root: Path | str, subject_id: str, home: str,
                  inbox: Any = None, protocol: Any = None, cycle: Any = None,
-                 practice: Any = None, consumer: str = CONSUMER,
-                 max_per_tick: int = DEFAULT_MAX_PER_TICK) -> None:
+                 practice: Any = None, responder: Any = None, consumer: str = CONSUMER,
+                 max_per_tick: int = DEFAULT_MAX_PER_TICK,
+                 responder_note: Optional[Mapping[str, Any]] = None) -> None:
         self.runtime = runtime
         self.state_root = Path(state_root)
         self.subject_id = str(subject_id or "")
@@ -116,6 +138,13 @@ class SocialContactPort:
         #: v0.4 shared practice: A's service seam over this instance's own owner port.  ``None``
         #: means the content half is not wired, and every practice answer says so by name.
         self.practice = practice
+        #: The local reply expression for an ordinary message.  It is optional on purpose:
+        #: ``None`` means the pass still records ``responded`` from LR-3's own verdict but
+        #: never invents words.  A wired responder gets one call per observed message and its
+        #: text is counted, never echoed into any view.
+        self.responder = responder
+        #: Why there is no responder, when there is none (``{"wired": False, "reason_code": ...}``).
+        self.responder_note = dict(responder_note or {})
         self.consumer = consumer
         self.max_per_tick = max(1, min(int(max_per_tick), MAX_PER_TICK))
         self.last_tick: Optional[dict[str, Any]] = None
@@ -152,13 +181,33 @@ class SocialContactPort:
             "external_channel_sent": False,
             "delivered_to_user": False,
             "shared_practice": practice,
+            "local_reply": self._local_reply_describe(),
             "rules": {
-                "ordinary_message": ("observed only: no pause, no Activity, and a model call only "
-                                     "inside an already-open shared practice"),
+                "ordinary_message": ("observed only: no pause and no Activity.  The bounded local "
+                                     "reply reads LR-3's communication_availability, so an "
+                                     "ATOMIC foreground is BOUNDARY_DEFERRED: only the foreground "
+                                     "move waits for the boundary.  With a wired responder one "
+                                     "bounded answer is archived on the arrival itself; with "
+                                     "none the pass says why by name and never invents words"),
                 "invitation": "one fresh AG-1 Decision; accept/defer/decline are separate",
                 "end": "the protocol's own end path; silence is not an end",
             },
         }
+
+    def _local_reply_describe(self) -> dict[str, Any]:
+        """Is there something that can answer, and what may it do?"""
+
+        if self.responder is None:
+            out = {"wired": False,
+                   "reason_code": str(self.responder_note.get("reason_code")
+                                      or "LOCAL_REPLY_NOT_WIRED")}
+            if self.responder_note.get("detail"):
+                out["detail"] = _text(self.responder_note.get("detail"), 200)
+            return out
+        describe = getattr(self.responder, "describe", None)
+        block = dict(describe() if callable(describe) else {})
+        block["wired"] = True
+        return block
 
     def _practice_describe(self) -> dict[str, Any]:
         """What the content half is wired to -- or the name of what is missing."""
@@ -194,6 +243,8 @@ class SocialContactPort:
             "by_kind": dict(data.get("by_kind") or {}),
             "event_count": data.get("event_count"),
             "bodies_stored": data.get("bodies_stored"),
+            # How many arrivals already have a bounded local reply -- a count, never words.
+            "replies_stored": data.get("replies_stored"),
             "private_text_included": False,
         }
         if self.protocol is not None:
@@ -277,6 +328,17 @@ class SocialContactPort:
             out["reason_code"] = _code(type(exc).__name__, "SHARED_PRACTICE_VIEW_FAILED")
         return out
 
+    def read_reply(self, ref: str, *, include_text: bool = False) -> dict[str, Any]:
+        """A's archived local reply for one arrival -- the only way its words come back out."""
+
+        if self.inbox is None:
+            return {"ok": False, "status": "unavailable", "reason_code": REASON_PORT_UNAVAILABLE,
+                    "data": None, "writes_performed": 0}
+        out = dict(self.inbox.reply(str(ref or ""), include_text=include_text) or {})
+        out["delivered_to_user"] = False
+        out["external_channel_sent"] = False
+        return out
+
     def reconcile(self, operation_key: str) -> dict[str, Any]:
         """A's accounting for one operation key -- the UNKNOWN read, not a redo."""
 
@@ -330,13 +392,56 @@ class SocialContactPort:
         self.last_results = processed
         return out
 
+    def tick_ordinary_messages(self, *, limit: Optional[int] = None,
+                               now: Optional[str] = None,
+                               consumer: Optional[str] = None) -> dict[str, Any]:
+        """Consume **only** ordinary messages.  The independent lane's one entry point.
+
+        An invitation or an end is deliberately left untouched: those go through the serial
+        resident step (one Decision, the protocol's own end path), so this method can run on a
+        background thread without ever becoming a second Life writer.  Claiming is A's own
+        durable, atomic claim, so the main tick and this lane can never both answer one arrival.
+        """
+
+        if self.inbox is None:
+            return {"ok": False, "reason_code": REASON_PORT_UNAVAILABLE, "processed": [],
+                    "llm_calls": 0, "kinds": [KIND_MESSAGE], "max_per_tick": 0}
+        cap = self.max_per_tick if limit is None else max(1, min(int(limit), MAX_PER_TICK))
+        # The inbox bounds the listing itself; this only narrows to ordinary messages, then
+        # claims at most ``cap`` of them.
+        listing = self.inbox.pending()
+        if not listing.get("ok"):
+            data = listing.get("data") if isinstance(listing.get("data"), Mapping) else {}
+            return {"ok": False,
+                    "reason_code": _code(listing.get("reason_code"), REASON_PENDING_UNREADABLE),
+                    "detail": _text(listing.get("detail"), 400), "processed": [],
+                    "llm_calls": 0, "kinds": [KIND_MESSAGE],
+                    "ledger_state": (data or {}).get("ledger_state")}
+        rows = [row for row in ((listing.get("data") or {}).get("events") or [])
+                if str(row.get("event_kind") or "") == KIND_MESSAGE]
+        processed = [self._process(str(row.get("event_ref") or ""), now=now,
+                                   consumer=consumer or self.consumer)
+                     for row in rows[:cap] if str(row.get("event_ref") or "")]
+        return {
+            "ok": True,
+            "reason_code": "",
+            "processed": processed,
+            "processed_count": len(processed),
+            "matched": len(rows),
+            "llm_calls": sum(int(item.get("llm_calls") or 0) for item in processed),
+            "max_per_tick": cap,
+            "kinds": [KIND_MESSAGE],
+            "lane_only": True,
+        }
+
     # -- one event -------------------------------------------------------------------------
 
-    def _process(self, event_ref: str, *, now: Optional[str] = None) -> dict[str, Any]:
+    def _process(self, event_ref: str, *, now: Optional[str] = None,
+                 consumer: Optional[str] = None) -> dict[str, Any]:
         if not event_ref:
             return {"event_ref": None, "consumed": False, "reason_code": REASON_EVENT_UNREADABLE,
                     "llm_calls": 0}
-        claim = self.inbox.claim(event_ref, consumer=self.consumer, now=now)
+        claim = self.inbox.claim(event_ref, consumer=consumer or self.consumer, now=now)
         if not claim.get("ok"):
             # Another consumer owns it (or it is already terminal): nothing was done here.
             return {"event_ref": event_ref, "consumed": False,
@@ -408,6 +513,11 @@ class SocialContactPort:
                 _text(practice.get("detail"), 400) or "the shared-practice step did not land",
                 llm_calls=int(practice.get("llm_calls") or 0), practice=practice)
         recorded = bool(practice and practice.get("ok"))
+        # The expression half: LR-3 already said a reply is possible (``respondable``);
+        # an ATOMIC foreground answers ``BOUNDARY_DEFERRED``, which delays the *foreground
+        # move*, not the reply.  This never pauses, never opens an Activity and never sends.
+        reply = self._local_reply(observed, event_ref=event_ref, claim_token=token,
+                                  detail=detail)
         if recorded:
             detail_text = ("an ordinary message inside an open shared practice: the words, one "
                            "content request and her reply were recorded by the owners")
@@ -416,9 +526,20 @@ class SocialContactPort:
                            % str(gate.get("reason_code") or "SHARED_PRACTICE_NOT_CONTINUED"))
         else:
             detail_text = ("an ordinary inbound message is observed only: no pause, no Activity")
+        replied = bool(reply.get("archived"))
+        if recorded:
+            outcome_code = "SHARED_PRACTICE_CONTENT_RECORDED"
+        elif replied:
+            # The one thing an ordinary message may add to its transport result: a bounded local
+            # reply is archived on it.  A reply that did *not* happen keeps the transport result
+            # exactly what it was (``OBSERVED_ONLY``); why it did not is in the returned row and
+            # in the port's own wiring record -- never invented into the ledger.
+            outcome_code = "LOCAL_REPLY_RECORDED"
+        else:
+            outcome_code = "OBSERVED_ONLY"
         result = self.inbox.record_result(
             event_ref, outcome=OUTCOME_OBSERVED, claim_token=token,
-            reason_code=("SHARED_PRACTICE_CONTENT_RECORDED" if recorded else "OBSERVED_ONLY"),
+            reason_code=outcome_code,
             detail=detail_text)
         out = {"event_ref": event_ref, "consumed": True, "kind": KIND_MESSAGE,
                "outcome": OUTCOME_OBSERVED,
@@ -426,6 +547,20 @@ class SocialContactPort:
                "effect": observed.get("effect"),
                "pause_requested": bool(observed.get("pause_requested")),
                "activity_started": bool(observed.get("activity_started")),
+               # A bounded local expression -- archived on the arrival, never echoed into this
+               # row, never delivered.  ``responded`` means "there is a reply to read", not
+               # "a model was called".
+               "responded": bool(recorded or (reply or {}).get("archived")),
+               "response_kind": RESPONSE_KIND_LOCAL_REPLY,
+               "response": reply,
+               "local_only": True,
+               "delivered_to_user": False,
+               # What LR-3 said about answering mid-step, and why the foreground did not move.
+               "communication_availability": observed.get("communication_availability"),
+               "boundary_deferred": bool(observed.get("boundary_deferred")),
+               "foreground_atomic": bool(observed.get("foreground_atomic")),
+               "no_pause": True,
+               "no_activity": True,
                "practice": practice,
                "recorded": bool(result.get("ok")),
                "record_reason_code": result.get("reason_code") or None}
@@ -433,6 +568,87 @@ class SocialContactPort:
             # Named, bounded: *why* a message did or did not continue the work, without a body.
             out["practice_gate"] = gate
         return out
+
+    def _local_reply(self, observed: Mapping[str, Any], *, event_ref: Optional[str] = None,
+                     claim_token: Any = None, detail: Optional[Mapping[str, Any]] = None
+                     ) -> dict[str, Any]:
+        """One bounded local reply for an ordinary message, **archived on the arrival**.
+
+        ``BOUNDARY_DEFERRED`` is *not* a refusal to answer -- it only says the foreground may
+        not move before the boundary.  When no responder is wired nothing is said, and the
+        result names why.  The words are written to A's reply archive under the live claim, so a
+        later read (this process or a restarted one, the CLI) gets them instead of re-asking.
+        Nothing is echoed here: the row keeps a reference and a length.
+        """
+
+        if not bool(observed.get("respondable")):
+            return {"responded": False, "archived": False,
+                    "reason_code": ("LOCAL_REPLY_LIFE_VIEW_UNREADABLE"
+                                    if observed.get("life_view_error")
+                                    else "LOCAL_REPLY_NOT_RESPONDABLE")}
+        if self.responder is None:
+            return {"responded": False, "archived": False,
+                    "reason_code": str(self.responder_note.get("reason_code")
+                                       or "LOCAL_REPLY_NOT_WIRED")}
+        text = str((detail or {}).get("body") or "")
+        try:
+            answer = self.responder.respond(event_kind=KIND_MESSAGE,
+                                            observed=dict(observed), text=text)
+        except TypeError as exc:
+            if "text" not in str(exc):
+                return {"responded": False, "archived": False,
+                        "reason_code": "LOCAL_REPLY_FAILED",
+                        "detail": "%s: %s" % (type(exc).__name__, str(exc)[:120])}
+            # An older responder that only knows (event_kind, observed).  Kept working, not
+            # guessed at: the same call, one argument fewer.
+            try:
+                answer = self.responder.respond(event_kind=KIND_MESSAGE,
+                                                observed=dict(observed))
+            except Exception as exc:  # a responder failure is named, never a lost message
+                return {"responded": False, "archived": False,
+                        "reason_code": "LOCAL_REPLY_FAILED",
+                        "detail": "%s: %s" % (type(exc).__name__, str(exc)[:120])}
+        except Exception as exc:  # a responder failure is named, never a lost message
+            return {"responded": False, "archived": False,
+                    "reason_code": "LOCAL_REPLY_FAILED",
+                    "detail": "%s: %s" % (type(exc).__name__, str(exc)[:120])}
+        if isinstance(answer, str):
+            words, failure = answer, ""
+        elif isinstance(answer, Mapping):
+            words = str(answer.get("text") or "")
+            failure = ("" if answer.get("ok", True) else
+                       str(answer.get("reason_code") or "LOCAL_REPLY_FAILED"))
+        else:
+            words, failure = "", "LOCAL_REPLY_FAILED"
+        if failure:
+            return {"responded": False, "archived": False, "reason_code": failure,
+                    "detail": _text((answer or {}).get("detail") if isinstance(answer, Mapping)
+                                    else "", 200)}
+        if not words.strip():
+            return {"responded": False, "archived": False,
+                    "reason_code": "LOCAL_REPLY_EMPTY_ANSWER"}
+        archived: dict[str, Any] = {"ok": False, "status": "unavailable"}
+        if event_ref and self.inbox is not None and claim_token:
+            archived = dict(self.inbox.record_reply(
+                str(event_ref), claim_token=claim_token, text=words,
+                responder_ref=_responder_ref(self.responder)) or {})
+        if not archived.get("ok"):
+            # A reply nobody can read is not a reply: report it as unarchived, never as sent.
+            return {"responded": False, "archived": False,
+                    "reason_code": "LOCAL_REPLY_NOT_ARCHIVED",
+                    "detail": _text(archived.get("reason_code"), 120)
+                              or "the arrival could not keep the reply",
+                    "chars": len(words)}
+        return {"responded": True,
+                "archived": True,
+                "response_kind": RESPONSE_KIND_LOCAL_REPLY,
+                "reply_ref": archived.get("reply_ref"),
+                "chars": int(archived.get("chars") or len(words)),
+                "empty": False,
+                # 「回应」不是投递：没有外发，也没有人被告知用户已收到或已读。
+                "local_only": True,
+                "delivered_to_user": False}
+
 
     def _practice_step(self, event_ref: str, detail: Mapping[str, Any], *,
                        gate: Any = None) -> Optional[dict[str, Any]]:

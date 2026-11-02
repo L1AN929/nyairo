@@ -49,7 +49,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -418,15 +418,24 @@ class NeighborhoodLifeTest(unittest.TestCase):
         # -- 0) 没有真实材料：一个模型调用都不该发生 --------------------------------
         saved = (field.cycle.world_opportunity_provider, field.cycle.artifact_port,
                  field.cycle.reading_artifact_id)
+        source = field.cycle.artifact_source
+        saved_source = (source.port, source.reading_artifact_id) if source is not None else None
         field.cycle.world_opportunity_provider = lambda: []
         field.cycle.artifact_port = None
         field.cycle.reading_artifact_id = None
+        if source is not None:
+            # The registered continuation source still holds the real port; give it the
+            # empty owner so this arm really has no material to offer.
+            source.port = continuous.NoMaterialOwner()
+            source.reading_artifact_id = None
         quiet = field.round("nb:quiet")
         self.assertEqual(quiet.get("outcome"), "NO_MATERIAL", quiet)
         self.assertEqual(quiet.get("llm_calls"), 0, quiet)
         self.assertEqual(field.cognition.call_count, 0, field.cognition.call_count)
         field.cycle.world_opportunity_provider, field.cycle.artifact_port, \
             field.cycle.reading_artifact_id = saved
+        if source is not None:
+            source.port, source.reading_artifact_id = saved_source
 
         # -- 1) 出门前：一次真实作品推进（AR-0 → 真 Supply 新版本） -----------------
         head_before = field.head(work_id)["version_id"]
@@ -448,11 +457,30 @@ class NeighborhoodLifeTest(unittest.TestCase):
         invitation = cop.parse_invitation({
             "event_kind": cop.KIND_INVITATION, "invitation_id": "inv:nb:1",
             "source_ref": "channel:nb-drill", "occurred_at": field.clock.iso(),
+            # 显式有限窗口：这段 episode 在同一时间轴上走动 11 小时以上，窗口要覆盖整段，
+            # 否则第 9 段回来时恢复资格已按产品规则过期，RESUME 本来就不该被提供。
+            "expires_at": (field.clock.base + timedelta(hours=24)).isoformat(timespec="seconds"),
             "scope": "一起待一会儿", "requires_engagement": True})
         self.assertEqual(protocol.consider(invitation, now=field.clock.iso()).get("decision"),
                          cop.DECISION_ACCEPT)
-        started = protocol.begin(invitation, now=field.clock.iso())
-        self.assertEqual(started["adoption"]["adoption_status"], "APPLIED", started["adoption"])
+        # 正式入口：Decision 先行，只有它的 START 被采纳；前台交接是 adoption 自己的第一步，
+        # 不再是旧 ``begin`` 的"先 PAUSE 释放前台、再转 WAITING"。
+        joint_cognition = field.base._co_presence_cognition(invitation["invitation_id"])
+        saved_cognition = field.runtime.decision_service.cognition_adapter
+        field.runtime.decision_service.cognition_adapter = joint_cognition
+        try:
+            started = protocol.begin_from_decision(invitation, now=field.clock.iso())
+        finally:
+            field.runtime.decision_service.cognition_adapter = saved_cognition
+        self.assertTrue(started.get("ok"), started)
+        self.assertEqual(started["stage"], "JOINT_OPEN", started)
+        self.assertTrue(joint_cognition.joint_offered,
+                        "AG-1 never offered the joint time as a START-legal candidate")
+        self.assertEqual(started["adoption_status"], "APPLIED", started)
+        self.assertTrue(started["park_applied"], started)
+        self.assertGreaterEqual(started["llm_calls"], 1, started)
+        joint_ref = started["joint_activity_ref"]
+        self.assertTrue(joint_ref, started)
         parked = field.activity(private_activity)
         self.assertEqual(parked.get("status"), "WAITING", parked)
         checkpoint_at_break = parked.get("checkpoint_ref")

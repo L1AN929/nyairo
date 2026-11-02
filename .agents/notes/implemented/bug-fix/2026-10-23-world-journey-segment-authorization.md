@@ -85,3 +85,27 @@ one-shot 不跨 Action 复用，计划时校验不能替代 dispatch 时校验�
   （该缝由 `test_life_closeout_cycle_v04` 单独覆盖）。原断言全部保留（真的走
   Supply owner、版本 +1、世界零移动、`AR0_WORLD_ROUTED`、候选集两条路），
   AG0/AG1/AG2/cycle 的业务选择逻辑未改。父级复跑 B：94 例 OK。
+
+## 测试接线补记（2026-11-01，只记事实）
+
+* 新增 `tests/fixtures/world_gateway_fixture.py`：每个用例在自己的新根启动真实
+  `WorldBodyService`（真 socket、真 registry、真 Resolver），并把测试的 `now` 作为
+  服务的**业务时钟**；一次性授权的 TTL 与 gateway 消费仍读真实墙钟。
+* `tests/test_world_move_tool.py`（16 例）与 `tests/test_world_runner.py`（26 例）
+  已接回该夹具；runner 不再注入 `DirectOwnerSubmitPort`，三段旅程每段各铸/消费一张
+  一次性授权（用例里对 registry 的 `CONSUMED` 记录做了断言）。这两个模块本次实测全绿。
+* `tests/test_world_move_tool_navigation.py` 曾记 13/14：`test_timed_move_owner_rejection_stops_immediately`
+  仍按原断言要求 legacy 码 `LOCATION_CLOSED`。Resolver 回执实际是
+  `reason_code=NOT_ALLOWED`、`legacy_reason_code=LOCATION_CLOSED`；gateway 的
+  `submit_action` 只转发 `reason_code`，`journey_submit_port._as_owner_status` 对
+  `STATUS_REJECTED` 又取客户端 `outcome`（`FAILURE`），legacy 拼写到不了工具层。
+  该次按停止门留红并交回，失败史保留。
+* 2026-11-01 内部映射修复（不扩回执协议）：`_as_owner_status` 的 `STATUS_REJECTED`
+  分支改为优先读 executor 结果里**已有**的 `reason`（Resolver 归一后的 canonical 码），
+  缺失时才回落到原 `outcome`/`INTENT_REJECTED`。gateway/client 回执 schema、
+  `legacy_reason_code` 透传、authorization/gate/TTL 全部未改；成功/`uncertain`/timeout
+  分型不变。对应测试断言改为精确 `NOT_ALLOWED`，并注明正式 gateway **不保证** legacy 码。
+  新增 `tests/test_journey_submit_reason.py` 覆盖 canonical 拒因、gate 拒因、reason
+  缺失回落、成功与 timeout 不误报拒绝。验收：navigation 14、ambiguous 8、reason 5 全过。
+* 未证：不覆盖真实模型自然采用、真实墙钟下的长旅程；只证明隔离实例内的正式授权接线与
+  票消费。

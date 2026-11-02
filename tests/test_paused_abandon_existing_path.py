@@ -40,6 +40,21 @@ ABANDON 放进 PAUSED 的合法集，AG-2 也会在 LR-2 之前拒绝同一个�
 ``PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE``。本文件因此覆盖：扣留本身、扣留后活动与未决
 Action 都不被改动、以及 ACTIVE / ATOMIC / 无授权等既有门仍然生效。
 
+2026-11-01 夹具对齐（PAUSE 释放执行槽之后）
+------------------------------------------
+一次成功的 PAUSE 现在写 ``foreground_released`` 并清空 ``foreground_activity_ref``
+（见 .agents/notes/implemented/feature/2026-10-24-paused-background-single-execution.md）。
+因此一个**新**暂停的 Activity：
+* 不再被 AG-0 的 CURRENT_ACTIVITY 源投影成 ``CONTINUE_CURRENT`` 候选（它的回来入口是
+  RESUME_ELIGIBLE + LR-4 资格，本夹具没有生成资格）；
+* 但 AG-1 的 ``validate_decision_output`` 仍按快照里的 ``current_activity_status == PAUSED``
+  具名拒绝 ABANDON，AG-2 也仍按目标 Activity 自己的状态在 LR-2 之前拒绝。这两处是状态判定，
+  与前台指针无关，所以下面继续用「伪造的 ABANDON」把它们真正打到，而不是跳过。
+
+``context()`` 默认仍构造**旧指针形状**的快照（current_activity_ref 指向该 Activity、
+status=PAUSED）。这**不是**说本轮还会投影它；只是为了打到 AG-1 那个按状态判定的具名拒绝门。
+真实的新暂停状态是「前台为空」，本文件用 ``foreground_ref() is None`` 和 0 候选断言它。
+
 Run:  python3 -m unittest -v tests.test_paused_abandon_existing_path
 """
 from __future__ import annotations
@@ -339,6 +354,52 @@ class _Harness:
             candidate_executability={candidate.candidate_id: {"executability": exec_now}},
         )
 
+    @staticmethod
+    def empty_capacity() -> ag1.AgencyCapacitySnapshot:
+        """A capacity snapshot for a *forged* decision that has no projected candidate."""
+        return ag1.AgencyCapacitySnapshot(
+            capacity_snapshot_id=CAP_ID,
+            captured_at=STAMP,
+            source_revisions=["snapshot:pausedexit"],
+            candidate_executability={},
+        )
+
+    @staticmethod
+    def forged_abandon_raw() -> dict:
+        """A model output that names the PAUSED Activity without a projected candidate.
+
+        A released PAUSED Activity has no CONTINUE_CURRENT candidate at all, so a decision that
+        still wants to abandon it can only be a forged/self-asserted one.  That is exactly the
+        backstop both AG-1 and AG-2 keep: it must be refused by name, not silently ignored.
+        """
+        return {
+            "decision": ag1.DECISION_ABANDON,
+            "selected_candidate_id": None,
+            "reason_codes": [ag1.REASON_ABANDON_NONTERMINAL_CHOSEN],
+            "short_rationale": "我决定结束这件已经放下的活动。",
+            "deferred_candidate_ids": [],
+            "target_activity_ref": ACTIVITY_ID,
+        }
+
+    def validate_forged_abandon(self, *, context, candidate_set=None):
+        """Run the real AG-1 validator over a forged ABANDON with an empty candidate set."""
+        candidate_set = candidate_set or ag0.CandidateSet(
+            candidate_set_id="cset:pausedexit",
+            subject_id=ag1.GLOBAL_SUBJECT_ID,
+            candidate_refs=[],
+            source_snapshot_refs=[],
+            observed_at=STAMP,
+            built_at=STAMP,
+        )
+        return ag1.DecisionOutputValidator.validate_decision_output(
+            self.forged_abandon_raw(),
+            candidate_set=candidate_set,
+            candidates_by_id={},
+            constraint_results_by_id={},
+            context_snapshot=context,
+            capacity_snapshot=self.empty_capacity(),
+        )
+
     def constraints(self, candidates, context):
         return ag1.HardConstraintEvaluator.evaluate_candidates(
             candidates=list(candidates),
@@ -349,60 +410,70 @@ class _Harness:
         )
 
     @staticmethod
+    def paused_continue_candidate() -> ag0.CandidateRecord:
+        """The ``CONTINUE_CURRENT`` candidate a *legacy* PAUSED pointer used to project.
+
+        A newly paused Activity is no longer projected; this hand-built record exists only to
+        exercise the pure AG-1 legality matrix against a PAUSED current Activity.
+        """
+        return ag0.CandidateRecord(
+            candidate_id="cand:pausedexitpaused",
+            candidate_kind=ag0.CANDIDATE_KIND_CONTINUE_CURRENT,
+            source_kind=ag0.SOURCE_CURRENT_ACTIVITY,
+            source_ref=ACTIVITY_ID,
+            availability_status=ag0.CANDIDATE_STATUS_OPEN,
+            created_at=STAMP,
+            observed_at=STAMP,
+            recorded_at=STAMP,
+            idempotency_key="cand:pausedexitpaused",
+            activity_ref=ACTIVITY_ID,
+            causal_parent_refs=[ACTIVITY_ID],
+            provenance_refs=[ACTIVITY_ID],
+        )
+
+    @staticmethod
     def legal(candidate, context, capacity):
         return ag1.DecisionOutputValidator.compute_legal_decisions_for_candidate(
             candidate, context_snapshot=context, capacity_snapshot=capacity
         )
 
-    def abandon_decision(self, *, context, candidate_set, candidates, constraint_results):
-        """The scripted model output + the real validator + a real DecisionRecord."""
-        candidate = candidates[0]
-        capacity = self.capacity(candidate)
-        raw = {
-            "decision": ag1.DECISION_ABANDON,
-            "selected_candidate_id": candidate.candidate_id,
-            "reason_codes": [ag1.REASON_ABANDON_NONTERMINAL_CHOSEN],
-            "short_rationale": "我决定不再继续这件已经放下的活动。",
-            "deferred_candidate_ids": [],
-        }
-        validated = ag1.DecisionOutputValidator.validate_decision_output(
-            raw,
-            candidate_set=candidate_set,
-            candidates_by_id={c.candidate_id: c for c in candidates},
-            constraint_results_by_id={r.candidate_ref: r for r in constraint_results},
-            context_snapshot=context,
-            capacity_snapshot=capacity,
-        )
+    def forged_abandon_decision(self) -> ag1.DecisionRecord:
+        """A DecisionRecord that skipped AG-1 and still names the PAUSED Activity.
+
+        A released PAUSED Activity has no projected candidate, so this record is deliberately a
+        self-asserted one.  Its stored context snapshot matches the *live* state (no foreground
+        pointer), so AG-2's freshness check passes and the owner's own PAUSED-status refusal is
+        what stops it -- before LR-2 ever sees a command.
+        """
         decision = ag1.DecisionRecord(
             subject_id=ag1.GLOBAL_SUBJECT_ID,
             decision_id=ABANDON_DECISION_ID,
             revision=1,
             decision_opportunity_ref=OPP_ID,
-            candidate_set_ref=candidate_set.candidate_set_id,
-            candidate_refs=tuple(candidate_set.candidate_refs),
+            candidate_set_ref="cset:pausedexit",
+            candidate_refs=(),
             context_snapshot_ref=CTX_ID,
-            hard_constraint_result_refs=tuple(r.constraint_result_id for r in constraint_results),
-            decision=validated["decision"],
-            reason_codes=tuple(validated["reason_codes"]),
+            hard_constraint_result_refs=(),
+            decision=ag1.DECISION_ABANDON,
+            reason_codes=(ag1.REASON_ABANDON_NONTERMINAL_CHOSEN,),
             decision_route=ag1.ROUTE_COGNITIVE_REQUIRED,
             policy_version=ag1.POLICY_VERSION_AG1_V1,
             snapshot_fingerprint=SFP,
             created_at=STAMP,
-            current_activity_ref=ACTIVITY_ID,
+            current_activity_ref=None,
             capacity_snapshot_ref=CAP_ID,
-            selected_candidate_ref=candidate.candidate_id,
-            target_activity_ref=validated["target_activity_ref"],
+            selected_candidate_ref=None,
+            target_activity_ref=ACTIVITY_ID,
         )
         self.decision_reader.decisions[ABANDON_DECISION_ID] = decision.to_dict()
         self.decision_reader.contexts[CTX_ID] = {
-            "current_activity_ref": ACTIVITY_ID,
+            # The live state after a released PAUSE: the pointer is gone.
+            "current_activity_ref": None,
             "current_activity_revision": self.store_revision(),
-            "candidate_revisions": {
-                candidate.candidate_id: {"source_revision": candidate.source_revision}
-            },
+            "candidate_revisions": {},
         }
         self.decision_reader.opportunities[OPP_ID] = {"status": "OPEN"}
-        return decision, validated
+        return decision
 
     def abandon_transitions(self) -> list[dict]:
         return [entry for entry in self.store.load_verified_state_and_journal()[1]
@@ -435,7 +506,12 @@ class _Harness:
 
 @POSIX_ONLY
 class PausedAbandonExistingPathTest(unittest.TestCase):
-    """PAUSED offers exactly one execution-shaped exit (ABANDON) and AG-2 can adopt it."""
+    """A PAUSED Activity offers no execution-shaped exit; AG-2 still withholds ABANDON.
+
+    After v0.4 background pause a newly PAUSED Activity is not the foreground at all, so AG-0
+    does not project it.  The named ``PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE`` doors in AG-1/AG-2
+    remain as status-based backstops for a forged Decision that still names it.
+    """
 
     def make_harness(self) -> _Harness:
         harness = _Harness()
@@ -448,90 +524,55 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
         self.assertEqual(started["status"], ac.STATUS_ACTIVE)
         paused = harness.pause()
         self.assertEqual(paused["status"], ac.STATUS_PAUSED)
-        self.assertEqual(harness.foreground_ref(), ACTIVITY_ID)
+        # v0.4 background pause: a successful PAUSE releases the execution slot.  The record
+        # keeps its own PAUSED status and is marked released; the global pointer is gone.
+        self.assertTrue(paused.get("foreground_released") is True, paused)
+        self.assertIsNone(harness.foreground_ref())
         return harness
 
-    # -- the withheld exit: AG-1 offers no ABANDON, AG-2 refuses the same target ----
+    # -- the withheld exit: AG-1 refuses a forged ABANDON, AG-2 refuses the same target --
 
     def test_paused_projection_offers_no_abandon_and_withholds_it_end_to_end(self):
         harness = self.paused_harness()
+
+        # New rule: a released PAUSED Activity is *not* the foreground, so AG-0's
+        # CURRENT_ACTIVITY source does not project it at all.  Its way back is the LR-4
+        # RESUME_ELIGIBLE source, which this fixture does not generate.
         candidate_set, candidates = harness.materialize()
-        self.assertEqual(len(candidates), 1)
-        candidate = candidates[0]
-        self.assertEqual(candidate.candidate_kind, ag0.CANDIDATE_KIND_CONTINUE_CURRENT)
-        self.assertEqual(candidate.source_kind, ag0.SOURCE_CURRENT_ACTIVITY)
-        self.assertEqual(candidate.activity_ref, ACTIVITY_ID)
+        self.assertEqual(candidates, [])
+        self.assertEqual(candidate_set.candidate_refs, [])
+        self.assertIsNone(harness.foreground_ref())
 
+        # A forged ABANDON that still names the PAUSED Activity is refused by name.  The
+        # snapshot keeps the legacy pointer shape only to exercise that status-based backstop;
+        # it is not a claim that the round still projects this Activity.
         context = harness.context(activity=harness.activity())
-        results, allowed = harness.constraints(candidates, context)
-        self.assertEqual([c.candidate_id for c in allowed], [candidate.candidate_id])
-        self.assertEqual(results[0].status, ag1.CONSTRAINT_STATUS_ALLOWED)
-
-        legal = harness.legal(candidate, context, harness.capacity(candidate))
-        # No execution-shaped exit is offered for a PAUSED foreground: not ABANDON either.
-        self.assertEqual(legal, [ag1.DECISION_DEFER])
-
         with self.assertRaises(ag1.DecisionValidationError) as caught:
-            harness.abandon_decision(
-                context=context,
-                candidate_set=candidate_set,
-                candidates=allowed,
-                constraint_results=results,
-            )
+            harness.validate_forged_abandon(context=context)
         self.assertIn("PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE", str(caught.exception))
         self.assertEqual(caught.exception.failure_class,
                          ag1.FAILURE_CLASS_ILLEGAL_DECISION_MATRIX)
 
         final = harness.activity()
         self.assertEqual(final["status"], ac.STATUS_PAUSED)
-        self.assertEqual(harness.foreground_ref(), ACTIVITY_ID)
+        self.assertTrue(final.get("foreground_released") is True)
+        self.assertIsNone(harness.foreground_ref())
         self.assertIsNone(final.get("completion_evidence_ref"))
         self.assertEqual(harness.abandon_transitions(), [])
 
     def test_ag2_refuses_a_forged_paused_abandon_before_lr2(self):
-        """Even a decision that skipped AG-1's validator cannot abandon the PAUSED foreground."""
+        """Even a decision that skipped AG-1's validator cannot abandon the PAUSED Activity."""
 
         harness = self.paused_harness()
-        candidate_set, candidates = harness.materialize()
-        context = harness.context(activity=harness.activity())
-        results, allowed = harness.constraints(candidates, context)
-        candidate = candidates[0]
-        decision = ag1.DecisionRecord(
-            subject_id=ag1.GLOBAL_SUBJECT_ID,
-            decision_id=ABANDON_DECISION_ID,
-            revision=1,
-            decision_opportunity_ref=OPP_ID,
-            candidate_set_ref=candidate_set.candidate_set_id,
-            candidate_refs=tuple(candidate_set.candidate_refs),
-            context_snapshot_ref=CTX_ID,
-            hard_constraint_result_refs=tuple(r.constraint_result_id for r in results),
-            decision=ag1.DECISION_ABANDON,
-            reason_codes=(ag1.REASON_ABANDON_NONTERMINAL_CHOSEN,),
-            decision_route=ag1.ROUTE_COGNITIVE_REQUIRED,
-            policy_version=ag1.POLICY_VERSION_AG1_V1,
-            snapshot_fingerprint=SFP,
-            created_at=STAMP,
-            current_activity_ref=ACTIVITY_ID,
-            capacity_snapshot_ref=CAP_ID,
-            selected_candidate_ref=candidate.candidate_id,
-            target_activity_ref=ACTIVITY_ID,
-        )
-        harness.decision_reader.decisions[ABANDON_DECISION_ID] = decision.to_dict()
-        harness.decision_reader.contexts[CTX_ID] = {
-            "current_activity_ref": ACTIVITY_ID,
-            "current_activity_revision": harness.store_revision(),
-            "candidate_revisions": {
-                candidate.candidate_id: {"source_revision": candidate.source_revision}
-            },
-        }
-        harness.decision_reader.opportunities[OPP_ID] = {"status": "OPEN"}
+        self.assertEqual(harness.materialize()[1], [], "nothing should be projected")
+        decision = harness.forged_abandon_decision()
 
         with self.assertRaises(ag2.AdoptionIllegalError) as caught:
             harness.adoption.adopt_decision(decision)
         self.assertIn("PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE", str(caught.exception))
 
         self.assertEqual(harness.activity()["status"], ac.STATUS_PAUSED)
-        self.assertEqual(harness.foreground_ref(), ACTIVITY_ID)
+        self.assertIsNone(harness.foreground_ref())
         self.assertEqual(harness.abandon_transitions(), [])
 
     def test_unbound_unresolved_action_is_not_same_activity_evidence_and_exit_stays_withheld(self):
@@ -550,16 +591,10 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
         self.assertIsNone(pending["activity_ref"])
         self.assertNotEqual(pending["activity_ref"], ACTIVITY_ID)
 
-        candidate_set, candidates = harness.materialize()
+        self.assertEqual(harness.materialize()[1], [])
         context = harness.context(activity=harness.activity())
-        results, allowed = harness.constraints(candidates, context)
         with self.assertRaises(ag1.DecisionValidationError) as caught:
-            harness.abandon_decision(
-                context=context,
-                candidate_set=candidate_set,
-                candidates=allowed,
-                constraint_results=results,
-            )
+            harness.validate_forged_abandon(context=context)
         self.assertIn("PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE", str(caught.exception))
 
         self.assertEqual(harness.activity()["status"], ac.STATUS_PAUSED)
@@ -572,31 +607,22 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
 
     def test_atomic_foreground_withholds_abandon_and_ag2_refuses_it(self):
         harness = self.paused_harness()
-        candidate_set, candidates = harness.materialize()
+        candidate = harness.paused_continue_candidate()
         context = harness.context(
             activity=harness.activity(), interruptibility=ag1.INTERRUPTIBILITY_ATOMIC
         )
-        results, allowed = harness.constraints(candidates, context)
-        self.assertEqual(len(allowed), 1)
-        legal = harness.legal(candidates[0], context, harness.capacity(candidates[0]))
+        legal = harness.legal(candidate, context, harness.capacity(candidate))
         self.assertNotIn(ag1.DECISION_ABANDON, legal)
         self.assertEqual(legal, [ag1.DECISION_DEFER])
 
         with self.assertRaises(ag1.DecisionValidationError) as caught:
-            harness.abandon_decision(
-                context=context,
-                candidate_set=candidate_set,
-                candidates=allowed,
-                constraint_results=results,
-            )
+            harness.validate_forged_abandon(context=context)
         self.assertEqual(caught.exception.failure_class, ag1.FAILURE_CLASS_ATOMIC_VIOLATION)
 
     def test_capacity_unavailable_does_not_turn_the_withheld_exit_legal(self):
         harness = self.paused_harness()
-        candidate_set, candidates = harness.materialize()
+        candidate = harness.paused_continue_candidate()
         context = harness.context(activity=harness.activity())
-        results, allowed = harness.constraints(candidates, context)
-        candidate = allowed[0]
 
         blocked = harness.legal(
             candidate, context, harness.capacity(candidate, exec_now=ag1.EXEC_NOT_NOW)
@@ -606,12 +632,7 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
 
         # A spent / unavailable budget never becomes a reason to abandon a PAUSED Activity.
         with self.assertRaises(ag1.DecisionValidationError):
-            harness.abandon_decision(
-                context=context,
-                candidate_set=candidate_set,
-                candidates=allowed,
-                constraint_results=results,
-            )
+            harness.validate_forged_abandon(context=context)
         self.assertEqual(harness.activity()["status"], ac.STATUS_PAUSED)
 
     def test_active_foreground_keeps_continue_pause_and_abandon(self):
@@ -641,22 +662,16 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
     def test_withheld_exit_leaves_the_paused_activity_untouched(self):
         harness = self.paused_harness()
         revision_before = int(harness.activity()["revision"])
-        candidate_set, candidates = harness.materialize()
+        self.assertEqual(harness.materialize()[1], [])
         context = harness.context(activity=harness.activity())
-        results, allowed = harness.constraints(candidates, context)
         with self.assertRaises(ag1.DecisionValidationError):
-            harness.abandon_decision(
-                context=context,
-                candidate_set=candidate_set,
-                candidates=allowed,
-                constraint_results=results,
-            )
+            harness.validate_forged_abandon(context=context)
 
-        # No journal transition, no revision move, the same foreground, still PAUSED.
+        # No journal transition, no revision move, still PAUSED and still released.
         self.assertEqual(harness.abandon_transitions(), [])
         self.assertEqual(int(harness.activity()["revision"]), revision_before)
         self.assertEqual(harness.activity()["status"], ac.STATUS_PAUSED)
-        self.assertEqual(harness.foreground_ref(), ACTIVITY_ID)
+        self.assertIsNone(harness.foreground_ref())
 
         # LR-2 still refuses a caller that tries to mint the transition on its own.
         with self.assertRaises(ac.WriterCapabilityError):
@@ -672,8 +687,7 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
 
     def test_paused_candidate_bound_to_another_activity_is_refused(self):
         harness = self.paused_harness()
-        _, candidates = harness.materialize()
-        candidate = candidates[0]
+        self.assertEqual(harness.materialize()[1], [])
 
         foreign = ag0.CandidateRecord(
             candidate_id="cand:pausedexitforeign",
@@ -708,7 +722,7 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
                 candidate_set=ag0.CandidateSet(
                     candidate_set_id="cset:pausedexitforeign",
                     subject_id=ag1.GLOBAL_SUBJECT_ID,
-                    candidate_refs=[candidate.candidate_id],
+                    candidate_refs=[foreign.candidate_id],
                     source_snapshot_refs=[],
                     observed_at=STAMP,
                     built_at=STAMP,
@@ -723,28 +737,20 @@ class PausedAbandonExistingPathTest(unittest.TestCase):
         """The old test drove a real AG-2 stale rejection through the PAUSED ABANDON door.
 
         That door no longer exists, so the precedence is what is proven here: AG-1 refuses the
-        PAUSED target before a Decision can reach AG-2's staleness checks.  Advancing the
-        Activity afterwards also removes the projection entirely rather than leaving a stale
-        continuation candidate behind.
+        PAUSED target by its own status predicate, before a Decision can reach AG-2 at all.  No
+        adoption record is written and the released Activity is unchanged.
         """
 
         harness = self.paused_harness()
-        candidate_set, candidates = harness.materialize()
         context = harness.context(activity=harness.activity())
-        results, allowed = harness.constraints(candidates, context)
         with self.assertRaises(ag1.DecisionValidationError) as caught:
-            harness.abandon_decision(
-                context=context,
-                candidate_set=candidate_set,
-                candidates=allowed,
-                constraint_results=results,
-            )
+            harness.validate_forged_abandon(context=context)
         self.assertIn("PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE", str(caught.exception))
 
-        harness.wait(command_id="pausedexit-withheld-wait")
-        self.assertEqual(harness.activity()["status"], ac.STATUS_WAITING)
-        _, candidates_after = harness.materialize()
-        self.assertEqual(candidates_after, [])
+        state = harness.integration_store.load_state()
+        self.assertEqual(state.get("adoptions_by_id") or {}, {})
+        self.assertEqual(harness.activity()["status"], ac.STATUS_PAUSED)
+        self.assertIsNone(harness.foreground_ref())
         self.assertEqual(harness.abandon_transitions(), [])
 
     def test_lr2_refuses_abandon_without_an_owner_grant(self):

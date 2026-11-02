@@ -25,12 +25,20 @@ What it keeps honest
   this consumer only checks structure and references.
 * A Memory failure returns ``DEFER``, which AG-2 keeps in ``pending_handoff_ids`` for a later
   retry, and which never rolls back the artifact or the settlement.
+* **The handoff must be one the real AG-2 owner really persisted.**  ``activity_ref`` alone is
+  only a shape: a fabricated event can point it at a genuinely existing Activity.  So the event
+  is checked against this instance's authoritative AG-2 handoff store -- the same read port the
+  runtime already holds -- by ``handoff_id``, and the delivered content (activity, revision,
+  kind, subject and every ref the event carries) must be the persisted record's own.  A
+  consumer without such a read port refuses to write: there is no "legacy default" that skips
+  the check.  The trust boundary is local: a process running as the same uid can rewrite the
+  owner's own files, and that is outside what this check can promise.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 _LIFE_SCRIPTS = str(Path(__file__).resolve().parent)
 if _LIFE_SCRIPTS not in sys.path:
@@ -80,8 +88,68 @@ _REF_FIELDS = ("artifact_refs", "fact_refs", "settlement_refs", "progress_refs",
                "world_refs", "decision_refs", "adoption_refs", "causal_parent_refs")
 
 
+#: ``(handoff_id) -> the owner's persisted handoff record, or None``.  The runtime binds its
+#: own AG-2 read port; a raise means "cannot read the owner", never "assume it is genuine".
+HandoffVerifier = Callable[[str], Optional[Mapping[str, Any]]]
+
+#: The fields a delivered handoff must carry *exactly* as the owner persisted them.  The
+#: handoff id alone is not enough: a copied id with a different Activity, kind or result ref
+#: would otherwise be filed as this instance's own life.  ``handoff_id`` is the lookup key and
+#: is compared too, so a record under another id can never stand in for this one.
+AUTHORITATIVE_HANDOFF_FIELDS = (
+    "handoff_id",
+    "activity_ref",
+    "activity_revision",
+    "activity_kind",
+    "terminal_or_milestone_kind",
+    "subject_id",
+    "decision_refs",
+    "adoption_refs",
+    "action_refs",
+    "settlement_refs",
+    "progress_refs",
+    "completion_evidence_ref",
+    "fact_refs",
+    "artifact_refs",
+    "world_refs",
+    "causal_parent_refs",
+    "owner_confirmed_context",
+    "occurred_at",
+    "observed_at",
+)
+
+
 class _OwnerUnresolved(RuntimeError):
     """The bound port cannot name a Memory owner, so nothing may be written."""
+
+
+def _normalized(value: Any) -> Any:
+    """A comparable form of one field: order matters for ref lists, never for mappings."""
+
+    if isinstance(value, Mapping):
+        return tuple(sorted((str(key), _normalized(item)) for key, item in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_normalized(item) for item in value)
+    return value
+
+
+def handoff_matches_authoritative_record(delivered: Mapping[str, Any],
+                                         record: Mapping[str, Any]) -> bool:
+    """True only when every compared field of *delivered* is the owner's own value."""
+
+    for field in AUTHORITATIVE_HANDOFF_FIELDS:
+        left = _normalized(delivered.get(field))
+        right = _normalized(record.get(field))
+        if field == "activity_revision":
+            try:
+                if int(left or 0) != int(right or 0):
+                    return False
+            except (TypeError, ValueError):
+                return False
+            continue
+        if left != right:
+            return False
+    return True
 
 
 def _real_refs(event: Mapping[str, Any]) -> set[str]:
@@ -114,17 +182,41 @@ class MemoryAdmissionExperienceConsumer:
         *,
         enabled: bool = False,
         max_chars: int = 600,
+        handoff_verifier: Optional[HandoffVerifier] = None,
     ) -> None:
         self.port = port
         self.enabled = bool(enabled and port is not None)
         self.max_chars = max(0, int(max_chars))
+        #: Read-only lookup into this instance's own AG-2 handoff store.  Without it the
+        #: consumer refuses every handoff: shape is not provenance, so there is no default
+        #: that silently trusts the caller's mapping.
+        self.handoff_verifier: Optional[HandoffVerifier] = (
+            handoff_verifier if callable(handoff_verifier) else None)
         self.accepted = 0
         self.duplicates = 0
         self.deferred = 0
         self.ignored = 0
+        #: Refused because the event is not shaped like a Life handoff (no Activity anchor).
+        self.refused = 0
+        #: Refused because the owner's own record does not back this event.
+        self.unverified = 0
         self.last_error: Optional[str] = None
         #: How the optional confirmed-result mapping was treated: counted, never quoted.
         self.owner_context: dict[str, int] = {}
+
+    def bind_handoff_verifier(self, verifier: Optional[HandoffVerifier]) -> bool:
+        """Attach the owner's read port once (the production runtime does this at assembly).
+
+        Returns whether a verifier is now bound.  An already-bound consumer is not replaced,
+        so a caller cannot swap the authority out from under an accepted stream.
+        """
+
+        if self.handoff_verifier is not None:
+            return True
+        if not callable(verifier):
+            return False
+        self.handoff_verifier = verifier
+        return True
 
     # -- the protocol ------------------------------------------------------------------
 
@@ -138,6 +230,24 @@ class MemoryAdmissionExperienceConsumer:
         if not handoff_id:
             self.deferred += 1
             return {"disposition": DISPOSITION_DEFER, "reason": "HANDOFF_ID_MISSING"}
+
+        #: A handoff is only ever a *Life* milestone, so it must name the Activity it belongs
+        #: to.  ``activity_ref`` is a required field of ``LifeExperienceHandoffEvent`` and the
+        #: causal parent of every emitted event; a World execution receipt, a test/maintenance
+        #: action or any other mapping that reaches this door without it is not personal life
+        #: and is refused before M0.
+        activity_ref = str(event.get("activity_ref") or "").strip()
+        if not activity_ref:
+            self.refused += 1
+            return {"disposition": DISPOSITION_IGNORE,
+                    "reason": "LIFE_ACTIVITY_REF_MISSING"}
+
+        #: Shape is not provenance: a forged event can point ``activity_ref`` at an Activity
+        #: that really exists.  What may be filed as her experience is the record *this
+        #: instance's own AG-2 owner persisted*, looked up by id and compared field by field.
+        source_refusal = self._verify_source(handoff_id, event)
+        if source_refusal is not None:
+            return source_refusal
 
         occurred_at = str(event.get("occurred_at") or event.get("observed_at") or "")
         kind = str(event.get("terminal_or_milestone_kind") or "")
@@ -182,6 +292,40 @@ class MemoryAdmissionExperienceConsumer:
         self.deferred += 1
         return dict(receipt, disposition=DISPOSITION_DEFER,
                     reason=f"MEMORY_{status.upper() or 'UNKNOWN'}")
+
+    # -- provenance --------------------------------------------------------------------
+
+    def _verify_source(self, handoff_id: str,
+                       event: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+        """Refuse anything the owner's persisted handoff record does not back.
+
+        Returns ``None`` when the delivered event *is* the owner's own record (or differs
+        only in keys we do not compare), otherwise the refusal envelope.  Every refusal is
+        a named code; a read failure is "cannot confirm", which is also a refusal -- losing
+        a handoff is recoverable from the owner's own pending list, filing a forgery is not.
+        """
+
+        if self.handoff_verifier is None:
+            self.unverified += 1
+            return {"disposition": DISPOSITION_IGNORE,
+                    "reason": "HANDOFF_SOURCE_UNVERIFIED"}
+        try:
+            record = self.handoff_verifier(handoff_id)
+        except Exception as exc:  # cannot read the owner != the owner said yes
+            self.unverified += 1
+            self.last_error = f"handoff source unreadable: {type(exc).__name__}: {exc}"
+            return {"disposition": DISPOSITION_IGNORE,
+                    "reason": "HANDOFF_SOURCE_UNREADABLE",
+                    "detail": self.last_error[:200]}
+        if not isinstance(record, Mapping):
+            self.unverified += 1
+            return {"disposition": DISPOSITION_IGNORE,
+                    "reason": "HANDOFF_SOURCE_NOT_FOUND"}
+        if not handoff_matches_authoritative_record(event, record):
+            self.unverified += 1
+            return {"disposition": DISPOSITION_IGNORE,
+                    "reason": "HANDOFF_SOURCE_MISMATCH"}
+        return None
 
     # -- owner -------------------------------------------------------------------------
 
@@ -341,17 +485,22 @@ class MemoryAdmissionExperienceConsumer:
 
     def describe(self) -> dict[str, Any]:
         return {"kind": "memory_admission_experience_consumer", "enabled": self.enabled,
+                "source_verified": self.handoff_verifier is not None,
                 "accepted": self.accepted, "duplicates": self.duplicates,
                 "deferred": self.deferred, "ignored": self.ignored,
+                "refused": self.refused, "unverified": self.unverified,
                 "last_error": self.last_error,
                 "owner_confirmed_context": dict(self.owner_context)}
 
 
 __all__ = [
+    "AUTHORITATIVE_HANDOFF_FIELDS",
     "DISPOSITION_ACCEPT",
     "DISPOSITION_DEFER",
     "DISPOSITION_DUPLICATE",
     "DISPOSITION_IGNORE",
+    "HandoffVerifier",
     "MemoryAdmissionExperienceConsumer",
     "OWNER_CONFIRMED_KEYS",
+    "handoff_matches_authoritative_record",
 ]

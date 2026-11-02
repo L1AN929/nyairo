@@ -678,6 +678,12 @@ class LifeSharingService:
 
         content = project.get("content")
         content_chars = len(content) if isinstance(content, str) else None
+        # A governed erasure clears the source head.  Even an explicit share_text may not be
+        # formed from a source whose body is gone: the draft would outlive the deleted material.
+        if not isinstance(content, str) or not content.strip():
+            return self._refused(REASON_SOURCE_HAS_NO_TEXT,
+                                 "the source head has no readable text",
+                                 source_artifact_id=source_id)
         if share_text is not None:
             text = _text(share_text, "share_text", limit=MAX_SHARE_TEXT_CHARS)
             kind = "EXPLICIT_TEXT"
@@ -740,9 +746,13 @@ class LifeSharingService:
             str(head_version), sha256(text.encode("utf-8")).hexdigest()[:16], audience, channel,
             artifact_title)
 
+        lineage = [{"kind": "artifact", "namespace": "supply", "ref": source_id}]
+        if head_version:
+            lineage.append({"kind": "artifactversion", "namespace": "supply",
+                            "ref": str(head_version)})
         try:
             created = self.projects.create_project(title=artifact_title, content=envelope,
-                                                   operation_key=key)
+                                                   operation_key=key, source_refs=lineage)
         except Exception as exc:
             return self._unavailable(REASON_PORT_ERROR, exc, operation_key=key)
         settled = self._settle(created, operation_key=key)
@@ -807,6 +817,7 @@ class LifeSharingService:
         defer_condition: Optional[str] = None,
         opportunity_ref: Optional[str] = None,
         reason: Optional[str] = None,
+        disclosure_grant_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """One explicit action on a draft: ``send_local`` / ``defer`` / ``drop`` / ``expire``.
 
@@ -917,9 +928,21 @@ class LifeSharingService:
             updated["delivered_at"] = stamp
 
         envelope = encode_share_content(updated, parsed["text"])
+        lineage = [{"kind": "artifact", "namespace": "supply",
+                    "ref": str(parsed.get("source_artifact_id") or "")}]
+        if parsed.get("source_version_id"):
+            lineage.append({"kind": "artifactversion", "namespace": "supply",
+                            "ref": str(parsed["source_version_id"])})
+        send_kwargs: dict[str, Any] = {}
+        if action == ACTION_SEND_LOCAL and disclosure_grant_id:
+            # Internal callers may name an already-issued permit.  The owner derives the exact
+            # binding from the envelope and checks it inside the sending transaction; when no id
+            # is named the owner looks up the one permit bound to that same exact scope.
+            send_kwargs["disclosure_grant_id"] = str(disclosure_grant_id)
         try:
             committed = self.projects.commit_project(
-                artifact_id=target, content=envelope, expected_head=head, operation_key=key)
+                artifact_id=target, content=envelope, expected_head=head, operation_key=key,
+                source_refs=lineage, **send_kwargs)
         except Exception as exc:
             return self._unavailable(REASON_PORT_ERROR, exc, share_id=target, operation_key=key)
         settled = self._settle(committed, operation_key=key)

@@ -48,13 +48,17 @@ from typing import Any, Mapping, Optional, Sequence
 READ_OPS = frozenset({
     "list_artifacts", "read_artifact", "read_head", "read_effect_receipt", "lookup_operation",
     "list_versions", "read_version",
+    # F-011/F-012/F-014: one pure representation observation (payload and projection health).
+    "observe_projection",
 })
 #: Command operations this port may send.  Mirrors the artifact half of ``life_supply.COMMAND_OPS``
 #: (``life_supply.py:230-233``, where the lifecycle verbs are spelled ``archive_artifact`` and
 #: ``tombstone``).  Only ``archive_artifact`` of the two lifecycle verbs is exposed here: an archive
 #: keeps every row, version and the content, while a tombstone hides the content and is terminal, so
 #: nothing Life does needs it.
-COMMAND_OPS = frozenset({"create_artifact", "commit_markdown", "archive_artifact"})
+COMMAND_OPS = frozenset({"create_artifact", "commit_markdown", "archive_artifact",
+                         # F-011/F-012: explicit external import and safe projection repair.
+                         "import_projection", "rebuild_projection"})
 
 DEFAULT_TIMEOUT = 5.0
 MAX_RESPONSE_BYTES = 1_000_000
@@ -421,8 +425,52 @@ class LifeArtifactPort:
             "lifecycle": answer.get("lifecycle"),
             "created_at": answer.get("created_at"),
             "operation_key": answer.get("operation_key"),
+            # Owner-written import provenance, or None for an ordinary commit.
+            "provenance": answer.get("provenance"),
+            "source_kind": answer.get("source_kind"),
             "source": "ManagedArtifact",
         }
+
+    # -- F-011/F-012/F-014: projection observation and explicit import ---------------------
+
+    def observe_projection(self, artifact_id: str) -> dict[str, Any]:
+        """Actually read the managed Markdown; payload health and representation health apart.
+
+        Pure read.  The answer never carries the projection body: a diverged external edit is
+        described by hashes, size and line counts, and only the explicit import command asks
+        the owner for the bytes.  No Observation event, row or repair is written.
+        """
+        answer = self._call({"op": "observe_projection", "subject": self.subject_id,
+                             "artifact_id": str(artifact_id)})
+        if answer.get("status") != STATUS_OK:
+            raise ArtifactOwnerRefused(str(answer.get("status") or ""),
+                                       str(answer.get("reason") or ""),
+                                       str(answer.get("detail") or ""))
+        return dict(answer)
+
+    def import_projection(self, *, artifact_id: str, candidate_id: str,
+                          base_version_id: Optional[str], confirm: bool,
+                          grant_id: str, operation_key: str) -> ArtifactOutcome:
+        """Import one explicitly confirmed external edit through the owner's CAS write port."""
+        answer = self._call({
+            "op": "import_projection",
+            "grant_id": str(grant_id),
+            "operation_key": str(operation_key),
+            "import": {
+                "subject_id": self.subject_id,
+                "artifact_id": str(artifact_id),
+                "candidate_id": str(candidate_id),
+                "base_version_id": base_version_id,
+                "confirm": confirm is True,
+            },
+        })
+        return self._outcome(answer, operation_key=operation_key)
+
+    def rebuild_projection(self, *, artifact_id: str) -> ArtifactOutcome:
+        """Explicitly repair a MISSING/UNBOUND projection; DIVERGED is refused by the owner."""
+        answer = self._call({"op": "rebuild_projection", "subject": self.subject_id,
+                             "artifact_id": str(artifact_id)})
+        return self._outcome(answer, operation_key="")
 
     def resume_point(self, artifact_id: str) -> ArtifactResumePoint:
         """Read one artifact's real continuation point from the owner."""
@@ -469,18 +517,28 @@ class LifeArtifactPort:
         content: str,
         grant_id: str,
         operation_key: str,
+        source_refs: Sequence[Mapping[str, Any]] = (),
     ) -> ArtifactOutcome:
-        """Create a ManagedArtifact and commit its first version, as one owner command."""
+        """Create a ManagedArtifact and commit its first version, as one owner command.
+
+        ``source_refs`` are the typed facts this document was built from.  They travel in the
+        same owner command, so the owner registers the lineage inside the transaction that
+        writes the first version (a derived body cannot exist without its sources).
+        """
+        artifact: dict[str, Any] = {
+            "subject_id": self.subject_id,
+            "workspace_id": str(workspace_id),
+            "title": str(title),
+            "content": str(content),
+        }
+        refs = _wire_source_refs(source_refs)
+        if refs:
+            artifact["source_refs"] = refs
         answer = self._call({
             "op": "create_artifact",
             "grant_id": str(grant_id),
             "operation_key": str(operation_key),
-            "artifact": {
-                "subject_id": self.subject_id,
-                "workspace_id": str(workspace_id),
-                "title": str(title),
-                "content": str(content),
-            },
+            "artifact": artifact,
         })
         return self._outcome(answer, operation_key=operation_key)
 
@@ -492,23 +550,35 @@ class LifeArtifactPort:
         content: str,
         grant_id: str,
         operation_key: str,
+        source_refs: Sequence[Mapping[str, Any]] = (),
+        disclosure_grant_id: Optional[str] = None,
     ) -> ArtifactOutcome:
         """Commit the next version of an existing artifact.
 
         ``expected_head`` is the compare-and-swap precondition: passing the head read before the
         edit means a concurrent writer is refused by the owner instead of silently overwritten.
+        ``source_refs`` carry the typed lineage of this version in the same owner command.
         """
-        answer = self._call({
+        artifact: dict[str, Any] = {
+            "subject_id": self.subject_id,
+            "artifact_id": str(artifact_id),
+            "expected_head": expected_head,
+            "content": str(content),
+        }
+        refs = _wire_source_refs(source_refs)
+        if refs:
+            artifact["source_refs"] = refs
+        request: dict[str, Any] = {
             "op": "commit_markdown",
             "grant_id": str(grant_id),
             "operation_key": str(operation_key),
-            "artifact": {
-                "subject_id": self.subject_id,
-                "artifact_id": str(artifact_id),
-                "expected_head": expected_head,
-                "content": str(content),
-            },
-        })
+            "artifact": artifact,
+        }
+        if disclosure_grant_id:
+            # Named explicitly by an internal caller; the owner still derives the exact binding
+            # from the envelope and refuses a permit that does not cover it.
+            request["disclosure_grant_id"] = str(disclosure_grant_id)
+        answer = self._call(request)
         return self._outcome(answer, operation_key=operation_key)
 
     def archive_artifact(
@@ -688,6 +758,32 @@ class LifeArtifactPort:
 def parse_grant_ids(raw: str) -> Sequence[str]:
     """Accept the grant id list form used by the profile config (comma separated)."""
     return [part.strip() for part in str(raw or "").split(",") if part.strip()]
+
+
+def _wire_source_refs(source_refs: Any) -> list[dict[str, str]]:
+    """The typed source facts one commit carries, in the owner's own edge shape.
+
+    The owner records lineage in the *same* transaction that writes the body, so a malformed
+    fact is refused here instead of being dropped: a derived document must never be written
+    without the sources it was built from.
+    """
+    rows: list[dict[str, str]] = []
+    for item in source_refs or ():
+        if not isinstance(item, Mapping):
+            raise LifeArtifactError("source_refs entries must be mappings with kind/ref")
+        kind = str(item.get("kind") or "").strip()
+        ref = str(item.get("ref") or item.get("id") or "").strip()
+        namespace = str(item.get("namespace") or "").strip()
+        generation = str(item.get("generation") or "").strip()
+        if not kind or not ref:
+            raise LifeArtifactError("source_refs entries require non-empty kind and ref")
+        row = {"kind": kind, "ref": ref}
+        if namespace:
+            row["namespace"] = namespace
+        if generation:
+            row["generation"] = generation
+        rows.append(row)
+    return rows
 
 
 __all__ = [

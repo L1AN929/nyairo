@@ -46,6 +46,7 @@ import autonomous_life_assembly as assembly  # noqa: E402
 import life_sharing_context as lsc  # noqa: E402
 import life_sharing_service as lss  # noqa: E402
 import one_day_life as odl  # noqa: E402
+from lifesupply.governance.authority import disclosure_scope  # noqa: E402
 
 POSIX_ONLY = unittest.skipUnless(sys.platform != "win32", "real Supply socket needs POSIX")
 
@@ -250,6 +251,18 @@ class SharingLifeChainTest(unittest.TestCase):
         self.assertEqual(lsc.read_draft(service, share_id)["head_version_id"], head_before)
 
         # 4) 声明的机会到了（脚本声明的机会，不是世界自动给的）→ 正式 Decision send_local。
+        # 本单批准的披露许可：没有精确许可，owner 现在会拒发；这条链显式发一张精确许可，
+        # 证明正常发送仍只需要一次本地投递。
+        issued = odl.supply_call(self.data["supply_socket"], {
+            "op": "issue_grant",
+            "grant": {"subject": self.data["subject_id"],
+                      "capability": "DISCLOSE_MANAGED_ARTIFACT",
+                      "scope": disclosure_scope(self.data["work_artifact_id"],
+                                                self.work_head()),
+                      "target": "local:owner",
+                      "operation_id": "op:share-chain:disclose",
+                      "use_mode": "ONE_SHOT", "max_uses": 1}})
+        self.assertEqual(issued.get("status"), "ALLOW", issued)
         third = self.turn("send_local", trigger="share:send")
         # 第 3 轮（send 之前）的 prompt 必须带着 DEFERRED 状态、草稿正文、来源版本与她的等待条件。
         block = self.cognition.reads[-1]["sharing"] or {}

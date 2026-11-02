@@ -505,9 +505,15 @@ class ReadingOperationToolTest(ReadingToolBase):
         self.assertEqual((props["page"]["minimum"], props["page"]["maximum"]), (1, 64))
         self.assertEqual(props["kind"]["enum"], ["note", "unclear"])
         self.assertEqual(props["content"]["maxLength"], 24000)
-        # The reading face is private: the schema still offers no artifact/path/authority input.
-        for forbidden in ("artifact_id", "path", "url", "authority", "understanding"):
+        # The reading face is private: the schema still offers no path/authority input, and no
+        # reading action accepts an artifact id.  ``artifact_id`` *is* a legitimate top-level
+        # input for the owner-id-only faces (work_context / work_version / album_image), so the
+        # guarantee is asserted per action instead of by a blanket "the property never exists".
+        for forbidden in ("path", "url", "authority", "understanding"):
             self.assertNotIn(forbidden, props)
+        for action in ("reading_material", "reading_import", "reading_position",
+                       "reading_annotate", "reading_operation"):
+            self.assertNotIn("artifact_id", phone_tool._FIELD_BY_ACTION[action], action)
         for action in ("reading_material", "reading_import", "reading_position",
                        "reading_annotate", "reading_operation"):
             self.assertIn(action, phone_tool.PRIVATE_ARTIFACT_ACTIONS)

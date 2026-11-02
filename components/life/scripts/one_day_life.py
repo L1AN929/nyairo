@@ -430,7 +430,22 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
     steps.append({"step": "observe_room", "status": room["status"],
                   "objects": len(room["objects"]), "reason": room.get("reason_code")})
 
+    # S03 Perception/Belief: a *new* instance gets its own claim aggregate root and an
+    # explicit binding.  Old roots have no such binding and stay exactly as they were.
+    # The store is initialised here (schema only, zero claims); prepare never invents a
+    # belief, an observation or a reported fact.
+    s03_claims_db = root / "s03" / "claims.sqlite3"
+    try:
+        from s03_claims import S03ClaimService
+        S03ClaimService.initialize(s03_claims_db, subject=subject)
+        s03_note = "initialized"
+    except Exception as exc:  # a failed binding is reported, never faked
+        s03_note = "failed:%s" % type(exc).__name__
+    steps.append({"step": "prepare_s03_claims", "status": s03_note,
+                  "db": str(s03_claims_db)})
+
     environment = {
+        "CHIYO_S03_CLAIMS_DB": str(s03_claims_db),
         "CHIYO_WORLD_HOME": str(world_home),
         "HERMES_HOME": str(world_home),
         "CHIYO_WORLD_PACKAGE": str(package_dir),
@@ -503,6 +518,7 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
         "work_artifact_id": artifact_id,
         "reading_artifact_id": reading_artifact_id,
         "private_items_artifact_id": private_items_artifact_id,
+        "s03_claims_db": str(s03_claims_db),
         "room_observation": room,
         "private_items_title": private_items_title,
         "environment": environment,
@@ -1137,7 +1153,10 @@ def reading_view(root: Path | str) -> dict[str, Any]:
 #: status view must create nothing on an instance that has not been started yet.
 CANONICAL_ACTIVITY_STATE_FILENAME = "canonical_life_state.json"
 #: The statuses that occupy the one foreground slot (``activity_continuity``'s own vocabulary).
-OPEN_ACTIVITY_STATUSES = ("ACTIVE", "PAUSED", "WAITING")
+#: BLOCKED is listed because it is a non-terminal open Activity; LR-2 itself releases the
+#: foreground when it records a BLOCK, so a live pointer to a BLOCKED record would be the
+#: anomaly this view reports, not a second kind of occupancy.
+OPEN_ACTIVITY_STATUSES = ("ACTIVE", "PAUSED", "WAITING", "BLOCKED")
 #: A bounded journal read: enough for the newest windows, never the whole life of the instance.
 JOURNAL_TAIL_BYTES = 65536
 JOURNAL_TAIL_RECORDS = 40

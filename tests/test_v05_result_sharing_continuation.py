@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -84,6 +85,7 @@ class ResultSharingContinuationTest(unittest.TestCase):
         self.assertIsInstance(self.chain.cycle.sharing_service, lss.LifeSharingService)
         self.chain.cycle.work_artifact_id = self.artifact
         self.service = self.chain.cycle.sharing_service
+        self._permit_seq = 0
 
     def _close(self) -> None:
         try:
@@ -119,6 +121,32 @@ class ResultSharingContinuationTest(unittest.TestCase):
         self.assertEqual(share.get("state"), lss.STATE_DRAFT, share)
         self.assertFalse(share.get("delivered"), share)
         return share
+
+    def issue_disclosure(self, source_id: str, version_id: str, *, why: str) -> str:
+        """Issue the exact local disclosure permit through the product's own operator CLI.
+
+        ``send_local`` is refused by name (``DISCLOSURE_GRANT_REQUIRED``) unless an active
+        permit names this exact source artifact+version and the local-owner target.  The permit
+        is not hand-forged here: it goes through ``scripts/disclosure_authority_cli.py`` against
+        the same governance socket the owner checks, and it carries no body.
+        """
+        script = ROOT / "scripts" / "disclosure_authority_cli.py"
+        operation = "test:v05-sharing:issue:%s:%d" % (why, self._permit_seq)
+        self._permit_seq += 1
+        done = subprocess.run(
+            [sys.executable, "-B", str(script), "--socket", str(self.chain.services.gov_path),
+             "issue", "--subject", str(self.chain.data["subject_id"]),
+             "--source", str(source_id), "--version", str(version_id),
+             "--operation-id", operation],
+            capture_output=True, text=True, timeout=60)
+        lines = (done.stdout or "").strip().splitlines()
+        answer = json.loads(lines[-1]) if lines else {}
+        self.assertEqual(done.returncode, 0,
+                         {"stdout": done.stdout, "stderr": done.stderr, "answer": answer})
+        self.assertEqual(answer.get("status"), "ALLOW", answer)
+        grant = str(answer.get("grant_id") or "")
+        self.assertTrue(grant, answer)
+        return grant
 
     def owner_bound_version(self, share_id: str) -> str:
         answer = self.service.read_share(share_id, include_text=False)
@@ -211,6 +239,8 @@ class ResultSharingContinuationTest(unittest.TestCase):
         self.assertEqual(counts["local_delivered"], 0)
 
         # 新 Decision send_local：恰好一条本地 receipt，外部事实全 false。
+        # 发送需要一张绑定到 d2 精确 source 版本与本地 owner 的披露许可（真实 operator CLI）。
+        self.issue_disclosure(self.artifact, v3, why="d2")
         out_send = self.round({"op": "send_local", "target": d2_id},
                               trigger="evt:share-cont:send")
         sent = out_send.get("sharing") or {}
@@ -307,6 +337,8 @@ class ResultSharingContinuationTest(unittest.TestCase):
         draft = self.prepare(D2_TEXT, "CAS 竞态用例", trigger="evt:share-cont:prepare-cas")
         share_id = str(draft["share_id"])
         head_before = str(draft["head_version_id"])
+        # 先有合法许可，让这一次真的走到草稿 CAS 检查，而不是停在缺许可那一步。
+        self.issue_disclosure(self.artifact, self.owner_bound_version(share_id), why="cas")
 
         def competing_defer(_step, *, target=share_id, head=head_before):
             other = lss.LifeSharingService(self.service.projects, clock=self.service._clock)

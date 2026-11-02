@@ -72,8 +72,12 @@ PAST_STATE_UNREADABLE = "CONTROL_LEDGER_UNREADABLE"
 PAST_STATE_WRONG_SUBJECT = "WRONG_SUBJECT"
 
 #: Read-side mirrors of the owning domains' open statuses (LR-2 / LR-4).  This module never
-#: writes them; it only asks the owners for what they already consider open.
-UNFINISHED_ACTIVITY_STATUSES = frozenset({"ACTIVE", "PAUSED", "WAITING"})
+#: writes them; it only asks the owners for what they already consider open.  BLOCKED is open
+#: (non-terminal) but a suspension, never a continuation: the next choice may resume it only
+#: through an eligibility its owner emitted, or end it through the owner's own exit.
+UNFINISHED_ACTIVITY_STATUSES = frozenset({"ACTIVE", "PAUSED", "WAITING", "BLOCKED"})
+#: A suspension whose way back is an owner eligibility, not a checkpoint continuation.
+SUSPENDED_ACTIVITY_STATUS = "BLOCKED"
 OPEN_AGENDA_STATUSES = frozenset({"SCHEDULED", "DUE"})
 
 SOURCE_OK = "OK"
@@ -83,10 +87,12 @@ SOURCE_UNREADABLE = "UNREADABLE"
 NEXT_STEP_RESUME_WAIT = "RESUME_WAITING_NEW_ELIGIBILITY"
 NEXT_STEP_HISTORY = "CONTINUE_FROM_OWNER_CONFIRMED_OBJECT"
 NEXT_STEP_CHECKPOINT = "CONTINUE_FROM_CHECKPOINT"
+NEXT_STEP_BLOCKED = "BLOCKED_AWAITING_CONDITION"
 NEXT_STEP_NO_ACTION = "NO_ACTION_NOTHING_OPEN"
 
 CHOICE_CONTINUE = "CONTINUE_UNFINISHED"
 CHOICE_RESUME = "RESUME_WAITING"
+CHOICE_BLOCKED = "BLOCKED_SUSPENDED"
 CHOICE_NO_ACTION = "NO_ACTION"
 
 #: Refusal reasons a caller can see in ``refusals``.
@@ -467,7 +473,8 @@ class LifeContinuityInputs:
 
         waiting: list[dict[str, Any]] = []
         for act in activities:
-            if str(act.get("status") or "") != "WAITING":
+            status = str(act.get("status") or "")
+            if status not in {"WAITING", SUSPENDED_ACTIVITY_STATUS}:
                 continue
             activity_ref = str(act.get("activity_id") or "")
             fresh = fresh_by_activity.get(activity_ref)
@@ -477,7 +484,7 @@ class LifeContinuityInputs:
                 "subject": str(act.get("subject_id") or self.binding.subject),
                 "home": self.binding.home,
                 "bound_at": self.binding.now,
-                "status": "WAITING",
+                "status": status,
                 "waiting_since": act.get("waiting_since"),
                 # Echoed as the owner wrote them.  This read has no waiting-ref vocabulary of
                 # its own and never re-classifies a reference (LR-4 owns that schema).
@@ -506,7 +513,9 @@ class LifeContinuityInputs:
         items: list[dict[str, Any]] = []
         for act in activities:
             activity_ref = str(act.get("activity_id") or "")
+            status = str(act.get("status") or "")
             fresh = fresh_by_activity.get(activity_ref)
+            suspended = status == SUSPENDED_ACTIVITY_STATUS
             items.append({
                 "kind": "ACTIVITY",
                 "owner": OWNER_ACTIVITY,
@@ -514,7 +523,7 @@ class LifeContinuityInputs:
                 "subject": str(act.get("subject_id") or self.binding.subject),
                 "home": self.binding.home,
                 "bound_at": self.binding.now,
-                "status": str(act.get("status") or ""),
+                "status": status,
                 "title": act.get("title"),
                 "activity_kind": act.get("activity_kind"),
                 "revision": act.get("revision"),
@@ -522,7 +531,12 @@ class LifeContinuityInputs:
                 "checkpoint_ref": act.get("checkpoint_ref"),
                 "waiting_on_ref": act.get("waiting_on_ref"),
                 "resume_condition_ref": act.get("resume_condition_ref"),
-                "resumable": bool(str(act.get("status") or "") == "WAITING" and fresh),
+                # A suspension is visible as unfinished, but it is never a continuation and its
+                # only way back is an owner-issued eligibility.
+                "blocked_on_ref": act.get("blocked_on_ref"),
+                "blocked_reason_code": act.get("blocked_reason_code"),
+                "continue_allowed": not suspended,
+                "resumable": bool(status in {"WAITING", SUSPENDED_ACTIVITY_STATUS} and fresh),
                 "resume_eligibility_ref": (str(fresh.get("eligibility_id") or "")
                                            if fresh else None),
                 "continue_from_ref": None,
@@ -562,7 +576,8 @@ class LifeContinuityInputs:
         confirmed no object (a refusal/CONFLICT, say) is not a continuation point.
         """
         open_activity_refs = {str(item["item_ref"]) for item in unfinished
-                              if item.get("kind") == "ACTIVITY"}
+                              if item.get("kind") == "ACTIVITY"
+                              and item.get("continue_allowed", True)}
         best: Optional[dict[str, Any]] = None
         for row in past:
             if str(row.get("activity_ref") or "") not in open_activity_refs:
@@ -582,18 +597,31 @@ class LifeContinuityInputs:
         choices: list[dict[str, Any]] = []
         for item in unfinished:
             resumable = bool(item.get("resumable"))
+            suspended = not bool(item.get("continue_allowed", True))
             evidence = [item["item_ref"]]
             reason = "OPEN_ITEM_CAN_CONTINUE"
             if resumable:
                 reason = "WAIT_HAS_NEW_ELIGIBILITY"
                 evidence.append(str(item.get("resume_eligibility_ref") or ""))
+            elif suspended:
+                # Visible, but not a continuation: only the owner's own eligibility may bring
+                # it back, and without one there is no RESUME to offer either.
+                reason = "BLOCKED_REQUIRES_CONDITION"
+                if item.get("blocked_on_ref"):
+                    evidence.append(str(item["blocked_on_ref"]))
             if history is not None and str(item["item_ref"]) == str(
                     history.get("activity_ref") or ""):
                 reason = "ADMITTED_CONSEQUENCE_FOR_THIS_ITEM"
                 evidence.append(str(history.get("source_ref") or ""))
+            if resumable:
+                kind = CHOICE_RESUME
+            elif suspended:
+                kind = CHOICE_BLOCKED
+            else:
+                kind = CHOICE_CONTINUE
             choices.append({
                 "choice_id": f"cont:{item['item_ref']}",
-                "kind": CHOICE_RESUME if resumable else CHOICE_CONTINUE,
+                "kind": kind,
                 "owner": item.get("owner"),
                 "subject_ref": item["item_ref"],
                 "activity_ref": item.get("activity_ref") or (
@@ -674,7 +702,8 @@ class LifeContinuityInputs:
             }
 
         # 3. no admitted consequence for an open item: fall back to its own checkpoint.
-        activities = [item for item in unfinished if item.get("kind") == "ACTIVITY"]
+        activities = [item for item in unfinished if item.get("kind") == "ACTIVITY"
+                      and item.get("continue_allowed", True)]
         if activities:
             chosen = sorted(activities, key=lambda i: str(i.get("updated_at") or ""))[-1]
             chosen["continue_from_ref"] = chosen.get("checkpoint_ref")
@@ -687,6 +716,28 @@ class LifeContinuityInputs:
                 "object_ref": chosen.get("checkpoint_ref"),
                 "continue_from_ref": chosen.get("checkpoint_ref"),
                 "evidence_refs": [chosen["item_ref"]],
+                "subject": self.binding.subject,
+                "home": self.binding.home,
+                "bound_at": self.binding.now,
+                "authority": None,
+                "requires_model_call": False,
+            }
+
+        # 3b. only a suspension is left: say so by name.  This is neither "nothing open" nor a
+        # checkpoint continuation -- it waits for the condition its own owner recorded.
+        suspended = [item for item in unfinished if item.get("kind") == "ACTIVITY"
+                     and not item.get("continue_allowed", True)]
+        if suspended:
+            chosen = sorted(suspended, key=lambda i: str(i.get("updated_at") or ""))[-1]
+            return {
+                "kind": NEXT_STEP_BLOCKED,
+                "reason_code": NEXT_STEP_BLOCKED,
+                "item_ref": chosen["item_ref"],
+                "activity_ref": chosen["item_ref"],
+                "object_ref": chosen.get("blocked_on_ref"),
+                "continue_from_ref": None,
+                "evidence_refs": [ref for ref in
+                                  (chosen["item_ref"], chosen.get("blocked_on_ref")) if ref],
                 "subject": self.binding.subject,
                 "home": self.binding.home,
                 "bound_at": self.binding.now,
@@ -750,6 +801,7 @@ class LifeContinuityInputs:
 
 
 __all__ = [
+    "CHOICE_BLOCKED",
     "CHOICE_CONTINUE",
     "CHOICE_NO_ACTION",
     "CHOICE_RESUME",
@@ -759,10 +811,12 @@ __all__ = [
     "ContinuityInputsError",
     "ContinuityRefused",
     "LifeContinuityInputs",
+    "NEXT_STEP_BLOCKED",
     "NEXT_STEP_CHECKPOINT",
     "NEXT_STEP_HISTORY",
     "NEXT_STEP_NO_ACTION",
     "NEXT_STEP_RESUME_WAIT",
+    "SUSPENDED_ACTIVITY_STATUS",
     "PAST_STATE_NOT_WIRED",
     "PAST_STATE_NO_HISTORY",
     "PAST_STATE_OK",

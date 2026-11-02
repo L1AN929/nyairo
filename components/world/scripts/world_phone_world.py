@@ -1468,6 +1468,15 @@ class PhoneWorld:
                 return None, "INVALID_PARAMS"
             normalized["object_id"] = object_id
             normalized["state"] = state.lower()
+        elif action == "TOILET":
+            # One declared facility id, forwarded as-is: whether it exists, sits
+            # at the current place and is open is the World owner's verdict.  No
+            # case folding, no prefixing -- only the bounded text the Resolver
+            # itself requires.
+            facility_id = _bounded(params.get("facility_id"))
+            if facility_id is None:
+                return None, "INVALID_PARAMS"
+            normalized["facility_id"] = facility_id
         return normalized, None
 
     def _frame(self, execution_id: str) -> dict[str, Any]:

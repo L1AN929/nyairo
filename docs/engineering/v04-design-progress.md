@@ -1,5 +1,7 @@
 # NyAiro 0.4：对照总体设计的实际进度
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 ## 基准与读法
 
 设计标准为 `D:\CHIYO-总体设计-v2.0-final\CHIYO-总体设计-v2-最终版`（此前来源ZIP同名），软件仍在开发 **0.4**；设计2.0不等于软件2.0。唯一开发树 `D:\nyairo-rc1-body-backend`，分支 `work/rc1-phone-world-body`，底座 `41e818faaa24115fbf43db2977b15585c04144af`。0.4改动为本地未提交开发，不代表发布或完整生产验收。
@@ -50,7 +52,7 @@
 
 ## 历史运行与发布边界（最新结果见文末连续生活阶段）
 
-当前原实例模型已按用户选择切为 `gemini-3.8-flash-high`，URL仍 `https://gw.929711.xyz/v1`，私有model_env保持0600且已备份。Gemini真实Life新增1请求，合法NO_ACTION，原run账本2→3；DeepSeek此前的INVALID_JSON/OUTPUT_TRUNCATED保留为历史，不再列为当前模型阻塞。最终补线后一次tick为QUIET/0新请求，不能说真实模型已自主使用新功能。Memory仍UNBOUND可选降级。
+当前原实例模型已按用户选择切为 `gemini-3.8-flash-high`，URL仍 `https://gw.example.invalid/v1`，私有model_env保持0600且已备份。Gemini真实Life新增1请求，合法NO_ACTION，原run账本2→3；DeepSeek此前的INVALID_JSON/OUTPUT_TRUNCATED保留为历史，不再列为当前模型阻塞。最终补线后一次tick为QUIET/0新请求，不能说真实模型已自主使用新功能。Memory仍UNBOUND可选降级。
 
 本轮允许较大批本地开发；不自动提交/push/tag/打包/改官网/部署。现有钱包2860虚拟JPY、四购买、房间物件、作品、材料/PDI与Activity历史均保留。必要新功能用隔离夹具及有限真实owner链验证，不用旧备份回滚已发生历史。
 

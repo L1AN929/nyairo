@@ -215,6 +215,8 @@ function makeStubDom() {
     clearInterval: () => {},
     AbortController,
     sessionStorage: {getItem: () => null, setItem() {}, removeItem() {}},
+    /* window 级监听：真实浏览器 window 有 addEventListener('blur')；stub DOM 只建模 document。 */
+    addEventListener() {},
     fetch: async (url, init) => {
       const method = (init && init.method) || 'GET';
       const path = String(url).replace('/api/phone', '');

@@ -251,10 +251,14 @@ class RealSecurityDomainTest(unittest.TestCase):
 
     def test_real_expiry_still_refuses_after_logical_advance(self):
         root = _root()
-        dbc.create_clock(root, run_id="r1", rate=24.0, wall=lambda: WALL)
+        # The logical clock must be able to cross a *real* +1h expiry inside one 24x day,
+        # so anchor the injected wall clock near real now (the fixed WALL constant is days
+        # behind wall time and could never overtake it).
+        wall = dbc.real_now() - timedelta(hours=2)
+        dbc.create_clock(root, run_id="r1", rate=24.0, wall=lambda: wall)
         mono = _Mono()
         authority = dbc.BusinessClockAuthority(
-            root, run_id="r1", rate=24.0, monotonic=mono, wall=lambda: WALL, pid=778)
+            root, run_id="r1", rate=24.0, monotonic=mono, wall=lambda: wall, pid=778)
         authority.acquire()
         # 真实域里 1 小时有效的 grant；业务时钟快进一天不能把它续命。
         grant_expires = dbc.real_now() + timedelta(seconds=3600)

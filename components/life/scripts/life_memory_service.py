@@ -164,8 +164,12 @@ class LifeMemoryService:
         authority_database: Optional[str] = None,
         bind_error: Optional[str] = None,
         source: str = "explicit",
+        forget_gate: Any = None,
     ) -> None:
         self.port = port
+        #: Optional F-153/F-154 gate.  ``None`` keeps the legacy read path; a configured but
+        #: unhealthy gate blocks the whole binding instead of being silently skipped.
+        self.forget_gate = forget_gate
         self.owner = str(owner) if owner else (
             str(getattr(port, "subject", "") or "") or None)
         self.database = str(database) if database else (
@@ -209,6 +213,23 @@ class LifeMemoryService:
             "governance_healthy": None,
             "controls": None,
         }
+        if self.forget_gate is not None:
+            try:
+                gate_state = dict(self.forget_gate.state())
+            except Exception as exc:
+                data.update({"binding_status": STATUS_BLOCKED,
+                             "reason": "FORGET_GATE_PROBE_FAILED"})
+                return {"status": STATUS_BLOCKED, "reason": "FORGET_GATE_PROBE_FAILED",
+                        "detail": "%s: %s" % (type(exc).__name__, exc), "data": data}
+            if not gate_state.get("healthy"):
+                data.update({"binding_status": STATUS_BLOCKED,
+                             "forget_gate": "BLOCKED",
+                             "reason": str(gate_state.get("reason") or "FORGET_GATE_UNHEALTHY")})
+                return {"status": STATUS_BLOCKED,
+                        "reason": str(gate_state.get("reason") or "FORGET_GATE_UNHEALTHY"),
+                        "detail": gate_state.get("detail"), "data": data}
+            data["forget_gate"] = "HEALTHY"
+            data["forget_authority_seq"] = gate_state.get("authority_seq")
         if self.port is None:
             if self.bind_error:
                 data.update({"binding_status": STATUS_UNAVAILABLE, "reason": "MEMORY_BINDING_UNRESOLVED"})
@@ -267,6 +288,8 @@ class LifeMemoryService:
             records = self.port.search(query=query, limit=int(limit), since=since)
         except Exception as exc:
             return self._read_failure(data, exc)
+        if self.forget_gate is not None:
+            records = self.forget_gate.filter_records(records)
         rows = []
         for record in records:
             item = self._row(record, LIST_MAX_CHARS)
@@ -296,6 +319,11 @@ class LifeMemoryService:
                 STATUS_NOT_FOUND, data, "MEMORY_EXPERIENCE_NOT_RECALLABLE",
                 "no recallable experience with this id for this owner: absent, another owner's, "
                 "corrected away or deleted")
+        if self.forget_gate is not None and self.forget_gate.blocks_record(record):
+            return self._envelope(
+                STATUS_NOT_FOUND, data, "MEMORY_EXPERIENCE_NOT_RECALLABLE",
+                "no recallable experience with this id for this owner: absent, another owner's, "
+                "corrected away or deleted")
         data["experience"] = self._row(record, LIST_MAX_CHARS)
         return self._envelope(STATUS_READY, data)
 
@@ -312,6 +340,8 @@ class LifeMemoryService:
             records = self.port.search(query=query, limit=int(limit))
         except Exception as exc:
             return self._read_failure(data, exc)
+        if self.forget_gate is not None:
+            records = self.forget_gate.filter_records(records)
         rows = []
         for record in records:
             item = self._row(record, CONTEXT_MAX_CHARS)
@@ -368,6 +398,16 @@ def memory_service_from_env(environment: Optional[Mapping[str, str]] = None) -> 
 
     env = {str(key): str(value) for key, value in dict(environment or {}).items()
            if value is not None and str(value).strip()}
+    gate = None
+    gate_error = None
+    if any(str(env.get(name) or "").strip() for name in
+           ("NYA02_FORGET_CASE_DB", "CHIYO_LIFE_FORGET_CASE_DB")):
+        try:
+            from forget_request import gate_from_env
+
+            gate = gate_from_env(env)
+        except Exception as exc:  # a configured gate that cannot be built blocks the binding
+            gate_error = "%s: %s" % (type(exc).__name__, exc)
     names = memory_env_names()
     database, _database_env = _first_bound(env, names["database"])
     controls, _controls_env = _first_bound(env, names["controls"])
@@ -376,26 +416,69 @@ def memory_service_from_env(environment: Optional[Mapping[str, str]] = None) -> 
     owner, _owner_env = _first_bound(env, names["owner"])
     if not database:
         return LifeMemoryService(None, owner=None, database=None, controls_database=None,
-                                 authority_database=None, source="env")
+                                 authority_database=None, source="env", forget_gate=gate)
     owner = owner or MEMORY_DEFAULT_OWNER
     try:
         minimum = int(authority_min_seq) if authority_min_seq else None
     except ValueError:  # an unreadable handoff is "cannot confirm", never zero
         minimum = None
+    # A recovered copy is not readable just because its files exist: it must carry an activation
+    # marker written by the retained sweep for *this* owner and still-current authority head.
+    recovery_gate = None
+    if any(str(env.get(name) or "").strip() for name in
+           ("NYA02_F154_RECOVERY_DIR", "CHIYO_F154_RECOVERY_DIR")):
+        try:
+            from forget_request import RecoveryGate
+
+            module_for_recovery = _port_module()
+            conversation = module_for_recovery.life_conversation_id(owner)
+            recovery_gate = RecoveryGate.from_env(
+                env, owner=owner, conversation=conversation,
+                authority_db=authority or None, minimum_seq=minimum)
+            state = recovery_gate.state()
+            if state.get("status") != "OPEN":
+                return LifeMemoryService(
+                    None, owner=owner, database=database,
+                    controls_database=controls or database,
+                    authority_database=authority or None,
+                    bind_error="%s: %s" % (state.get("reason") or "RECOVERY_NOT_ACTIVATED",
+                                           state.get("detail") or ""),
+                    source="env", forget_gate=gate)
+            # The marker must name *these* files: an activation of another copy cannot be
+            # reused by pointing this instance at a different evidence/controls database.
+            recovery_gate.verify_copy(evidence=database, controls=controls or database)
+            recovery_gate.ensure("memory_service")
+        except Exception as exc:
+            return LifeMemoryService(
+                None, owner=owner, database=database,
+                controls_database=controls or database,
+                authority_database=authority or None,
+                bind_error="RECOVERY_GATE_UNAVAILABLE: %s: %s"
+                           % (type(exc).__name__, exc),
+                source="env", forget_gate=gate)
     try:
         module = _port_module()
+        # The port reads/admits through the same gate this service reports: one gate object,
+        # built from the instance's own environment, never a second hand-built copy.
         port = module.LifeExperiencePort(database, controls_db=controls or None,
                                          subject=owner, authority_db=authority or "",
-                                         authority_min_seq=minimum)
+                                         authority_min_seq=minimum, forget_gate=gate,
+                                         recovery_gate=recovery_gate)
     except Exception as exc:
         return LifeMemoryService(None, owner=owner, database=database,
                                  controls_database=controls or database,
                                  authority_database=authority or None,
                                  bind_error="%s: %s" % (type(exc).__name__, exc),
-                                 source="env")
+                                 source="env", forget_gate=gate)
+    if gate_error:
+        return LifeMemoryService(None, owner=owner, database=database,
+                                 controls_database=controls or database,
+                                 authority_database=authority or None,
+                                 bind_error=gate_error, source="env", forget_gate=gate)
     return LifeMemoryService(port, owner=owner, database=database,
                              controls_database=controls or database,
-                             authority_database=authority or None, source="env")
+                             authority_database=authority or None, source="env",
+                             forget_gate=gate)
 
 
 __all__ = [

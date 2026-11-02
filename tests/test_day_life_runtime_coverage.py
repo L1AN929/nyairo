@@ -387,7 +387,10 @@ class ResidentRecordTest(unittest.TestCase):
 
     def test_an_acted_wake_without_an_owner_receipt_is_not_a_confirmed_version(self):
         loop = _resident(_state_root(), FakeClock())
-        bare = {"kind": "CHECK_WINDOW", "status": "ACTED", "status_class": resident.CLASS_ACTED,
+        # A real ``WakeRecord.to_dict()`` always carries ``at``; only a synthetic tick dict
+        # lacks it (and is not counted as a wake at all).
+        bare = {"at": "2026-10-24T08:00:00+00:00",
+                "kind": "CHECK_WINDOW", "status": "ACTED", "status_class": resident.CLASS_ACTED,
                 "outcome": "ACTED", "extra": {"budget": {"state": "OK"}}}
 
         loop._count(bare)

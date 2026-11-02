@@ -319,6 +319,28 @@ def _raise_translation_unavailable(detail: str) -> None:
     raise CameraRefused("CAMERA_TRANSLATION_UNAVAILABLE", detail)
 
 
+def _dedupe_exact_tags(text: str) -> str:
+    """Collapse *exactly identical* comma-separated tags, keeping first-occurrence order.
+
+    The local converter can emit the same tag many times in one line.  Repeating a tag adds no
+    meaning to the picture, so the duplicate copies are dropped -- nothing new is generated,
+    translated or reordered, and tags that differ at all (a different count, colour, weight or
+    wording) are kept untouched.  This runs only on an answer that already passed every other
+    check (length, truncation, language, chattiness), so it can never turn an over-limit or cut
+    answer into an accepted one.
+    """
+
+    seen: set[str] = set()
+    kept: list[str] = []
+    for raw_tag in text.split(","):
+        tag = raw_tag.strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        kept.append(tag)
+    return ", ".join(kept)
+
+
 def _clean_english_prompt(value: Any) -> str:
     """Accept only a short, non-empty, English tag line; anything else is a named refusal.
 
@@ -357,7 +379,8 @@ def _clean_english_prompt(value: Any) -> str:
                "as an ai", "unable to", "cannot help")
     if any(marker in lowered for marker in refusal):
         _raise_translation_unavailable("translator_refused")
-    return text
+    # Last step only: an accepted, untruncated, in-budget answer loses its exact duplicates.
+    return _dedupe_exact_tags(text)
 
 
 class SceneTranslator:

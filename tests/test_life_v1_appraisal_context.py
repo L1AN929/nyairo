@@ -28,7 +28,7 @@ for entry in (str(ROOT), str(ROOT / "components"),
 
 import one_day_life as odl  # noqa: E402
 import short_appraisal_view as sav  # noqa: E402
-from test_life_v1_integration import DScenarioBase  # noqa: E402
+from test_life_v1_integration import DScenarioBase, NoMaterialOwner  # noqa: E402
 from test_one_day_life import StubCognition, posix_only  # noqa: E402
 
 NOW = "2026-10-16T07:00:00+00:00"
@@ -116,13 +116,15 @@ class AppraisalContextTest(DScenarioBase):
 
     # -- 2. corrected / expired / lost-source appraisals are not consumed ---------------
 
-    def test_a_correction_or_expiry_keeps_the_appraisal_out_of_the_context(self):
+    # Each refusal below runs in its own test method, so the bounded "this exact state was
+    # already considered" ledger (and the instance root) is fresh for that wake: no ledger
+    # file is deleted and no silence is released to force a second round.  The control that
+    # the same appraisal *is* consumed while it holds is
+    # ``test_a_valid_sourced_appraisal_reaches_the_decision_context`` above.
+
+    def test_a_correction_keeps_the_appraisal_out_of_the_context(self):
         fixture = self._cycle()
         runtime, cycle, cognition = fixture.runtime, fixture.cycle, fixture.cognition
-        # control: the same appraisal *is* consumed while it holds
-        cycle.appraisal_source = lambda: self._view(runtime)
-        first = cycle.evaluate_once(trigger_ref="evt:a:control", act=True)
-        self.assertEqual(len(self._appraisal_items(cognition.requests[-1])), 1, first)
         # a valid correction targeting it (with its own source) leaves nothing to consume
         cycle.appraisal_source = lambda: self._view(
             runtime, corrections=[{"correction_ref": "correction:c1",
@@ -134,7 +136,11 @@ class AppraisalContextTest(DScenarioBase):
                          sav.REASON_APPRAISAL_CORRECTED, corrected["appraisal"])
         self.assertEqual(self._appraisal_items(cognition.requests[-1]), [],
                          cognition.requests[-1].prior_experiences)
-        # ... and so does a passed valid_until, decided against the injected reference instant
+
+    def test_an_expired_appraisal_keeps_the_appraisal_out_of_the_context(self):
+        fixture = self._cycle()
+        runtime, cycle, cognition = fixture.runtime, fixture.cycle, fixture.cognition
+        # a passed valid_until, decided against the injected reference instant, is not consumed
         cycle.appraisal_source = lambda: self._view(runtime, now=VALID_UNTIL)
         expired = cycle.evaluate_once(trigger_ref="evt:a:expired", act=True)
         self.assertFalse(expired["appraisal"]["has_valid_appraisal"], expired["appraisal"])
@@ -142,7 +148,11 @@ class AppraisalContextTest(DScenarioBase):
                          sav.REASON_APPRAISAL_EXPIRED, expired["appraisal"])
         self.assertEqual(self._appraisal_items(cognition.requests[-1]), [],
                          cognition.requests[-1].prior_experiences)
-        # ... and a lost source too (the projection, not the cycle, decides this)
+
+    def test_a_lost_source_keeps_the_appraisal_out_of_the_context(self):
+        fixture = self._cycle()
+        runtime, cycle, cognition = fixture.runtime, fixture.cycle, fixture.cognition
+        # a lost source is decided by the projection, not the cycle, and is not consumed
         cycle.appraisal_source = lambda: self._view(
             runtime, lost=["world:observation:1"])
         lost = cycle.evaluate_once(trigger_ref="evt:a:lost", act=True)
@@ -166,12 +176,21 @@ class AppraisalContextTest(DScenarioBase):
                          empty_view)
         # a quiet window stays quiet: an empty appraisal never creates a round or a call
         saved_port, cycle.artifact_port = cycle.artifact_port, None
+        source = cycle.artifact_source
+        saved_source = (source.port, source.reading_artifact_id) if source is not None else None
+        if source is not None:
+            # Registry-held source captured the real port; an empty owner is the honest
+            # "no material" fixture for this arm.
+            source.port = NoMaterialOwner()
+            source.reading_artifact_id = None
         cycle.world_opportunity_provider = lambda: []
         quiet = cycle.evaluate_once(trigger_ref="evt:a:quiet", act=False)
         self.assertEqual(quiet["outcome"], "NO_MATERIAL", quiet)
         self.assertEqual(quiet["llm_calls"], 0, quiet)
         self.assertEqual(cognition.call_count, 0, cognition.call_count)
         cycle.artifact_port = saved_port
+        if source is not None:
+            source.port, source.reading_artifact_id = saved_source
         # with a valid one, the projection still cannot mint a Candidate or a permission
         cycle.appraisal_source = lambda: self._view(runtime)
         items = cycle.appraisal_context()

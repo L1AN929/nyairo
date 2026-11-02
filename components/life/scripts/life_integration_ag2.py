@@ -71,9 +71,11 @@ from activity_continuity import (
     OPEN_ACTIVITY_STATUSES,
     STATUS_ABANDONED,
     STATUS_ACTIVE,
+    STATUS_BLOCKED,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_EXPIRED,
+    STATUS_FAILED,
     STATUS_PAUSED,
     STATUS_WAITING,
     TERMINAL_ACTIVITY_STATUSES,
@@ -471,13 +473,24 @@ ASYNC_COMPLETION_MODE_ELIGIBILITY_FIRST = "RESUME_ELIGIBILITY_ON_SETTLEMENT"
 # Experience Handoff milestone kinds (Section 107)
 HANDOFF_KIND_COMPLETED = "COMPLETED"
 HANDOFF_KIND_ABANDONED = "ABANDONED"
+#: 2026-10-28: a FAILED Activity is a terminal fact of its own kind.  One handoff, the same
+#: exactly-once identity as COMPLETED/ABANDONED, the real assessment/evidence refs, and no
+#: success wording.  BLOCKED deliberately has no kind: it is non-terminal and must not grow
+#: one experience per tick.
+HANDOFF_KIND_FAILED = "FAILED"
 HANDOFF_KIND_SIGNIFICANT_PROGRESS = "SIGNIFICANT_PROGRESS"
 HANDOFF_KIND_CONFLICT = "CONFLICT"
+#: 2026-10-28 external stop: the Activity ended because the local operator stopped it.  It is
+#: its own kind so nothing downstream (Memory, phone, today) can read this as her abandoning
+#: the work, and it keeps the same exactly-once identity as the other terminals.
+HANDOFF_KIND_CANCELLED = "CANCELLED"
 
 VALID_HANDOFF_KINDS = frozenset(
     {
         HANDOFF_KIND_COMPLETED,
         HANDOFF_KIND_ABANDONED,
+        HANDOFF_KIND_FAILED,
+        HANDOFF_KIND_CANCELLED,
         HANDOFF_KIND_SIGNIFICANT_PROGRESS,
         HANDOFF_KIND_CONFLICT,
     }
@@ -652,6 +665,23 @@ class ForegroundHandoffStranded(AdoptionIllegalError):
         super().__init__("joint start failed after the foreground handoff: %s" % cause)
         self.handoff = dict(handoff or {})
         self.cause = str(cause)
+
+
+class ActivityExternalStopPending(LifeIntegrationError):
+    """A durable local-operator stop intent already owns this Activity.
+
+    Raised at the *production* step/submit gates so a prepared step cannot slip past a stop
+    that was accepted a moment earlier.  Nothing was sent: the caller gets the Activity and
+    the intent so the round can report ``STEP_REFUSED`` honestly instead of an UNKNOWN.
+    """
+
+    def __init__(self, *, activity_id: str, intent_id: str, stage: str) -> None:
+        super().__init__(
+            "external stop intent %r is pending for activity %r at %s"
+            % (intent_id, activity_id, stage))
+        self.activity_id = str(activity_id)
+        self.intent_id = str(intent_id)
+        self.stage = str(stage)
 
 
 class PlannerInventionForbiddenError(LifeIntegrationError):
@@ -2512,12 +2542,18 @@ class IntegrationStore:
             "store_revision": next_rev,
             "journal_entry": signed_entry,
         }
+        # Durability follows the namespace, mirroring the LR-2 store's own rule
+        # (``activity_continuity``: ``do_fsync = fault_hook is not None or namespace != isolated``).
+        # Production namespaces are always durable; the isolated test namespace keeps the fast
+        # deferred-snapshot path unless a fault hook explicitly demands a full sync.  Gating on
+        # the fault hook alone made the durable path test-only and left production unsynced.
+        do_fsync = fault_hook is not None or self.namespace != NAMESPACE_ISOLATED_TEST
         self.store_root.mkdir(parents=True, exist_ok=True)
         wal_tmp = self.store_root / f".{self.WAL_FILENAME}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
         with wal_tmp.open("w", encoding="utf-8") as wh:
             wh.write(canonical_json_line(wal_doc) + "\n")
             wh.flush()
-            if fault_hook is not None:
+            if do_fsync:
                 os.fsync(wh.fileno())
         os.replace(wal_tmp, self.wal_path)
 
@@ -2525,10 +2561,10 @@ class IntegrationStore:
         with self.journal_path.open("a", encoding="utf-8") as jh:
             jh.write(j_line)
             jh.flush()
-            if fault_hook is not None:
+            if do_fsync:
                 os.fsync(jh.fileno())
 
-        if fault_hook is not None:
+        if do_fsync:
             self._write_snapshot_sync(next_state)
             self.wal_path.unlink(missing_ok=True)
             _fsync_dir(self.store_root)
@@ -3963,6 +3999,10 @@ class DecisionAdoptionCoordinator:
             # through: "no unresolved side effect / commitment binding" cannot be proven from an
             # existing owner fact, so nothing is deleted or reinterpreted to make it look safe.
             target_record = (act_state.get("activities") or {}).get(target_id) or {}
+            # 2026-10-28: BLOCKED is not PAUSED.  It is a suspension the owner recorded from a
+            # named basis and already released the foreground slot; a later Decision may still
+            # end it (ABANDON), which is the legal exit that keeps BLOCKED from deadlocking.
+            # Nothing is deleted or reinterpreted; LR-2 allows the terminal from BLOCKED.
             if str(target_record.get("status") or "") == STATUS_PAUSED:
                 raise AdoptionIllegalError(
                     "PAUSED_ABANDON_WITHHELD_UNPROVEN_SAFE: refusing to abandon a PAUSED "
@@ -4309,6 +4349,30 @@ class DecisionActionBridge:
             "action": action_dict,
         }
 
+    def require_no_pending_external_stop(self, activity_id: str, *, stage: str) -> None:
+        """The live owner record is the only source of truth for a pending stop.
+
+        Called twice on the real path: before a step is even proposed, and again immediately
+        before the prepared Action crosses submission.  A stale in-memory plan is never a
+        permission to dispatch after the owner accepted a stop.
+        """
+
+        act = self.activity_read.get_activity(str(activity_id))
+        if act is None:
+            raise LifeIntegrationError(
+                "activity_id=%r not found at the external-stop gate" % activity_id)
+        if str(act.get("status") or "") in TERMINAL_ACTIVITY_STATUSES:
+            raise LifeIntegrationError(
+                "activity %r is already terminal (%s); no step may be dispatched"
+                % (activity_id, act.get("status")))
+        stop = act.get("external_stop") or {}
+        if isinstance(stop, Mapping) and stop.get("state") == "PENDING":
+            raise ActivityExternalStopPending(
+                activity_id=str(activity_id),
+                intent_id=str(stop.get("intent_id") or ""),
+                stage=stage,
+            )
+
     def submit_step_action_and_apply_post_submit_behavior(
         self,
         *,
@@ -4320,6 +4384,10 @@ class DecisionActionBridge:
         fault_hook: Optional[Callable[[str], None]] = None,
     ) -> dict[str, Any]:
         """Submit the prepared Action through AR-0 and apply `post_submit_life_behavior` (Sections 77-88)."""
+        # 2026-10-28: the real submit gate.  A durable stop accepted while this step was being
+        # prepared is re-read here, immediately before any external effect.
+        self.require_no_pending_external_stop(
+            step_spec.activity_ref, stage="before_submit")
         occ_iso = _require_iso(occurred_at or _iso(now()), "occurred_at")
         sub_res = self.action_command.submit_action(
             action_id=action_id,
@@ -4883,7 +4951,10 @@ class LifeIntegrationCoordinator:
             )
 
         # Exactly-once handoff ID per (activity_id, terminal_or_milestone_kind, activity_revision or COMPLETED)
-        if terminal_or_milestone_kind in {HANDOFF_KIND_COMPLETED, HANDOFF_KIND_ABANDONED}:
+        if terminal_or_milestone_kind in {
+            HANDOFF_KIND_COMPLETED, HANDOFF_KIND_ABANDONED, HANDOFF_KIND_FAILED,
+            HANDOFF_KIND_CANCELLED,
+        }:
             idem_seed = f"{activity_id}:{terminal_or_milestone_kind}"
             handoff_id = f"lexp:{sha256_hex(idem_seed)[:16]}"
         elif result_ref is not None:
@@ -4942,10 +5013,24 @@ class LifeIntegrationCoordinator:
         set_refs = list(int_dict.get("settlement_refs") or [])
         prog_refs = list(int_dict.get("progress_refs") or [])
         comp_ev_ref = act.get("completion_evidence_ref") or int_dict.get("completion_ref")
+        if terminal_or_milestone_kind == HANDOFF_KIND_FAILED:
+            # A failure is not a completion: never carry a completion ref into it.  The real
+            # owner assessment and its re-readable evidence ride along as facts, and every
+            # still-unresolved Action stays named -- the handoff records what really happened,
+            # it does not invent a success or erase an UNKNOWN.
+            comp_ev_ref = None
 
         resolved_facts = list(fact_refs or [])
         resolved_artifacts = list(artifact_refs or [])
         resolved_worlds = list(world_refs or [])
+        if terminal_or_milestone_kind == HANDOFF_KIND_FAILED:
+            for ref in (
+                act.get("failure_assessment_ref"),
+                *(act.get("failure_evidence_refs") or []),
+                *(act.get("unresolved_action_refs") or []),
+            ):
+                if isinstance(ref, str) and ref and ref not in resolved_facts:
+                    resolved_facts.append(ref)
 
         for sref in set_refs:
             s_rec = self.settlement_read.get_settlement_by_id(sref)
@@ -5465,6 +5550,10 @@ class LifeIntegrationCoordinator:
         fault_hook: Optional[Callable[[str], None]] = None,
     ) -> dict[str, Any]:
         """Execute one `ExecutableStepSpec` for an active Activity through `AR-0 -> AR-1 -> LR-5 -> ExperienceHandoff`."""
+        # 2026-10-28: refuse before a step object is even created.  The same check runs again
+        # at the submit fence below; this one keeps a stopped Activity from growing a proposal.
+        self.action_bridge.require_no_pending_external_stop(
+            activity_id, stage="before_step_proposal")
         int_state = self.integration_commit.read_state(mutable=True)
         int_rec = LifeIntegrationRecord.from_dict(int_state["integrations_by_id"][integration_id])
         occ_iso = _require_iso(occurred_at or _iso(now()), "occurred_at")
@@ -6213,6 +6302,26 @@ class LifeIntegrationCoordinator:
                             self.integration_commit.read_state(mutable=True)["integrations_by_id"][integration_id]
                         )
                         mutated = True
+                elif live_act["status"] == STATUS_FAILED:
+                    # 2026-10-28: the Activity's pursuit ended by an assessed failure.  The
+                    # integration closes with its own kind; one handoff carries the real
+                    # assessment/evidence refs.  No completion ref is written.
+                    if int_rec.status != INTEGRATION_STATUS_COMPLETED:
+                        int_rec.status = INTEGRATION_STATUS_COMPLETED
+                        int_rec.partial_stage = None
+                        int_rec.completion_ref = None
+                        mutated = True
+                    if not int_rec.experience_handoff_refs:
+                        self.emit_experience_handoff(
+                            integration_id=integration_id,
+                            activity_id=int_rec.activity_ref,
+                            terminal_or_milestone_kind=HANDOFF_KIND_FAILED,
+                            occurred_at=now_iso,
+                        )
+                        int_rec = LifeIntegrationRecord.from_dict(
+                            self.integration_commit.read_state(mutable=True)["integrations_by_id"][integration_id]
+                        )
+                        mutated = True
 
         if mutated:
             int_rec.revision += 1
@@ -6837,6 +6946,8 @@ __all__ = [
     "POST_SUBMIT_ENTER_WAITING",
     "POST_SUBMIT_KEEP_ACTIVE",
     "POST_SUBMIT_NO_LIFE_CHANGE",
+    "ActivityExternalStopPending",
+    "HANDOFF_KIND_CANCELLED",
     "PlannerInventionForbiddenError",
     "ReplayIsolationViolationError",
     "RepairProposal",

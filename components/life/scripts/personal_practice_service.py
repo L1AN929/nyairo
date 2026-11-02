@@ -1225,13 +1225,30 @@ class PersonalPracticeService:
 
     # -- 内部：写 ------------------------------------------------------------------------
 
+    @staticmethod
+    def _source_facts(metadata: Mapping[str, Any]) -> list[dict[str, str]]:
+        """The owner-visible lineage of one practice document.
+
+        A method/review was built from the experiences and review artifacts it names; those are
+        recorded as source edges on the same owner commit, so a deletion of the experience can
+        find this document by following edges instead of hoping a Memory row listed it.
+        """
+
+        out: list[dict[str, str]] = []
+        for experience in metadata.get("experience_ids") or ():
+            out.append({"kind": "memory", "namespace": "memory", "ref": str(experience)})
+        for review in metadata.get("review_refs") or ():
+            out.append({"kind": "artifact", "namespace": "supply", "ref": str(review)})
+        return out
+
     def _create(self, kind: str, title: str, metadata: Mapping[str, Any], body: str,
                 operation_key: Any, extra: Mapping[str, Any]) -> dict[str, Any]:
         clean_content = build_practice_content(metadata, body)
         key = _operation_key(operation_key) or project_operation_key(
             "practice", kind, self.subject_id, self.workspace_id, title, clean_content)
         answer = self.projects.create_project(title=title, content=clean_content,
-                                              operation_key=key)
+                                              operation_key=key,
+                                              source_refs=self._source_facts(metadata))
         project_row = self._row_from_answer(kind, answer, metadata)
         data = dict(extra)
         data.update(self._effect_data(answer, key))
@@ -1248,7 +1265,8 @@ class PersonalPracticeService:
         answer = self.projects.commit_project(artifact_id=artifact_id,
                                               content=clean_content,
                                               expected_head=expected_head,
-                                              operation_key=key)
+                                              operation_key=key,
+                                              source_refs=self._source_facts(metadata))
         return answer if isinstance(answer, Mapping) else {
             "ok": False, "status": STATUS_UNAVAILABLE, "reason_code": "PRACTICE_ANSWER_INVALID",
             "data": {"artifact_id": artifact_id}}

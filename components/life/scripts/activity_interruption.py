@@ -1810,6 +1810,190 @@ class InterruptionCoordinator:
         )
         return region
 
+    def exit_atomic_region(
+        self,
+        *,
+        activity_id: str,
+        atomic_region_ref: str,
+        boundary_ref: str,
+        expected_activity_revision: Optional[int] = None,
+        observed_at: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Close an ATOMIC region at a real owner boundary.
+
+        This is the LR-3 owner confirming that the region it opened has actually ended.  It is
+        not a caller-side flag write:
+
+        * the region must exist, belong to this Activity and still be ACTIVE;
+        * ``boundary_ref`` must be a well-formed boundary reference;
+        * when the caller names ``expected_activity_revision`` it must match the live Activity
+          revision (a region entered for a different revision is not silently closed);
+        * an already-closed region replays only for the *same* boundary ref, and any other
+          ref is a conflict.
+
+        Nothing is invented: no boundary event is fabricated and no LR-2 transition is written.
+        """
+
+        if not str(atomic_region_ref or "").strip():
+            raise ContractViolationError("ATOMIC_REGION_REF_REQUIRED")
+        if not str(boundary_ref or "").strip():
+            raise InvalidBoundaryEvidenceError("BOUNDARY_REF_REQUIRED")
+        prefix = str(boundary_ref).split(":", 1)[0].split("_", 1)[0]
+        allowed = any(str(boundary_ref).startswith(candidate)
+                      for candidate in VALID_BOUNDARY_REF_PREFIXES)
+        if not allowed and prefix not in VALID_BOUNDARY_REF_PREFIXES:
+            raise InvalidBoundaryEvidenceError(
+                f"BOUNDARY_REF_PREFIX_INVALID: {boundary_ref!r}")
+
+        act = self.read_service.get_activity(activity_id)
+        if act is None:
+            raise ContractViolationError(
+                f"unknown activity for atomic exit: {activity_id!r}")
+        live_revision = int(act.get("revision", -1))
+        if expected_activity_revision is not None and int(expected_activity_revision) != live_revision:
+            raise ContractViolationError(
+                "ATOMIC_EXIT_REVISION_CONFLICT: expected %s, live %s"
+                % (expected_activity_revision, live_revision))
+
+        istate = self.interruption_store.load_state()
+        regions = istate.get("atomic_regions") or {}
+        region = regions.get(atomic_region_ref)
+        if not isinstance(region, dict):
+            raise ContractViolationError(
+                f"unknown atomic region: {atomic_region_ref!r}")
+        if str(region.get("activity_id") or "") != str(activity_id):
+            raise ContractViolationError(
+                "ATOMIC_REGION_ACTIVITY_MISMATCH: region %r belongs to %r"
+                % (atomic_region_ref, region.get("activity_id")))
+        if region.get("active") is not True:
+            if str(region.get("boundary_ref") or "") == str(boundary_ref):
+                return copy.deepcopy(region)  # idempotent replay of the same boundary
+            raise ContractViolationError(
+                "ATOMIC_REGION_ALREADY_CLOSED: %r closed at %r"
+                % (atomic_region_ref, region.get("boundary_ref")))
+
+        closed = dict(region)
+        closed.update({
+            "active": False,
+            "reconciliation_status": "BOUNDARY_CONFIRMED",
+            "boundary_ref": str(boundary_ref),
+            "exited_at": str(observed_at or _iso(now())),
+            "confirmed_activity_revision": live_revision,
+        })
+        regions[atomic_region_ref] = closed
+        istate["atomic_regions"] = regions
+        self.interruption_store.save_state(
+            istate,
+            log_entry={
+                "action": "EXIT_ATOMIC_REGION",
+                "activity_id": activity_id,
+                "atomic_region_ref": atomic_region_ref,
+                "boundary_ref": str(boundary_ref),
+                "confirmed_activity_revision": live_revision,
+            },
+        )
+        return copy.deepcopy(closed)
+
+    def confirm_external_stop_boundary(
+        self,
+        *,
+        activity_id: str,
+        expected_activity_revision: Optional[int] = None,
+        boundary_ref: Optional[str] = None,
+        observed_at: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Record the LR-3 owner's own confirmation that a SAFE_BOUNDARY was reached.
+
+        This is a **narrow** entry for one already-accepted external stop intent: it accepts
+        only an ACTIVE Activity whose ``external_stop`` is PENDING, whose effective
+        interruptibility is really ``SAFE_BOUNDARY``, and whose owner has no active atomic
+        region.  It writes one ``applied_boundaries`` record (the same face
+        ``handle_boundary_reached`` writes) and never pauses or cancels anything -- the stop
+        service reaches the terminal on its own after this.
+
+        It is deliberately *not* a synthetic ``BoundaryReachedEvent``: no pending interruption
+        is invented, no LR-2 transition is written, and an Activity that is inside an atomic
+        region or not marked SAFE_BOUNDARY is refused by name.  The caller cannot pass
+        ``safe=true``; the owner checks the live record itself.
+        """
+
+        if not str(activity_id or "").strip():
+            raise ContractViolationError("ACTIVITY_ID_REQUIRED")
+        act = self.read_service.get_activity(str(activity_id))
+        if act is None:
+            raise BoundaryMismatchError(
+                f"UNKNOWN_ACTIVITY: {activity_id!r}")
+        if str(act.get("status") or "") != STATUS_ACTIVE:
+            raise BoundaryMismatchError(
+                "ACTIVITY_NOT_ACTIVE: %r is %r"
+                % (activity_id, act.get("status")))
+        live_revision = int(act.get("revision", -1))
+        if (expected_activity_revision is not None
+                and int(expected_activity_revision) != live_revision):
+            raise ContractViolationError(
+                "BOUNDARY_REVISION_CONFLICT: expected %s, live %s"
+                % (expected_activity_revision, live_revision))
+        stop = act.get("external_stop") or {}
+        if not isinstance(stop, Mapping) or stop.get("state") != "PENDING":
+            raise BoundaryMismatchError(
+                "NO_PENDING_EXTERNAL_STOP: %r" % (activity_id,))
+
+        istate = self.interruption_store.load_state()
+        for reg_dict in (istate.get("atomic_regions") or {}).values():
+            if (isinstance(reg_dict, Mapping)
+                    and str(reg_dict.get("activity_id") or "") == str(activity_id)
+                    and reg_dict.get("active") is True):
+                raise BoundaryMismatchError(
+                    "ATOMIC_REGION_ACTIVE: %r" % (activity_id,))
+
+        profile = (istate.get("attention_profiles") or {}).get(str(activity_id)) or {}
+        interruptibility = str(profile.get("interruptibility") or "")
+        if not interruptibility:
+            interruptibility = (
+                INTERRUPTIBILITY_SAFE_BOUNDARY
+                if str(act.get("interruptibility") or "") == OCCUPANCY_FOCUSED
+                else INTERRUPTIBILITY_IMMEDIATE)
+        if interruptibility != INTERRUPTIBILITY_SAFE_BOUNDARY:
+            raise BoundaryMismatchError(
+                "NOT_A_SAFE_BOUNDARY_ACTIVITY: %r is %r"
+                % (activity_id, interruptibility))
+
+        ref = str(boundary_ref or "").strip()
+        if not ref:
+            ref = "safe_boundary:external_stop:%s:r%d" % (activity_id, live_revision)
+        ref = _validate_structured_ref(
+            ref, "external_stop.boundary_ref",
+            allowed_prefixes=frozenset({"safe_boundary"}))
+        applied = istate.setdefault("applied_boundaries", {})
+        existing = applied.get(ref)
+        if isinstance(existing, Mapping):
+            if str(existing.get("activity_id") or "") != str(activity_id):
+                raise BoundaryMismatchError(
+                    "BOUNDARY_REF_CONFLICT: %r already names another Activity" % (ref,))
+            return copy.deepcopy(dict(existing))
+
+        record = {
+            "boundary_ref": ref,
+            "activity_id": str(activity_id),
+            "activity_revision": live_revision,
+            "confirmed_at": str(observed_at or _iso(now())),
+            "source": "EXTERNAL_STOP_OPERATOR_BOUNDARY",
+            "authority": "LOCAL_OPERATOR",
+            "external_stop_intent_id": str(stop.get("intent_id") or ""),
+        }
+        applied[ref] = record
+        istate["applied_boundaries"] = applied
+        self.interruption_store.save_state(
+            istate,
+            log_entry={
+                "action": "EXTERNAL_STOP_BOUNDARY_CONFIRMED",
+                "activity_id": str(activity_id),
+                "boundary_ref": ref,
+                "confirmed_activity_revision": live_revision,
+            },
+        )
+        return copy.deepcopy(record)
+
     def set_consequence_port(self, port: Any) -> None:
         """Composition root only: hand LR-3 its typed ACTIVITY_CONSEQUENCE port."""
         if port is not None and not isinstance(port, ActivityConsequencePort):

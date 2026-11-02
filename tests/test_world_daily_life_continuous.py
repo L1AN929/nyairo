@@ -93,6 +93,28 @@ STARTABLE_KINDS = frozenset({
 _WORLD_CONSUMED = re.compile(r"world_fact:object:([A-Za-z0-9_.:+-]+?):consumed")
 
 
+class NoMaterialOwner:
+    """An artifact owner that holds nothing: the "no real material" arm of the episodes.
+
+    The continuation source captures its port when the cycle is assembled, so a case that
+    wants a genuinely empty material set hands the source this empty owner instead of only
+    clearing ``cycle.artifact_port`` (the registered adapter would otherwise keep offering
+    the real reading/work artifact).  It answers the same read-only calls with nothing.
+    """
+
+    def available(self) -> bool:
+        return False
+
+    def list_artifacts(self, *args, **kwargs):
+        return []
+
+    def resume_point(self, *args, **kwargs):
+        return None
+
+    def read_artifact(self, *args, **kwargs):
+        return None
+
+
 def episode_instant(*, after: datetime | None = None) -> datetime:
     """The **one** injected instant of this episode: the next weekday 07:00 (JST).
 
@@ -643,15 +665,25 @@ class DailyContinuousDrillTest(EpisodeFixture):
         # -- 0) 没有真实材料：一个模型调用都不该发生 ---------------------------------
         saved = (self.cycle.world_opportunity_provider, self.cycle.artifact_port,
                  self.cycle.reading_artifact_id)
+        source = self.cycle.artifact_source
+        saved_source = (source.port, source.reading_artifact_id) if source is not None else None
         self.cycle.world_opportunity_provider = lambda: []
         self.cycle.artifact_port = None
         self.cycle.reading_artifact_id = None
+        if source is not None:
+            # The source captured the real port at construction and the candidate registry
+            # still holds it; setting ``cycle.artifact_port = None`` alone would leave the
+            # reading/work artifact offered.  Give it the empty owner for this quiet arm.
+            source.port = NoMaterialOwner()
+            source.reading_artifact_id = None
         quiet = self.round("drill:quiet")
         self.assertEqual(quiet.get("outcome"), "NO_MATERIAL", quiet)
         self.assertEqual(quiet.get("llm_calls"), 0, quiet)
         self.assertEqual(self.cognition.call_count, 0, self.cognition.call_count)
         self.cycle.world_opportunity_provider, self.cycle.artifact_port, \
             self.cycle.reading_artifact_id = saved
+        if source is not None:
+            source.port, source.reading_artifact_id = saved_source
 
         # -- 1) 一次真实作品推进：AR-0 → 真 Supply 新版本 → AG-2 handoff → M0 -------
         head_before = self.head(work_id)["version_id"]
@@ -680,12 +712,28 @@ class DailyContinuousDrillTest(EpisodeFixture):
         invitation = cop.parse_invitation({
             "event_kind": cop.KIND_INVITATION, "invitation_id": "inv:ir1:1",
             "source_ref": "channel:ir1-drill", "occurred_at": self.clock.iso(),
-            "scope": "一起待一会儿", "requires_engagement": True})
+            # 显式有限窗口：整段 episode 在同一时间轴上走动，恢复资格必须在这个窗口内有效。
+            "scope": "一起待一会儿", "requires_engagement": True, "duration_seconds": 7200})
         considered = protocol.consider(invitation, now=self.clock.iso())
         self.assertEqual(considered.get("decision"), cop.DECISION_ACCEPT, considered)
-        started = protocol.begin(invitation, now=self.clock.iso())
+        # 正式入口：Decision 先行，只有它的 START 被采纳；前台交接是 adoption 自己的第一步。
+        # 旧的 ``begin`` 先 PAUSE 释放前台、再转 WAITING，单前台规则本来就会拒绝那条路。
+        joint_cognition = self.base._co_presence_cognition(invitation["invitation_id"])
+        saved_cognition = self.runtime.decision_service.cognition_adapter
+        self.runtime.decision_service.cognition_adapter = joint_cognition
+        try:
+            started = protocol.begin_from_decision(invitation, now=self.clock.iso())
+        finally:
+            self.runtime.decision_service.cognition_adapter = saved_cognition
         self.assertTrue(started.get("ok"), started)
-        self.assertEqual(started["adoption"]["adoption_status"], "APPLIED", started["adoption"])
+        self.assertEqual(started["stage"], "JOINT_OPEN", started)
+        self.assertTrue(joint_cognition.joint_offered,
+                        "AG-1 never offered the joint time as a START-legal candidate")
+        self.assertEqual(started["adoption_status"], "APPLIED", started)
+        self.assertTrue(started["park_applied"], started)
+        self.assertGreaterEqual(started["llm_calls"], 1, started)
+        joint_ref = started["joint_activity_ref"]
+        self.assertTrue(joint_ref, started)
         parked = self.activity(private_activity)
         self.assertEqual(parked.get("status"), "WAITING", parked)
         checkpoint_at_break = parked.get("checkpoint_ref")
@@ -693,6 +741,7 @@ class DailyContinuousDrillTest(EpisodeFixture):
         self.assertTrue(parked.get("foreground_released"), parked)
         # 单前台：共处期间前台是**共处自己**那一个 Activity，私人 Activity 已停在保存点
         self.assertNotEqual(self.foreground(), private_activity)
+        self.assertEqual(self.foreground(), joint_ref)
         self.assertIn("wait_dep:co_presence-inv:ir1:1", parked.get("source_refs") or [], parked)
         ended = protocol.end(cop.parse_end({
             "event_kind": cop.KIND_END, "invitation_id": "inv:ir1:1",
@@ -992,6 +1041,9 @@ class DailyContinuousDrillTest(EpisodeFixture):
         self.assertTrue(work_rows, "the real owner result must be admitted to M0")
         newest = work_rows[0]
         self.assertTrue(newest.owner_result, newest.to_dict())
+        # 产品把 AR-1 结算（``rset:``）与版本引用分列；续作对象优先取版本引用。
+        continue_object = newest.version_ref or newest.owner_result
+        self.assertTrue(continue_object, newest.to_dict())
         self.assertTrue(newest.action_ref, newest.to_dict())
         history_receipts = self.runtime.action_read.list_receipts(newest.action_ref)
         self.assertTrue(history_receipts, newest.action_ref)
@@ -1001,11 +1053,11 @@ class DailyContinuousDrillTest(EpisodeFixture):
         self.assertEqual(view.get("past_state"), "OK", view.get("source_states"))
         step = view.get("next_step") or {}
         self.assertEqual(step.get("reason_code"), "CONTINUE_FROM_OWNER_CONFIRMED_OBJECT", step)
-        self.assertEqual(step.get("continue_from_ref"), newest.owner_result, step)
+        self.assertEqual(step.get("continue_from_ref"), continue_object, step)
         self.assertEqual(self.cycle.continuity_continue_object(), work_id)
         point, selection = self.cycle._read_resume_point()
         self.assertEqual(selection.get("selected_by"), "CONTINUITY_HISTORY", selection)
-        self.assertEqual(selection.get("history_continuation_ref"), newest.owner_result,
+        self.assertEqual(selection.get("history_continuation_ref"), continue_object,
                          selection)
         self.assertEqual(selection.get("history_version_ref"), history_version, selection)
         self.assertEqual(selection.get("expected_head_source"), "OWNER_CURRENT_HEAD", selection)

@@ -1,5 +1,7 @@
 # 安装与开始使用
 
+> 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
+
 当前发行是 `v0.3.0` 公开测试版（GitHub prerelease，不是稳定版）：[GitHub 仓库](https://github.com/L1AN929/nyairo)、[预发布下载](https://github.com/L1AN929/nyairo/releases/tag/v0.3.0)。旧的 `v0.2.0-rc3` 标签、ZIP 与 rc9 等更早资产保留原处。
 
 ## 一条命令引导安装
@@ -144,7 +146,7 @@ PY
 ```
 
 ```text
-{'provider': 'custom', 'model': 'gemini-3.8-flash-high', 'base_url': 'https://gw.929711.xyz/v1', 'key_env': None, 'api_key_present': True, 'hermes_home': '/srv/nya02/inst/profile', 'resolved_by': 'profile_shape_resolver', 'usable': True}
+{'provider': 'custom', 'model': 'gemini-3.8-flash-high', 'base_url': 'https://gw.example.invalid/v1', 'key_env': None, 'api_key_present': True, 'hermes_home': '/srv/nya02/inst/profile', 'resolved_by': 'profile_shape_resolver', 'usable': True}
 ```
 
 ```bash
@@ -212,7 +214,7 @@ bash components/life/tests/v02/run_resident.sh foreground --once
 # 真实输出的关键字段（其余字段省略）
  "autonomous_enabled": true,
  "feeds": ["resume_eligibility", "artifact_head"],
- "model": {"cognition": true, "probe": {"host": "gw.929711.xyz", "port": 443, "status": "REACHABLE"}},
+ "model": {"cognition": true, "probe": {"host": "gw.example.invalid", "port": 443, "status": "REACHABLE"}},
  "world": {"status": "UNAVAILABLE", "reason": "WORLD_NOT_CONFIGURED"},
  "counters": {"wakes": 2, "outcomes": {"ACTED": 1}, "owner_confirmed_versions": 1, "actions": 1,
               "model_calls": 1, "pending_unknown_last": 0, "pending_unknown_max": 0},

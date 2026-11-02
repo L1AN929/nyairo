@@ -71,6 +71,10 @@ Status: implemented
    不同 fingerprint）、显式 `release_reconsideration(refs=...)`、以及**命中自己 ref** 的真实事件（runner 只对
    `KNOWN_EVENT_KINDS` 且 ref 命中台账 target/activity 的事件解除）。作品 `no_change` 用 `entries` 落盘
    （reason `WORK_NO_CHANGE_CONFIRMED`，绑定 owner head），下一轮读回即知。
+   测试夹具在 `2026-10-26T08:00:00+00:00` 写入 no_change，而 `cycle.step_readiness` 调 `no_change`
+   时不传 `at`，TTL 回落到 `life_step_readiness._now_iso` 的真实墙钟；夹具须把该模块级 callable 在 with 内
+   钉到同一时刻，否则记录一读即过期。只钉这一个 callable，六小时 TTL 与"过时反控"原样保留，不冻全局时钟、
+   不改生产路径。
    **（父级 gen3 短链抓到并已修）** 旧判定是"无步骤 + 这一轮没有别的机会"，而世界机会几乎每轮都在，于是同一
    状态永远不安静；现在机会"存在"不再是否决理由，机会**集合**是处境的一部分。世界 revision 单独跳动**不**算
    新处境（tick 不是生活事件），工件 head 变化算。

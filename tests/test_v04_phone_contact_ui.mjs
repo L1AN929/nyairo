@@ -236,6 +236,8 @@ function bootPhone(options = {}) {
     setTimeout: () => 0,
     clearTimeout: () => {},
     console: console,
+    /* window 级监听：真实浏览器 window 有 addEventListener('blur')；stub DOM 只建模 document。 */
+    addEventListener() {},
     fetch: async (url, init) => {
       const path = String(url);
       const method = (init && init.method) || 'GET';
@@ -315,8 +317,9 @@ test('主屏「来访与共同时间」入口会真的读 /contact，并渲染�
   });
   await settle();
 
-  assert.deepEqual(phone.paths(), [API + '/state'],
-    '全新页面应该只发 GET /state，实际：' + JSON.stringify(phone.paths()));
+  /* boot：先读 /state，再读主屏「此刻」的 /living（7d4871c 起）；不预取世界。 */
+  assert.deepEqual(phone.paths(), [API + '/state', API + '/living'],
+    '全新页面只读 /state 与 /living，不预取世界；实际：' + JSON.stringify(phone.paths()));
 
   const entry = phone.shortcut('来访与共同时间');
   assert.ok(entry, '主屏应该渲染出「来访与共同时间」入口；现有按钮：' +

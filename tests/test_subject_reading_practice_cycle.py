@@ -162,6 +162,41 @@ class NoChangeWorkWriter:
         raise mcw.ModelNoChange("nothing to add here")
 
 
+class PracticeCognition(ScriptedCognition):
+    """``ScriptedCognition`` + one explicit rule: the exact work artifact, not its closeout.
+
+    AG-0 can offer *two* candidates for the same artifact -- the ordinary continuation and a
+    ``closeout:artifact:...`` option.  Picking whichever the list happens to list first makes
+    "the work writer was asked" depend on candidate order; a case that is about continuing the
+    work must choose the continuation by its own refs, never the closeout.
+    """
+
+    @staticmethod
+    def _is_closeout(candidate: dict) -> bool:
+        refs = [str(ref) for ref in (candidate.get("target_refs") or [])]
+        return any(ref.startswith("closeout:") for ref in refs)
+
+    def _pick(self, request, wanted):
+        matches: list[tuple[dict, list[str]]] = []
+        for candidate in (getattr(request, "candidates", []) or []):
+            candidate = dict(candidate)
+            if self._is_closeout(candidate):
+                continue
+            refs = [str(ref) for ref in (candidate.get("target_refs") or [])]
+            refs.append(str(candidate.get("source_ref") or ""))
+            if not any(wanted in ref for ref in refs):
+                continue
+            legal = [str(item) for item in (candidate.get("legal_decisions") or [])]
+            matches.append((candidate, legal))
+        for candidate, legal in matches:
+            if "CONTINUE" in legal:
+                return candidate, legal
+        for candidate, legal in matches:
+            if "START" in legal:
+                return candidate, legal
+        return (matches[0] if matches else (None, []))
+
+
 @posix_only
 class SubjectReadingPracticeCycleTest(SubjectReadingCycleTest):
     """真实 Supply owner + 真实 runtime + 脚本化决策 + 明确的内容替身。"""
@@ -173,7 +208,7 @@ class SubjectReadingPracticeCycleTest(SubjectReadingCycleTest):
         """(重新)装配同一实例上的完整 runtime + cycle，并注入明确的私密答复替身。"""
         data = data or odl.read_instance(self.instance)
         env = self.instance_env()
-        cognition = ScriptedCognition(
+        cognition = PracticeCognition(
             script, reading_artifact_id=data["reading_artifact_id"],
             work_artifact_id=data["work_artifact_id"])
         runtime, port = self._runtime(cognition, env, data, grant_id=grant_id,

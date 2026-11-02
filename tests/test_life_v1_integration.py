@@ -5,10 +5,11 @@
 房间真的有物件、重启真的是另一个进程）。没有任何 ``if ok else 接受未中断`` 这类分支收口。
 
 覆盖：
-1. 共同时间闭环：显式邀请 → LR-3 规范暂停 → LR-4 WAITING 保存点 → AG-1/AG-2 有限共同活动 →
+1. 共同时间闭环：显式邀请 → **Decision 先行**（拒绝/DEFER 时私人活动零变化）→ 采纳自己的
+   第一条命令走 LR-4 WAITING 前台交接 → AG-1/AG-2 有限共同活动 →
    显式结束事件 → LR-5 完成（joint Activity COMPLETED，前台释放）→ 新 resume eligibility →
    下一轮 AG-0→AG-1→AG-2 RESUME 原私人 Activity（checkpoint/原对象保持，并能继续真实一小步）；
-   重复 end 幂等；未 APPLIED 的 begin 明确非成功且私人状态可恢复。
+   重复 end 幂等；未采纳的邀请明确非成功、私人状态原样。
 2. C 真实接入：真实 Action/owner 回执 → handoff → M0 准入 → C 读回 → 下一次实际可继续对象变化；
    弱线索负控不变；三 subject 不强制相等。
 3. 资格与 status：status/读取不消费资格；暂停/DEFER 不丢资格；成功 RESUME 后不重复 adopt。
@@ -47,6 +48,29 @@ for entry in (str(ROOT), str(ROOT / "components"),
 
 from test_one_day_life import CycleTest, StubCognition, StubObservation, StubWriter, posix_only
 
+
+class NoMaterialOwner:
+    """An artifact owner that holds nothing: used by the "quiet window" arms.
+
+    The continuation source captures its port when the cycle is assembled and the candidate
+    registry keeps that adapter, so ``cycle.artifact_port = None`` alone would still leave
+    the reading/work artifact offered.  This stand-in answers the same read-only calls with
+    nothing, which is exactly the "no real material" situation those cases describe.
+    """
+
+    def available(self) -> bool:
+        return False
+
+    def list_artifacts(self, *args, **kwargs):
+        return []
+
+    def resume_point(self, *args, **kwargs):
+        return None
+
+    def read_artifact(self, *args, **kwargs):
+        return None
+
+
 import autonomous_life_assembly as assembly  # noqa: E402
 import autonomous_life_cycle as alc  # noqa: E402
 import life_co_presence as cop  # noqa: E402
@@ -66,6 +90,9 @@ INVITATION = {
     "event_kind": cop.KIND_INVITATION, "invitation_id": "inv:d:1",
     "source_ref": "channel:d-test", "occurred_at": "2026-10-16T06:00:00+00:00",
     "scope": "一起待一会儿", "requires_engagement": True,
+    # The bounded handoff condition inherits this window: the joint time may last two hours,
+    # and the sessions below end well inside it (the default is 15 minutes).
+    "duration_seconds": 7200,
 }
 END_EVENT = {
     "event_kind": cop.KIND_END, "invitation_id": "inv:d:1",
@@ -75,6 +102,7 @@ INVITATION_2 = {
     "event_kind": cop.KIND_INVITATION, "invitation_id": "inv:d:2",
     "source_ref": "channel:d-test", "occurred_at": "2026-10-16T06:40:00+00:00",
     "scope": "再待一会儿", "requires_engagement": True,
+    "duration_seconds": 7200,
 }
 END_EVENT_2 = {
     "event_kind": cop.KIND_END, "invitation_id": "inv:d:2",
@@ -371,6 +399,12 @@ class DScenarioBase(CycleTest):
                         inner.reading_offered = True
                     if not any(work_artifact_id in ref for ref in refs):
                         continue
+                    # v0.4 C: the same work is also offered as a *closeout* candidate (its
+                    # target refs carry both ``closeout:artifact:<id>`` and the artifact itself).
+                    # This branch is about writing the next version, not wrapping the work up, so
+                    # the closeout offer is not the work candidate here.
+                    if any(ref.startswith("closeout:") for ref in refs):
+                        continue
                     inner.work_offered = True
                     per = [str(item) for item in (candidate.get("legal_decisions") or [])]
                     if chosen is None and ("START" in per or "CONTINUE" in per):
@@ -392,6 +426,48 @@ class DScenarioBase(CycleTest):
                 return super().invoke(request, schema_retry_index=schema_retry_index)
 
         return WorkCognition()
+
+    def _co_presence_cognition(self, invitation_id: str):
+        """A loopback branch that picks the typed co-presence request for one invitation.
+
+        The formal entry (``begin_from_decision``) runs the instance's own Decision; the test
+        only supplies *which* legal candidate is chosen, never the legality.  Nothing is
+        chosen when AG-1 did not offer the joint time as ``START``-legal.
+        """
+        import agency_decision_ag1 as ag1
+
+        class CoPresenceCognition(StubCognition):
+            def __init__(inner):
+                super().__init__("artifact")
+                inner.joint_offered = False
+                #: the candidate id this loopback really chose (the committed Decision must name it)
+                inner.selected = None
+
+            def invoke(inner, request, *, schema_retry_index=0):
+                allowed = [str(code) for code in
+                           (getattr(request, "allowed_reason_codes", []) or [])]
+                for candidate in (getattr(request, "candidates", []) or []):
+                    refs = [str(ref) for ref in (candidate.get("target_refs") or [])]
+                    if not any(("co_presence:%s" % invitation_id) in ref for ref in refs):
+                        continue
+                    per = [str(item) for item in (candidate.get("legal_decisions") or [])]
+                    if "START" not in per:
+                        continue
+                    inner.joint_offered = True
+                    inner.selected = candidate.get("candidate_id")
+                    inner.call_count += 1
+                    return ag1.CognitiveDecisionResponse(
+                        model_run_ref="model_run:stub:co_presence", model_id=inner.model_id,
+                        model_version=inner.model_version,
+                        raw_output={"decision": "START",
+                                    "selected_candidate_id": candidate["candidate_id"],
+                                    "reason_codes": allowed[:1],
+                                    "short_rationale": "accept the invitation",
+                                    "deferred_candidate_ids": []},
+                        latency_ms=1)
+                return super().invoke(request, schema_retry_index=schema_retry_index)
+
+        return CoPresenceCognition()
 
     def supply(self, request: dict) -> dict:
         return odl.supply_call(self.services.supply_path, request)
@@ -435,8 +511,11 @@ class DCoPresenceClosureTest(DScenarioBase):
         fixture.runtime, fixture.port, fixture.data = runtime, port, prepared.data
         fixture.memory, fixture.env = prepared.memory, env
         # A real private Activity must exist first (the work round really commits a version).
+        # Every round below runs on the *same* timeline as the invitation, so the bounded wait
+        # condition is judged against the same clock the events carry.
         before = self.head(prepared.data["work_artifact_id"])["version_id"]
-        first = fixture.cycle.evaluate_once(trigger_ref="evt:d:work", act=True)
+        first = fixture.cycle.evaluate_once(trigger_ref="evt:d:work",
+                                            observed_at="2026-10-16T05:50:00+00:00", act=True)
         self.assertEqual(first["outcome"], "ACTED", first)
         self.assertNotEqual(self.head(prepared.data["work_artifact_id"])["version_id"], before)
         fixture.private_activity_ref = first["activity_ref"]
@@ -448,19 +527,25 @@ class DCoPresenceClosureTest(DScenarioBase):
         invitation = cop.parse_invitation(INVITATION)
         decision = protocol.consider(invitation, now="2026-10-16T06:01:00+00:00")
         self.assertEqual(decision["decision"], cop.DECISION_ACCEPT, decision)
-        started = protocol.begin(invitation, now="2026-10-16T06:03:00+00:00")
+        # The formal entry: the Decision runs first, and only its START is adopted.  The
+        # foreground handoff is the adoption's own first command -- there is no separate
+        # PAUSE-then-WAIT step here, which the single-foreground rules would refuse anyway.
+        joint_cognition = self._co_presence_cognition(invitation["invitation_id"])
+        runtime.decision_service.cognition_adapter = joint_cognition
+        started = protocol.begin_from_decision(invitation, now="2026-10-16T06:03:00+00:00")
         self.assertTrue(started["ok"], started)
-        self.assertEqual(started["stage"], "INTERRUPTED", started)
-        self.assertTrue(started["pause_applied"], started)
-        self.assertEqual(started["activity_effect"], "INTERRUPT_NOW", started)
-        self.assertTrue(started["private_waiting"]["ok"], started["private_waiting"])
-        self.assertTrue(started["request"]["ok"], started["request"])
-        self.assertTrue(started["adoption"]["ok"], started["adoption"])
-        self.assertEqual(started["adoption"]["adoption_status"], "APPLIED",
-                         started["adoption"])
+        self.assertEqual(started["stage"], "JOINT_OPEN", started)
+        self.assertTrue(joint_cognition.joint_offered,
+                        "AG-1 never offered the joint time as a START-legal candidate")
+        self.assertEqual(started["decision"], cop.DECISION_ACCEPT, started)
+        self.assertTrue(started["activity_started"], started)
+        self.assertEqual(started["adoption_status"], "APPLIED", started)
+        self.assertTrue(started["park_applied"], started)
+        self.assertTrue(started["handoff"], started)
+        self.assertGreaterEqual(started["llm_calls"], 1, started)
         fixture.protocol = protocol
         fixture.session = started["session"]
-        fixture.joint_ref = started["adoption"]["activity_ref"]
+        fixture.joint_ref = started["joint_activity_ref"]
         self.assertTrue(fixture.joint_ref)
         self.assertTrue(fixture.session["single_foreground"])
         # The private work is really WAITING with its resume condition, foreground released.
@@ -500,7 +585,8 @@ class DCoPresenceClosureTest(DScenarioBase):
         # legal (AG-1's own choice), and this test is about the legal resume path.
         resume_cognition = self._resume_cognition()
         runtime.decision_service.cognition_adapter = resume_cognition
-        resumed = fixture.cycle.evaluate_once(trigger_ref="evt:d:resume", act=True)
+        resumed = fixture.cycle.evaluate_once(trigger_ref="evt:d:resume",
+                                              observed_at="2026-10-16T06:21:00+00:00", act=True)
         self.assertTrue(resume_cognition.resume_offered,
                         "no resume candidate was offered at all")
         self.assertEqual(resumed["decision"], "RESUME", resumed)
@@ -518,7 +604,8 @@ class DCoPresenceClosureTest(DScenarioBase):
         # ... and the private work can really continue: one more real version
         before = self.head(fixture.data["work_artifact_id"])["version_id"]
         runtime.decision_service.cognition_adapter = self._continue_cognition()
-        again = fixture.cycle.evaluate_once(trigger_ref="evt:d:continue", act=True)
+        again = fixture.cycle.evaluate_once(trigger_ref="evt:d:continue",
+                                            observed_at="2026-10-16T06:25:00+00:00", act=True)
         self.assertEqual(again["outcome"], "ACTED", again)
         self.assertNotEqual(self.head(fixture.data["work_artifact_id"])["version_id"], before)
 
@@ -548,7 +635,8 @@ class DCoPresenceClosureTest(DScenarioBase):
 
         # a paused window does not consume it either
         odl.set_pause(self.instance, True, reason="d-r1")
-        held = fixture.cycle.evaluate_once(trigger_ref="evt:d:paused", act=True)
+        held = fixture.cycle.evaluate_once(trigger_ref="evt:d:paused",
+                                           observed_at="2026-10-16T06:21:00+00:00", act=True)
         self.assertEqual(held["outcome"], "PAUSED_BY_OPERATOR", held)
         odl.set_pause(self.instance, False, reason="d-r1")
         self.assertEqual([e for e in self.eligibilities(runtime)
@@ -560,22 +648,153 @@ class DCoPresenceClosureTest(DScenarioBase):
         saved = fixture.cycle.runtime.decision_service.cognition_adapter
         fixture.cycle.runtime.decision_service.cognition_adapter = deferring
         try:
-            deferred = fixture.cycle.evaluate_once(trigger_ref="evt:d:defer", act=True)
+            deferred = fixture.cycle.evaluate_once(trigger_ref="evt:d:defer",
+                                                   observed_at="2026-10-16T06:22:00+00:00",
+                                                   act=True)
         finally:
             fixture.cycle.runtime.decision_service.cognition_adapter = saved
         self.assertIn(deferred["decision"], {"DEFER", "NO_ACTION"}, deferred)
+        self.assertFalse(deferred["reconsideration"]["blocked"], deferred["reconsideration"])
         self.assertEqual([e for e in self.eligibilities(runtime)
                           if e["eligibility_id"] == eligibility_id][0]["status"], "OPEN")
+        self.assertEqual(fixture.cycle.read_continuity_watermark()["adopted_eligibility_refs"], [])
 
-        # and the legal resume still works afterwards, exactly once
-        fixture.runtime.decision_service.cognition_adapter = self._resume_cognition()
-        first = fixture.cycle.evaluate_once(trigger_ref="evt:d:resume", act=True)
+        # The product's own same-state rule: the *identical* next situation is not asked again.
+        # This is the silence itself, not a workaround -- no request is spent, nothing is adopted,
+        # and the eligibility stays exactly OPEN.  A later consideration would need a real change
+        # (or the ledger's TTL), which this case deliberately does not fake with a release.
+        quiet = fixture.cycle.evaluate_once(trigger_ref="evt:d:quiet",
+                                            observed_at="2026-10-16T06:22:30+00:00", act=True)
+        self.assertEqual(quiet["outcome"], "QUIET", quiet)
+        self.assertEqual(quiet["llm_calls"], 0, quiet)
+        self.assertTrue(quiet["reconsideration"]["blocked"], quiet["reconsideration"])
+        self.assertEqual([e for e in self.eligibilities(runtime)
+                          if e["eligibility_id"] == eligibility_id][0]["status"], "OPEN")
+        self.assertEqual(fixture.cycle.read_continuity_watermark()["adopted_eligibility_refs"], [])
+
+    def test_a_never_deferred_eligibility_is_consumed_by_exactly_one_resume(self):
+        """The plain path with no DEFER anywhere: one end, one real RESUME, one consumption.
+
+        This is a *fresh root*, not the continuation of the DEFER case above.  After a decline
+        the product keeps the identical situation quiet, and a test may not lift that silence to
+        keep going; so the "it can still be consumed later" half is proved here on a root that
+        never deferred, and the silence itself is proved there.
+        """
+        fixture = self._start_joint_time()
+        runtime, protocol, cycle = fixture.runtime, fixture.protocol, fixture.cycle
+        ended = protocol.end(cop.parse_end(END_EVENT), now="2026-10-16T06:20:00+00:00")
+        self.assertTrue(ended["ok"], ended)
+        eligibility = ended["new_eligibility_refs"][0]
+        self.assertEqual(eligibility["status"], "OPEN", eligibility)
+
+        resume_cognition = self._resume_cognition()
+        runtime.decision_service.cognition_adapter = resume_cognition
+        first = cycle.evaluate_once(trigger_ref="evt:d:resume",
+                                    observed_at="2026-10-16T06:21:00+00:00", act=True)
+        self.assertTrue(resume_cognition.resume_offered, "no resume candidate was offered")
         self.assertEqual(first["decision"], "RESUME", first)
-        fixture.runtime.decision_service.cognition_adapter = self._resume_cognition()
-        second = fixture.cycle.evaluate_once(trigger_ref="evt:d:resume:again", act=True)
-        self.assertNotEqual(second["decision"], "RESUME", second)
+        self.assertEqual(first["adoption_status"], "APPLIED", first)
+        consumed = [e for e in self.eligibilities(runtime)
+                    if e["eligibility_id"] == eligibility["eligibility_id"]]
+        self.assertEqual(len(consumed), 1, consumed)
+        self.assertEqual(consumed[0]["status"], "CONSUMED", consumed[0])
+        consumed_ref = consumed[0].get("consumed_decision_ref")
+        self.assertTrue(consumed_ref, consumed[0])
+        private = self.activity(runtime, fixture.private_activity_ref)
+        self.assertEqual(private["status"], "ACTIVE", private)
+        self.assertEqual(private["checkpoint_ref"], fixture.private_checkpoint, private)
 
-    def test_a_failed_adoption_is_not_reported_as_a_started_joint_time(self):
+        # A second window cannot consume it again: the same owner row stays CONSUMED under the
+        # same Decision, and the round is not another RESUME.
+        runtime.decision_service.cognition_adapter = self._resume_cognition()
+        second = cycle.evaluate_once(trigger_ref="evt:d:resume:again",
+                                     observed_at="2026-10-16T06:23:00+00:00", act=True)
+        self.assertNotEqual(second.get("decision"), "RESUME", second)
+        again = [e for e in self.eligibilities(runtime)
+                 if e["eligibility_id"] == eligibility["eligibility_id"]][0]
+        self.assertEqual(again["status"], "CONSUMED", again)
+        self.assertEqual(again.get("consumed_decision_ref"), consumed_ref, again)
+
+    def test_a_started_decision_whose_adoption_fails_is_not_reported_as_a_started_joint_time(self):
+        """A real START Decision, then the adopt boundary fails: never "started".
+
+        The failure is injected at the LR-2 start command *after* the Decision committed and
+        after the adoption's own foreground handoff ran -- the documented stranded boundary,
+        never a fabricated success and never a loosened state gate.  What the product then owes
+        is the named recovery: the private Activity WAITING under LR-4, its handoff released
+        into a real resume eligibility, and a PARKED_NO_JOINT session an explicit end can still
+        reconcile.  Production source is untouched: only this test's command port fails.
+        """
+        prepared = self.prepare_scenario()
+        env = self.instance_env()
+        cognition = self._work_cognition(prepared.data["work_artifact_id"],
+                                         prepared.data["reading_artifact_id"])
+        runtime, port = self.runtime_with_memory(cognition, env, prepared.data, prepared.memory)
+        fixture = self.assemble(runtime, env, cognition=cognition)
+        first = fixture.cycle.evaluate_once(trigger_ref="evt:d:work",
+                                            observed_at="2026-10-16T05:50:00+00:00", act=True)
+        self.assertEqual(first["outcome"], "ACTED", first)
+        private_ref = first["activity_ref"]
+        protocol = cop.FiniteCoPresence(
+            runtime, state_root=odl.life_state_root(self.instance),
+            subject_id=prepared.data["subject_id"], home=str(odl.life_state_root(self.instance)),
+            cycle=fixture.cycle)
+        invitation = cop.parse_invitation(INVITATION)
+        joint_cognition = self._co_presence_cognition(invitation["invitation_id"])
+        runtime.decision_service.cognition_adapter = joint_cognition
+
+        coordinator = runtime.adoption_coordinator
+        real_command = coordinator.activity_command
+
+        class _StartRefused:
+            def __getattr__(self, name):
+                return getattr(real_command, name)
+
+            def start_activity(self, **kwargs):
+                raise RuntimeError("injected LR-2 start refusal (test-side fault only)")
+
+        coordinator.activity_command = _StartRefused()
+        try:
+            started = protocol.begin_from_decision(invitation, now="2026-10-16T06:03:00+00:00")
+        finally:
+            coordinator.activity_command = real_command
+
+        # the committed Decision really said START (the owner's record is the evidence, not the stub)
+        self.assertTrue(joint_cognition.joint_offered,
+                        "AG-1 never offered the joint time as a START-legal candidate")
+        state = runtime.decision_read.store.load_state()
+        decisions = [row for row in (state.get("decisions_by_id") or {}).values()
+                     if str(row.get("selected_candidate_ref") or "")
+                     == str(joint_cognition.selected)]
+        self.assertEqual(len(decisions), 1, decisions)
+        self.assertEqual(decisions[0].get("decision"), "START", decisions[0])
+
+        # ... and the adoption did not apply: nothing is reported as a started joint time
+        self.assertFalse(started["ok"], started)
+        self.assertEqual(started["stage"], "HANDOFF_STRANDED", started)
+        self.assertEqual(started["reason_code"], "JOINT_START_FAILED_AFTER_HANDOFF", started)
+        self.assertFalse(started.get("activity_started"), started)
+        self.assertIsNone(started.get("joint_activity_ref"), started)
+        self.assertEqual(started["session"]["state"], "PARKED_NO_JOINT", started["session"])
+        self.assertIsNone(started["session"]["joint_activity_ref"], started["session"])
+        self.assertEqual(protocol.read_session()["state"], "PARKED_NO_JOINT")
+        # no joint Activity exists: the only open Activity in the owner is the private work
+        self.assertEqual([a["activity_id"] for a in runtime.activity_read.list_open_activities()],
+                         [private_ref])
+
+        # the named stranded recovery really ran: LR-4 has the private work WAITING and the
+        # handoff was released into a real OPEN eligibility (a new Decision resumes it)
+        private = self.activity(runtime, private_ref)
+        self.assertEqual(private["status"], "WAITING", private)
+        self.assertTrue(private.get("resume_condition_ref"), private)
+        released = started["release"]
+        self.assertTrue(released["ok"], released)
+        self.assertTrue(released["new_eligibility_refs"], released)
+        open_for = {e["eligibility_id"]: e["activity_id"] for e in self.eligibilities(runtime)
+                    if e["status"] == "OPEN"}
+        self.assertIn(private_ref, open_for.values(), open_for)
+
+    def test_a_decision_that_never_chooses_the_joint_time_is_not_reported_as_started(self):
         prepared = self.prepare_scenario()
         env = self.instance_env()
         # the private round is the work branch (chosen explicitly, not by candidate order)
@@ -583,28 +802,37 @@ class DCoPresenceClosureTest(DScenarioBase):
                                          prepared.data["reading_artifact_id"])
         runtime, port = self.runtime_with_memory(cognition, env, prepared.data, prepared.memory)
         fixture = self.assemble(runtime, env, cognition=cognition)
-        first = fixture.cycle.evaluate_once(trigger_ref="evt:d:work", act=True)
+        first = fixture.cycle.evaluate_once(trigger_ref="evt:d:work",
+                                            observed_at="2026-10-16T05:50:00+00:00", act=True)
         self.assertEqual(first["outcome"], "ACTED", first)
         protocol = cop.FiniteCoPresence(
             runtime, state_root=odl.life_state_root(self.instance),
             subject_id=prepared.data["subject_id"], home=str(odl.life_state_root(self.instance)),
             cycle=fixture.cycle)
         invitation = cop.parse_invitation(INVITATION)
+        before = self.activity(runtime, first["activity_ref"])
+        self.assertEqual(before["status"], "ACTIVE", before)
         # The Decision is forced to decline the joint Activity: a NO_ACTION cognition adapter
-        # never selects a candidate, so no joint Activity may exist.
-        declining = StubCognition("no_action")
-        runtime.decision_service.cognition_adapter = declining
-        started = protocol.begin(invitation, now="2026-10-16T06:03:00+00:00")
+        # selects nothing, so the adoption can never apply and no joint Activity may exist.
+        runtime.decision_service.cognition_adapter = StubCognition("no_action")
+        started = protocol.begin_from_decision(invitation, now="2026-10-16T06:03:00+00:00")
         self.assertFalse(started["ok"], started)
-        self.assertEqual(started["stage"], "ADOPTION_NOT_APPLIED", started)
-        self.assertFalse(started["activity_started"])
-        recovery = started["private_recovery"]
-        self.assertTrue(recovery["recoverable"], recovery)
-        self.assertEqual(recovery["activity_ref"], first["activity_ref"])
-        # the private work is parked in the owner's own WAITING state -- recoverable, not lost
+        self.assertEqual(started["stage"], "DECLINED_BY_DECISION", started)
+        self.assertEqual(started["reason_code"], "DECISION_NO_ACTION", started)
+        self.assertFalse(started["activity_started"], started)
+        self.assertFalse(started["park_applied"], started)
+        self.assertIsNone(started["session"], started)
+        self.assertIsNone(started["joint_activity_ref"], started)
+        # ... and the private work is exactly as its owner left it: not paused, not parked,
+        # not resumed -- the decline touched nothing at all.
         private = self.activity(runtime, first["activity_ref"])
-        self.assertEqual(private["status"], "WAITING", private)
-        self.assertEqual(private["checkpoint_ref"], recovery["activity"]["checkpoint_ref"])
+        self.assertEqual(private["status"], "ACTIVE", private)
+        self.assertEqual(private["revision"], before["revision"], private)
+        self.assertEqual(private["checkpoint_ref"], before["checkpoint_ref"], private)
+        self.assertEqual(runtime.canonical_state().get("foreground_activity_ref"),
+                         first["activity_ref"])
+        self.assertEqual([a["activity_id"] for a in runtime.activity_read.list_open_activities()],
+                         [first["activity_ref"]])
         # no session was opened, so a later end cannot be mistaken for this one
         self.assertEqual(protocol.read_session()["state"], "NONE")
 
@@ -651,7 +879,8 @@ class DCoPresenceClosureTest(DScenarioBase):
         # a *second* real Activity has to exist before it can be parked: the reading branch
         # really reads a page and leaves the reading Activity as the single foreground
         runtime.decision_service.cognition_adapter = self._reading_cognition(data)
-        reading = cycle.evaluate_once(trigger_ref="evt:d:read", act=True)
+        reading = cycle.evaluate_once(trigger_ref="evt:d:read",
+                                      observed_at="2026-10-16T06:35:00+00:00", act=True)
         self.assertEqual(reading["outcome"], "ACTED", reading)
         reading_activity = str(reading["activity_ref"])
         self.assertNotEqual(reading_activity, fixture.private_activity_ref)
@@ -662,8 +891,12 @@ class DCoPresenceClosureTest(DScenarioBase):
         invitation2 = cop.parse_invitation(INVITATION_2)
         self.assertEqual(second.consider(invitation2, now="2026-10-16T06:41:00+00:00")["decision"],
                          cop.DECISION_ACCEPT)
-        started2 = second.begin(invitation2, now="2026-10-16T06:43:00+00:00")
+        runtime.decision_service.cognition_adapter = self._co_presence_cognition(
+            invitation2["invitation_id"])
+        started2 = second.begin_from_decision(invitation2, now="2026-10-16T06:43:00+00:00")
         self.assertTrue(started2["ok"], started2)
+        self.assertEqual(started2["stage"], "JOINT_OPEN", started2)
+        self.assertTrue(started2["activity_started"], started2)
         ended2 = second.end(cop.parse_end(END_EVENT_2), now="2026-10-16T06:55:00+00:00")
         self.assertTrue(ended2["ok"], ended2)
         reading_elig = ended2["new_eligibility_refs"][0]
@@ -672,17 +905,14 @@ class DCoPresenceClosureTest(DScenarioBase):
         self.assertEqual(two_open, {work_elig["eligibility_id"]: fixture.private_activity_ref,
                                     reading_elig["eligibility_id"]: reading_activity}, two_open)
 
-        # a DEFER round really considers them and consumes nothing at all
-        runtime.decision_service.cognition_adapter = StubCognition("defer")
-        deferred = cycle.evaluate_once(trigger_ref="evt:d:defer", act=True)
-        self.assertEqual(deferred["decision"], "DEFER", deferred)
-        self.assertEqual(cycle.read_continuity_watermark()["adopted_eligibility_refs"], [],
-                         cycle.read_continuity_watermark())
-
-        # exactly one RESUME is adopted: only *that* eligibility may be recorded
+        # Exactly one RESUME is adopted: only *that* eligibility may be recorded.  No DEFER and
+        # no release happen in this root -- after a decline the product keeps the identical
+        # situation quiet, and a test may not lift that silence to keep consuming.  The
+        # "considering consumes nothing" half lives in the DEFER case above.
         runtime.decision_service.cognition_adapter = self._resume_cognition_for(
             data["work_artifact_id"])
-        resumed = cycle.evaluate_once(trigger_ref="evt:d:resume", act=True)
+        resumed = cycle.evaluate_once(trigger_ref="evt:d:resume",
+                                      observed_at="2026-10-16T06:57:00+00:00", act=True)
         self.assertEqual(resumed["decision"], "RESUME", resumed)
         self.assertEqual(resumed["adoption_status"], "APPLIED", resumed)
         self.assertEqual(resumed.get("continuity_consumed_eligibility_ref"),
@@ -690,15 +920,17 @@ class DCoPresenceClosureTest(DScenarioBase):
         watermark = cycle.read_continuity_watermark()
         self.assertEqual(watermark["adopted_eligibility_refs"], [work_elig["eligibility_id"]],
                          watermark)
-        # the other one is untouched: still OPEN in LR-4, still offered by the legal AG-0 source
+        # the other one is untouched: still OPEN in LR-4.  While the work Activity really holds
+        # the single foreground it is *not* offered as a RESUME candidate -- a resume elsewhere
+        # would be refused, and the product does not pre-empt (no second execution).
         statuses = {item["eligibility_id"]: item["status"]
                     for item in self.eligibilities(runtime)}
         self.assertEqual(statuses[work_elig["eligibility_id"]], "CONSUMED", statuses)
         self.assertEqual(statuses[reading_elig["eligibility_id"]], "OPEN", statuses)
         offered, _snap, _counts = runtime.resume_eligible_source.discover(
             observed_at="2026-10-16T07:00:00+00:00")
-        self.assertIn(reading_elig["eligibility_id"],
-                      [str(item.get("eligibility_id")) for item in offered])
+        self.assertNotIn(reading_elig["eligibility_id"],
+                         [str(item.get("eligibility_id")) for item in offered])
 
         # ... and repeating status/read changes none of it
         for _ in range(3):
@@ -786,12 +1018,16 @@ class DContinuityIntegrationTest(DScenarioBase):
         step = view["next_step"]
         self.assertEqual(step["reason_code"], "CONTINUE_FROM_OWNER_CONFIRMED_OBJECT", step)
         self.assertEqual(step["artifact_ref"], data["work_artifact_id"], step)
-        self.assertEqual(step["continue_from_ref"], real_row.owner_result, step)
+        # v0.5 结果级身份：续接点命名的是 owner 确证的**版本**，不是结果集 ``rset:…``。
+        # 这条 row 现在带着 artifactversion ref，因此 step 与 selection 都取它（见
+        # .agents/notes/implemented/architecture/2026-10-25-v05-progress-result-handoff-identity.md）。
+        self.assertTrue(real_row.version_ref, real_row.to_dict())
+        self.assertEqual(step["continue_from_ref"], real_row.version_ref, step)
         self.assertEqual(cycle.continuity_continue_object(), data["work_artifact_id"])
         point, selection = cycle._read_resume_point()
         self.assertEqual(selection["selected_by"], "CONTINUITY_HISTORY", selection)
         self.assertTrue(selection.get("owner_verified"), selection)
-        self.assertEqual(selection.get("history_continuation_ref"), real_row.owner_result,
+        self.assertEqual(selection.get("history_continuation_ref"), real_row.version_ref,
                          selection)
         self.assertEqual(selection.get("history_action_ref"), real_row.action_ref, selection)
         self.assertEqual(selection.get("history_version_ref"), head_after_first, selection)
@@ -1192,7 +1428,13 @@ class DRestartAndQuietTest(DScenarioBase):
         #    model where to go), so the quiet window is the one where the observation seam
         #    reports nothing -- not the one where the observation is silently ignored.
         cycle = fixture.cycle
+        source = cycle.artifact_source
         cycle.artifact_port = None
+        if source is not None:
+            # The registry still holds the source that captured the real port; an empty
+            # owner is what makes this arm genuinely material-free.
+            source.port = NoMaterialOwner()
+            source.reading_artifact_id = None
         cycle.artifact_source = None
         cycle.world_opportunity_provider = lambda: []
         quiet = cycle.evaluate_once(trigger_ref="evt:d:quiet", act=False)
@@ -1200,8 +1442,15 @@ class DRestartAndQuietTest(DScenarioBase):
         self.assertEqual(quiet["llm_calls"], 0)
         self.assertEqual(cognition.call_count, 0)
         self.assertEqual(hits, [])
-        # 2) a real NO_ACTION window is exactly one decision request -- not "zero model"
+        # 2) a real NO_ACTION window is exactly one decision request -- not "zero model".
+        #    The continuation source captured its own port at assembly, so restoring only
+        #    ``cycle.artifact_port`` would leave the material-free owner in place and the round
+        #    would be a rule-resolved NO_ACTION with no request at all.
         cycle.artifact_port = port
+        if source is not None:
+            source.port = port
+            source.reading_artifact_id = prepared.data["reading_artifact_id"]
+        cycle.artifact_source = source
         out = cycle.evaluate_once(trigger_ref="evt:d:noaction", act=True)
         self.assertEqual(out["outcome"], "NO_ACTION", out)
         self.assertEqual(out["llm_calls"], 1)

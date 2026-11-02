@@ -61,14 +61,24 @@ def world_handoff(**overrides) -> dict:
 
     event = {
         "handoff_id": "lexp:0123456789abcdef",
+        "correlation_id": "corr:drill-home-stay",
         "activity_ref": "act:drill-home-stay",
+        "activity_revision": 1,
+        "activity_kind": "WORLD_ACTION",
         "terminal_or_milestone_kind": "SIGNIFICANT_PROGRESS",
+        "decision_refs": ["dec:drill-consume-1"],
+        "adoption_refs": ["adp:drill-consume-1"],
         "action_refs": ["actn:drill-consume-1"],
         "settlement_refs": ["rset:drill-consume-1"],
+        "progress_refs": [],
+        "completion_evidence_ref": None,
         "artifact_refs": [],
         "world_refs": [CONSUMED_FACT, "world:object:%s" % FOOD],
         "fact_refs": [],
         "occurred_at": OCCURRED_AT,
+        "observed_at": OCCURRED_AT,
+        "recorded_at": OCCURRED_AT,
+        "causal_parent_refs": ["act:drill-home-stay"],
         "subject_id": "chiyo.global",
     }
     event.update(overrides)
@@ -126,8 +136,12 @@ class WorldMemoryTextTest(unittest.TestCase):
         self.assertEqual(kinds.get("artifact"), "artifact:drill-work-note")
 
     def test_an_unsettled_outcome_is_never_written_as_a_success(self):
-        event = world_handoff(handoff_id="lexp:aaaabbbbccccdddd", settlement_refs=[],
-                              outcome_kind="UNKNOWN_EFFECT")
+        # The event carries its own unresolved verdict as a World ref token (the consumer's
+        # documented carrier); the handoff dataclass has no ``outcome_kind`` field.
+        event = world_handoff(
+            handoff_id="lexp:aaaabbbbccccdddd", settlement_refs=[],
+            world_refs=[CONSUMED_FACT, "world:object:%s" % FOOD,
+                        "world_fact:%s:UNKNOWN_EFFECT" % FOOD])
         row = self.admitted_row(event)
         text = str(row["content"])
         self.assertIn("结果还没有确定", text)

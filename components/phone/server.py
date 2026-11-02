@@ -8,6 +8,9 @@
   ``same-origin`` / ``none``；
 * 每个 ``POST`` 都要 ``X-CSRF-Token``，值与 ``GET /api/phone/state`` 里的
   ``csrf_token`` 一致（常量时间比较）；
+* 日记正文读取（``X-Phone-Actor: model``）与主体日记写入还要**本次 serve 的本地能力凭据**
+  （``Authorization: Bearer`` 或 ``X-Phone-Capability``，常量时间比较）；缺失/错误/本 serve
+  不可用时 403，不降级成空正文，也不写任何条目。operator 的元数据读取不需要凭据；
 * 请求字段白名单；客户端带来的 ``uid``/``authority``/``main_self_verified``/``home``/
   ``price``/``balance``/``owner`` 一律不当身份（直接拒）；
 * 静态文件只有固定三个名字，``profile``/仓库根**不可能**被当成静态目录；
@@ -53,6 +56,8 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 from urllib.parse import parse_qsl, urlsplit
 
+from . import capability as phone_capability
+from . import operator_stop as phone_operator_stop
 from . import service as phone_service
 from . import living as phone_living
 from . import sharing as phone_sharing
@@ -94,6 +99,16 @@ IDENTITY_FIELDS = frozenset({
 })
 
 NOTES_FIELDS = frozenset({"title", "body", "operation_key", "expected_head", "note_id"})
+#: ``POST /api/phone/control/activity/stop`` -- the local operator names only which Activity,
+#: which revision it saw, its own stable operation key and a closed reason code.  Subject,
+#: epoch and authority come from the server side; an ``actor``/``operator``/``system`` field
+#: is refused outright (it is in ``IDENTITY_FIELDS``).
+OPERATOR_STOP_FIELDS = frozenset({
+    "activity_id", "expected_revision", "operation_key", "reason_code",
+})
+OPERATOR_STOP_REASONS = frozenset({
+    "OPERATOR_REQUEST", "USER_REQUEST", "SAFETY_HOLD", "SERVICE_SHUTDOWN",
+})
 #: ``POST /api/phone/diary``: one entry of her own words.  The operation key is required: a diary
 #: write is an explicit act, and the original key is what makes a retry land on the same entry.
 DIARY_WRITE_FIELDS = frozenset({"body", "operation_key"})
@@ -240,6 +255,10 @@ RESEARCH_SOURCE_FIELDS = frozenset({"artifact_id", "source_revision"})
 #: The only query parameter the research list accepts.
 RESEARCH_QUERY_FIELDS = frozenset({"limit"})
 
+#: ``/api/phone/decisions/review`` -- S04's read-only decision projection.  ``decision_id``
+#: 单查一条有限摘要；缺省时只列出最近的骨架。``limit`` 只影响骨架列表长度。
+DECISION_REVIEW_QUERY_FIELDS = frozenset({"decision_id", "limit"})
+
 #: ``/api/phone/memory`` -- A's Memory service.  ``GET`` is a pure read (status / experiences);
 #: ``POST .../memory/enable`` only names its own idempotency key: the owner, the database and the
 #: controls are this instance's configuration, never a request field.
@@ -278,6 +297,9 @@ WORLD_ACTION_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "PLACE": (frozenset({"object_id", "target"}), frozenset({"object_id", "target"})),
     "POSE": (frozenset({"pose", "orientation"}), frozenset({"pose"})),
     "REST": (frozenset({"state", "mode"}), frozenset({"state"})),
+    # Optional lived-needs facility use: exactly one facility id the World declaration names.
+    # Nothing else (no elapsed time, no body value, no effect) is ever a client's input.
+    "TOILET": (frozenset({"facility_id"}), frozenset({"facility_id"})),
 }
 
 #: The room verbs, verbatim from C's ``PhoneWorld.VERBS`` / ``PARAM_SPEC``:
@@ -402,6 +424,14 @@ _SHARE_OPERATION_PATH = re.compile(r"^/api/phone/shares/operations/([A-Za-z0-9._
 #: (``contact_evt:<hex>``): matched, never rewritten, and never a body field.
 _CONTACT_PATH = re.compile(r"^/api/phone/contact/events/([A-Za-z0-9._:\-]{1,200})$")
 _CONTACT_OPERATION_PATH = re.compile(r"^/api/phone/contact/operations/([A-Za-z0-9._:\-]{1,128})$")
+#: ``/api/phone/participants`` -- F-140's identity read surface (A's ``ParticipantRegistry``).
+#: Two pure reads only: the bounded list and one participant.  There is deliberately **no**
+#: POST here: creation / endpoint binding / event linking are local operator CLI acts.
+_PARTICIPANT_PATH = re.compile(r"^/api/phone/participants/([A-Za-z0-9._:\-]{1,200})$")
+#: Same bound as the owner (``participant_registry.MAX_LIST``); repeated here so this layer
+#: refuses an oversized query before the owner is asked.
+MAX_PARTICIPANTS_LIST = 50
+PARTICIPANT_QUERY_FIELDS = frozenset({"limit"})
 #: ``/api/phone/shared-practice`` -- shared practice over A's ``shared_practice_service``.
 #: ``/works/<id>`` is one practice (its id is A's protocol string, matched never rewritten),
 #: ``/works/<id>/actions`` the one explicit **user** action, ``/operations/<key>`` the pure-read
@@ -413,6 +443,11 @@ _SHARED_PRACTICE_ACTIONS_PATH = re.compile(
     r"^/api/phone/shared-practice/works/([A-Za-z0-9._:\-]{1,200})/actions$")
 _SHARED_PRACTICE_OPERATION_PATH = re.compile(
     r"^/api/phone/shared-practice/operations/([A-Za-z0-9._:\-]{1,128})$")
+#: ``/api/phone/claims`` -- S03's bounded current-claim read.  ``/claims/<slot_id>`` is
+#: one exact slot (the id is S03's own opaque string, matched never rewritten);
+#: ``/claims/observations`` is the one write: it takes an operation key only, and the
+#: phone itself performs a formal World read before recording evidence.
+_CLAIM_SLOT_PATH = re.compile(r"^/api/phone/claims/([A-Za-z0-9._:\-]{1,200})$")
 #: The only HTTP codes this surface may ever answer with: the existing 200/202/404/409/503
 #: conventions, the 400 for a request that cannot be a request at all, and 413 for an oversized
 #: body.  A facade's ``http_status`` hint is honoured inside this set only.
@@ -477,7 +512,9 @@ class PhoneHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, address: tuple[str, int], *, service: phone_service.PhoneService,
                  csrf_token: str, log_path: Optional[Path] = None,
-                 supervisor: Optional[Any] = None, reuse_address: bool = False) -> None:
+                 supervisor: Optional[Any] = None, reuse_address: bool = False,
+                 capability: Optional[phone_capability.Capability] = None,
+                 operator_stop: Optional[Any] = None) -> None:
         if not isinstance(service, phone_service.PhoneService):
             raise TypeError("PhoneHTTPServer needs a PhoneService")
         if not isinstance(csrf_token, str) or not csrf_token:
@@ -487,12 +524,34 @@ class PhoneHTTPServer(ThreadingHTTPServer):
         self.allow_reuse_address = bool(reuse_address)
         self.service = service
         self.csrf_token = csrf_token
+        #: This serve's local capability credential (private diary body / subject write).  It is
+        #: minted after the real endpoint is bound; ``None`` means the private diary fails closed.
+        self.capability: Optional[phone_capability.Capability] = capability
+        #: 2026-10-28: the *separate* local-operator credential for the external-stop control
+        #: route.  It is never the diary credential and it grants nothing else.
+        self.operator_stop: Optional[Any] = operator_stop
         self.log_path = Path(log_path) if log_path else None
         #: The optional local supervisor.  A plain ``phone serve`` has none: the living view is
         #: still readable, but the run controls answer ``SUPERVISOR_UNAVAILABLE`` instead of
         #: starting a model window from a surface that never offered one.
         self.supervisor = supervisor
         super().__init__(address, PhoneRequestHandler)
+
+    def set_capability(self, capability: Optional[phone_capability.Capability]) -> None:
+        """Install the credential issued for this bound endpoint (called once, before serving)."""
+
+        self.capability = capability
+
+    def set_operator_stop(self, credential: Optional[Any]) -> None:
+        """Install this serve's local-operator stop credential (never the diary one)."""
+
+        self.operator_stop = credential
+
+
+#: A peer that left before its answer was written.  There is nobody left to receive an error
+#: body, so the request ends quietly: a second (500) write would only raise again and turn a
+#: closed client into a logged internal error.
+_CLIENT_GONE_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 class PhoneRequestHandler(BaseHTTPRequestHandler):
@@ -507,30 +566,52 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
 
         LOG.info("%s %s", self.command, self.path.split("?", 1)[0])
 
+    def _write_response(self, emit: Any) -> bool:
+        """Emit one response; a disconnected peer is a quiet end, not an internal error.
+
+        Only socket-level disconnects are swallowed here.  Anything raised by the handler body
+        itself still reaches ``_dispatch``'s error path, so a real failure stays visible.
+        """
+
+        try:
+            emit()
+        except _CLIENT_GONE_ERRORS:
+            self.close_connection = True
+            return False
+        return True
+
     def _send(self, code: int, payload: Mapping[str, Any]) -> None:
         body = json.dumps(dict(payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
-        self.send_response(int(code))
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+
+        def emit() -> None:
+            self.send_response(int(code))
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        self._write_response(emit)
 
     def _send_image(self, content_type: str, body: bytes) -> None:
         """One real picture response.  Same-origin only; never cached, never sniffed."""
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+
+        def emit() -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        self._write_response(emit)
 
     def _send_static(self, name: str, content_type: str) -> None:
         path = WEB_DIR / name
@@ -542,19 +623,23 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         except OSError:
             self._send(404, _failure("STATIC_FILE_MISSING"))
             return
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-            "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+
+        def emit() -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+                "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        self._write_response(emit)
 
     # -- guards --------------------------------------------------------------------------
 
@@ -658,6 +743,129 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             return phone_service.ACTOR_USER
         return declared
 
+    # -- local capability (private diary only) -------------------------------------------
+
+    def _presented_capability(self) -> tuple[Optional[str], Optional[str]]:
+        """Extract one bearer credential.  Two differing headers are refused, never merged."""
+
+        authorization = str(self.headers.get("Authorization") or "").strip()
+        header = str(self.headers.get("X-Phone-Capability") or "").strip()
+        values: list[str] = []
+        if authorization:
+            scheme, _, value = authorization.partition(" ")
+            if scheme.strip().lower() != "bearer" or not value.strip():
+                return None, "CAPABILITY_MALFORMED"
+            values.append(value.strip())
+        if header:
+            values.append(header)
+        if not values:
+            return None, "CAPABILITY_REQUIRED"
+        if len(set(values)) > 1:
+            return None, "CAPABILITY_INVALID"
+        return values[0], None
+
+    def _capability_refusal(self) -> Optional[tuple[int, dict[str, Any]]]:
+        """The one gate for the private diary.  Missing / wrong / unavailable never degrade."""
+
+        capability = getattr(self.server, "capability", None)
+        if capability is None:
+            return 403, _failure("CAPABILITY_UNAVAILABLE")
+        presented, reason = self._presented_capability()
+        if reason is not None:
+            return 403, _failure(reason)
+        if not phone_capability.matches(capability, presented):
+            return 403, _failure("CAPABILITY_INVALID")
+        return None
+
+    # -- local operator stop (a *separate* credential; never the diary one) ---------------
+
+    def _presented_operator_stop(self) -> tuple[Optional[str], Optional[str]]:
+        authorization = str(self.headers.get("Authorization") or "").strip()
+        header = str(self.headers.get("X-Phone-Operator-Stop") or "").strip()
+        values: list[str] = []
+        if authorization:
+            scheme, _, value = authorization.partition(" ")
+            if scheme.strip().lower() != "bearer" or not value.strip():
+                return None, "OPERATOR_STOP_CAPABILITY_MALFORMED"
+            values.append(value.strip())
+        if header:
+            values.append(header)
+        if not values:
+            return None, "OPERATOR_STOP_REQUIRED"
+        if len(set(values)) > 1:
+            return None, "OPERATOR_STOP_INVALID"
+        return values[0], None
+
+    def _operator_stop_refusal(self) -> Optional[tuple[int, dict[str, Any]]]:
+        """Authentication happens before the body is parsed and before any idempotency read."""
+
+        credential = getattr(self.server, "operator_stop", None)
+        if credential is None:
+            return 403, _failure("OPERATOR_STOP_UNAVAILABLE")
+        presented, reason = self._presented_operator_stop()
+        if reason is not None:
+            return 403, _failure(reason)
+        if not phone_operator_stop.matches(credential, presented):
+            return 403, _failure("OPERATOR_STOP_INVALID")
+        return None
+
+    def _get_activity_stop_state(self, service: phone_service.PhoneService) -> None:
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._operator_stop_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        query = parse_qsl(urlsplit(self.path).query, keep_blank_values=True)
+        keys = [key for key, _value in query]
+        if sorted(keys) != ["activity_id"] or len(query) != 1:
+            self._send(400, _failure("UNKNOWN_QUERY"))
+            return
+        activity_id = str(query[0][1] or "").strip()
+        if not activity_id:
+            self._send(400, _failure("ACTIVITY_ID_REQUIRED"))
+            return
+        result = service.activity_stop_state(activity_id)
+        self._send(200 if result.get("ok") else http_status_for(
+            str(result.get("status") or ""), result), result)
+
+    def _post_activity_stop(self, service: phone_service.PhoneService) -> None:
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._operator_stop_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        # The credential is already checked; only now is the body read and the operation key
+        # considered.  A wrong token can never be turned into a replay of an earlier request.
+        payload = self._read_body(OPERATOR_STOP_FIELDS)
+        reason = str(payload.get("reason_code") or "").strip().upper()
+        if reason not in OPERATOR_STOP_REASONS:
+            self._send(409, _failure("UNKNOWN_REASON_CODE"))
+            return
+        revision = payload.get("expected_revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            self._send(400, _failure("EXPECTED_REVISION_INVALID"))
+            return
+        credential = self.server.operator_stop
+        result = service.request_activity_stop(
+            activity_id=payload.get("activity_id"),
+            expected_revision=revision,
+            operation_key=payload.get("operation_key"),
+            reason_code=reason,
+            epoch=str(getattr(credential, "epoch", "") or ""),
+            # The credential itself travels with the request: the mailbox signature is
+            # derived from it, and the Life subject it may stop is verified before anything
+            # is written.  The token never leaves this call.
+            stop_credential=credential,
+        )
+        self._send(200 if result.get("ok") else http_status_for(
+            str(result.get("status") or ""), result), result)
+
     # -- routing -------------------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib signature
@@ -686,6 +894,11 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             self._dispatch_api(method, path)
+        except _CLIENT_GONE_ERRORS:
+            # The caller hung up while this request was being handled (a long camera capture is
+            # the realistic case).  There is no one to answer; writing a 500 would just fail again
+            # and be misreported as an internal error.
+            self.close_connection = True
         except PhoneRequestError as exc:
             self._send(exc.status, _failure(exc.reason_code))
         except Exception:  # never echo the exception text, path or token
@@ -699,6 +912,11 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         world_operation = _WORLD_OPERATION_PATH.match(path)
         reading_operation = _READING_OPERATION_PATH.match(path)
         if method == "GET":
+            # 2026-10-28: the external-stop read surface.  Same loopback guards, plus the
+            # *separate* operator credential; it answers stop/terminal facts only.
+            if path == f"{API_PREFIX}/control/activity/stop/state":
+                self._get_activity_stop_state(service)
+                return
             if path == f"{API_PREFIX}/state":
                 self._get_state(service)
                 return
@@ -717,6 +935,27 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             # 不启动服务、不写结果 store。``/today`` 的既有形状与行为完全不变。
             if path == f"{API_PREFIX}/today/arrangements":
                 self._get_today_arrangements(service)
+                return
+            # 她今天有记录的事：把已有的 Activity / 日计划 / World 动作 / 日记 / 相册 /
+            # 钱包交易合成一条只读时间线。不新建 store、不补空白、不复制正文；
+            # operator 默认只有骨架，她自己的工具带 actor 声明才拿到原入口引用。
+            if path == f"{API_PREFIX}/today/timeline":
+                self._get_day_timeline(service)
+                return
+            # S03: her current claims -- observed / reported / inferred, each with its
+            # scope, time and status; conflicts, stale and unknown stay distinct.  A pure
+            # read: no World fetch, no model, no Memory write, no action permission.
+            # S04 F-049/F-050: 一条已提交决定的有限摘要、已记录的未选/延期项，以及
+            # Decision 与 Adoption 的分开状态。纯读；rationale 正文在手机读面扣留，
+            # 实时适用性明确 NOT_EVALUATED（不复制 AG-2 准入规则）。
+            if path == f"{API_PREFIX}/decisions/review":
+                self._get_decision_review(service)
+                return
+            if path == f"{API_PREFIX}/claims":
+                self._get_claims(service)
+                return
+            if _CLAIM_SLOT_PATH.match(path):
+                self._get_claim_slot(service, _CLAIM_SLOT_PATH.match(path).group(1))
                 return
             if path == f"{API_PREFIX}/notes":
                 self._send(200, service.notes())
@@ -870,6 +1109,16 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if _CONTACT_PATH.match(path):
                 self._get_contact_event(service, _CONTACT_PATH.match(path).group(1))
                 return
+            # F-140 participant identity: two guarded pure reads.  The list carries names /
+            # aliases / counts (no message body); the detail adds explicit endpoint and event
+            # links.  There is no write route on this surface, so a model cannot create, bind or
+            # send through it.
+            if path == f"{API_PREFIX}/participants":
+                self._get_participants(service)
+                return
+            if _PARTICIPANT_PATH.match(path):
+                self._get_participant(service, _PARTICIPANT_PATH.match(path).group(1))
+                return
             # Shared practice (A's ``shared_practice_service``): two guarded pure reads and one
             # pure-read reconciliation.  ``/works/<id>`` is matched before any future sub-path,
             # and ``/operations/<key>`` is the *original* key, looked up as-is.
@@ -895,6 +1144,9 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             self._send(404, _failure("NOT_FOUND"))
             return
         if method == "POST":
+            if path == f"{API_PREFIX}/control/activity/stop":
+                self._post_activity_stop(service)
+                return
             if path == f"{API_PREFIX}/notes":
                 self._post_note(service)
                 return
@@ -915,6 +1167,11 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
                 return
             if path == f"{API_PREFIX}/world/actions":
                 self._post_world_action(service)
+                return
+            # S03: one formal observation.  The body carries an operation key only; the
+            # observation itself comes from the World owner's snapshot, never from the client.
+            if path == f"{API_PREFIX}/claims/observations":
+                self._post_claim_observe(service)
                 return
             if path == f"{API_PREFIX}/reading/material":
                 self._post_reading_material(service)
@@ -1278,6 +1535,43 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
                                  operation_key=key, result=result)
         self._send_or_map(result)
 
+    # -- participants (F-140: A's ParticipantRegistry; every read here is pure) -----------
+
+    def _participants_limit(self) -> Optional[int]:
+        """``?limit=N``: the only query key the identity list accepts."""
+
+        raw = urlsplit(self.path).query
+        if not raw:
+            return None
+        pairs = parse_qsl(raw, keep_blank_values=True)
+        unknown = sorted({key for key, _value in pairs} - PARTICIPANT_QUERY_FIELDS)
+        if unknown:
+            raise PhoneRequestError("UNKNOWN_QUERY:%s" % ",".join(unknown))
+        if [key for key, _value in pairs].count("limit") > 1:
+            raise PhoneRequestError("QUERY_REPEATED:limit")
+        return _limit_value(pairs[0][1] if pairs else None, MAX_PARTICIPANTS_LIST)
+
+    def _get_participants(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/participants``: bounded identity rows -- no message body."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        self._send_or_map(service.participants(self._participants_limit()))
+
+    def _get_participant(self, service: phone_service.PhoneService,
+                         participant_id: str) -> None:
+        """``GET /api/phone/participants/<id>``: one participant and its explicit links."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.participant(participant_id))
+
     # -- shared practice (A's shared_practice_service; P forwards user intent only) -------
 
     def _get_shared_practices(self, service: phone_service.PhoneService) -> None:
@@ -1453,6 +1747,103 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             raise PhoneRequestError("UNKNOWN_QUERY")
         self._send_or_map(service.today_arrangements())
 
+    def _get_decision_review(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/decisions/review``: 决定的有限摘要与 Adoption 状态，只读。
+
+        ``?decision_id=`` 单查一条；缺省只列最近骨架。与 ``/today`` 同一套 host/origin
+        守护：决定里的来源、候选和理由都是她的私人事实。rationale 正文不进入手机读面。
+        """
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        decision_id, limit = self._decision_review_query()
+        self._send_or_map(service.decision_review(decision_id=decision_id, limit=limit))
+
+    def _decision_review_query(self) -> tuple[Optional[str], int]:
+        """``?decision_id=...&limit=N``：两个键各最多一次；未知键直接拒绝。"""
+
+        raw = urlsplit(self.path).query
+        if not raw:
+            return None, 10
+        pairs = parse_qsl(raw, keep_blank_values=True)
+        unknown = sorted({key for key, _value in pairs} - DECISION_REVIEW_QUERY_FIELDS)
+        if unknown:
+            raise PhoneRequestError("UNKNOWN_QUERY:%s" % ",".join(unknown))
+        seen: dict[str, str] = {}
+        for key, value in pairs:
+            if key in seen:
+                raise PhoneRequestError("QUERY_REPEATED:%s" % key)
+            seen[key] = value
+        decision_id = (seen.get("decision_id") or "").strip() or None
+        if decision_id is not None:
+            if len(decision_id) > 128 or any(ch in decision_id for ch in ("\x00", "\r", "\n")):
+                raise PhoneRequestError("DECISION_ID_INVALID")
+        limit = _limit_value(seen.get("limit"), phone_service.MAX_MATERIAL_LIMIT)
+        return decision_id, int(limit or 10)
+
+    def _get_day_timeline(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/today/timeline``: 她今天有记录的事，只读。
+
+        和 ``/today`` 一样走 host/origin 守护；日期只由实例自己的业务时钟决定，调用方
+        不能写入发生时间。`X-Phone-Actor` 沿用既有声明：缺失/未知 = operator，只有
+        ``model`` 才拿到原入口 ``detail_ref``；两种视图都不在聚合里复制日记正文或相册说明。
+        """
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.day_timeline(
+            subject_view=self._actor() == phone_service.ACTOR_MODEL))
+
+    def _get_claims(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/claims``: bounded current claims; host/origin guarded.
+
+        A claim read carries where she was last observed and what sources said, so it
+        uses the same guard as the rest of her private surface.  It never writes.
+        """
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.claims())
+
+    def _get_claim_slot(self, service: phone_service.PhoneService, slot_id: str) -> None:
+        """``GET /api/phone/claims/<slot_id>``: one slot's current state and history."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.claim_slot(slot_id))
+
+    def _post_claim_observe(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/claims/observations``: one formal World read -> evidence.
+
+        The request names no content, world id, role or authority: only the operation
+        key.  Everything observed is taken from the World owner's own snapshot here.
+        """
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(frozenset({"operation_key"}))
+        key = _operation_key(payload.get("operation_key"))
+        result = service.claim_observe(key)
+        service.record_operation(actor=self._actor(), action="claims:observe",
+                                 operation_key=key, result=result)
+        self._send_or_map(result)
+
     def _living_supervisor(self) -> Optional[Any]:
         return getattr(self.server, "supervisor", None)
 
@@ -1596,25 +1987,42 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         self._send(200, service.diary_list())
 
     def _get_diary_entry(self, service: phone_service.PhoneService, entry_id: str) -> None:
-        """``GET /api/phone/diary/<id>``: one entry, body only for the subject's own tool path.
+        """``GET /api/phone/diary/<id>``: one entry, body only with this serve's credential.
 
-        The actor is the existing ``X-Phone-Actor`` declaration this server already records
-        (missing / unknown = the operator).  A request-body ``role`` is never read; the default
-        operator answer is metadata with ``body_withheld: true``, so an ordinary phone read
-        cannot quietly turn into the diary's text.
+        ``X-Phone-Actor`` remains an intent declaration, not an identity.  An operator read
+        (missing / non-model actor) gets metadata with ``body_withheld: true``.  A declared
+        model read must additionally present the local capability credential; missing, wrong
+        or unavailable credentials are refused instead of degrading to a successful empty body.
         """
         guard = self._guard_common()
         if guard is not None:
             self._send(*guard)
             return
-        include_text = self._actor() == phone_service.ACTOR_MODEL
+        if self._actor() == phone_service.ACTOR_MODEL:
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+            include_text = True
+        else:
+            include_text = False
         self._send_or_map(service.diary_read(entry_id, include_text=include_text))
 
     def _post_diary(self, service: phone_service.PhoneService) -> None:
-        """``POST /api/phone/diary``: one entry of her own words, with her own real time."""
+        """``POST /api/phone/diary``: one entry of her own words, with her own real time.
+
+        Writing her own diary is a subject write, not an operator write: it requires this
+        serve's local capability in addition to the existing CSRF door.  A missing / wrong
+        credential is refused before the body is parsed or any owner is touched, so it creates
+        zero entries and zero versions.
+        """
         guard = self._guard_mutation()
         if guard is not None:
             self._send(*guard)
+            return
+        refusal = self._capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
             return
         payload = self._read_body(DIARY_WRITE_FIELDS)
         body = _clean_body(payload.get("body"), phone_service.MAX_DIARY_BODY)
@@ -3227,9 +3635,9 @@ def _world_params(action: str, value: Any) -> dict[str, Any]:
     """Validate one verb's params before the owner sees them (contract §3.1).
 
     ``ARRANGE`` / ``TOGGLE_FIXTURE`` follow C's own ``PARAM_SPEC`` exactly (``object_id`` +
-    ``target`` / ``object_id`` + absolute ``state``).  P checks the shape only; the owner's word
-    and reason code win.  Identity, elapsed time, price and body values are refused here for
-    every verb.
+    ``target`` / ``object_id`` + absolute ``state``), and ``TOILET`` takes exactly one
+    declared ``facility_id``.  P checks the shape only; the owner's word and reason code win.
+    Identity, elapsed time, price and body values are refused here for every verb.
     """
 
     if not isinstance(value, dict):
@@ -3257,6 +3665,11 @@ def _world_params(action: str, value: Any) -> dict[str, Any]:
                                      "OBJECT_ID_INVALID"),
             "state": _world_choice(value["state"], FIXTURE_STATES, "FIXTURE_STATE_INVALID"),
         }
+    if action == "TOILET":
+        # Only the declared facility id travels.  Whether that facility exists, is at the
+        # current place and is open is the World owner's verdict, never P's.
+        return {"facility_id": _clean_text(value["facility_id"], MAX_WORLD_OBJECT_ID,
+                                           "FACILITY_ID_INVALID")}
     if action == "MOVE":
         return {"destination_location_id": _clean_text(
             value["destination_location_id"], MAX_WORLD_DESTINATION, "DESTINATION_INVALID")}
@@ -3292,14 +3705,17 @@ def _world_params(action: str, value: Any) -> dict[str, Any]:
 def create_server(service: phone_service.PhoneService, *, csrf_token: str, port: int = 0,
                   log_path: Optional[Path] = None,
                   supervisor: Optional[Any] = None,
-                  reuse_address: bool = False) -> PhoneHTTPServer:
+                  reuse_address: bool = False,
+                  capability: Optional[phone_capability.Capability] = None,
+                  operator_stop: Optional[Any] = None) -> PhoneHTTPServer:
     """Bind one loopback server.  The host is not a caller choice."""
 
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
         raise ValueError("port must be an integer in 0..65535")
     return PhoneHTTPServer(("127.0.0.1", int(port)), service=service,
                            csrf_token=csrf_token, log_path=log_path, supervisor=supervisor,
-                           reuse_address=bool(reuse_address))
+                           reuse_address=bool(reuse_address), capability=capability,
+                           operator_stop=operator_stop)
 
 
 __all__ = [
@@ -3307,6 +3723,7 @@ __all__ = [
     "ALLOWED_HOSTS",
     "API_PREFIX",
     "ARRANGE_TARGET_KINDS",
+    "DECISION_REVIEW_QUERY_FIELDS",
     "FIXTURE_STATES",
     "HAND_SLOTS",
     "IDENTITY_FIELDS",

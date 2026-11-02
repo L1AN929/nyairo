@@ -21,7 +21,10 @@ What it deliberately is not
   The only thing it persists is its own session record (``co_presence.json`` in the Life state
   root), which is bookkeeping about the invitation -- not a fact about the Activity.
 * An ordinary inbound message is **an observation only**: it never pauses anything and never
-  starts an Activity.  Only an explicit invitation may ask for engagement.
+  starts an Activity.  Only an explicit invitation may ask for engagement.  It is still
+  *answered* -- ``observe`` reads LR-3's ``communication_availability`` and reports
+  ``BOUNDARY_DEFERRED`` during an ATOMIC foreground, which defers the foreground move, not the
+  reply.
 * The operator's global pause is not a social interruption.  A paused instance refuses the
   invitation; this module never writes the pause bit.
 * True concurrency beyond the current single-foreground contract is **not** implemented.  It is
@@ -63,6 +66,11 @@ MAX_WAIT_SECONDS = 6 * 3600
 
 EFFECT_OBSERVATION_ONLY = "OBSERVATION_ONLY"
 EFFECT_INVITATION = "INVITATION"
+
+#: LR-3's own ``COMM_AVAILABILITY_*`` word list (``activity_interruption`` :220-226).  A reply
+#: is possible for all three: BOUNDARY_DEFERRED only means the *foreground* may not move before
+#: the boundary, never that an ordinary message goes unanswered.
+RESPONDABLE_AVAILABILITIES = frozenset({"OPEN", "LIMITED", "BOUNDARY_DEFERRED"})
 
 DECISION_ACCEPT = "ACCEPT"
 DECISION_DEFER = "DEFER"
@@ -345,16 +353,41 @@ class FiniteCoPresence:
 
         It is not stored on any owner, it does not pause anything and it does not start an
         Activity.  The answer says exactly that, so no caller can read it as engagement.
+
+        The one fact this used to leave out is *whether a reply may happen now*.  LR-3 has
+        carried that verdict since ``InterruptionPolicy.compute_communication_availability``:
+        an ordinary message never pauses the foreground, and during an ATOMIC step it answers
+        ``BOUNDARY_DEFERRED`` -- the reply still happens, it just cannot move the foreground
+        before the boundary.  Reading it here is a pure projection (``get_current_life_view``
+        does not write); the older path simply never asked, so "can she answer mid-step?" was
+        unknown rather than ``OPEN``/``BOUNDARY_DEFERRED``.
         """
         classified = classify(raw)
         if classified["kind"] == KIND_INVITATION:
             return {"effect": EFFECT_INVITATION, "kind": KIND_INVITATION,
                     "pause_requested": False, "activity_started": False,
                     "detail": "an explicit invitation is not an observation; consider() it"}
+        life = self._life_view()
+        availability = None
+        foreground_atomic = False
+        life_view_error = None
+        if life.get("read_error"):
+            life_view_error = str(life.get("read_error"))
+        else:
+            availability = str(life.get("communication_availability") or "") or None
+            foreground_atomic = str(life.get("interruptibility") or "") == "ATOMIC"
         return {"effect": EFFECT_OBSERVATION_ONLY, "kind": classified["kind"],
                 "reason_code": classified.get("reason_code"),
                 "pause_requested": False, "activity_started": False,
                 "owners_written": 0,
+                # LR-3's own verdict, not a new policy: OPEN / LIMITED / BOUNDARY_DEFERRED.
+                "communication_availability": availability,
+                # A reply is possible whenever LR-3 gave a verdict; BOUNDARY_DEFERRED only
+                # says the foreground may not move before the boundary.  No verdict -> no guess.
+                "respondable": availability in RESPONDABLE_AVAILABILITIES,
+                "boundary_deferred": availability == "BOUNDARY_DEFERRED",
+                "foreground_atomic": foreground_atomic,
+                "life_view_error": life_view_error,
                 "detail": "an inbound message is observed only; the reply, if any, is a "
                           "read-only expression and needs no pause and no new Activity"}
 
