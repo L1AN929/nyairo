@@ -3,7 +3,7 @@
  * Handles Home / Docs View Switching, SPA Routing, Command Copy Bar, Dynamic TOC, Search Modal
  */
 
-document.addEventListener('DOMContentLoaded', () => {
+function bootstrap() {
   initTheme();
   initCommandCopy();
   initInstallMethods();
@@ -13,7 +13,16 @@ document.addEventListener('DOMContentLoaded', () => {
   initMobileMenu();
   initShowcaseTabs();
   initRoadmapAccordion();
-});
+  if (typeof initInteractiveRoadmap === 'function') {
+    initInteractiveRoadmap();
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
+}
 
 /* ==========================================================================
    1. 主题切换 (Theme Toggle)
@@ -186,6 +195,13 @@ function renderSidebar() {
   });
 
   sidebarEl.innerHTML = html;
+
+  sidebarEl.querySelectorAll('.sidebar-link').forEach(link => {
+    link.addEventListener('click', () => {
+      sidebarEl.classList.remove('open');
+      setMobileMenuState(false);
+    });
+  });
 }
 
 /* ==========================================================================
@@ -256,7 +272,7 @@ function initRouting() {
   routeHash();
 }
 
-function routeHash() {
+function routeHash(autoCloseSidebar = true) {
   const urlParams = new URLSearchParams(location.search);
   const queryDoc = (urlParams.get('doc') || urlParams.get('p') || '').trim();
   const rawHash = location.hash.replace('#', '').trim();
@@ -292,10 +308,10 @@ function routeHash() {
     navDocs.classList.add('active');
   }
 
-  loadDoc(docId, anchor);
+  loadDoc(docId, anchor, autoCloseSidebar);
 }
 
-function loadDoc(docId, anchor = null) {
+function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
   const doc = DOCS_CONTENT[docId] || DOCS_CONTENT['intro'];
   const targetId = DOCS_CONTENT[docId] ? docId : 'intro';
 
@@ -350,8 +366,10 @@ function loadDoc(docId, anchor = null) {
   bindCopyButtons();
 
   const sidebarEl = document.getElementById('docs-sidebar');
-  if (sidebarEl) sidebarEl.classList.remove('open');
-  setMobileMenuState(false);
+  if (autoCloseSidebar) {
+    if (sidebarEl) sidebarEl.classList.remove('open');
+    setMobileMenuState(false);
+  }
 
   if (anchor) {
     requestAnimationFrame(() => {
@@ -567,25 +585,37 @@ function initMobileMenu() {
   const sidebarEl = document.getElementById('docs-sidebar');
   if (!toggleBtn || !sidebarEl) return;
   const close = () => { sidebarEl.classList.remove('open'); setMobileMenuState(false); };
-  toggleBtn.addEventListener('click', () => {
-    if (!location.hash || location.hash === '#home') {
-      window.addEventListener('hashchange', () => {
-        sidebarEl.classList.add('open');
-        setMobileMenuState(true);
-      }, { once: true });
-      location.hash = 'intro';
+
+  toggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const rawHash = location.hash.replace('#', '').trim();
+    if (!rawHash || rawHash === 'home') {
+      history.pushState(null, '', '#intro');
+      routeHash(false);
+      sidebarEl.classList.add('open');
+      setMobileMenuState(true);
       return;
     }
     const open = sidebarEl.classList.toggle('open');
     setMobileMenuState(open);
   });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sidebarEl.classList.contains('open')) { close(); toggleBtn.focus(); } });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidebarEl.classList.contains('open')) {
+      close();
+      toggleBtn.focus();
+    }
+  });
+
   const backdrop = document.getElementById('sidebar-backdrop');
   if (backdrop) {
     backdrop.addEventListener('click', close);
   }
+
   document.addEventListener('click', (e) => {
-    if (sidebarEl.classList.contains('open') && !sidebarEl.contains(e.target) && !toggleBtn.contains(e.target) && (!backdrop || !backdrop.contains(e.target))) close();
+    if (sidebarEl.classList.contains('open') && !sidebarEl.contains(e.target) && !toggleBtn.contains(e.target) && (!backdrop || !backdrop.contains(e.target))) {
+      close();
+    }
   });
 }
 
@@ -743,6 +773,4 @@ function initInteractiveRoadmap() {
   setPhase(0);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  initInteractiveRoadmap();
-});
+// initInteractiveRoadmap handled in bootstrap()
