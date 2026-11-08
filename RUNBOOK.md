@@ -41,6 +41,25 @@ python scripts/phone_edge_fixture.py --port 3816
 
 夹具说明写在脚本开头；它证明界面链路，不替代真实 owner 验收。
 
+## 压缩日的逻辑起点与起跑时段
+
+**想让她的一天从早上开始，就用 `--logical-anchor`，不要等真实时间。** 逻辑起点不必跟
+真实时间同步，可以虚构：不传时它仍等于按下 `prepare` 的真实时刻；传了就按那个起点算
+`horizon_logical`（起点 + `logical_seconds`），下午五点起跑也能让她从早上开始。
+
+```bash
+python scripts/fast_day.py prepare --root /abs/new-root --run-id day-x \\
+    --memory-authority /abs/outside-root/authority.db \\
+    --logical-anchor 2026-11-05T08:00:00+08:00
+```
+
+只有**逻辑起点**的本地钟点决定她这一天的开场：起点落在本地 21:00–07:00 仍然拒绝
+`FASTDAY_NIGHT_START_REFUSED`（夜间起点把一天的额度烧在逻辑 00–06 点几乎没有候选的
+时段上，2026-11-04 u/v 批就是因此空手而归），不传起点时退回看创建时刻，与旧行为一致；
+`--clock-only` 的时钟冒烟不拦。确实要从夜间开场才显式加 `--allow-night-start`，返回里
+的 `allow_night_start` / `started_local_hour`（以及传起点时的 `real_local_hour`）
+会记下这是显式放行。真实时间那一侧（超时、暂停、预算、心跳、`created_utc`）不跟着变。
+
 ## 派工给施工模型
 
 任务正文写进文件（不要放命令行参数，Windows 下中文会被截断）：
@@ -54,6 +73,17 @@ python scripts/dispatch_worker.py --name <工单名> --task-file <任务文件> 
 ```
 
 默认模型 `workbuddy-wg/cn:deepseek-v4.1-flash`，网关 `http://127.0.0.1:3425`。
+
+**CLI 版本**：claude CLI 2.1.265 起会硬拒网关的私有模型 id（`unrecognized_model` 之后直接不发
+请求），2.1.263 只打一条告警就照常跑。仓库外的 `D:\Tools\claude-263` 装了那一版，专给 worker 用：
+
+```bash
+python scripts/dispatch_worker.py --name <工单名> --task-file <任务文件> \
+  --claude "D:/Tools/claude-263/node_modules/.bin/claude.cmd" --timeout 3600 --max-turns 300
+```
+
+或者设 `WORKER_CLAUDE` 环境变量，省掉每次传参。2026-11-06 实测 exit=0、模型 DeepSeek、
+工具往返正常。升级或重装 CLI 后回来重验这一条。
 日志落在 `.agents/worker-runs/`。施工跑完监工独立复跑任务书里写的那几条验收命令，
 不看施工自述；任务书之外的全量套件和浏览器点验不在监工会话里跑。
 

@@ -91,3 +91,11 @@ Status: implemented
 - **已知上限**：本轮没有调用真实 provider（硬约束），因此**不能宣称真实截断已消失**；
   失败请求当时的具体 token 量已不可恢复，只能等下一次真实运行产生带形状的失败记录。
   4096 是否被网关接受、是否足够，同样未在真实链上验证。
+- **后续（2026-11-06）**：内容 writer 不经过认知 adapter，其失败只落在 bounded_failstop
+  marker。该 marker 的持久合同仍只有四个键，没有 metadata 容器，因此 stage/actual_cap/
+  finish_reason **不落盘**（CONTRACT_STOP），只在既有 `AgencyModelClientError.metadata`
+  通道保留安全事实，见
+  [2026-11-06-content-failure-metadata.md](2026-11-06-content-failure-metadata.md)。
+  同日用户明确批准有限扩展后，这三个字段已可作为三个定型顶层键持久，见
+  [2026-11-06-content-failure-marker-extension.md](2026-11-06-content-failure-marker-extension.md)；
+  “marker 仍只有四个键”的判断保留为当时事实。

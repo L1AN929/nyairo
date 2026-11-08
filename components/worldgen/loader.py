@@ -111,6 +111,28 @@ class WorldPackage:
 
     # ---- 规则 ------------------------------------------------------------
 
+    @staticmethod
+    def _affordance_tuple(item: dict[str, Any]) -> tuple[Any, ...]:
+        """一条 affordance 的运行时元组；旧包仍是 ``(id, description)``。
+
+        可选键彼此独立，缺哪个就少哪一段：只有 title 时是 3 元组，只有
+        suggested_seconds 时第 3 位补 ``None`` 占位，二者都有时是 4 元组；
+        显式 execution 必然伴随 title + suggested_seconds，所以是第 5 段。
+        """
+
+        values: list[Any] = [item["affordance_id"], item["description"]]
+        if "title" in item:
+            values.append(item["title"])
+        elif "suggested_seconds" in item:
+            values.append(None)
+        if "suggested_seconds" in item:
+            values.append(item["suggested_seconds"])
+        # 显式执行机制总是与 title/suggested_seconds 同时存在（schema 已保证），
+        # 因此这里只会在完整元数据之后追加第 5 段；旧包仍是 2/3/4 元组。
+        if "execution" in item:
+            values.append({"mechanism": item["execution"]["mechanism"]})
+        return tuple(values)
+
     def location_rule(self, location_id: str) -> Optional[dict[str, Any]]:
         rule = self._rules["location_rules"].get(location_id)
         if rule is None:
@@ -120,7 +142,7 @@ class WorldPackage:
             "close_hour": rule["close_hour"],
             "weekdays_only": rule["weekdays_only"],
             "affordances": tuple(
-                (item["affordance_id"], item["description"]) for item in rule["affordances"]
+                self._affordance_tuple(item) for item in rule["affordances"]
             ),
         }
 

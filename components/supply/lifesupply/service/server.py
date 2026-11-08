@@ -596,7 +596,7 @@ def run(mode: str, socket_path: str, data_root: str,
     if refusal is not None:
         raise RuntimeError(refusal)
     path = Path(socket_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
     if path.exists():
         raise RuntimeError("refusing to unlink a pre-existing service socket path")
     api = Api(data_root, mode=mode, governance_socket=governance_socket,
@@ -605,7 +605,11 @@ def run(mode: str, socket_path: str, data_root: str,
               writer_instance=writer_instance, read_only=read_only,
               service_principal=service_principal,
               require_non_root_identity=require_non_root_identity)
-    server = UnixApiServer(str(path), api)
+    prev_umask = os.umask(0o177)
+    try:
+        server = UnixApiServer(str(path), api)
+    finally:
+        os.umask(prev_umask)
     os.chmod(path, 0o660)
     try:
         server.serve_forever(poll_interval=0.5)

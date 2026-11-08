@@ -162,3 +162,5 @@ LR-2 的 PAUSE/ABANDON 规则、候选供给、AG-0 来源准入（tombstone/不
   路径不变。跨 owner 补绑的恢复目标改为 adoption 自己的 `authorized_activity_ref`，不再从
   当前前台猜。旧 PAUSED 指针不迁移。见
   [PAUSE 释放执行槽](2026-10-24-paused-background-single-execution.md)。
+
+- 2026-11-07 的正式整链测试证据见 [暂停作品回来链](../testing/2026-11-07-paused-work-resume-chain.md)；它只补证据，不改变本笔记的规则。

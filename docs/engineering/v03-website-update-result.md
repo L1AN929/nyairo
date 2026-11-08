@@ -17,7 +17,7 @@ Status: implemented（本地内容已改完并验证；未提交、未推送、�
 
 ## 2. 源站基线核对（先核对再改）
 
-只读抓取（`C:\Windows\System32\OpenSSH\scp.exe` BatchMode，未写远端）HK `202.6.205.26:/var/www/nyairo` 到会话 scratch `remote-baseline/`：
+只读抓取（`C:\Windows\System32\OpenSSH\scp.exe` BatchMode，未写远端）HK `<ORIGIN_HOST_REDACTED>:/var/www/nyairo` 到会话 scratch `remote-baseline/`：
 
 | 文件 | 线上（部署版） | 本地 HEAD `7f09d26` 工作树 |
 |---|---|---|

@@ -104,3 +104,5 @@ condition 分支与 agenda 分支保持「必须 `WAITING`」：它们的绑定�
   `invalidated 0 -> OPEN` / `RESUME -> ACTIVE` / `CONSUMED`。仓库本身未回滚、未改动。
 - 笔记门禁：tree / format / archive 三条脚本。
 - 未验证：AU-1/AG-2 自然生成资格、遗留实例解卡、G1 任一场景、真实模型、24h。
+
+- 2026-11-07 的正式整链测试证据见 [暂停作品回来链](../testing/2026-11-07-paused-work-resume-chain.md)；它只补证据，不改变本笔记的规则。

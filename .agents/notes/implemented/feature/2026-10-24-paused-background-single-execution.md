@@ -274,3 +274,5 @@ PAUSED Activity」打到（两处都是状态判定，与前台指针无关）�
 
 验收：WSL `owned_test_runner --files test_life_v1_integration.py` 全例 OK、exit 0；本单
 `components/` 零改动。
+
+- 2026-11-07 的双 PID 正式整链证据见 [暂停作品回来链](../testing/2026-11-07-paused-work-resume-chain.md)；它只补证据，不改变本笔记的规则。

@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_ROOT = "/srv/nyairo-v0.3.0"
+DEFAULT_ROOT = str(Path(__file__).resolve().parents[1])
 TOOLSET = "chiyo_world"
 TOOL = "world_move"
 
@@ -75,16 +75,21 @@ def main():
     # Discover all platforms present in config
     platforms = set(cfg.get("platforms", {}).keys())
     if args.platform == "all":
-        target_platforms = platforms.union(platform_toolsets.keys()).union({"weixin", "cli", "telegram", "web"})
+        target_platforms = platforms.union(platform_toolsets.keys()).union(
+            {"api_server", "qqbot", "weixin", "cli", "telegram", "web"}
+        )
     else:
         target_platforms = {args.platform}
+
+    def _default_composite(plat: str) -> str:
+        return "hermes-api-server" if plat == "api_server" else f"hermes-{plat}"
 
     changed = False
     print(f"Targeting platforms: {sorted(target_platforms)}")
     for p in sorted(target_platforms):
         current_list = platform_toolsets.get(p)
         if current_list is None:
-            current_list = []
+            current_list = [_default_composite(p)]
         elif not isinstance(current_list, list):
             current_list = list(current_list)
 

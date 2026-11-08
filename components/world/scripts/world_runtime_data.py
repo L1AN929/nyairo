@@ -33,7 +33,14 @@ SHIOMI_HOME_AREA_ID = "bedroom"
 
 
 class WorldDataError(ValueError):
-    """活动世界数据不可用。"""
+    """活动世界数据不可用。
+
+    世界包加载因活动定义不成立而失败时，``code``/``path`` 携带同一条定义错误的
+    固定码与安全结构定位；普通读取失败保持 ``None``，不冒充定义错误。
+    """
+
+    code: Optional[str] = None
+    path: Optional[str] = None
 
 
 class WorldData:
@@ -461,7 +468,14 @@ def _package_world(package_dir: Path) -> WorldData:
     try:
         package = loader.load(package_dir, verify=True)
     except Exception as exc:
-        raise WorldDataError(f"世界包 {package_dir} 无法加载: {exc}") from exc
+        error = WorldDataError(f"世界包 {package_dir} 无法加载: {exc}")
+        # 活动定义错误在加载时已带固定 code + 安全结构 path；沿同一条错误转发，
+        # 普通格式/读取失败没有这两个属性，仍只是不可读。
+        code = getattr(exc, "code", None)
+        if code is not None:
+            error.code = code
+            error.path = getattr(exc, "path", None)
+        raise error from exc
 
     rules: dict[str, dict[str, Any]] = {}
     for location_id in package.locations:
@@ -516,20 +530,38 @@ def _package_world(package_dir: Path) -> WorldData:
 
 
 # ---------------------------------------------------------------------------
-# 活动世界解析（按 (包路径, world.json mtime, size) 缓存）
+# 活动世界解析（按包路径与包内全部数据文件的 mtime / size 缓存）
 # ---------------------------------------------------------------------------
 
-_CACHE: dict[tuple[str, int, int], WorldData] = {}
+_PACKAGE_FILES = (
+    "world.json",
+    "topology.json",
+    "rules.json",
+    "npcs.json",
+    "objects.json",
+    "ambient.json",
+    "scene.json",
+    "content.json",
+    "MANIFEST.json",
+)
+_CACHE: dict[tuple[Any, ...], WorldData] = {}
 _SHIOMI_CACHE: list[WorldData] = []
 
 
-def _package_key(path: Path) -> tuple[str, int, int]:
+def _package_key(path: Path) -> tuple[Any, ...]:
     marker = path / "world.json"
     try:
-        stat = marker.stat()
+        wstat = marker.stat()
     except OSError as exc:
         raise WorldDataError(f"CHIYO_WORLD_PACKAGE 指向的世界包不可读: {path} ({exc})") from exc
-    return (str(path), stat.st_mtime_ns, stat.st_size)
+    stamps: list[tuple[str, int, int]] = [("world.json", wstat.st_mtime_ns, wstat.st_size)]
+    for name in _PACKAGE_FILES[1:]:
+        try:
+            st = (path / name).stat()
+            stamps.append((name, st.st_mtime_ns, st.st_size))
+        except OSError:
+            stamps.append((name, -1, -1))
+    return (str(path), tuple(stamps))
 
 
 def package_root(environment: Optional[Mapping[str, str]] = None) -> Optional[Path]:

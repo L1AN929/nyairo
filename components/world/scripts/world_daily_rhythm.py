@@ -26,7 +26,9 @@ class _LocationRule:
     open_hour: Optional[int]
     close_hour: Optional[int]
     weekdays_only: bool
-    affordances: tuple[tuple[str, str], ...]
+    #: 旧的二元组 ``(affordance_id, description)``；带可选 title/秒数时是 3/4 元组；
+    #: 显式 execution 必然带齐 title+秒数，作为第 5 段出现。
+    affordances: tuple[tuple[Any, ...], ...]
 
 
 _RULES = {
@@ -164,7 +166,7 @@ def affordances_for_location(
     *,
     timezone_name: str = WORLD_TIMEZONE,
     environment: Optional[Mapping[str, str]] = None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     rule = _rule(location_id, environment)
     if (
         location_availability(
@@ -173,10 +175,19 @@ def affordances_for_location(
         != "OPEN"
     ):
         return []
-    return [
-        {"affordance_id": affordance_id, "description": description}
-        for affordance_id, description in rule.affordances
-    ]
+    projected = []
+    for item in rule.affordances:
+        affordance = {"affordance_id": item[0], "description": item[1]}
+        # 可选元数据只在世界包自己声明时出现；旧二元组不会凭空多出键。
+        if len(item) > 2 and item[2]:
+            affordance["title"] = item[2]
+        if len(item) > 3 and item[3] is not None:
+            affordance["suggested_seconds"] = item[3]
+        # 显式执行机制只在世界包自己声明时透传；它是定义引用，不是授权。
+        if len(item) > 4 and item[4] is not None:
+            affordance["execution"] = dict(item[4])
+        projected.append(affordance)
+    return projected
 
 
 def all_location_availability(

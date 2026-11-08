@@ -46,8 +46,8 @@ except ImportError:  # pragma: no cover - Windows
 SCHEMA_LIVING = "phone.living.v1"
 SCHEMA_WINDOW = "phone.living.window.v1"
 
-#: The whole feature may spend at most this many real model requests, across restarts.
-FUNCTION_REQUEST_CAP = 4
+#: Fallback ceiling when the persisted LifeRequestBudget has no configured day/window ceiling.
+FUNCTION_REQUEST_CAP = 96
 #: One explicit window is bounded by both the order and ``live_day``'s own ceiling.
 MAX_WINDOW_SECONDS = 600
 MAX_WINDOW_REQUESTS = 4
@@ -56,9 +56,9 @@ DEFAULT_WINDOW_SECONDS = 120
 WINDOW_FILENAME = "usable-window.json"
 SUPERVISOR_FILENAME = "usable-supervisor.json"
 WINDOW_LOG = "usable-window.log"
-#: Append-only evidence that an explicit window was ever started.  It is what stops a deleted
-#: baseline file from silently re-basing the cap: evidence without a ledger means "refuse".
 WINDOW_ATTEMPTS = "usable-window.attempts.jsonl"
+MANAGED_DAY_FILENAME = "nyairo-day.instance.json"
+SERVE_MARKER_FILENAME = "phone.serve.json"
 
 STATE_OK = "READY"
 STATE_UNKNOWN = "UNKNOWN"
@@ -113,6 +113,37 @@ def _state_root(root: Path | str) -> Optional[Path]:
         return None
 
 
+def _recorded_switches(root: Path | str) -> dict[str, bool]:
+    """Read run switches persisted by ``nyairo_day`` or the last ``phone.demo`` serve."""
+
+    rdir = run_dir(root)
+    managed = _read_json(rdir / MANAGED_DAY_FILENAME)
+    if managed:
+        return {
+            "room_living": bool(managed.get("room_living")),
+            "ambient_events": bool(managed.get("ambient_events")),
+            "world_actions": bool(managed.get("world_actions")),
+        }
+    marker = _read_json(rdir / SERVE_MARKER_FILENAME)
+    return {
+        "room_living": bool(marker.get("room_living")),
+        "ambient_events": bool(marker.get("ambient_events")),
+        "world_actions": str(marker.get("world_intent_gate") or "").strip().lower() == "canonical",
+    }
+
+
+def _switch_overrides(switches: Mapping[str, bool]) -> Optional[dict[str, str]]:
+    from . import demo
+
+    overrides = dict(demo._serve_feature_overrides(
+        room_living=bool(switches.get("room_living")),
+        ambient_events=bool(switches.get("ambient_events")),
+    ) or {})
+    if switches.get("world_actions"):
+        overrides["WORLD_BODY_INTENT_MUTATION_GATE"] = "canonical"
+    return overrides or None
+
+
 def _bound_environment(root: Path | str, environment: Optional[Mapping[str, str]]
                        ) -> tuple[dict[str, str], Optional[Path]]:
     root_path = phone_life.phone_root(root)
@@ -123,9 +154,12 @@ def _bound_environment(root: Path | str, environment: Optional[Mapping[str, str]
         return dict(environment or os.environ), None
     if nested is None:
         return dict(environment or os.environ), None
+    switches = _recorded_switches(root_path)
     try:
         bound = phone_life.map_life_environment(
-            phone, nested, base_env=dict(os.environ if environment is None else environment))
+            phone, nested,
+            base_env=dict(os.environ if environment is None else environment),
+            feature_overrides=_switch_overrides(switches))
     except Exception:
         return dict(environment or os.environ), None
     return bound, phone_life.life_state_root(root_path, nested)
@@ -165,7 +199,7 @@ def ledger_view(environment: Mapping[str, str], state_root: Optional[Path]) -> d
 
 
 # ---------------------------------------------------------------------------------------------
-# the supervisor's own window ledger: derived from the persisted budget, never reset
+# window audit log + capacity derived directly from the persisted LifeRequestBudget
 # ---------------------------------------------------------------------------------------------
 
 
@@ -174,8 +208,6 @@ def _window_path(root: Path | str) -> Path:
 
 
 def _window_mirror(root: Path | str) -> Path:
-    """A second copy inside this phone instance, so losing one file cannot refresh the cap."""
-
     return phone_life.nested_life_dir(phone_life.phone_root(root)) / "run" / WINDOW_FILENAME
 
 
@@ -197,28 +229,6 @@ def _write_window_doc(root: Path | str, state_root: Optional[Path],
         pass
 
 
-def _baseline_was_lost(root: Path | str, state_root: Optional[Path], doc: Mapping[str, Any]
-                       ) -> bool:
-    """No usable window ledger anywhere, but this feature clearly ran before.
-
-    A supervisor record or the window child's own log means a window existed; without the
-    ledger the baseline cannot be rebuilt, so the only honest answer is to refuse.
-    """
-
-    if doc:
-        return False
-    if (run_dir(root) / WINDOW_ATTEMPTS).exists():
-        return True
-    if (run_dir(root) / WINDOW_LOG).exists():
-        return True
-    record = _read_json(supervisor_path(root))
-    if record.get("child"):
-        # The supervisor only records a child after it actually started one.  A plain ``serve``
-        # record with no child is not evidence that a window ever ran.
-        return True
-    return False
-
-
 def _append_attempt(root: Path | str, row: Mapping[str, Any]) -> None:
     path = run_dir(root) / WINDOW_ATTEMPTS
     try:
@@ -229,40 +239,50 @@ def _append_attempt(root: Path | str, row: Mapping[str, Any]) -> None:
         pass
 
 
-def _function_used(doc: Mapping[str, Any], ledger: Mapping[str, Any]) -> dict[str, Any]:
-    """How many real requests this feature has already spent.
+def _ledger_capacity(ledger: Mapping[str, Any],
+                     environment: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
+    """Compute used / remaining / ceiling from the authoritative LifeRequestBudget view."""
 
-    The ledger baseline is taken **once**, before the first window.  ``used`` is then always
-    ``max(recorded high water, current ledger - baseline)``: a supervisor restart, a crash in
-    the middle of a window, or a lost state file can only make the number larger, never smaller.
-    """
+    state = str(ledger.get("state") or "")
+    if state not in ("ok", "absent"):
+        reason = str(ledger.get("reason") or "LEDGER_UNREADABLE")
+        return {
+            "cap": FUNCTION_REQUEST_CAP,
+            "used": 0,
+            "remaining": 0,
+            "reason": reason,
+            "readable": False,
+        }
 
-    baseline = _int_or_none(doc.get("ledger_baseline_run_window_calls"))
-    baseline_run = str(doc.get("ledger_baseline_run_id") or "")
-    stored = _int_or_none(doc.get("used_high")) or 0
-    current = _int_or_none(ledger.get("run_window_calls"))
-    ledger_run = str(ledger.get("run_id") or "")
-    reason = None
-    calculated: Optional[int] = None
-    windows = ledger.get("windows") if isinstance(ledger.get("windows"), Mapping) else {}
-    if baseline is None:
-        used = stored
-        if not doc:
-            reason = "NO_WINDOW_LEDGER_YET"
-    elif (baseline_run and ledger_run and baseline_run != ledger_run) or (
-            baseline_run and windows and baseline_run not in windows):
-        # The run identity the baseline was taken under is not the one the ledger now holds.
-        # The cap cannot be carried across run windows, so nothing may start.
-        used = FUNCTION_REQUEST_CAP
-        reason = "RUN_WINDOW_CHANGED"
-    elif current is None:
-        used = stored
-        reason = "LEDGER_UNREADABLE"
-    else:
-        calculated = max(0, int(current) - int(baseline))
-        used = max(int(stored), int(calculated))
-    return {"used": used, "stored_high": int(stored), "calculated": calculated,
-            "baseline": baseline, "reason": reason}
+    day_calls = max(0, _int_or_none(ledger.get("utc_day_calls")) or 0)
+    win_calls = max(0, _int_or_none(ledger.get("run_window_calls")) or 0)
+    day_max = _int_or_none(ledger.get("utc_day_max"))
+    win_max = _int_or_none(ledger.get("run_window_max"))
+    override_cap = _int_or_none((environment or {}).get("CHIYO_PHONE_LIVING_REQUEST_CAP"))
+
+    candidates: list[tuple[int, int, int]] = []  # (remaining, cap, used)
+    if day_max is not None and day_max >= 0:
+        candidates.append((max(0, day_max - day_calls), day_max, day_calls))
+    if win_max is not None and win_max >= 0:
+        candidates.append((max(0, win_max - win_calls), win_max, win_calls))
+    if override_cap is not None and override_cap >= 0:
+        eff_used = max(day_calls, win_calls)
+        candidates.append((max(0, override_cap - eff_used), override_cap, eff_used))
+
+    if not candidates:
+        eff_used = max(day_calls, win_calls)
+        candidates.append((max(0, FUNCTION_REQUEST_CAP - eff_used),
+                           FUNCTION_REQUEST_CAP, eff_used))
+
+    remaining, cap, used = min(candidates, key=lambda item: (item[0], item[1]))
+    reason = "FUNCTION_WINDOW_CAP_EXHAUSTED" if remaining <= 0 else None
+    return {
+        "cap": int(cap),
+        "used": int(used),
+        "remaining": int(remaining),
+        "reason": reason,
+        "readable": True,
+    }
 
 
 def window_status(root: Path | str, *, environment: Optional[Mapping[str, str]] = None
@@ -270,27 +290,25 @@ def window_status(root: Path | str, *, environment: Optional[Mapping[str, str]] 
     env, state_root = _bound_environment(root, environment)
     ledger = ledger_view(env, state_root)
     doc = _read_window_doc(root, state_root)
-    used = _function_used(doc, ledger)
-    baseline_lost = _baseline_was_lost(root, state_root, doc)
-    remaining = 0 if baseline_lost else max(0, FUNCTION_REQUEST_CAP - int(used["used"]))
+    cap_info = _ledger_capacity(ledger, env)
     return {
         "schema": SCHEMA_WINDOW,
-        "function_cap": FUNCTION_REQUEST_CAP,
+        "function_cap": cap_info["cap"],
         "max_window_seconds": MAX_WINDOW_SECONDS,
         "max_window_requests": MAX_WINDOW_REQUESTS,
-        "used": int(used["used"]),
-        "remaining": remaining,
-        "stored_high": used["stored_high"],
-        "calculated_from_ledger": used["calculated"],
-        "baseline": used["baseline"],
+        "used": cap_info["used"],
+        "remaining": cap_info["remaining"],
+        "stored_high": _int_or_none(doc.get("used_high")) or 0,
+        "calculated_from_ledger": cap_info["used"] if cap_info["readable"] else None,
+        "baseline": _int_or_none(doc.get("ledger_baseline_run_window_calls")),
         "ledger": ledger,
         "state_root": str(state_root) if state_root else None,
         "windows": list(doc.get("windows") or [])[-8:],
         "last_window": doc.get("last_window"),
-        "baseline_lost": baseline_lost,
-        "reason": "WINDOW_BASELINE_LOST" if baseline_lost else used["reason"],
-        "note": ("上限是整个功能共享的：监督进程重启、窗口崩溃或状态文件丢失都只会让已用数"
-                 "变大，不会刷新；账本读不到时保持不可启动"),
+        "baseline_lost": False,
+        "reason": cap_info["reason"],
+        "note": ("配额直接读取实例持久请求账本（当日与运行窗口上限），"
+                 "重启不会清零，跨日按账本自然轮转；账本损坏读不到时拒绝启动"),
     }
 
 
@@ -362,7 +380,8 @@ def run_bounded_window(
     try:
         with _window_lock(root):
             before = ledger_view(env, state_root)
-            if before.get("state") != "ok":
+            cap_before = _ledger_capacity(before, env)
+            if not cap_before["readable"]:
                 return _refused("LEDGER_UNREADABLE",
                                 "the persisted request ledger cannot be read; no window was opened")
             lease = phone_life.check_single_lease(state_root)
@@ -372,48 +391,55 @@ def run_bounded_window(
                 return _refused("LEASE_NOT_FREE",
                                 "the single-writer lease is %s; no window was opened"
                                 % lease.get("status"))
-            doc = _read_window_doc(root, state_root)
-            if _baseline_was_lost(root, state_root, doc):
-                return _refused("WINDOW_BASELINE_LOST",
-                                "a window ran before but its shared ledger is gone; this feature "
-                                "cannot prove what it already spent")
-            used = _function_used(doc, before)
-            if used["reason"] == "RUN_WINDOW_CHANGED":
-                return _refused("RUN_WINDOW_CHANGED",
-                                "the persisted run window changed; this feature cannot prove its cap")
-            remaining = max(0, FUNCTION_REQUEST_CAP - int(used["used"]))
+            remaining = int(cap_before["remaining"])
             if remaining <= 0:
                 return _refused("FUNCTION_WINDOW_CAP_EXHAUSTED",
-                                "all %d requests of this feature are already spent"
-                                % FUNCTION_REQUEST_CAP)
+                                "all %d requests of the current budget ceiling are already spent"
+                                % int(cap_before["cap"]))
             allowed = min(int(requested), remaining)
-            if used["baseline"] is None:
-                # The first window records the ledger's current run-window count.  It is written
-                # *inside* the lock, before any request can be made.
+            doc = _read_window_doc(root, state_root)
+            if not doc:
                 doc = {
                     "schema": SCHEMA_WINDOW,
                     "created_at": _now_iso(),
                     "ledger_baseline_run_window_calls": _int_or_none(
-                        before.get("run_window_calls")),
+                        before.get("run_window_calls")) or 0,
                     "ledger_baseline_run_id": before.get("run_id"),
-                    "ledger_baseline_utc_day_calls": _int_or_none(before.get("utc_day_calls")),
-                    "used_high": int(used["used"]),
-                    "windows": list(doc.get("windows") or []),
+                    "ledger_baseline_utc_day_calls": _int_or_none(before.get("utc_day_calls")) or 0,
+                    "used_high": int(cap_before["used"]),
+                    "windows": [],
                 }
                 _write_window_doc(root, state_root, doc)
             started_at = _now_iso()
             _append_attempt(root, {"at": started_at, "duration_seconds": int(duration),
                                    "allowed_requests": int(allowed), "pid": os.getpid()})
-            runner = run_fn or live_day.run_segment
-            segment = runner(root, duration_seconds=int(duration), poll_seconds=2,
-                             max_new_requests=int(allowed), act=True,
-                             start_services=live_day.SERVICE_AUTO, environment=env)
+            switches = _recorded_switches(root)
+            if run_fn is None:
+                segment = live_day.run_segment(
+                    root, duration_seconds=int(duration), poll_seconds=2,
+                    max_new_requests=int(allowed), act=True,
+                    start_services=live_day.SERVICE_AUTO,
+                    room_living=switches["room_living"],
+                    ambient_events=switches["ambient_events"],
+                    environment=env)
+            else:
+                segment = run_fn(root, duration_seconds=int(duration), poll_seconds=2,
+                                 max_new_requests=int(allowed), act=True,
+                                 start_services=live_day.SERVICE_AUTO, environment=env)
             after = ledger_view(env, state_root)
+            before_day = _int_or_none(before.get("utc_day_calls")) or 0
+            after_day = _int_or_none(after.get("utc_day_calls"))
+            before_win = _int_or_none(before.get("run_window_calls")) or 0
+            after_win = _int_or_none(after.get("run_window_calls"))
             spent = None
-            current, baseline = (_int_or_none(after.get("run_window_calls")),
-                                 _int_or_none(doc.get("ledger_baseline_run_window_calls")))
-            if current is not None and baseline is not None:
-                spent = max(0, int(current) - int(baseline))
+            if after_day is not None and after_win is not None:
+                spent = max(0, int(after_day) - int(before_day),
+                            int(after_win) - int(before_win))
+            elif after_day is not None:
+                spent = max(0, int(after_day) - int(before_day))
+            elif after_win is not None:
+                spent = max(0, int(after_win) - int(before_win))
+            cap_after = _ledger_capacity(after, env)
             row = {
                 "started_at": started_at,
                 "ended_at": _now_iso(),
@@ -428,7 +454,7 @@ def run_bounded_window(
             windows = list(doc.get("windows") or [])[-15:]
             windows.append(row)
             doc.update({
-                "used_high": max(int(doc.get("used_high") or 0), int(spent or 0)),
+                "used_high": max(int(doc.get("used_high") or 0), int(cap_after["used"])),
                 "windows": windows,
                 "last_window": row,
                 "updated_at": _now_iso(),
@@ -579,6 +605,10 @@ class Supervisor:
             return _refused("REQUEST_CAP_OUT_OF_RANGE", "max_new_requests must be 1..%d"
                             % MAX_WINDOW_REQUESTS)
         budget = window_status(self.root, environment=self.environment)
+        ledger = dict(budget.get("ledger") or {})
+        if str(ledger.get("state") or "") not in ("ok", "absent"):
+            return _refused("LEDGER_UNREADABLE",
+                            "the persisted request ledger cannot be read; no window was opened")
         if budget.get("remaining", 0) <= 0:
             return _refused("FUNCTION_WINDOW_CAP_EXHAUSTED",
                             "no request budget remains for this feature")

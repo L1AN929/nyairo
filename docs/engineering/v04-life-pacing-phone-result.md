@@ -178,14 +178,14 @@ defer→send_local 全链 + 再发 409 `SHARE_ALREADY_DELIVERED`；陈旧 head 4
 6. 分享件在 owner 里就是 artifact，`GET /projects` 仍会列出它（P 的 projects 面照旧标 `artifact_type`）；
    本轮没有把它从项目列表里排除（那是「分享件 vs 作品」的产品决定，不在本写集里偷偷改）。
 7. 门禁脚本**位置纠正**（原写「不在树里」是错的）：决策树与格式校验脚本不在本仓库 `scripts/` 下，
-   而在全局 skills 目录 `C:/Users/28556/.agents/skills/write-notes-like-deepseek/scripts/`
+   而在全局 skills 目录 `<USER_HOME>/.agents/skills/write-notes-like-deepseek/scripts/`
    （`verify-agent-note-tree.ts` / `verify-agent-note-format.ts`）。以仓库为 cwd 可以跑：
 
    ```powershell
    cd D:\nyairo-rc1-body-backend
-   node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
+   node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
    #   ok: 72 note(s) tree and relative links verified           exit 0
-   node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
+   node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
    #   ok: 72 note(s) verified                                    exit 0
    ```
 

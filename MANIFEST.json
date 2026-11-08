@@ -1,7 +1,7 @@
 {
   "schema": "chiyo/source-release@1",
-  "version": "0.5.1",
-  "revision": "V05_1_REDACTED_SOURCE_TARGETED_CHECKS",
+  "version": "0.6.0",
+  "revision": "V06_0_REDACTED_SOURCE_TARGETED_CHECKS",
   "status": "SOURCE_REVIEWED_TARGETED_TESTS_PASSED",
   "hermes": {
     "repository": "https://github.com/NousResearch/hermes-agent",

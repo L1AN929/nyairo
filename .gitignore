@@ -20,5 +20,19 @@ __pycache__/
 .hermes*/
 local-profile*/
 
-# 施工日志与改动前备份，不入库
+# 施工日志、会话连续性记录与本地检索索引，不入公开源码库
 .agents/worker-runs/
+.agents/continuity/
+.memsearch/
+.claude/launch.json
+
+# 浏览器 MCP 状态、发版 zip 与运行时锁：机器本地产物，不属于源码。
+# dist/ 里是两个 release zip（合计约 171MB），由 scripts/make_release.sh 生成。
+# 刻意不用全局 *.zip / *.lock：vendor/hermes 下有已跟踪的 flake.lock 与 uv.lock。
+.playwright-mcp/
+/dist/
+/life_request_budget.lock
+.tmp_*.py
+components/supply/lifesupply2/
+components/supply/lifesupply_real/
+components/supply/lifysupply/

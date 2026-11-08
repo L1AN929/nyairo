@@ -52,6 +52,40 @@ def load_theme(theme_id: str) -> dict[str, Any]:
     return json.loads((TEMPLATES_DIR / f"{theme_id}.json").read_text(encoding="utf-8"))
 
 
+#: The only optional affordance keys a template may carry, beside the legacy pair.
+AFFORDANCE_TEMPLATE_OPTIONAL_KEYS = ("title", "suggested_seconds", "execution")
+
+
+def _template_affordances(entries: Any, *, where: str) -> list[dict[str, Any]]:
+    """Build rules affordances from the template's list form.
+
+    Legacy entries stay ``[affordance_id, description]``; an entry may instead carry a third
+    mapping with the optional ``title`` / ``suggested_seconds`` keys.  No other shape is
+    invented here: values themselves are checked by ``schema.validate_rules_doc`` when the
+    generated documents are validated.
+    """
+    built: list[dict[str, Any]] = []
+    for index, item in enumerate(entries or []):
+        at = f"{where}[{index}]"
+        if not isinstance(item, (list, tuple)) or len(item) not in (2, 3):
+            raise schema.WorldPackageError(
+                f"{at} 必须是 [affordance_id, description] 或 "
+                "[affordance_id, description, {title/suggested_seconds/execution}]"
+            )
+        affordance = {"affordance_id": item[0], "description": item[1]}
+        if len(item) == 3:
+            meta = item[2]
+            if not isinstance(meta, dict) or not set(meta) <= set(AFFORDANCE_TEMPLATE_OPTIONAL_KEYS):
+                raise schema.WorldPackageError(
+                    f"{at} 的第三个元素只允许包含 title/suggested_seconds 的对象"
+                )
+            for key in AFFORDANCE_TEMPLATE_OPTIONAL_KEYS:
+                if key in meta:
+                    affordance[key] = meta[key]
+        built.append(affordance)
+    return built
+
+
 def _slugify_streets(rng: random.Random, template: dict[str, Any], count: int) -> list[dict[str, Any]]:
     names = list(template["street_names"])
     rng.shuffle(names)
@@ -186,9 +220,9 @@ def generate_topology(
         open_raw, close_raw = slot.get("open_hour"), slot.get("close_hour")
         open_hour = rng.randint(*open_raw) if isinstance(open_raw, list) else open_raw
         close_hour = rng.randint(*close_raw) if isinstance(close_raw, list) else close_raw
-        affordances = [
-            {"affordance_id": item[0], "description": item[1]} for item in slot.get("affordances", [])
-        ]
+        affordances = _template_affordances(
+            slot.get("affordances", []), where=f"slot {location_id}.affordances"
+        )
         rules[location_id] = {
             "open_hour": open_hour,
             "close_hour": close_hour,
@@ -251,10 +285,9 @@ def generate_topology(
         "open_hour": None,
         "close_hour": None,
         "weekdays_only": False,
-        "affordances": [
-            {"affordance_id": item[0], "description": item[1]}
-            for item in template["street_slot"]["affordances"]
-        ],
+        "affordances": _template_affordances(
+            template["street_slot"]["affordances"], where="street_slot.affordances"
+        ),
     }
     for street in streets:
         rules[street["location_id"]] = dict(street_rule)
@@ -487,6 +520,11 @@ def generate_world(
         sentence = flavor_sentences[flavor_cursor["index"] % len(flavor_sentences)]
         flavor_cursor["index"] += 1
         return sentence
+    reading_by_location = {
+        str(slot.get("slot") or slot.get("id")): slot["reading"].strip()
+        for slot in template["slot_pool"]
+        if isinstance(slot.get("reading"), str) and slot["reading"].strip()
+    }
     for location in topology["locations"]:
         intro = location["description"]
         if flavor_sentences and rng.random() < 0.65:
@@ -496,6 +534,10 @@ def generate_world(
         entry: dict[str, Any] = {"intro": intro}
         if location["kind"] == "street":
             entry["flavor"] = rng.choice(flavor["street_flavor"])
+        # 地点自己带的文字（书里的一页、墙上的告示）。模板给了就抄进 content.json；
+        # 没给就什么都不加，旧包的形状一分不变。
+        if location["location_id"] in reading_by_location:
+            entry["reading"] = reading_by_location[location["location_id"]][:400]
         entries[location["location_id"]] = entry
     for npc in npcs:
         entries[npc["npc_id"]] = {"public_note": f"{npc['display_name']}是这里的{npc['public_role']}。"}

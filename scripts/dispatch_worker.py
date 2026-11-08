@@ -91,7 +91,11 @@ def read_task(args: argparse.Namespace) -> str:
 
 
 def build_command(args: argparse.Namespace, model: str) -> list[str]:
-    exe = shutil.which("claude")
+    # claude CLI 2.1.265 起会硬拒网关的私有模型 id（unrecognized_model 之后不再发请求），
+    # 2.1.263 只打一条告警就照常跑。允许用 --claude 或 WORKER_CLAUDE 给 worker 单指一份旧版，
+    # 不去动全局 settings 或 PATH 上那份——监工自己还要用新的。
+    exe = (getattr(args, "claude", None) or os.environ.get("WORKER_CLAUDE")
+           or shutil.which("claude"))
     if not exe:
         raise SystemExit("找不到 claude 可执行文件")
     cmd = [
@@ -295,6 +299,12 @@ def main() -> int:
     p.add_argument("--timeout", type=int, default=3600, help="秒；超时即杀")
     p.add_argument("--allowed-tools", default=DEFAULT_TOOLS)
     p.add_argument("--token", default=os.environ.get("WORKER_AUTH_TOKEN", "local-gateway"))
+    p.add_argument(
+        "--claude",
+        default=None,
+        help="claude 可执行文件路径；省略则用 WORKER_CLAUDE 或 PATH 上的那份。"
+             "2.1.265 起硬拒网关私有模型 id，worker 需要指一份 2.1.263 这类旧版",
+    )
     p.add_argument("--no-probe", action="store_true", help="派工前不探测模型可用性，直接按链跑")
     p.add_argument("--probe-timeout", type=float, default=8.0, help="单个模型探测超时秒数")
     p.add_argument("--dry-run", action="store_true", help="只打印命令和环境，不执行")

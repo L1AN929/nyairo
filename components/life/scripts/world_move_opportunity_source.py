@@ -108,23 +108,166 @@ STAY_SECONDS_BY_AFFORDANCE = {
     "REST": 300,
     "READ_HERE": 600,
     "READ": 600,
+    "SELF_STUDY": 600,
     "LOOK_AROUND": 180,
     "WALK": 240,
     "USE_PHONE": 240,
     "BROWSE_BOOKS": 300,
+    # 模板 coastal_town 的便利店/鱼市/杂货店/书店都用这个名字说「逛逛」；
+    # 漏在这里就不会生成停留候选（2026-11-07 起不再退回 QUIET_STOP）。
+    "BROWSE_STORE": 300,
+    "PRAY": 180,
+    # 「什么都不干」的三档：短，是因为发呆本来没有任务感，十分钟的呆滞不是发呆是加班。
+    "DAZE": 180,
+    "POTTER": 180,
+    "PEOPLE_WATCH": 180,
 }
 
 #: The affinity order a stay prefers when a place offers several: a stationary, non-productive
 #: option first (a bench, a reading table, a quiet pause), and walking last -- walking is not
 #: staying, so it is only used when the place offers nothing else this table knows.
+#:
+#: ``IDLE_STAY_AFFORDANCES`` sit at the end *on purpose*: they are the fallback flavour of a
+#: place, never its headline.  Being last is also why they may not be picked by this order at
+#: all (see ``_stay_descriptors``) -- an order alone would starve them forever, so they travel
+#: as their own candidate on a rotating turn instead of competing for the one slot above.
 STAY_DESCRIPTOR_PREFERENCE = (
-    "SIT", "SIT_AT_CAFE", "REST", "READ_HERE", "READ", "USE_PHONE",
-    "BROWSE_BOOKS", "LOOK_AROUND", "WALK",
+    "SIT", "SIT_AT_CAFE", "REST", "READ_HERE", "READ", "SELF_STUDY", "USE_PHONE",
+    "BROWSE_BOOKS", "BROWSE_STORE", "PRAY", "LOOK_AROUND", "WALK",
+    "DAZE", "POTTER", "PEOPLE_WATCH",
 )
-#: Used when the place offers no affordance this table knows: a quiet stop, which is legal
-#: anywhere she really is and is never dressed up as one of the place's own affordances.
+#: The "nothing is being produced here" affordances: sitting and drifting off, pottering about
+#: at home, standing on a corner watching people.  They have no completion condition, no
+#: artifact and no owner verb -- which is the whole point of them.
+IDLE_STAY_AFFORDANCES = ("DAZE", "POTTER", "PEOPLE_WATCH")
+#: How long one turn of the idle rotation lasts.  An hour, on the observation's own clock: long
+#: enough that the same quiet stretch keeps the same offer (so a re-observation does not reshuffle
+#: the candidate set), short enough that a whole day is not stuck on one flavour of doing nothing.
+STAY_IDLE_ROTATION_SECONDS = 3600
+#: 旧版"没有已知 affordance 就待一会儿"的兜底描述符。2026-11-07 起**不再自动产生**：
+#: 没有可用执行定义时，只能明确报告，不能替她选一个 QUIET_STOP 伪装成功。
 STAY_DESCRIPTOR_QUIET = "QUIET_STOP"
 STAY_QUIET_SECONDS = 180
+
+
+class StayDefinitionError(Exception):
+    """一条显式活动定义不成立。
+
+    ``code`` 是稳定、安全的固定错误码；``path`` 是可选的安全结构定位
+    （``rules.json/location_rules/<合法id>/affordances/<index>/<合同字段>``）。
+    二者都不含 description/title 值、异常正文或主机绝对路径。
+    """
+
+    def __init__(self, code: str, path: Optional[str] = None) -> None:
+        super().__init__(code if not path else "%s: %s" % (code, path))
+        self.code = code
+        self.path = path
+
+
+#: 地点 ID 合法字符与 schema.``ID_RE`` 同一约束；不合法时路径里不回显它。
+_DEFINITION_PATH_PLACEHOLDER = "*"
+
+
+def _safe_location_component(location_id: Any) -> Optional[str]:
+    """合法地点 ID 才能进定位路径；否则返回 ``None``（不直接回显任意键）。"""
+
+    text = str(location_id or "")
+    if not text:
+        return None
+    try:
+        from components.worldgen import schema as worldgen_schema
+    except ImportError:
+        import sys
+        from pathlib import Path
+
+        root = str(Path(__file__).resolve().parents[3])
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from components.worldgen import schema as worldgen_schema
+    if len(text) > worldgen_schema.MAX_LOCATION_ID_LENGTH:
+        return None
+    if not worldgen_schema.ID_RE.fullmatch(text):
+        return None
+    return text
+
+
+def _definition_path(
+    location_id: Any, index: Any, field: Any
+) -> str:
+    """``rules.json/location_rules/...`` 形式的安全定位（闭集字段 + 严格整数下标）。"""
+
+    activity_definition = _activity_definition_module()
+    safe_field = (
+        str(field)
+        if str(field) in activity_definition.DEFINITION_FIELDS
+        else activity_definition.FIELD_EXECUTION
+    )
+    safe_place = _safe_location_component(location_id) or _DEFINITION_PATH_PLACEHOLDER
+    return "rules.json/location_rules/%s/affordances/%d/%s" % (
+        safe_place, int(index), safe_field)
+
+
+def _activity_definition_module() -> Any:
+    """世界包侧的活动定义合同；Life 只消费，不另建第二份解释。"""
+
+    try:
+        from components.worldgen import activity_definition
+    except ImportError:
+        import sys
+        from pathlib import Path
+
+        root = str(Path(__file__).resolve().parents[3])
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from components.worldgen import activity_definition
+    return activity_definition
+
+
+#: 允许经 catalog 读取转发到调用方的定义错误码（严格闭集）。
+_DEFINITION_ERROR_CODES = frozenset({
+    "UNSUPPORTED_ACTIVITY_DEFINITION",
+    "INVALID_ACTIVITY_EXECUTION",
+    "INCOMPLETE_ACTIVITY_EXECUTION",
+})
+#: 安全结构定位的地点段：合法字符闭集，不含分隔符或任意输入值。
+_DEFINITION_PLACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _safe_definition_error(
+    code: Any, path: Any
+) -> Optional[tuple[str, Optional[str]]]:
+    """把 catalog 里的定义错误收敛成 ``(固定code, 安全path)``；否则返回 None。
+
+    ``code`` 必须在闭集内；``path`` 必须是
+    ``rules.json/location_rules/<合法地点>/affordances/<整数下标>/<合同字段>``，
+    否则只保留 code、不传播路径字符串。
+    """
+
+    if code not in _DEFINITION_ERROR_CODES:
+        return None
+    safe_path: Optional[str] = None
+    if isinstance(path, str):
+        parts = path.split("/")
+        if (
+            len(parts) == 6
+            and parts[0] == "rules.json"
+            and parts[1] == "location_rules"
+            and _DEFINITION_PLACE_RE.fullmatch(parts[2])
+            and parts[3] == "affordances"
+            and parts[4].isdigit()
+            and str(int(parts[4])) == parts[4]
+            and parts[5] in _activity_definition_module().DEFINITION_FIELDS
+        ):
+            safe_path = path
+    return str(code), safe_path
+#: How each idle descriptor is said out loud in a candidate label.  A place name goes in front
+#: ("在临海的住居发会儿呆"), so these are the verb phrase only.  A descriptor with no phrase here
+#: keeps the neutral "在X待一会儿" label.
+STAY_IDLE_PHRASES = {
+    "DAZE": "发会儿呆",
+    "POTTER": "随便转转",
+    "PEOPLE_WATCH": "站着看看人",
+}
 
 #: Target namespaces.  The prefix is what the Life core reads back to decide *which* owner
 #: verb an adopted opportunity implies -- never the model, and never a guess.
@@ -658,20 +801,160 @@ def parse_stay_target(target: Any) -> Optional[dict[str, Any]]:
             "target_ref": text}
 
 
-def _stay_descriptor(affordances: Any) -> tuple[str, int]:
-    """The descriptor + duration this place really offers, or the quiet-stop fallback.
+def _stay_rotation_turn(observed_at: Any) -> int:
+    """Which turn of the idle rotation this observation falls on.
 
-    Only affordances the place itself lists are ever used, and among them the preference
-    order picks the stationary, non-productive one first: the point of a stay is being
-    somewhere, not producing anything, and never a walk dressed up as a stay.
+    Counted in hours on the observation's *own* instant, so every caller in one round agrees,
+    a quiet hour keeps one answer, and a failed read of the instant degrades to turn 0 instead
+    of inventing a random one.
     """
 
-    offered = {str(item.get("affordance_id") or "").strip()
-               for item in affordances or [] if isinstance(item, Mapping)}
-    for affordance_id in STAY_DESCRIPTOR_PREFERENCE:
-        if affordance_id in offered and affordance_id in STAY_SECONDS_BY_AFFORDANCE:
-            return affordance_id, STAY_SECONDS_BY_AFFORDANCE[affordance_id]
-    return STAY_DESCRIPTOR_QUIET, STAY_QUIET_SECONDS
+    from datetime import datetime, timezone
+
+    text = str(observed_at or "").strip()
+    if not text:
+        return 0
+    try:
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return int(moment.timestamp()) // STAY_IDLE_ROTATION_SECONDS
+
+
+def _stay_descriptors(
+    affordances: Any, *, observed_at: Any = None, location_id: Any = None
+) -> list[tuple[str, int]]:
+    """The stays this place really offers: at most one for what it is *for*, one for doing nothing.
+
+    Only affordances the place itself lists are ever used.  Two tiers, two rules:
+
+    * the place's own working options (a reading table, a bench, a cafe seat) keep the old
+      behaviour exactly -- the preference order picks one, and a place that only offers real
+      work (a bookshop with ``READ_HERE``) therefore always offers that work;
+    * the idle options (``IDLE_STAY_AFFORDANCES``) travel as their own candidate on a rotating
+      turn, because a preference list alone would bury them forever -- they are last by design.
+      One turn, one idle flavour, so the offer still has one shape per place rather than a menu
+      of three ways to do nothing.
+
+    A place that lists idle affordances *only* gets its rotating one.  A place that lists
+    nothing this table knows is an *environment-only* description: it yields no stay at all,
+    and this function does **not** invent a ``QUIET_STOP`` on its behalf.  An affordance that
+    explicitly claims an execution mechanism must point at a supported, complete stay
+    definition; otherwise this raises :class:`StayDefinitionError` instead of silently
+    dropping it.  Environment declarations (no ``execution``) are never upgraded or refused.
+    """
+
+    declared = {str(item.get("affordance_id") or "").strip(): item
+                for item in affordances or [] if isinstance(item, Mapping)}
+    activity_definition = _activity_definition_module()
+    # 逐条原始声明校验（不按去重后的 dict），重复 ID 也不能把坏定义悄悄盖掉。
+    for index, item in enumerate(affordances or []):
+        if not isinstance(item, Mapping):
+            continue
+        if not activity_definition.declares_execution(item):
+            continue
+        try:
+            activity_definition.validate_execution(item)
+        except activity_definition.ActivityDefinitionError as error:
+            # 固定 code + 安全结构定位；调用方拿到的是这个异常，不是空列表。
+            raise StayDefinitionError(
+                error.code, _definition_path(location_id, index, error.field)
+            ) from None
+    offered = set(declared)
+    # 旧绑定的两张表必须同时命中；只命中一张是"缺绑定"，不是环境描述。
+    for affordance_id in offered:
+        in_preference = affordance_id in STAY_DESCRIPTOR_PREFERENCE
+        in_seconds = affordance_id in STAY_SECONDS_BY_AFFORDANCE
+        if in_preference != in_seconds:
+            raise StayDefinitionError("INCOMPLETE_STAY_BINDING")
+    known = [affordance_id for affordance_id in STAY_DESCRIPTOR_PREFERENCE
+             if affordance_id in offered and affordance_id in STAY_SECONDS_BY_AFFORDANCE]
+    working = [item for item in known if item not in IDLE_STAY_AFFORDANCES]
+    idle = [item for item in known if item in IDLE_STAY_AFFORDANCES]
+
+    def seconds_for(descriptor: str) -> int:
+        """本机会的时长：地点自己声明的建议值优先，缺失时回退既有固定表。"""
+
+        suggestion = (declared.get(descriptor) or {}).get("suggested_seconds")
+        if isinstance(suggestion, int) and not isinstance(suggestion, bool) and suggestion > 0:
+            return suggestion
+        return STAY_SECONDS_BY_AFFORDANCE[descriptor]
+
+    chosen: list[tuple[str, int]] = []
+    for item in working:
+        chosen.append((item, seconds_for(item)))
+    if idle:
+        picked = idle[_stay_rotation_turn(observed_at) % len(idle)]
+        chosen.append((picked, seconds_for(picked)))
+    # 没有可执行的停留定义 = 没有停留候选。禁止自动补 QUIET_STOP / "待一会儿"。
+    return chosen
+
+
+def stay_definition_status(
+    affordances: Any, *, observed_at: Any = None, location_id: Any = None
+) -> dict[str, Any]:
+    """这条地点的 affordance 列表在**定义层**是什么状态。
+
+    ``available``：有可执行的停留定义；``environment_only``：只有环境描述，没有停留
+    定义（合法，零候选）；``absent``：连环境描述都没有。显式定义不成立时返回
+    ``error`` 和固定错误码——调用方不能只看到空列表而不知道原因。
+    """
+
+    try:
+        descriptors = _stay_descriptors(
+            affordances, observed_at=observed_at, location_id=location_id)
+    except StayDefinitionError as error:
+        return {"status": "error", "reason_code": error.code, "definitions": []}
+    definitions = [
+        {"descriptor": descriptor, "seconds": seconds}
+        for descriptor, seconds in descriptors
+    ]
+    if definitions:
+        return {"status": "available", "reason_code": None,
+                "definitions": definitions}
+    if any(isinstance(item, Mapping) for item in affordances or []):
+        return {"status": "environment_only",
+                "reason_code": "NO_EXECUTABLE_STAY_DEFINITION",
+                "definitions": []}
+    return {"status": "absent", "reason_code": "NO_AFFORDANCES",
+            "definitions": []}
+
+
+def stay_definition_status_for(
+    observation: Mapping[str, Any],
+    catalog: Optional[Mapping[str, Any]],
+    *,
+    observed_at: Any = None,
+) -> dict[str, Any]:
+    """同一次观察里，她所在地点在定义层的状态（与"闭店/暂不可执行"分开）。"""
+
+    place = _place_of(observation)
+    if place is None or not isinstance(catalog, Mapping):
+        return {"status": "unavailable", "reason_code": "PLACE_FACT_UNAVAILABLE",
+                "definitions": []}
+    if str(catalog.get("status") or "") != "available":
+        return {"status": "unavailable", "reason_code": "CATALOG_UNAVAILABLE",
+                "definitions": []}
+    entry: Mapping[str, Any] = {}
+    for item in catalog.get("opportunities") or []:
+        if isinstance(item, Mapping) and str(item.get("location_id")) == place:
+            entry = item
+            break
+    if not entry:
+        return {"status": "absent", "reason_code": "PLACE_NOT_IN_CATALOG",
+                "definitions": []}
+    # 第一层先于第二层：定义不成立时，即使地点闭店也必须报定义错误，
+    # 不能被 closed 短路掩盖；合法定义在闭店时仍按第二层返回 closed。
+    status = stay_definition_status(
+        entry.get("affordances"), observed_at=observed_at, location_id=place)
+    if str(status.get("status") or "") == "error":
+        return status
+    if str((entry.get("availability") or {}).get("status") or "") != "OPEN":
+        return {"status": "closed", "reason_code": "PLACE_NOT_OPEN_NOW",
+                "definitions": []}
+    return status
 
 
 def observed_stay_opportunities(
@@ -682,16 +965,25 @@ def observed_stay_opportunities(
     observed_at: str,
     valid_for_seconds: int = DEFAULT_VALIDITY_SECONDS,
 ) -> list[dict[str, Any]]:
-    """One non-productive stay at the place she is really in, if that place is really open.
+    """The non-productive stays this place really offers right now, if it is really open.
 
-    What it is: a Life-side bounded stay whose only World-side inputs are (a) the canonical
+    What they are: Life-side bounded stays whose only World-side inputs are (a) the canonical
     observation that she is in this place right now and (b) the W catalog's own opening /
-    affordance facts for it.  What it is not: a World verb, a resting effect, a nutrition
+    affordance facts for it.  What they are not: a World verb, a resting effect, a nutrition
     fact, or a claim that something was produced.
+
+    Usually one offer; two when the place offers both something it is *for* and something to do
+    nothing in (see ``_stay_descriptors``).  Either way every descriptor comes from the place's
+    own affordance list, so a place that does not declare an idle option never gets one.
 
     Failure is closed: an unreadable catalog (or a place with no OPEN availability fact)
     yields no stay at all, so a place whose opening state is unknown never becomes somewhere
     she is invited to settle in for ten minutes.
+
+    Definition failure is *not* silent: an affordance that explicitly claims an execution
+    mechanism but is unsupported or incomplete raises :class:`StayDefinitionError` with a
+    fixed code.  A place that only describes its environment (no execution claim and no
+    legacy stay binding) yields zero stays without inventing a ``QUIET_STOP``.
     """
 
     place = _place_of(observation)
@@ -708,10 +1000,12 @@ def observed_stay_opportunities(
             break
     if not entry:
         return []
+    # 第一层先于第二层：显式坏定义即使地点闭店也要报错，不能被 closed 短路。
+    descriptors = _stay_descriptors(
+        entry.get("affordances"), observed_at=observed_at, location_id=place)
     if str((entry.get("availability") or {}).get("status") or "") != "OPEN":
         return []
 
-    descriptor, seconds = _stay_descriptor(entry.get("affordances"))
     valid_from, valid_until = _validity_window(observed_at, valid_for_seconds)
     occurred = ag0._require_iso(occurred_at, "occurred_at")
     return [{
@@ -728,7 +1022,7 @@ def observed_stay_opportunities(
         "revision": 1,
         "subject_id": ag0.GLOBAL_SUBJECT_ID,
         "location_ref": "place:%s" % place,
-    }]
+    } for descriptor, seconds in descriptors]
 
 
 def read_location_catalog(
@@ -740,8 +1034,11 @@ def read_location_catalog(
     """The W opportunity catalog, as facts about places -- or an honest absence.
 
     Read-only and failure tolerant by design: an unreadable catalog means "no place
-    facts this round", never a guessed availability.  The catalog is never a grant;
-    every entry it returns carries ``action_grant: false`` of its own.
+    facts this round", never a guessed availability.  When the package failed to load
+    because an explicit activity definition is invalid, the same fixed ``code`` and
+    safe structural ``path`` are kept on the unavailable envelope; ordinary read
+    failures stay reason-only, never dressed up as definition errors.  The catalog is
+    never a grant; every entry it returns carries ``action_grant: false`` of its own.
     """
 
     try:
@@ -755,9 +1052,23 @@ def read_location_catalog(
     except Exception as error:  # noqa: BLE001 - same rule: report, never invent
         return {"status": "unavailable", "reason_code": "CATALOG_READ_FAILED",
                 "detail": "%s: %s" % (type(error).__name__, error), "opportunities": []}
-    return dict(catalog) if isinstance(catalog, Mapping) else {
-        "status": "unavailable", "reason_code": "CATALOG_SHAPE_INVALID",
-        "opportunities": []}
+    if not isinstance(catalog, Mapping):
+        return {"status": "unavailable", "reason_code": "CATALOG_SHAPE_INVALID",
+                "opportunities": []}
+    result = dict(catalog)
+    definition_error = None
+    if str(result.get("status") or "") == "unavailable":
+        definition_error = _safe_definition_error(
+            result.get("code"), result.get("path"))
+    # 定义错误才带 code/path；两条都先摘掉，非法或越界的值不进入调用方视野。
+    result.pop("code", None)
+    result.pop("path", None)
+    if definition_error is not None:
+        code, safe_path = definition_error
+        result["code"] = code
+        if safe_path is not None:
+            result["path"] = safe_path
+    return result
 
 
 def opportunity_view(
@@ -789,6 +1100,12 @@ def opportunity_view(
         stay = parse_stay_target(target)
         affordance = None
         stay_seconds = None
+        #: 停留的描述性标题，只从**同一地点**同一 descriptor 的 affordance 取；缺失即 None，
+        #: 不跨地点拼凑，也不写进 target（target 仍只装计划本身）。
+        stay_title = None
+        #: 同一地点同一 descriptor 显式声明的执行机制；只有结构完整时透出，且只作
+        #: 定义信息展示，不是授权。
+        stay_execution = None
         body = None
         params: Optional[dict[str, Any]] = None
         pose = None
@@ -865,6 +1182,23 @@ def opportunity_view(
         place_fact = by_location.get(location) or {}
         availability = (place_fact.get("availability") or {}) if place_fact else {}
         reachability = (place_fact.get("reachability") or {}) if place_fact else {}
+        if stay is not None:
+            for declared in place_fact.get("affordances") or []:
+                if not isinstance(declared, Mapping):
+                    continue
+                if str(declared.get("affordance_id") or "") != str(affordance):
+                    continue
+                raw_title = declared.get("title")
+                if isinstance(raw_title, str) and raw_title.strip():
+                    stay_title = " ".join(raw_title.split())[:80]
+                activity_definition = _activity_definition_module()
+                if activity_definition.declares_execution(declared):
+                    try:
+                        stay_execution = activity_definition.validate_execution(
+                            declared)
+                    except activity_definition.ActivityDefinitionError:
+                        stay_execution = None
+                break
         if body:
             blocked_reason = _body_blocked_reason(body, available_actions)
         elif daily:
@@ -880,6 +1214,9 @@ def opportunity_view(
             "object_id": object_id,
             "affordance": affordance,
             "stay_seconds": stay_seconds,
+            "title": stay_title,
+            # 显式执行机制的定义信息（只有世界包写了才有）；不是执行授权。
+            "execution": stay_execution,
             "location_id": location,
             "subject_id": item.get("subject_id"),
             "source": source,
@@ -981,6 +1318,118 @@ CONTEXT_KIND_ORDER = (
 )
 #: How many unknowns one context may name (a bounded list, not a log).
 MAX_CONTEXT_UNKNOWNS = 8
+
+#: v0.6 ambient background: the World's own per-day cap is 3, and this background never
+#: enlarges it.  Only current, location-relevant facts the World itself projected are kept.
+MAX_AMBIENT_CONTEXT_EVENTS = 3
+AMBIENT_CONTEXT_SOURCE = "world_living_skeleton.observe_world.ambient_events"
+#: The World's own travel switch (``world_travel_delivery.TRAVEL_FEATURE_ENV``).  It is
+#: written off only for the ambient read, so this background read never realizes an
+#: arrival or writes the World state from the Life process.
+AMBIENT_READ_TRAVEL_ENV = "CHIYO_WORLD_TRAVEL_TIME_ENABLED"
+
+
+def _context_text(value: Any, limit: int) -> str:
+    """One whitespace-collapsed, length-capped string (never a paragraph)."""
+
+    return " ".join(str(value if value is not None else "").split())[:limit]
+
+
+def _ambient_instant(value: Any) -> Any:
+    """One iso instant for the same-source check; an unreadable one is UNKNOWN."""
+
+    from datetime import datetime, timezone
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def _ambient_same_source_conflict(
+    observation: Mapping[str, Any],
+    snapshot: Any,
+    events: Any,
+) -> Optional[str]:
+    """The named fact that contradicts this round's own snapshot, or ``None``.
+
+    The background read is a *second* read.  It must not turn another world, another
+    place or an already-expired record into "what is happening here now".  Only facts
+    the two reads already report are compared; a side that did not report one is
+    ``UNKNOWN`` and is never treated as a contradiction.  Nothing new is derived from
+    the world package -- the World still owns the time window, the place filter and
+    the event set.
+    """
+
+    if not isinstance(observation, Mapping):
+        return None
+    snap = snapshot if isinstance(snapshot, Mapping) else {}
+    observed_world = str(observation.get("world_id") or "").strip()
+    snapshot_world = str(snap.get("world_id") or "").strip()
+    if observed_world and snapshot_world and observed_world != snapshot_world:
+        return "AMBIENT_WORLD_MISMATCH"
+
+    current = observation.get("current_location")
+    snapshot_location = snap.get("location")
+    if isinstance(current, Mapping) and isinstance(snapshot_location, Mapping):
+        node = str(current.get("location_id") or "").strip()
+        observed_place = node.split("/", 1)[0] if node else ""
+        snapshot_place = str(snapshot_location.get("place_id") or "").strip()
+        if observed_place and snapshot_place and observed_place != snapshot_place:
+            return "AMBIENT_LOCATION_MISMATCH"
+        # An area is only comparable when the World named an area node.  A place node
+        # carries the place's *default* area, which is not the state's current area
+        # (entrance vs default differ), so comparing it would invent a contradiction.
+        observed_area = node.split("/", 1)[1] if "/" in node else ""
+        snapshot_area = str(snapshot_location.get("area_id") or "").strip()
+        if observed_area and snapshot_area and observed_area != snapshot_area:
+            return "AMBIENT_LOCATION_MISMATCH"
+
+    local_time = _ambient_instant(observation.get("local_time"))
+    if local_time is not None:
+        for event in events or []:
+            if not isinstance(event, Mapping):
+                continue
+            start = _ambient_instant(event.get("valid_from"))
+            end = _ambient_instant(event.get("valid_until"))
+            if start is None or end is None:
+                continue
+            if not (start <= local_time < end):
+                return "AMBIENT_EVENT_WINDOW_MISMATCH"
+    return None
+
+
+def _ambient_row(event: Any) -> Optional[dict[str, Any]]:
+    """One World-projected ambient fact, bounded to the public fields only.
+
+    The World owns the event id, the place, the validity window and the summary; this
+    copies those facts unchanged (the summary stays *exact* so a reader can still
+    recognise the same public template) and drops anything else.
+    """
+
+    if not isinstance(event, Mapping):
+        return None
+    event_id = _context_text(event.get("event_id"), 160)
+    payload = event.get("payload")
+    # The summary is copied verbatim (strip only) so it still matches the World's public
+    # template exactly; it is public world text, never private material.
+    summary = str(
+        (payload.get("summary") if isinstance(payload, Mapping) else "") or "").strip()[:240]
+    if not event_id or not summary:
+        return None
+    row: dict[str, Any] = {"event_id": event_id, "summary": summary}
+    for key, limit in (("event_type", 64), ("location_id", 160),
+                       ("local_date", 16), ("valid_from", 40), ("valid_until", 40)):
+        text = _context_text(event.get(key), limit)
+        if text:
+            row[key] = text
+    return row
 
 
 def _object_labels(observation: Mapping[str, Any]) -> dict[str, str]:
@@ -1346,9 +1795,15 @@ def _context_opportunity(
     elif verb == STAY_VERB:
         seconds = entry.get("stay_seconds")
         affordance = entry.get("affordance") or ""
-        label = "在%s待一会儿" % here
-        description = ("就在这里待大约%s秒（%s），不产出东西。"
-                       % (int(seconds) if isinstance(seconds, int) else seconds, affordance))
+        phrase = STAY_IDLE_PHRASES.get(affordance)
+        seconds_text = int(seconds) if isinstance(seconds, int) else seconds
+        # 发呆/转悠这类说不出口的选项，标签就用日常说法；说不出口的事没人会选。
+        label = ("在%s%s" % (here, phrase)) if phrase else ("在%s待一会儿" % here)
+        # 不说"什么也不做、不产出东西"：那等于在选项里替她判了这件事没用，而发呆本身就是
+        # 这件事的内容。只说清楚时间有多长，剩下的由她自己填。
+        description = ("就在这里待大约%s秒，这段时间空着。" % seconds_text
+                       if phrase else
+                       "就在这里待大约%s秒（%s）。" % (seconds_text, affordance))
     elif verb == POSE_VERB:
         label = "换个姿势（%s）" % (params.get("pose") or "")
         description = "身体的姿势换成%s，朝向仍是%s。" % (
@@ -1541,6 +1996,9 @@ class WorldMoveOpportunityProvider:
         self.last_surfaces: Optional[list[dict[str, Any]]] = None
         self.last_destination_reason: Optional[str] = None
         self.last_reason: Optional[str] = None
+        #: 定义层状态：available / environment_only / absent / closed / unavailable /
+        #: error。显式执行定义不成立时 ``reason_code`` 是固定错误码，不是空列表。
+        self.last_stay_definition_status: Optional[dict[str, Any]] = None
 
     def __call__(self) -> list[dict[str, Any]]:
         return self.observe()
@@ -1548,6 +2006,8 @@ class WorldMoveOpportunityProvider:
     def observe(self, *, occurred_at: Optional[str] = None) -> list[dict[str, Any]]:
         from datetime import datetime, timezone
 
+        # 每一轮重新计算定义层状态；提前返回时保持 None，不沿用上一轮结论。
+        self.last_stay_definition_status = None
         wbc = self._world_body_client()
         status = self.client.get_status()
         if status.outcome != wbc.OK or not (status.data or {}).get("ready"):
@@ -1574,6 +2034,14 @@ class WorldMoveOpportunityProvider:
         # The place facts are read *before* the stay is offered: a stay is only legal where
         # from a catalog read that has not happened yet.
         self.last_catalog = self._catalog()
+        # catalog 读取本身带出的定义错误：同一固定 code + 安全 path 直接报给调用方，
+        # 不落成空列表，也不只在 last_* 内部字段里留下。普通读失败没有 code，照旧。
+        catalog_definition_error = self._catalog_definition_error()
+        if catalog_definition_error is not None:
+            code, path = catalog_definition_error
+            self.last_stay_definition_status = {
+                "status": "error", "reason_code": code, "definitions": []}
+            raise StayDefinitionError(code, path)
         move = observed_move_opportunities(
             snapshot.data,
             action_space=visible,
@@ -1588,6 +2056,13 @@ class WorldMoveOpportunityProvider:
             observed_at=moment,
             valid_for_seconds=self.valid_for_seconds,
         )
+        # 定义层状态在候选之前就算好，因此"没有可执行定义"与"闭店/暂不可执行"
+        # 不能都表现成同一个空列表；显式定义不成立时错误码也留在这里。
+        self.last_stay_definition_status = stay_definition_status_for(
+            snapshot.data, self.last_catalog, observed_at=moment)
+        # 第一层不成立时**向调用方抛出**既有 StayDefinitionError（固定 code + 安全
+        # 结构 path），不再捕获成空列表；调用方（Life cycle）已把异常记进
+        # last_world_error，这是实际消费的错误通道。
         stay = observed_stay_opportunities(
             snapshot.data,
             catalog=self.last_catalog,
@@ -1690,6 +2165,16 @@ class WorldMoveOpportunityProvider:
             return None
         return dict(catalog) if isinstance(catalog, Mapping) else None
 
+    def _catalog_definition_error(self) -> Optional[tuple[str, Optional[str]]]:
+        """catalog 读取带出的定义错误；只有闭集 code 才向调用方抛出。"""
+
+        catalog = self.last_catalog
+        if not isinstance(catalog, Mapping):
+            return None
+        if str(catalog.get("status") or "") != "unavailable":
+            return None
+        return _safe_definition_error(catalog.get("code"), catalog.get("path"))
+
     def _world_body_client(self) -> Any:
         if self.bridge_dir:
             import sys
@@ -1725,6 +2210,75 @@ class WorldMoveOpportunityProvider:
             return None
         return [dict(item) for item in surfaces if isinstance(item, Mapping)]
 
+    def _ambient_context(self) -> Optional[dict[str, Any]]:
+        """The World's own current, location-relevant ambient facts -- or ``None`` when off.
+
+        Only the already-enabled ambient feature is read; ``0``/unset returns ``None`` so the
+        context keeps its old shape and this method performs **no** extra read.  The facts come
+        from the official ``observe_world`` projection, bound to this round's own clock and
+        world home, so the time/location filtering stays the World's own.  Travel realization
+        is switched off for this read only: Life must never write the World state on a
+        background read.  A read that fails is reported as an unknown, never filled in.
+        """
+
+        environment = self.environment
+        if not environment or not self.world_home:
+            return None
+        env = dict(environment)
+        try:
+            import world_ambient_events as wae
+
+            if not wae.feature_enabled(env):
+                return None
+        except Exception:  # noqa: BLE001 - no World module means no enabled feature
+            return None
+        try:
+            import world_runtime_data as wrd
+
+            # Bind the read to the *same* world package the instance is running; without
+            # that explicit binding the World module would fall back to its built-in city.
+            if wrd.package_root(env) is None:
+                return None
+        except Exception:  # noqa: BLE001 - an unreadable binding is not a same-world read
+            return None
+        read_env = dict(env)
+        read_env[AMBIENT_READ_TRAVEL_ENV] = "0"
+        try:
+            import world_living_skeleton as wls
+
+            observation = wls.observe_world(
+                hermes_home=self.world_home, environment=read_env, now=self._moment())
+        except Exception:  # noqa: BLE001 - reported as unknown, never guessed
+            return {"status": "unavailable", "source": AMBIENT_CONTEXT_SOURCE,
+                    "reason_code": "AMBIENT_READ_FAILED", "events": [], "total": 0}
+        if (not isinstance(observation, Mapping)
+                or str(observation.get("status")) != "available"):
+            return {"status": "unavailable", "source": AMBIENT_CONTEXT_SOURCE,
+                    "reason_code": "AMBIENT_OBSERVATION_UNAVAILABLE",
+                    "events": [], "total": 0}
+        raw_events = observation.get("ambient_events")
+        if not isinstance(raw_events, list):
+            return {"status": "unavailable", "source": AMBIENT_CONTEXT_SOURCE,
+                    "reason_code": "AMBIENT_NOT_PROJECTED", "events": [], "total": 0}
+        # A second read that names another world/place, or carries a record outside its
+        # own validity window, is not "what is happening here now": report the conflict
+        # and present no event rather than fill the prompt with a contradicting fact.
+        conflict = _ambient_same_source_conflict(
+            observation, self.last_observation, raw_events)
+        if conflict:
+            return {"status": "unavailable", "source": AMBIENT_CONTEXT_SOURCE,
+                    "reason_code": conflict, "events": [], "total": 0}
+        rows = [row for row in (_ambient_row(item) for item in raw_events) if row]
+        return {
+            "status": "available",
+            "source": AMBIENT_CONTEXT_SOURCE,
+            "observed_at": _context_text(observation.get("local_time"), 40) or None,
+            "events": rows[:MAX_AMBIENT_CONTEXT_EVENTS],
+            "total": len(rows),
+            "truncated": len(rows) > MAX_AMBIENT_CONTEXT_EVENTS,
+            "action_grant": False,
+        }
+
     def daily_life_context(self, limit: int = 8) -> dict[str, Any]:
         """The live situation, as bounded *data* for the cognition layer.
 
@@ -1754,6 +2308,11 @@ class WorldMoveOpportunityProvider:
         ``opportunities``, ``unknowns`` (the required shape), plus ``reason_code``,
         ``action_grant: false``, ``limit``, ``truncated``, ``total_opportunities``,
         ``order_basis`` and ``schedule_source`` for the caller's own bookkeeping.
+
+        v0.6: when the instance has the World ambient feature enabled, ``ambient`` carries the
+        World's own current, location-relevant facts for this place and instant (bounded to the
+        World's per-day cap).  It is background only -- not a candidate, an offer, a permission
+        or a task.  With the feature off/unset the key is absent and nothing extra is read.
         """
 
         limit_value = 8
@@ -1819,7 +2378,7 @@ class WorldMoveOpportunityProvider:
             observation, catalog=catalog, place_id=place_id, area_id=area_id, body=body,
             surfaces=surfaces, surface_reason=self.last_destination_reason,
             nearby=nearby_objects)
-        return {
+        context: dict[str, Any] = {
             "status": "available",
             "reason_code": None,
             "observed_at": self.last_observed_at,
@@ -1840,6 +2399,9 @@ class WorldMoveOpportunityProvider:
                                  if place_facts else None),
                 "observes": ((place_facts.get("observed") or {}).get("status")
                              if place_facts else None),
+                # 这个地方自己写的文字（书里的一页、墙上的告示）。只是背景事实，
+                # 不是候选、不是授权，也不代表她读过；世界没写就是 None。
+                "reading": (place_facts.get("reading") if place_facts else None),
             },
             "body": body,
             # ``nearby`` is what the catalog says about nearby *places*; ``nearby_objects``
@@ -1857,9 +2419,17 @@ class WorldMoveOpportunityProvider:
             "total_opportunities": len(ordered),
             "order_basis": "kind_group_presentation",
         }
+        # v0.6: an *enabled* ambient feature adds the World's own current facts for this place
+        # and instant.  Off/unset adds nothing and performs no read, so the old shape (and its
+        # cost) is exactly what it was.
+        ambient = self._ambient_context()
+        if ambient is not None:
+            context["ambient"] = ambient
+        return context
 
 
 __all__ = [
+    "AMBIENT_CONTEXT_SOURCE",
     "BODY_ACTION_REF_PREFIX",
     "CONSUME_VERB",
     "CONTEXT_KIND_ORDER",
@@ -1869,6 +2439,8 @@ __all__ = [
     "DURATION_SOURCE_ROUTE",
     "HANDS_USABLE_POSES",
     "HAND_MANIPULATION_SECONDS",
+    "IDLE_STAY_AFFORDANCES",
+    "MAX_AMBIENT_CONTEXT_EVENTS",
     "MAX_CONTEXT_UNKNOWNS",
     "MOVE_VERB",
     "OBJECT_REF_PREFIX",
@@ -1880,7 +2452,11 @@ __all__ = [
     "POSE_VERB",
     "POSTURE_SECONDS",
     "REST_VERB",
+    "STAY_DESCRIPTOR_PREFERENCE",
     "STAY_DESCRIPTOR_QUIET",
+    "StayDefinitionError",
+    "STAY_IDLE_PHRASES",
+    "STAY_IDLE_ROTATION_SECONDS",
     "STAY_QUIET_SECONDS",
     "STAY_REF_PREFIX",
     "STAY_SECONDS_BY_AFFORDANCE",
@@ -1893,6 +2469,8 @@ __all__ = [
     "observed_daily_action_opportunities",
     "observed_move_opportunities",
     "observed_stay_opportunities",
+    "stay_definition_status",
+    "stay_definition_status_for",
     "opportunity_view",
     "parse_stay_target",
     "read_location_catalog",

@@ -337,6 +337,23 @@ def _result(ok, status, message, **data):
 
 def move_handler(args, **kwargs) -> str:
     """Fail closed on input, feature gates, corrupt stores and writer failures."""
+    out = _move_handler_inner(args, **kwargs)
+    try:
+        doc = json.loads(out)
+        if doc.get("ok") and isinstance(args, Mapping):
+            env = kwargs.get("environment") or os.environ
+            raw_home = kwargs.get("hermes_home") or env.get("HERMES_HOME")
+            if raw_home:
+                p_home = Path(str(raw_home)).expanduser()
+                if (p_home / "chiyo" / "config.json").is_file():
+                    from .companion_extras import record_world_move_receipt
+                    record_world_move_receipt(p_home, str(args.get("location") or ""), doc)
+    except Exception:
+        pass
+    return out
+
+
+def _move_handler_inner(args, **kwargs) -> str:
     try:
         if not isinstance(args, Mapping) or set(args) != {"location"}:
             return _result(False, "rejected", "需要且仅接受 location 字符串。", reason_code="INVALID_ARGUMENTS")

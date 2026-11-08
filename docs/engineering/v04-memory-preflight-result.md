@@ -156,7 +156,7 @@ NOT_COMPARABLE：两个身份只并排报告，不匹配**不是** `BLOCKED`，`
 ```bash
 cd /mnt/d/nyairo-rc1-body-backend
 export PYTHONDONTWRITEBYTECODE=1
-export NYAIRO_V04_MEMORY_ROOT=/mnt/c/Users/28556/.pi-desktop/scratch/<session>/v04-memory-fixtures
+export NYAIRO_V04_MEMORY_ROOT=<WSL_USER_HOME>/.pi-desktop/scratch/<session>/v04-memory-fixtures
 python3 -m unittest -v \
   tests.test_phone_life_memory_preflight.MemoryHealthTests.test_a_different_memory_persona_is_legal_not_cross_bound \
   tests.test_phone_life_memory_preflight.RunMemoryGateTests.test_run_refuses_when_memory_health_is_unverified \

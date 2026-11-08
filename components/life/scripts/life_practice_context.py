@@ -62,6 +62,15 @@ REASON_DETAIL_UNAVAILABLE = "PRACTICE_METHOD_DETAIL_UNAVAILABLE"
 REASON_DETAIL_HEAD_CHANGED = "PRACTICE_METHOD_HEAD_CHANGED"
 REASON_EVIDENCE_WITHHELD = "PRACTICE_EVIDENCE_WITHHELD"
 REASON_NO_EXPLICIT_TRIAL = "PRACTICE_METHOD_NO_EXPLICIT_TRIAL"
+#: Why the automatic review seed was withheld this round: at least one experience's source
+#: artifact could not be *classified* by the owner (read failure / unknown type), so it must not
+#: be assumed to be an ordinary work.  Named on purpose -- a withheld seed is not "no experiences".
+REASON_SOURCE_KIND_UNKNOWN = "PRACTICE_SOURCE_KIND_UNKNOWN"
+
+#: Owner rejection codes that *definitively* say one artifact is **not** a review: it is another
+#: practice kind (a method), or its first line is not a practice marker at all (an ordinary work).
+#: Anything else -- not found, unreadable, an invalid marker, a service error -- stays UNKNOWN.
+NON_REVIEW_SOURCE_CODES = frozenset({"PRACTICE_KIND_MISMATCH", "PRACTICE_NOT_A_DOCUMENT"})
 
 #: What the seam needs from B's service.  A service missing one of these is reported UNUSABLE
 #: (never "empty"): a partial service would silently answer nothing forever.
@@ -364,6 +373,85 @@ class PracticeSeam:
                 break
         self.last_experiences = view
         return view
+
+    def review_result_artifact_ids(self, artifact_refs: Iterable[Any], *,
+                                   max_reads: Optional[int] = None) -> dict[str, Any]:
+        """Which of these *experience source artifacts* the owner marks as reviews.
+
+        A confirmed writing experience carries the owner artifact it was written to (its
+        ``artifact_ref``).  If that artifact's first-line practice marker says ``review``, the
+        experience is a review's **own writing result** -- using it as the seed for the next
+        automatic review would derive a review from a review.
+
+        This asks B's owner's own read port (``read_review``) once per distinct source artifact,
+        bounded by ``max_reads`` (default :attr:`max_experiences`).  It never opens a second index,
+        never reads a body, and never classifies by title, summary prefix or text.
+
+        Returns a named tri-state:
+
+        * ``status="READY"`` -- every distinct source was classified; ``review_ids`` are the ones
+          the owner calls reviews.  An artifact the owner says is a *method* or an ordinary work is
+          a confident non-review (kept as a legal seed).
+        * ``status="UNKNOWN"`` -- at least one source could not be classified (not found /
+          unreadable / invalid marker / service error / past the read bound).  The caller must
+          withhold this round's automatic review seed rather than assume it is ordinary.
+
+        An empty source ref is simply not a source (it is never sent to the owner and never makes
+        the answer UNKNOWN; an experience with no artifact cannot be any artifact's result).
+        """
+
+        refs: list[str] = []
+        for value in artifact_refs or ():
+            text = str(value or "").strip()
+            if text and text not in refs:
+                refs.append(text)
+        cap = (self.max_experiences if max_reads is None
+               else max(0, int(max_reads)))
+        review_ids: list[str] = []
+        checked = 0
+        unknown = 0
+        reason = ""
+        if not self.available():
+            return {"status": ("UNKNOWN" if refs else "READY"), "review_ids": [],
+                    "checked": 0, "unknown_count": (len(refs) and 1 or 0),
+                    "reason": (REASON_SERVICE_MISSING if refs else ""),
+                    "max_reads": cap}
+        for text in refs:
+            if checked >= cap:
+                # More distinct sources than this round may classify: the rest are unknown, not
+                # assumed ordinary.  (The caller's candidate set is already bounded to this cap.)
+                unknown += 1
+                reason = REASON_SOURCE_KIND_UNKNOWN
+                break
+            checked += 1
+            try:
+                answer = self.service.read_review(text)
+            except Exception as exc:  # a failed read is "unknown", never "ordinary"
+                unknown += 1
+                reason = "PRACTICE_SOURCE_READ_FAILED:%s" % type(exc).__name__
+                continue
+            if not isinstance(answer, Mapping):
+                unknown += 1
+                reason = REASON_ANSWER_NOT_A_MAPPING
+                continue
+            if answer.get("ok") is True:
+                review_ids.append(text)
+                continue
+            code = str(answer.get("reason_code") or answer.get("status") or "")
+            if code in NON_REVIEW_SOURCE_CODES:
+                # A method or an ordinary work: confidently not a review.
+                continue
+            unknown += 1
+            reason = code or REASON_SOURCE_KIND_UNKNOWN
+        return {
+            "status": "UNKNOWN" if unknown else "READY",
+            "review_ids": review_ids,
+            "checked": checked,
+            "unknown_count": unknown,
+            "reason": reason,
+            "max_reads": cap,
+        }
+
     def evidence_usable(self, experience_ids: Iterable[Any]) -> list[dict[str, Any]]:
         """Which of these experiences A can still read, one check each (no invention)."""
 
@@ -1025,6 +1113,7 @@ __all__ = [
     "MAX_DETAIL_READS",
     "METHOD_REF_PREFIX",
     "METHOD_STATE_RETIRED",
+    "NON_REVIEW_SOURCE_CODES",
     "OUTCOME_HELPED",
     "OUTCOME_NOT_HELPED",
     "OUTCOME_UNKNOWN",
@@ -1042,6 +1131,7 @@ __all__ = [
     "REASON_NO_EVIDENCE",
     "REASON_NO_EXPLICIT_TRIAL",
     "REASON_SERVICE_MISSING",
+    "REASON_SOURCE_KIND_UNKNOWN",
     "REASON_SERVICE_UNUSABLE",
     "REASON_TRIAL_REFUSED",
     "REQUIRED_METHODS",

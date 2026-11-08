@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import GENERATOR_VERSION, PACKAGE_SCHEMA
+from . import activity_definition
 
 WORLD_SCHEMA = "worldgen.world.v1"
 TOPOLOGY_SCHEMA = "worldgen.topology.v1"
@@ -81,7 +82,29 @@ VALID_TIMEZONES_HINT = "IANA 时区名，例如 Asia/Tokyo"
 
 
 class WorldPackageError(ValueError):
-    """世界包格式错误。所有格式问题都以明确的中文消息报告。"""
+    """世界包格式错误。所有格式问题都以明确的中文消息报告。
+
+    活动定义错误额外带两个可选属性：``code`` 是稳定闭集错误码，``path`` 是
+    ``rules.json/...`` 形式的安全结构定位（只含合法地点 ID、整数下标和合同字段名）。
+    其它格式错误不设置它们，行为不变。
+    """
+
+    code: Optional[str] = None
+    path: Optional[str] = None
+
+
+def _affordance_path(location_id: str, index: int, field: str) -> str:
+    """一条 affordance 出错时的安全结构定位。
+
+    ``location_id`` 已由 ``validate_id`` 校验过（合法字符闭集），``index`` 是
+    ``enumerate`` 的严格整数，``field`` 来自 ``activity_definition`` 的合同字段闭集；
+    这里不拼任何输入值。路径只描述世界包里的位置，不含主机绝对路径。
+    """
+
+    return (
+        "rules.json/location_rules/%s/affordances/%d/%s"
+        % (location_id, int(index), field)
+    )
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -104,6 +127,20 @@ def _require_text(value: Any, field: str, *, maximum: int = 240, allow_empty: bo
         raise WorldPackageError(f"{field} 不能为空")
     if len(text) > maximum:
         raise WorldPackageError(f"{field} 超过最大长度 {maximum}")
+    return text
+
+
+def _require_title(value: Any, field: str, *, maximum: int = 80) -> str:
+    """Optional display title: one plain-text line, no control characters."""
+    if not isinstance(value, str):
+        raise WorldPackageError(f"{field} 必须是字符串")
+    text = value.strip()
+    if not text:
+        raise WorldPackageError(f"{field} 不能为空")
+    if len(text) > maximum:
+        raise WorldPackageError(f"{field} 超过最大长度 {maximum}")
+    if any(ord(char) < 32 or ord(char) == 127 for char in text):
+        raise WorldPackageError(f"{field} 必须是单行纯文本，不允许换行或控制字符")
     return text
 
 
@@ -347,25 +384,57 @@ def validate_rules_doc(doc: Any) -> dict[str, Any]:
         if not isinstance(affordances_raw, list):
             raise WorldPackageError(f"rules[{location_id}].affordances 必须是列表")
         affordances = []
+        allowed_keys = {
+            "affordance_id",
+            "description",
+            "title",
+            "suggested_seconds",
+            "execution",
+        }
         for index, item in enumerate(affordances_raw):
-            if not isinstance(item, dict) or set(item) != {"affordance_id", "description"}:
+            where = f"rules[{location_id}].affordances[{index}]"
+            if (
+                not isinstance(item, dict)
+                or not {"affordance_id", "description"} <= set(item)
+                or not set(item) <= allowed_keys
+            ):
                 raise WorldPackageError(
-                    f"rules[{location_id}].affordances[{index}] 必须包含 affordance_id/description"
+                    f"{where} 必须包含 affordance_id/description；"
+                    "只允许可选 title/suggested_seconds/execution，不接受其它键"
                 )
-            affordances.append(
-                {
-                    "affordance_id": _require_text(
-                        item["affordance_id"],
-                        f"rules[{location_id}].affordances[{index}].affordance_id",
-                        maximum=64,
-                    ),
-                    "description": _require_text(
-                        item["description"],
-                        f"rules[{location_id}].affordances[{index}].description",
-                        maximum=120,
-                    ),
-                }
-            )
+            affordance = {
+                "affordance_id": _require_text(
+                    item["affordance_id"], f"{where}.affordance_id", maximum=64
+                ),
+                "description": _require_text(
+                    item["description"], f"{where}.description", maximum=120
+                ),
+            }
+            # 两个可选键彼此独立：只给一个时只带一个，不补默认键。
+            if "title" in item:
+                affordance["title"] = _require_title(item["title"], f"{where}.title")
+            if "suggested_seconds" in item:
+                affordance["suggested_seconds"] = _require_int(
+                    item["suggested_seconds"],
+                    f"{where}.suggested_seconds",
+                    minimum=1,
+                    maximum=86400,
+                )
+            # 显式执行机制：只在结构完整、活动受支持时成立。错误码固定且不回显
+            # 任何输入值；没有 execution 的 affordance 仍是普通环境声明。
+            if activity_definition.declares_execution(item):
+                try:
+                    affordance["execution"] = activity_definition.validate_execution(
+                        item)
+                except activity_definition.ActivityDefinitionError as error:
+                    # 固定错误码 + 安全结构定位：不回显 description/title 值、
+                    # 异常正文或主机绝对路径。
+                    path = _affordance_path(location_id, index, error.field)
+                    failure = WorldPackageError("%s: %s" % (error.code, path))
+                    failure.code = error.code
+                    failure.path = path
+                    raise failure from None
+            affordances.append(affordance)
         rules[location_id] = {
             "open_hour": open_hour,
             "close_hour": close_hour,

@@ -445,6 +445,11 @@ class AutonomousLifeResident:
             "wakes": 0, "by_class": {}, "outcomes": {}, "model_calls": 0,
             "check_windows": 0, "event_wakes": 0, "real_events": 0,
             "windows_with_material": 0, "no_action": 0, "defer": 0,
+            #: NO_ACTION outcomes that still carried a *committed* Decision (a real CONTINUE/START
+            #: whose execution produced nothing).  They are counted inside ``no_action`` too, so
+            #: old totals do not move; this key only stops "decided CONTINUE, wrote nothing" from
+            #: reading like "the model chose to do nothing".
+            "no_action_with_decision": 0,
             "blocked_reasons": {}, "actions": 0, "owner_confirmed_versions": 0,
             "owner_version_unknown": 0, "owner_version_refs": {},
             "unknown_settlements": 0, "reconciliations": 0,
@@ -933,7 +938,8 @@ class AutonomousLifeResident:
             if isinstance(stored, Mapping) else 0
         declared = None
         try:
-            raw = str(self.env.get("CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_UTC_DAY") or "").strip()
+            raw = str(self.env.get("NYA02_EXPERIMENT_CUMULATIVE_TOTAL") or
+                      self.env.get("CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_UTC_DAY") or "").strip()
             declared = int(raw) if raw else None
         except ValueError:
             declared = None
@@ -1037,7 +1043,7 @@ class AutonomousLifeResident:
             return {"ok": False, "reason": reason, "detail": str(self.last_error)}
         # W05R-R1b: the decision transport is admitted at each attempt's send boundary
         # against this instance's own pause bit (the same state root the operator writes).
-        admission = assembly.pause_request_admission(self.state_root)
+        admission = assembly.pause_request_admission(self.state_root, requests)
         cognition = assembly.model_cognition(self.env, requests=requests,
                                              admission=admission, pause_guard=admission,
                                              observer=self._cognition_diagnostic)
@@ -1500,6 +1506,14 @@ class AutonomousLifeResident:
             self.counters["windows_with_material"] += 1
         if outcome == "NO_ACTION":
             self.counters["no_action"] += 1
+            # A NO_ACTION outcome is not the same thing as "the model chose NO_ACTION": a real
+            # committed CONTINUE/START whose execution produced nothing (for example the writer's
+            # legal no_change) also ends here.  Keep the old ``no_action`` total and name the
+            # distinction next to it, from the wake's own committed-decision field only.
+            decision = str(wake.get("decision") or "")
+            if decision and decision != "NO_ACTION" and int(wake.get("llm_calls") or 0) > 0:
+                self.counters["no_action_with_decision"] = int(
+                    self.counters.get("no_action_with_decision") or 0) + 1
         if outcome == OUTCOME_DEFERRED:
             self.counters["defer"] += 1
         if status == "PAUSED_BY_OPERATOR":
@@ -1781,6 +1795,37 @@ class AutonomousLifeResident:
 
     # -- the record ----------------------------------------------------------------------
 
+    def _last_due_view(self) -> Optional[dict[str, Any]]:
+        """最近一次 due 的形状：status / status_class / outcome / detail 与时刻。
+
+        汇总层的 ``counters`` 是 wake 级的，四类静默在那里被压成一个总数，所以人看不出
+        她这一轮到底"没机会""被门禁拦了"还是"自己选择不动"。这里只报最后一行的**事实**，
+        不补剧情：``detail`` 原样带出（拦它的具名原因就写在那里）。
+        """
+
+        tick = self.last_tick or {}
+        due = tick.get("due")
+        if not isinstance(due, Mapping) or not due:
+            return None
+        extra = due.get("extra") if isinstance(due.get("extra"), Mapping) else {}
+        return {
+            "at": due.get("at") or tick.get("at"),
+            "tick": tick.get("tick"),
+            "kind": due.get("kind"),
+            "status": due.get("status"),
+            "status_class": due.get("status_class"),
+            "outcome": due.get("outcome"),
+            # The committed Decision's own enum / route / owner-result flag travel with the last
+            # due, so "decided CONTINUE but nothing was written" is readable here instead of
+            # looking exactly like a model-chosen NO_ACTION.
+            "decision": due.get("decision"),
+            "decision_route": extra.get("decision_route"),
+            "owner_version_created": extra.get("owner_version_created"),
+            "reason": due.get("reason"),
+            "detail": due.get("detail"),
+            "trigger_kind": due.get("trigger_kind"),
+        }
+
     def summary(self) -> dict[str, Any]:
         assembled = self.assembled or {}
         cycle = assembled.get("cycle")
@@ -1799,6 +1844,10 @@ class AutonomousLifeResident:
             "starts": self.starts,
             "ticks": self.ticks,
             "last_tick_at": (self.last_tick or {}).get("at"),
+            # 最近一次 due 的**形状**（不是一句话）：status 据此说清"没机会 / 被拦 / 她自己选择不动"。
+            # 只加字段，不改变既有字段语义；tick 级日志本来就有这些值，这里只是把最后一行的
+            # 具名理由带到汇总层（汇总层的 counters 是 wake 级的，一条具体理由都看不见）。
+            "last_due": self._last_due_view(),
             # R: `observed_seconds` used to be `now - first_start`, a wall span that counted
             # downtime as life.  The key is kept for old readers, but it is now proven coverage
             # (`covered_seconds`), and the wall span, the measured process time, the offline

@@ -85,6 +85,14 @@
         [
           "USE_PHONE",
           "在这里使用手机"
+        ],
+        [
+          "DAZE",
+          "坐着发会儿呆"
+        ],
+        [
+          "POTTER",
+          "在屋里随便转转"
         ]
       ],
       "close_hour": null,
@@ -643,6 +651,10 @@
         [
           "LOOK_AROUND",
           "在这里看看周围"
+        ],
+        [
+          "PEOPLE_WATCH",
+          "坐着看路过的人"
         ]
       ],
       "close_hour": 22,
@@ -678,6 +690,10 @@
       [
         "LOOK_AROUND",
         "在这里看看周围"
+      ],
+      [
+        "PEOPLE_WATCH",
+        "站在路边看路过的人"
       ]
     ],
     "kind": "street",

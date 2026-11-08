@@ -388,8 +388,17 @@ class AutonomousLifeRunner:
         #    is something legal to consider.
         self._mark_checked(moment)
         try:
+            requests = getattr(self.cycle.budget, "requests", None)
+            bounded = getattr(requests, "failstop", False)
+            before_calls = requests.view().get("run_window_calls") if bounded else None
             out = self.cycle.evaluate_once(trigger_ref=trigger_ref, trigger_kind=trigger_kind,
                                            act=act, observed_at=_iso(moment))
+            after_calls = requests.view().get("run_window_calls") if bounded else None
+            if (bounded and isinstance(before_calls, int) and isinstance(after_calls, int)
+                    and after_calls > before_calls
+                    and out.get("outcome") == alc.OUTCOME_DECISION_FAILED):
+                # AG1 的 schema拒绝在 adapter 返回之后才成立；本轮返回同步封住其它出口。
+                requests.note_failure("STRUCTURE_OR_OTHER_FAILURE")
         except Exception as exc:  # a real failure is reported as one, never as silence
             self.last_error = "%s: %s" % (type(exc).__name__, exc)
             return self._record(kind, reason, WAKE_ERROR, "blocked", moment,
@@ -475,11 +484,36 @@ class AutonomousLifeRunner:
         # inference from the outcome name; ``None`` means the round recorded no Decision.
         block["decision_route"] = (str(out["decision_route"])
                                    if out.get("decision_route") else None)
+        #: v0.5: the committed Decision's own id, so a wake can be tied back to the exact record
+        #: (never inferred, and ``None`` when the round committed no Decision).
+        block["decision_id"] = (str(out["decision_id"]) if out.get("decision_id") else None)
         block["reason_codes"] = ([str(code) for code in out["reason_codes"]]
                                  if isinstance(out.get("reason_codes"), (list, tuple))
                                  else [])
         block["selected_candidate_ref"] = (str(out["selected_candidate_ref"])
                                            if out.get("selected_candidate_ref") else None)
+        #: v0.4 day-life: the writer's legal ``no_change`` rides along as its own structured block
+        #: (reason/enum + two booleans only), so "decided CONTINUE; execution produced no new
+        #: version" is readable in this same record instead of only as a bare NO_ACTION outcome.
+        work_no_change = out.get("work_no_change")
+        if isinstance(work_no_change, Mapping) and work_no_change:
+            block["work_no_change"] = {
+                "reason_code": (str(work_no_change["reason_code"])
+                                if work_no_change.get("reason_code") else None),
+                "owner_called": (bool(work_no_change["owner_called"])
+                                 if work_no_change.get("owner_called") is not None else None),
+                "version_created": (bool(work_no_change["version_created"])
+                                    if work_no_change.get("version_created") is not None else None),
+            }
+        # 在世界里的读书位读完之后的形状报告：``APPLIED`` 与每一种没写成的原因
+        # （``NO_READING_HERE`` / ``NOT_CONFIGURED`` / ``NO_PRIVATE_ITEMS`` / ``REFUSED`` /
+        # ``UNKNOWN``）都要能在这份落盘记录里看出来，否则"成功"和"静默失败"在日志上长得一样。
+        # 只有这一轮**真的产生了它**才搬：没有这一项的轮次，记录形状与加入本字段之前一模一样，
+        # 不多一个 ``null``、不多一个空对象。报告本身只有形状（状态 / 地点 / 条目类型 / 版本号 /
+        # 原因），原文与批注正文从不进这里。
+        reading = out.get("world_reading")
+        if isinstance(reading, Mapping) and reading:
+            block["world_reading"] = dict(reading)
         return block
 
     def run_due(self, *, act: bool = True, now: Optional[datetime] = None,

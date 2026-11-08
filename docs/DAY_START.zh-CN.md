@@ -54,8 +54,11 @@ python3 scripts/nyairo_day.py start --root "$HOME/nyairo-day" \
 - `--room-living`：让同一个 World 进程和手机面看到相同的营业/店面/配送/布置状态。
 - `--world-actions`：只对**这次启动的进程树**显式打开本地世界动作（临时 canonical）。
   默认写门仍是关闭的；不写这个参数就不会改任何全局权限。
+- `--ambient-events`（配对关闭：`--no-ambient-events`）：显式打开世界环境事件（例如窗外声响、
+  街上动静），同步传给 World/手机服务与后续 `run-day` 的 Life 背景观测（也可直接在 `run-day`
+  上传入）。默认关闭，不改全局默认，也不改写旧实例数据。
 - 街区包和虚拟身体档案是**新实例的选择**：已有实例不接受换包或改初值，
-  会明确要求换一个新目录；`--room-living` / `--world-actions` 是运行开关，
+  会明确要求换一个新目录；`--room-living` / `--world-actions` / `--ambient-events` 是运行开关，
   同根重开会沿用上次选择。
 
 ## 3. 看她在做什么 / 给她一份材料

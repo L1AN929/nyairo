@@ -4760,6 +4760,18 @@ class AgencyDecisionService:
                 model_run_ref=None,
             )
 
+        # 给候选配一句人话。她真正用来选择的 candidates 数组里原本只有
+        # "CONSIDER_WORLD_OPPORTUNITY from WORLD_OPPORTUNITY (wopp:stay:home:r1:DAZE)" 这种串，
+        # 而"在临海的住居发会儿呆"躺在旁边的 world 块里等她自己去对照。用 target_ref 把
+        # AG-0 已经写好的那句标签搬进来——它是 owner 的枚举式描述，不是文档正文，也不含私人内容。
+        human_by_target: dict[str, str] = {}
+        for item in ((situation_context or {}).get("world") or {}).get("opportunities") or []:
+            if not isinstance(item, Mapping):
+                continue
+            ref, text = item.get("target_ref"), item.get("label")
+            if ref and isinstance(text, str) and text.strip():
+                human_by_target.setdefault(str(ref), " ".join(text.split())[:120])
+
         cog_candidates: list[dict[str, Any]] = []
         union_legal_enums: set[str] = {DECISION_NO_ACTION, DECISION_DEFER}
         for ac in allowed_candidates:
@@ -4778,7 +4790,9 @@ class AgencyDecisionService:
                     "source_kind": ac.source_kind,
                     "source_ref": ac.source_ref,
                     "target_refs": list(ac.target_refs),
-                    "bounded_description": f"{ac.candidate_kind} from {ac.source_kind} ({ac.source_ref})",
+                    "bounded_description": (
+                        human_by_target.get(str((ac.target_refs or [""])[0]))
+                        or f"{ac.candidate_kind} from {ac.source_kind} ({ac.source_ref})"),
                     "executability_now": exec_info.get("executability", EXEC_NOW),
                     "accessibility_dimensions": copy.deepcopy(acc_info),
                     "legal_decisions": legal_for_c,

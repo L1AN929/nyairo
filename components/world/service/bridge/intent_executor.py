@@ -32,7 +32,7 @@ except ImportError:  # noqa: BLE001 - loaded directly (tests, CLI)
     import world_body_client as wbc  # type: ignore
 
 
-def _lifecycle():
+def _lifecycle(environment: Optional[Mapping[str, str]] = None):
     """The action lifecycle recorder (M15B).  Fail-closed: a caller that
     cannot record provenance must not submit."""
 
@@ -41,15 +41,15 @@ def _lifecycle():
     except ImportError:  # flat load (tests, CLI)
         import importlib
         _l = importlib.import_module("world_action_lifecycle")
-    return _l.ActionLifecycle()
+    return _l.ActionLifecycle(_l.default_path(environment))
 
 
-def intent_gate() -> str:
+def intent_gate(environment: Optional[Mapping[str, str]] = None) -> str:
     """The intent mutation gate.  Distinct from the M13B tool gate."""
 
     import action_intent as ai
 
-    return ai.resolve_gate()
+    return ai.resolve_gate(environment)
 
 
 def _result(intent: Mapping[str, Any], *, status: str, outcome: str,
@@ -101,6 +101,7 @@ def _lifecycle_path(current: str, target: str, allowed) -> Optional[list[str]]:
 
 def _record_lifecycle(intent: Mapping[str, Any], *, verb: Optional[str] = None,
                       stage: str, failure_class: Optional[str] = None,
+                      environment: Optional[Mapping[str, str]] = None,
                       **fields: Any) -> None:
     """Write the lifecycle evidence for one attempt.
 
@@ -109,7 +110,7 @@ def _record_lifecycle(intent: Mapping[str, Any], *, verb: Optional[str] = None,
     OSError so the caller can fail closed.
     """
 
-    lifecycle = _lifecycle()
+    lifecycle = _lifecycle(environment)
     execution_id = str(intent.get("execution_id") or "")
     if not execution_id:
         raise ValueError("intent has no execution_id")
@@ -155,33 +156,46 @@ def execute_intent(
 
     import action_intent as ai
 
+    _client_env = getattr(client, "environment", None) if client is not None else None
+    if _client_env is not None:
+        _env: dict[str, str] = dict(os.environ)
+        for _k, _v in _client_env.items():
+            if _v is not None and str(_v) != "":
+                if _k == "WORLD_BODY_INTENT_MUTATION_GATE" and str(_v) == "off" and os.environ.get(_k):
+                    continue
+                _env[_k] = str(_v)
+    else:
+        _env = dict(os.environ)
+
     # M15B: evidence first.  A caller that cannot record provenance must not
     # submit, so a lifecycle failure here is fail-closed (UNKNOWN, no submit).
     try:
-        _existing = _lifecycle().get(str(intent.get("execution_id") or ""))
-        if _existing is not None and _existing["state"] in _lifecycle().TERMINAL:
+        _lc = _lifecycle(_env)
+        _existing = _lc.get(str(intent.get("execution_id") or ""))
+        if _existing is not None and _existing["state"] in _lc.TERMINAL:
             # defence in depth: a terminal record means this attempt is over;
             # never contact the Resolver again with the same execution id.
             return _result(intent, status=ai.STATUS_REJECTED,
                            outcome="DUPLICATE_EXECUTION",
                            detail="lifecycle already terminal: %s"
                                   % _existing["state"])
-        _record_lifecycle(intent, stage="created")
+        _record_lifecycle(intent, stage="created", environment=_env)
     except Exception as _lc_error:  # noqa: BLE001
         return _result(intent, status=ai.STATUS_UNKNOWN, outcome="NO_PROVENANCE",
                        detail="action lifecycle unavailable: %s" % _lc_error)
 
-    gate = intent_gate()
+    gate = intent_gate(_env)
 
     if gate == ai.GATE_OFF:
         _record_lifecycle(intent, verb=intent.get("verb"),
-                          stage="aborted", failure_class="GATE_OFF")
+                          stage="aborted", failure_class="GATE_OFF",
+                          environment=_env)
         return _result(
             intent, status=ai.STATUS_REJECTED, outcome="GATE_OFF",
             detail="intent mutation gate is off; nothing was validated or submitted",
         )
 
-    client = client or wbc.WorldBodyClient()
+    client = client or wbc.WorldBodyClient(environment=_env)
     if not client.enabled:
         return _result(intent, status=ai.STATUS_UNKNOWN, outcome="UNAVAILABLE",
                        detail="World/Body integration is off")
@@ -211,7 +225,7 @@ def execute_intent(
     if gate == ai.GATE_SHADOW:
         try:
             _record_lifecycle(intent, verb=submission["action"], stage="aborted",
-                              failure_class="SHADOW_NO_COMMIT")
+                              failure_class="SHADOW_NO_COMMIT", environment=_env)
         except Exception:  # noqa: BLE001 - shadow never submits anyway
             pass
         # Everything up to and including Resolver-shape validation has run; the
@@ -239,11 +253,11 @@ def execute_intent(
             _sys.path.insert(0, _HERE)
         import world_action_authorization as _waa
 
-    _explicit = os.environ.get("WORLD_ACTION_AUTH_REGISTRY_DIR")
+    _explicit = _env.get("WORLD_ACTION_AUTH_REGISTRY_DIR")
     if _explicit:
         _run_dir = pathlib.Path(_explicit)
     else:
-        _home = os.environ.get("CHIYO_WORLD_HOME") or os.environ.get("HERMES_HOME")
+        _home = _env.get("CHIYO_WORLD_HOME") or _env.get("HERMES_HOME")
         _run_dir = (pathlib.Path(_home) / "run") if _home else None
     if _run_dir is None:
         return _result(intent, status=ai.STATUS_UNKNOWN, outcome="UNAVAILABLE",
@@ -269,9 +283,9 @@ def execute_intent(
     try:
         _record_lifecycle(intent, verb=submission["action"], stage="authorized",
                           authorization_id=_auth["authorization_id"],
-                          target=submission.get("params"))
+                          target=submission.get("params"), environment=_env)
         _record_lifecycle(intent, verb=submission["action"], stage="submitting",
-                          authorization_id=_auth["authorization_id"])
+                          authorization_id=_auth["authorization_id"], environment=_env)
     except Exception as _lc_error:  # noqa: BLE001 - no provenance, no submit
         return _result(intent, status=ai.STATUS_UNKNOWN, outcome="NO_PROVENANCE",
                        detail="lifecycle write failed before submit: %s" % _lc_error)
@@ -290,12 +304,13 @@ def execute_intent(
               }.get(mapped["intent_status"], "unknown")
     try:
         _record_lifecycle(intent, verb=submission["action"], stage="submitted",
-                          authorization_id=_auth["authorization_id"])
+                          authorization_id=_auth["authorization_id"], environment=_env)
         _record_lifecycle(intent, verb=submission["action"], stage=_stage,
                           authorization_id=_auth["authorization_id"],
                           failure_class=(None if _stage == "applied"
                                          else str(outcome.reason or outcome.outcome)),
-                          detail=str(outcome.reason or "")[:200])
+                          detail=str(outcome.reason or "")[:200],
+                          environment=_env)
     except Exception as _lc_error:  # noqa: BLE001 - the outcome already happened
         import logging as _logging
         _logging.getLogger("chiyo_intent_executor").warning(

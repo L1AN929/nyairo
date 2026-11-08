@@ -47,9 +47,19 @@ class RedactedDefaultTest(unittest.TestCase):
         self.assertEqual(g1.MODEL_BASE_URL, "")
 
     def test_source_text_contains_no_real_gateway_host(self):
-        blob = Path(g1.__file__).read_bytes()
-        self.assertNotIn(b"929711.xyz", blob)
-        self.assertNotIn(b"gw.929711", blob)
+        import hashlib
+        import re
+
+        forbidden_digests = frozenset(['071a3fac2ca94b29f56cefa24661e2ed054a4f54c1995b9e0a6f946e95686cda', '07e29c5993747fe78a96cacf7c172aec66d0fc7e545d7283b409cf1eb8859201', '25df7caaf692453cc7cd8042c5d718e706f3dd9bff6ceef75d91708e3c2e509c', '50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2'])
+        text = Path(g1.__file__).read_text(encoding="utf-8")
+        tokens = set(re.findall(r"(?<![A-Za-z0-9.-])[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?![A-Za-z0-9.-])", text))
+        leaked = []
+        for tok in tokens:
+            parts = tok.lower().split(".")
+            candidates = [tok.lower()] + [".".join(parts[i:]) for i in range(1, len(parts) - 1)]
+            if any(hashlib.sha256(c.encode("utf-8")).hexdigest() in forbidden_digests for c in candidates):
+                leaked.append(tok)
+        self.assertEqual(leaked, [])
 
 
 class ExplicitConfigTest(unittest.TestCase):

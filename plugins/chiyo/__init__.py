@@ -14,12 +14,30 @@ _WORLD_MOVE_GUIDANCE=(
 )
 
 
+_PHONE_AND_WORLD_GUIDANCE=(
+    "【凪浦世界与随身手机：chiyo_phone / world_move 工具】\n"
+    "如果本次会话的可用工具里有 chiyo_phone，那么当用户让你去某个房间或街区地点、坐下/站起/"
+    "躺下休息、开关灯具、记随笔备忘、翻阅/保存共读书签或批注、购买/使用物品、写日记时，"
+    "这是需要真实执行的动作——请先调用 chiyo_phone 完成操作，再根据真实回执自然回话，不要只口头假装做过：\n"
+    "- 世界与房间动作：不确定目标 destination_location_id 或灯具/物品 object_id 时，先调 "
+    "chiyo_phone(action=\"world\") 查看可达地点与可用动作，再调 chiyo_phone(action=\"world_action\", "
+    "world_action=\"MOVE\"|\"POSE\"|\"REST\"|\"TOGGLE_FIXTURE\"|\"PICK_UP\"|\"PLACE\"|\"ARRANGE\", "
+    "params={...}, operation_key=\"...\")。注意：REST 小憩需先处于 seated/lying 姿态（sleep_like 需 lying）。\n"
+    "- 随笔/共读/商店/日记：可用 note_save、reading_material / reading_position / reading_annotate、"
+    "shop / store / purchase / store_purchase / use、diary_write（每次写操作给唯一 operation_key）。\n"
+    "- 所有位置、余额、灯光与物品变化一律以工具返回的 status（applied / rejected）为准，绝不编造结果。"
+)
+
+
 def _world_move_guidance(session_info=None):
-    """Guidance text, or '' when this profile has no World/Body service configured."""
+    """Guidance text, or '' when this profile has no World/Body or Phone service configured."""
     try:
         import os
         from chiyo_bundle.hermes_plugin import configuration
         _unused,settings=configuration()
+        phone_cfg=settings.get('phone') if isinstance(settings,dict) else None
+        if isinstance(phone_cfg,dict) and phone_cfg.get('enabled') is True:
+            return _PHONE_AND_WORLD_GUIDANCE
         if not (settings.get('world_body_socket') or os.environ.get('WORLD_BODY_SOCKET')):
             return ''
     except Exception:
@@ -28,7 +46,9 @@ def _world_move_guidance(session_info=None):
 
 
 def register(ctx):
+    import sys
     from chiyo_bundle.hermes_plugin import ChiyoContextEngine,memory_command,status_command,consider_command,note_command,close_services,configure_host_llm,memory_tool_gate,write_status_evidence
+    phrase_command = getattr(sys.modules.get('chiyo_bundle.hermes_plugin'), 'phrase_command', None)
     configure_host_llm(ctx.llm)
     ctx.register_context_engine(ChiyoContextEngine())
     try:
@@ -67,6 +87,9 @@ def register(ctx):
     ctx.register_command('chiyo_status',status_command,description='Read current life, world/body, resource and cognition status')
     ctx.register_command('chiyo_consider',consider_command,description='Submit an explicit request for cognition Shadow observation',args_hint='REQUEST')
     ctx.register_command('chiyo_note',note_command,description='Save or read a personal ManagedArtifact',args_hint='TITLE | CONTENT ; read ID')
+    if callable(phrase_command):
+        for pcmd in ('chiyo_phrase','chiyo-phrase'):
+            ctx.register_command(pcmd,phrase_command,description='Manage shared private phrases understood between you and your companion',args_hint='list | add PHRASE | MEANING [| ORIGIN] | del PHRASE')
     ctx.on_unload(close_services)
     try:write_status_evidence()
     except Exception:

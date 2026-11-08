@@ -110,10 +110,10 @@ def lock_path(state_root: Path | str) -> Path:
 
 
 @contextmanager
-def _exclusive(state_root: Path | str) -> Iterator[None]:
+def _exclusive(state_root: Path | str, filename: str = LOCK_FILENAME) -> Iterator[None]:
     """The cross-process lock every read-modify-write of the ledger is taken under."""
 
-    path = lock_path(state_root)
+    path = Path(state_root) / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+")
     try:
@@ -166,6 +166,128 @@ def _empty() -> dict[str, Any]:
             "opened_at": _iso(), "updated_at": _iso()}
 
 
+FAILSTOP_FILENAME = "bounded_failstop.json"
+REASON_FAILSTOP = "BOUNDED_RUN_FAILSTOP"
+
+#: The fixed writer purposes a content request can carry.  These are the purposes the actual
+#: client was constructed with; a purpose outside this closed set is recorded as ``UNKNOWN``
+#: instead of being copied through.
+CONTENT_WRITER_STAGES = frozenset({"artifact_edit", "reading_response", "shared_practice",
+                                   "local_reply"})
+FAILURE_STAGE_UNKNOWN = "UNKNOWN"
+#: The provider's own closed finish-reason vocabulary.  Anything else (including a missing
+#: field or a free-text sentence) is recorded as ``UNKNOWN``, never parsed.
+FAILURE_FINISH_REASONS = frozenset({"stop", "length", "content_filter", "tool_calls",
+                                    "function_call"})
+MAX_FAILURE_CAP = 10_000_000
+
+
+def _safe_failure_stage(value: Any) -> str:
+    return (value if isinstance(value, str) and value in CONTENT_WRITER_STAGES
+            else FAILURE_STAGE_UNKNOWN)
+
+
+def _safe_failure_cap(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= MAX_FAILURE_CAP else None
+
+
+def _safe_failure_finish_reason(value: Any) -> str:
+    return (value if isinstance(value, str) and value in FAILURE_FINISH_REASONS
+            else FAILURE_STAGE_UNKNOWN)
+
+
+#: The three typed diagnostic facts the failstop marker may carry on top of its original four
+#: keys.  They are re-validated here, so a caller cannot widen them by passing free text.
+FAILURE_DIAGNOSTIC_KEYS = ("stage", "actual_cap", "finish_reason")
+
+
+def safe_failure_diagnostics(source: Any) -> dict[str, Any]:
+    """Re-type the three diagnostics from an already-derived mapping; missing facts -> UNKNOWN."""
+
+    shape = source if isinstance(source, Mapping) else {}
+    cap = _safe_failure_cap(shape.get("actual_cap"))
+    return {
+        "stage": _safe_failure_stage(shape.get("stage")),
+        "actual_cap": cap if cap is not None else FAILURE_STAGE_UNKNOWN,
+        "finish_reason": _safe_failure_finish_reason(shape.get("finish_reason")),
+    }
+
+
+#: Safe non-negative integer shape facts that may stay in the exception's metadata mapping.
+#: Anything outside this allowlist (free text, unknown keys) is dropped by the rebuild.
+_SAFE_SHAPE_INTS = ("content_chars", "reasoning_chars", "parse_error_offset",
+                    "input_tokens", "output_tokens", "total_tokens", "reasoning_tokens",
+                    "max_output_tokens_sent")
+
+
+def safe_failure_metadata(failure: Any, *, stage: Any = None,
+                          actual_cap: Any = None) -> dict[str, Any]:
+    """The three safe facts a content failure can carry: stage, actual cap, finish reason.
+
+    ``stage`` is the fixed purpose the actual client was constructed with (or the wrapper's
+    explicit purpose), never classified from a prompt or an exception string.  ``actual_cap``
+    is the value the transport reports as actually sent, otherwise the ``max_output_tokens``
+    argument of this very call; the client's construction default is **never** substituted, so
+    a call that passed no cap stays ``UNKNOWN``.  A missing fact is ``UNKNOWN``; nothing is
+    guessed from a successful request or from an exception message.
+    """
+
+    shape = getattr(failure, "metadata", None)
+    shape = shape if isinstance(shape, Mapping) else {}
+    cap = _safe_failure_cap(shape.get("max_output_tokens_sent"))
+    if cap is None:
+        cap = _safe_failure_cap(actual_cap)
+    return {
+        "stage": _safe_failure_stage(stage),
+        "actual_cap": cap if cap is not None else FAILURE_STAGE_UNKNOWN,
+        "finish_reason": _safe_failure_finish_reason(shape.get("finish_reason")),
+    }
+
+
+def attach_safe_failure_metadata(failure: Any, *, stage: Any = None,
+                                 actual_cap: Any = None) -> dict[str, Any]:
+    """Rebuild ``failure.metadata`` from safe facts in place; return the derived facts.
+
+    This stays inside the *existing* ``AgencyModelClientError.metadata`` channel -- no new
+    file, marker key or sink.  Only the allowlisted integer counts and the three derived
+    closed/typed facts survive; the exception message and any free text are dropped.
+    """
+
+    facts = safe_failure_metadata(failure, stage=stage, actual_cap=actual_cap)
+    raw = getattr(failure, "metadata", None)
+    if isinstance(raw, dict):
+        clean: dict[str, Any] = {}
+        for name in _SAFE_SHAPE_INTS:
+            value = _safe_failure_cap(raw.get(name))
+            if value is not None:
+                clean[name] = value
+        clean.update(facts)
+        raw.clear()
+        raw.update(clean)
+    return facts
+
+
+def failure_category(value: Any) -> str:
+    """闭集分型，不保存异常正文；截断、晚到不是传输失败。"""
+    raw = value if isinstance(value, str) else getattr(value, "failure_class", "")
+    token = str(raw or "").removeprefix("DECISION_ATTEMPT_FAILED:")
+    if token in {"OUTPUT_TRUNCATED", "PROVIDER_OUTPUT_TRUNCATED"}:
+        return "OUTPUT_TRUNCATED"
+    if token == "LATE_RESULT_DISCARDED":
+        return "LATE_RESULT_DISCARDED"
+    if token in {"MODEL_TIMEOUT", "MODEL_CONNECTION", "TRANSPORT_TIMEOUT",
+                 "TRANSPORT_CONNECTION", "MODEL_RATE_LIMITED", "MODEL_PROVIDER_ERROR",
+                 "MODEL_AUTH_ERROR", "MODEL_UNAVAILABLE", "MODEL_REQUEST_REJECTED",
+                 "PROVIDER_RATE_LIMITED", "PROVIDER_SERVER_ERROR", "PROVIDER_AUTH_ERROR",
+                 "PROVIDER_UNAVAILABLE", "PROVIDER_REQUEST_REJECTED"}:
+        return "PROVIDER_OR_TRANSPORT_FAILURE"
+    if isinstance(value, (TimeoutError, ConnectionError, OSError)):
+        return "PROVIDER_OR_TRANSPORT_FAILURE"
+    return "STRUCTURE_OR_OTHER_FAILURE"
+
+
 class LifeRequestBudget:
     """The hard, persisted ceiling on model requests.
 
@@ -177,12 +299,71 @@ class LifeRequestBudget:
     """
 
     def __init__(self, state_root: Path | str, *, utc_day_max: Optional[int] = None,
-                 run_window_max: Optional[int] = None, run_id: Optional[str] = None) -> None:
+                 run_window_max: Optional[int] = None, run_id: Optional[str] = None,
+                 failstop: bool = False, request_deadline: Optional[str] = None) -> None:
         self.state_root = Path(state_root)
         self.utc_day_max = None if utc_day_max is None else max(0, int(utc_day_max))
         self.run_window_max = None if run_window_max is None else max(0, int(run_window_max))
         self.run_id = str(run_id).strip() if run_id else None
         self._thread_lock = threading.RLock()
+        self.failstop = bool(failstop)
+        self.request_deadline = request_deadline
+        self._failed_in_memory = False
+
+    def check_failstop(self) -> None:
+        if not self.failstop:
+            return
+        if self._failed_in_memory or (self.state_root / FAILSTOP_FILENAME).exists():
+            raise RequestBudgetError(REASON_FAILSTOP)
+        if self.request_deadline:
+            try:
+                deadline = datetime.fromisoformat(self.request_deadline)
+                expired = deadline.tzinfo is None or datetime.now(timezone.utc) >= deadline
+            except (TypeError, ValueError):
+                expired = True
+            if expired:
+                self.note_failure("DEADLINE_REACHED")
+                raise RequestBudgetError(REASON_FAILSTOP)
+
+    def note_failure(self, failure: Any, *, diagnostics: Any = None) -> None:
+        if not self.failstop:
+            return
+        self._failed_in_memory = True
+        # The persisted marker keeps its original four keys.  A content failure may carry the
+        # three approved typed facts on top (stage / actual_cap / finish_reason), rebuilt from
+        # the safe allowlist only; non-model stops (deadline, budget persistence, schema retry)
+        # pass no diagnostics and keep the four-key shape unchanged.
+        payload: dict[str, Any] = {
+            "run_id": self.run_id, "reason_code": REASON_FAILSTOP,
+            "failure_category": ("DEADLINE_REACHED" if failure == "DEADLINE_REACHED"
+                                 else failure_category(failure)),
+            "at": _iso(),
+        }
+        if diagnostics is not None:
+            payload.update(safe_failure_diagnostics(diagnostics))
+        # 先独占创建不可逆 marker，再填安全元数据；写一半也永久拒绝。
+        path = self.state_root / FAILSTOP_FILENAME
+        try:
+            with path.open("x", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _fsync_directory(path.parent)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            # 无法持久化停止位时绝不回到上层继续循环；进程硬退出保留原预留。
+            raise SystemExit("BOUNDED_FAILSTOP_PERSIST_FAILED") from exc
+
+    @contextmanager
+    def attempt_guard(self) -> Iterator[None]:
+        if not self.failstop:
+            yield
+            return
+        # 两个模型出口串行到失败返回落锁；并发调用不能穿过下一次 reserve。
+        with self._thread_lock, _exclusive(self.state_root, "bounded_attempt.lock"):
+            self.check_failstop()
+            yield
 
     # -- paths ---------------------------------------------------------------
 
@@ -227,7 +408,13 @@ class LifeRequestBudget:
         tokens = list(data.get("tokens") or [])[-MAX_TOKENS:]
         data["tokens"] = tokens
         data["updated_at"] = _iso()
-        _write_atomically(self.path, data)
+        try:
+            _write_atomically(self.path, data)
+        except OSError as exc:
+            if not self.failstop:
+                raise
+            self.note_failure("BUDGET_PERSIST_FAILED")
+            raise RequestBudgetError(REASON_UNREADABLE) from exc
 
     # -- view ----------------------------------------------------------------
 
@@ -289,6 +476,7 @@ class LifeRequestBudget:
             raise RequestBudgetError(REASON_RUN_WINDOW_NOT_AUTHORIZED,
                                      "no run identity was configured")
         with self._thread_lock, _exclusive(self.state_root):
+            self.check_failstop()
             data = self._load_locked()
             windows = dict(data.get("windows") or {})
             if self.run_id in windows:
@@ -348,6 +536,7 @@ class LifeRequestBudget:
         if kind not in REQUEST_KINDS:
             raise ValueError("unknown request kind %r" % (kind,))
         with self._thread_lock, _exclusive(self.state_root):
+            self.check_failstop()
             data = self._load_locked()
             verdict = self._verdict(data)
             if not verdict["allowed"]:
@@ -424,6 +613,28 @@ class BudgetedCognitionAdapter:
         self.attempts: list[dict[str, Any]] = []
 
     def invoke(self, request: Any, *, schema_retry_index: int = 0) -> Any:
+        if not getattr(self.budget, "failstop", False):
+            return self._invoke(request, schema_retry_index=schema_retry_index)
+        if schema_retry_index:
+            self.budget.note_failure("SCHEMA_RETRY_REFUSED")
+        with self.budget.attempt_guard():
+            try:
+                result = self._invoke(request, schema_retry_index=schema_retry_index)
+            except (RequestBudgetError, life_pause.RequestNotSentError, life_pause.PauseConfirmedError):
+                raise
+            except Exception as exc:
+                self.budget.note_failure(exc)
+                raise
+            failure = (result.get("failure_class") if isinstance(result, Mapping)
+                       else getattr(result, "failure_class", None))
+            if failure:
+                self.budget.note_failure(failure)
+            # AG1 对非法 JSON 可能再试；本 opt-in 在返回边界先封住重试。
+            if self.budget.failstop and not isinstance(getattr(result, "raw_output", {}), Mapping):
+                self.budget.note_failure("INVALID_JSON")
+            return result
+
+    def _invoke(self, request: Any, *, schema_retry_index: int = 0) -> Any:
         kind = (REQUEST_KIND_DECISION if int(schema_retry_index or 0) == 0
                 else REQUEST_KIND_RETRY)
         try:
@@ -448,16 +659,55 @@ class BudgetedModelClient:
 
     def __init__(self, inner: Any, budget: LifeRequestBudget,
                  *, kind: str = REQUEST_KIND_CONTENT,
-                 admission: Optional[Callable[[str, int], None]] = None) -> None:
+                 admission: Optional[Callable[[str, int], None]] = None,
+                 writer_purpose: Optional[str] = None) -> None:
         self.inner = inner
         self.budget = budget
         self.kind = kind
         #: W05R-R1b: the same pause request-start handshake as the cognition adapter.
         self.admission = admission
+        #: The fixed content-writer purpose, when the caller knows it.  ``None`` means "read it
+        #: from the actual client's own construction purpose"; a client without one is UNKNOWN.
+        self.writer_purpose = writer_purpose
         self.refusals: list[dict[str, Any]] = []
         self.attempts: list[dict[str, Any]] = []
 
+    def _failure_stage(self) -> Any:
+        if self.writer_purpose is not None:
+            return self.writer_purpose
+        return getattr(self.inner, "purpose", None)
+
+    def _actual_cap(self, kwargs: Mapping[str, Any]) -> Any:
+        """Only this call's explicit ``max_output_tokens``; never the construction default."""
+
+        return kwargs.get("max_output_tokens")
+
     def complete(self, *args: Any, **kwargs: Any) -> Any:
+        if not getattr(self.budget, "failstop", False):
+            return self._complete(*args, **kwargs)
+        stage = self._failure_stage()
+        actual_cap = self._actual_cap(kwargs)
+        with self.budget.attempt_guard():
+            try:
+                result = self._complete(*args, **kwargs)
+            except (RequestBudgetError, life_pause.RequestNotSentError, life_pause.PauseConfirmedError):
+                raise
+            except Exception as exc:
+                # The request already left and may already be paid; the stop marker is written
+                # synchronously before this exception reaches the caller, so the next reserve
+                # cannot pass.  Safe shape facts ride the exception's own metadata channel, and
+                # only the three typed facts are copied onto the persisted marker -- usage
+                # counts, message text and every other metadata key stay out of it.
+                facts = attach_safe_failure_metadata(exc, stage=stage, actual_cap=actual_cap)
+                self.budget.note_failure(exc, diagnostics=facts)
+                raise
+            failure = (result.get("failure_class") if isinstance(result, Mapping)
+                       else getattr(result, "failure_class", None))
+            if failure:
+                self.budget.note_failure(failure)
+            return result
+
+    def _complete(self, *args: Any, **kwargs: Any) -> Any:
         try:
             record = self.budget.reserve(self.kind)
         except RequestBudgetError as exc:
@@ -476,6 +726,9 @@ __all__ = [
     "BUDGET_FILENAME",
     "BudgetedCognitionAdapter",
     "BudgetedModelClient",
+    "CONTENT_WRITER_STAGES",
+    "FAILURE_DIAGNOSTIC_KEYS",
+    "FAILURE_STAGE_UNKNOWN",
     "KIND",
     "LOCK_FILENAME",
     "LifeRequestBudget",
@@ -493,6 +746,9 @@ __all__ = [
     "STATE_ABSENT",
     "STATE_CORRUPT",
     "STATE_OK",
+    "attach_safe_failure_metadata",
     "budget_path",
     "lock_path",
+    "safe_failure_diagnostics",
+    "safe_failure_metadata",
 ]

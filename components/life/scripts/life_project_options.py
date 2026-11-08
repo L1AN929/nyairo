@@ -122,6 +122,19 @@ def _artifact_id_of(record: Mapping[str, Any]) -> Optional[str]:
     return text or None
 
 
+def _bare_artifact_id(value: Any) -> str:
+    """One owner artifact id with its ``artifact:`` namespace stripped, or ``""``.
+
+    Only used to compare *names* of artifacts (an experience's confirmed source vs. the ids the
+    practice owner reports as reviews).  It never re-spells an id that is handed back to an owner.
+    """
+
+    text = str(value or "").strip()
+    while text.startswith("artifact:"):
+        text = text[len("artifact:"):]
+    return text
+
+
 @dataclass
 class ProjectOption:
     """One thing she could start writing, and exactly where it came from."""
@@ -285,6 +298,8 @@ def _research_scope(materials: list[dict[str, Any]]) -> str:
 
 def review_seed(experiences: Optional[Iterable[Mapping[str, Any]]], *,
                 available: bool = False,
+                excluded_artifact_refs: Optional[Iterable[Any]] = None,
+                source_verified: bool = True,
                 limit: int = MAX_REVIEW_EXPERIENCES) -> Optional[dict[str, Any]]:
     """Turn the experiences A's Memory really returned into **one** review option (or ``None``).
 
@@ -292,16 +307,36 @@ def review_seed(experiences: Optional[Iterable[Mapping[str, Any]]], *,
     material is the recallable experiences themselves, bounded and attributable, and its own
     ``uncertainty`` says it is a draft.  With no readable experience (or no practice workspace to
     write it into) there is no option: nothing is invented to fill the slot.
+
+    ``excluded_artifact_refs`` are the owner artifact ids the practice workspace has confirmed as
+    **reviews**.  An experience that is the confirmed writing result of one of them (its own
+    ``artifact_ref`` names that review) is *not* used as the seed for another review: that would
+    derive a review from a review.  Such an experience is skipped, the search continues inside the
+    same bounded set (a normal experience behind it is still a legal choice), and the experience
+    itself is not deleted or hidden from Memory/continuation anywhere else -- this filter lives
+    only on the automatic review seed.
+
+    ``source_verified`` is the caller's fact from the owner read: ``False`` means at least one
+    candidate source could not be classified (read failure / unknown type).  Then this round offers
+    **no** automatic review seed at all -- an unclassified source is never assumed to be an
+    ordinary work.  Other option kinds are untouched; the caller names the withholding.
     """
 
-    if not available:
+    if not available or not source_verified:
         return None
+    excluded = {_bare_artifact_id(ref) for ref in (excluded_artifact_refs or ())
+                if _bare_artifact_id(ref)}
     rows: list[dict[str, Any]] = []
     for row in experiences or ():
         if not isinstance(row, Mapping):
             continue
         experience_id = str(row.get("experience_id") or "").strip()
         if not experience_id:
+            continue
+        # No artifact source at all is a determinate fact: such an experience cannot be the
+        # confirmed writing result of any artifact, so it is never one of these reviews' results.
+        source_ref = _bare_artifact_id(row.get("artifact_ref"))
+        if source_ref and source_ref in excluded:
             continue
         rows.append({
             "experience_id": experience_id,
@@ -341,6 +376,8 @@ def build_options(*, questions: Optional[Iterable[Mapping[str, Any]]] = None,
                   research_available: bool = False,
                   experiences: Optional[Iterable[Mapping[str, Any]]] = None,
                   practice_available: bool = False,
+                  review_excluded_artifact_refs: Optional[Iterable[Any]] = None,
+                  review_source_verified: bool = True,
                   limit: int = MAX_OPTIONS,
                   reserved: Optional[Iterable[Mapping[str, Any]]] = None
                   ) -> list[dict[str, Any]]:
@@ -361,6 +398,13 @@ def build_options(*, questions: Optional[Iterable[Mapping[str, Any]]] = None,
     exactly those rows.  No experience means no review option at all: "write about a past you
     cannot read" is not a choice, it is a trap.
 
+    ``review_excluded_artifact_refs`` / ``review_source_verified`` come from the *owner read* the
+    caller just made: the artifacts B's owner marks as reviews, and whether every candidate
+    source could be classified.  The automatic review seed never derives from a review's own
+    writing result, and an unclassifiable source withholds this round's seed instead of being
+    assumed ordinary.  Both default to "no exclusion / verified", so every existing caller keeps
+    its exact old behaviour.
+
     ``reserved`` are the day's own two slots (at most one self-planned item and one obligation,
     both already validated by ``life_day_plan``).  They are appended **after** the ordinary
     review -> question -> due list, which is still cut to ``limit`` exactly as before; the
@@ -377,7 +421,9 @@ def build_options(*, questions: Optional[Iterable[Mapping[str, Any]]] = None,
     options: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    review_row = review_seed(experiences, available=practice_available)
+    review_row = review_seed(experiences, available=practice_available,
+                             excluded_artifact_refs=review_excluded_artifact_refs,
+                             source_verified=review_source_verified)
     if review_row is not None:
         title = _one_line(review_row["title"], MAX_TITLE_CHARS)
         if title.casefold() not in existing_titles:

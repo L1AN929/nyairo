@@ -23,8 +23,8 @@ plugin code has not been updated yet.
 
 Usage (run it with the hermes venv python - PyYAML/ruamel.yaml live there):
 
-    P=/srv/nyairo-v0.3.0/vendor/hermes/.venv/bin/python
-    S=/srv/nyairo-v0.3.0/scripts/fix_weixin_world_move.py
+    P=<nyairo-root>/vendor/hermes/.venv/bin/python
+    S=<nyairo-root>/scripts/fix_weixin_world_move.py
 
     sudo -u <owner> $P $S                      # report only (default)
     sudo -u <owner> $P $S --apply              # back up config.yaml, then enable chiyo_world
@@ -44,7 +44,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_ROOT = "/srv/nyairo-v0.3.0"
+DEFAULT_ROOT = str(Path(__file__).resolve().parents[1])
 DEFAULT_PLATFORM = "weixin"
 TOOLSET = "chiyo_world"
 TOOL = "world_move"

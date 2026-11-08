@@ -4,9 +4,9 @@
 这个脚本不是新的服务，也不是新的翻译层；它只把机器上已经装好的两个运行时按已知的
 loopback 端口拉起来，方便手机拍照这条演示链：
 
-* ``translator`` —— ``D:/novel-rewrite/llama/bin/llama-server.exe`` 加载既有
-  ``rewrite2-4b`` GGUF，监听 ``127.0.0.1:18190``（``SceneTranslator`` 的默认地址）；
-* ``sd`` —— ``D:/RUANJIAN/sd-webui-aki-v4.10`` 的 ``launch.py --nowebui --api``，
+* ``translator`` —— ``NYAIRO_LLAMA_SERVER_BIN`` 加载 ``NYAIRO_TRANSLATOR_MODEL``
+  GGUF，监听 ``127.0.0.1:18190``（``SceneTranslator`` 的默认地址）；
+* ``sd`` —— ``NYAIRO_SD_HOME`` 的 ``launch.py --nowebui --api``，
   监听 ``127.0.0.1:7860``（``LocalPictureLab`` 的默认地址）。用户数据目录指到本次
   临时目录，checkpoint 目录显式指回原安装，**不写回原 config/ui-config、不装依赖、
   不下载模型、不改别人的服务**。
@@ -20,25 +20,27 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-LLAMA_SERVER = Path("D:/novel-rewrite/llama/bin/llama-server.exe")
-TRANSLATOR_MODEL = Path("D:/novel-rewrite/models/rewrite2-4b-Q4_K_M.gguf")
-TRANSLATOR_PORT = 18190
+LLAMA_SERVER = Path(os.environ.get("NYAIRO_LLAMA_SERVER_BIN", "")) if os.environ.get("NYAIRO_LLAMA_SERVER_BIN") else Path()
+TRANSLATOR_MODEL = Path(os.environ.get("NYAIRO_TRANSLATOR_MODEL", "")) if os.environ.get("NYAIRO_TRANSLATOR_MODEL") else Path()
+TRANSLATOR_PORT = int(os.environ.get("NYAIRO_TRANSLATOR_PORT", "18190"))
+CAMERA_API_KEY = os.environ.get("NYAIRO_CAMERA_API_KEY", "").strip()
 
-SD_HOME = Path("D:/RUANJIAN/sd-webui-aki-v4.10")
-SD_PYTHON = SD_HOME / "python" / "python.exe"
-SD_LAUNCH = SD_HOME / "launch.py"
-SD_CKPT_DIR = SD_HOME / "models" / "Stable-diffusion"
-SD_PORT = 7860
+SD_HOME = Path(os.environ.get("NYAIRO_SD_HOME", "")) if os.environ.get("NYAIRO_SD_HOME") else Path()
+SD_PYTHON = SD_HOME / "python" / ("python.exe" if os.name == "nt" else "python3") if str(SD_HOME) != "." else Path()
+SD_LAUNCH = SD_HOME / "launch.py" if str(SD_HOME) != "." else Path()
+SD_CKPT_DIR = SD_HOME / "models" / "Stable-diffusion" if str(SD_HOME) != "." else Path()
+SD_PORT = int(os.environ.get("NYAIRO_SD_PORT", "7860"))
+SD_API_AUTH = os.environ.get("NYAIRO_SD_API_AUTH", "").strip()
 #: Everything the WebUI may write lives under this run's temporary data dir.
 SD_DATA_DIR = Path(os.environ.get("PHONE_CAMERA_SD_DATA_DIR")
-                   or Path(os.environ.get("TEMP", "C:/Windows/Temp"))
-                   / "nyairo-camera-sd-20261027")
+                   or Path(tempfile.gettempdir()) / "nyairo-camera-sd")
 
 
 def translator_command() -> list[str]:
-    return [
+    cmd = [
         str(LLAMA_SERVER),
         "-m", str(TRANSLATOR_MODEL),
         "--host", "127.0.0.1",
@@ -49,10 +51,13 @@ def translator_command() -> list[str]:
         "--jinja",
         "--no-webui",
     ]
+    if CAMERA_API_KEY:
+        cmd.extend(["--api-key", CAMERA_API_KEY])
+    return cmd
 
 
 def sd_command() -> list[str]:
-    return [
+    cmd = [
         str(SD_PYTHON), "-B", str(SD_LAUNCH),
         "--nowebui",
         "--api",
@@ -68,12 +73,17 @@ def sd_command() -> list[str]:
         "--xformers",
         "--no-half-vae",
     ]
+    if SD_API_AUTH:
+        cmd.extend(["--api-auth", SD_API_AUTH])
+    return cmd
 
 
-def _check(paths: list[Path]) -> None:
-    for path in paths:
+def _check(paths: list[tuple[str, Path]]) -> None:
+    for env_name, path in paths:
+        if not str(path) or str(path) == ".":
+            raise SystemExit("missing required environment variable: %s" % env_name)
         if not path.is_file():
-            raise SystemExit("missing local runtime file: %s" % path)
+            raise SystemExit("missing local runtime file (%s): %s" % (env_name, path))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,11 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.runtime == "translator":
-        _check([LLAMA_SERVER, TRANSLATOR_MODEL])
+        _check([("NYAIRO_LLAMA_SERVER_BIN", LLAMA_SERVER), ("NYAIRO_TRANSLATOR_MODEL", TRANSLATOR_MODEL)])
         command = translator_command()
     else:
-        _check([SD_PYTHON, SD_LAUNCH])
-        SD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _check([("NYAIRO_SD_HOME", SD_PYTHON), ("NYAIRO_SD_HOME", SD_LAUNCH)])
+        SD_DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         command = sd_command()
     if args.print_command:
         print(subprocess.list2cmdline(command))

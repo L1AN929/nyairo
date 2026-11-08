@@ -2,7 +2,8 @@
 """显式压缩逻辑日（COMPRESSED_DEMO）的唯一入口。
 
     python scripts/fast_day.py prepare --root /abs/new-root --run-id day-a \\
-        --memory-authority /abs/outside-root/authority.db
+        --memory-authority /abs/outside-root/authority.db [--allow-night-start] \\
+        [--logical-anchor 2026-11-05T08:00:00+08:00]
     python scripts/fast_day.py status  --root /abs/new-root
     python scripts/fast_day.py start   --root /abs/new-root [--clock-only]
     python scripts/fast_day.py pause   --root /abs/new-root
@@ -13,6 +14,15 @@
 operator 提供的公版节选）；``--clock-only`` 只准备时钟与实验额度，不建实例。
 Memory 的删除底账（``--memory-authority``）没有默认位置，非 clock-only 时必须由
 操作者显式给出一个实例业务根之外的绝对路径。
+逻辑默认锚在本实例创建的真实时刻；想让她的一天从某个虚构的钟点开始（例如不管几点
+按下 prepare 都从早上 08:00 起算），用 ``--logical-anchor`` 显式给出带时区的 ISO 8601
+起点，``horizon_logical`` 随之变成 ``起点 + logical_seconds``。真实时间那一侧（超时、
+暂停、预算、心跳、``created_utc``）仍按真实墙钟走，不加速也不虚构。
+非 clock-only 的 ``prepare`` 在逻辑起点落在本地夜间（21:00–次日 07:00）时拒绝
+``FASTDAY_NIGHT_START_REFUSED``：夜间起点会把一天的额度烧在逻辑 00–06 点几乎没有
+候选的时段上。判据是**逻辑起点**的本地钟点，没传 ``--logical-anchor`` 时退回看
+创建时刻（与旧行为一致）。只有显式 ``--allow-night-start`` 才放行，且返回里会带上
+``allow_night_start`` / ``started_local_hour`` 说明是显式放行。
 ``start`` 在同一个有界窗口里起本根自己的 Supply/World 子进程与 resident（不绑
 HTTP），World 读同一个业务时钟域；零模型冒烟用 ``--no-act --offline-scripted``。
 
@@ -47,7 +57,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
@@ -105,6 +115,18 @@ REASON_MEMORY_AUTHORITY_REQUIRED = "MEMORY_AUTHORITY_PATH_REQUIRED"
 REASON_MEMORY_AUTHORITY_PATH_INVALID = "MEMORY_AUTHORITY_PATH_INVALID"
 REASON_MEMORY_AUTHORITY_INSIDE_ROOT = "MEMORY_AUTHORITY_PATH_INSIDE_INSTANCE"
 REASON_WORLD_GATE_INVALID = "FASTDAY_WORLD_GATE_INVALID"
+#: 压缩日的逻辑起点决定她这一天的钟点：没传 ``--logical-anchor`` 时它等于实例创建的
+#: 真实时刻（``logical_anchor = created_utc``），传了就取那个虚构起点。起点落在本地
+#: 夜间会把额度烧在逻辑 00–06 点几乎没有候选的时段上（2026-11-04 u/v 两批实测：候选
+#: 53/72，额度在早上机会爆发前就用完），因此在 prepare 阶段就挡住，只有操作者显式
+#: ``--allow-night-start`` 才放行。
+REASON_NIGHT_START_REFUSED = "FASTDAY_NIGHT_START_REFUSED"
+#: ``--logical-anchor`` 只接受带时区的 ISO 8601；naive（没有偏移量）无法判定本地钟点，
+#: 也容易被误读成本地时间，因此在任何写入之前具名拒绝。
+REASON_LOGICAL_ANCHOR_INVALID = "LOGICAL_ANCHOR_INVALID"
+#: 本地时区的夜间窗口：21:00（含）起，到次日 07:00 前（不含）。
+NIGHT_START_HOUR_FROM = 21
+NIGHT_START_HOUR_TO = 7
 
 #: World 写闸门是**进程环境**开关（Intent Executor 直接读它）。显式 demo 只负责
 #: 把监督进程里已经存在的值原样、规范化后交给 resident 子进程；默认仍是 off。
@@ -268,6 +290,79 @@ def _reserved(path: Path) -> Optional[str]:
 
 # -- prepare ----------------------------------------------------------------
 
+def local_hour(now: Optional[datetime] = None) -> int:
+    """本地时区的当前小时（0–23）。
+
+    必须按**本地时区**判，不能用 ``utcnow()``：这台机器是 Asia/Shanghai，u 批的
+    ``created_utc`` 13:34Z 其实是本地 21:34，按 UTC 判会把夜间起跑错放过。
+    传入的 ``now`` 一律走 ``astimezone()``：aware 的换算到本地，naive 的按系统本地解释。
+    """
+
+    moment = datetime.now() if now is None else now
+    return moment.astimezone().hour
+
+
+def night_start_refusal(hour: int,
+                        *, allow_night_start: bool) -> Optional[dict[str, Any]]:
+    """逻辑起点落在本地夜间时给出拒绝；``--allow-night-start`` 是唯一的显式放行。"""
+
+    if allow_night_start:
+        return None
+    if hour >= NIGHT_START_HOUR_FROM or hour < NIGHT_START_HOUR_TO:
+        return {"ok": False, "reason_code": REASON_NIGHT_START_REFUSED,
+                "started_local_hour": hour,
+                "detail": ("逻辑起点落在本地 %02d:00，属于夜间：压缩日的时钟从这个起点"
+                           "开始算，夜间起点会把一天的额度烧在逻辑 00–06 点几乎没有候选的"
+                           "时段上。请把起点放在本地 %02d:00–%02d:00 之间（用 "
+                           "--logical-anchor 指定，或等到白天再 prepare）；确实要在夜间"
+                           "起跑就显式加 --allow-night-start"
+                           % (hour, NIGHT_START_HOUR_TO, NIGHT_START_HOUR_FROM))}
+    return None
+
+
+def parse_logical_anchor(text: Optional[str]) -> Optional[datetime]:
+    """``--logical-anchor`` 的字符串 → 带时区时刻；空值表示沿用创建时刻。
+
+    只接受带偏移量的 ISO 8601（``Z`` 按 UTC 处理）。naive 值在本地钟点上有歧义，
+    直接抛 ``ValueError`` 让调用方具名拒绝，而不是猜一个时区。
+    """
+
+    value = str(text or "").strip()
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("逻辑起点必须是 ISO 8601 时间（例如 2026-11-05T08:00:00+08:00），"
+                         "收到 %r" % text)
+    if moment.tzinfo is None:
+        raise ValueError("逻辑起点必须带时区偏移量（例如 +08:00）；收到无偏移量的 %r" % text)
+    return moment
+
+
+def _apply_logical_anchor(state_root: Path, anchor: datetime, *,
+                          logical_seconds: float) -> dict[str, Any]:
+    """把已经建好的时钟文件的逻辑起点改到 ``anchor``。
+
+    只动 ``logical_anchor`` / ``logical_checkpoint`` / ``horizon_logical`` 这三个既有
+    字段：``created_utc``、authority 时间戳、schema 版本与真实时间面一律不碰。
+    写完按既有校验器回读一次，写坏了就 fail closed，不带着半套时钟往下走。
+    """
+
+    path = clockmod.clock_path(state_root)
+    payload = _read_json(path)
+    if not payload:
+        raise clockmod.BusinessClockError(clockmod.REASON_CLOCK_CORRUPT,
+                                          "时钟文件不可读：%s" % path)
+    moment = anchor.astimezone(timezone.utc)
+    horizon = moment + timedelta(seconds=float(logical_seconds))
+    payload["logical_anchor"] = _iso(moment)
+    payload["logical_checkpoint"] = _iso(moment)
+    payload["horizon_logical"] = _iso(horizon)
+    _write_json(path, payload)
+    return clockmod.read_clock_file(path)
+
+
 def _inside_root(root: Path, candidate: Path) -> bool:
     """``candidate`` 的**真实路径**必须落在 ``root`` 内（符号链接逃逸也算外面）。"""
 
@@ -285,6 +380,7 @@ def _inside_root(root: Path, candidate: Path) -> bool:
 
 def _provision_instance(root: Path, *, run_id: str,
                         request_total_limit: int = clockmod.HARD_CONFIG_MAX,
+                        request_utc_day_max: Optional[int] = None,
                         max_cognition_calls_per_day: Optional[int] = None,
                         memory_authority: Optional[Path] = None
                         ) -> dict[str, Any]:
@@ -320,7 +416,8 @@ def _provision_instance(root: Path, *, run_id: str,
             run_id=expected_run_id,
             seed_work_artifact=False,
             # 显式额度只写进这个新实例：默认路径仍是 96/96/96。
-            request_utc_day_max=int(request_total_limit),
+            request_utc_day_max=int(request_utc_day_max if request_utc_day_max is not None
+                                    else request_total_limit),
             request_run_window_max=int(request_total_limit),
             max_cognition_calls_per_day=int(max_cognition_calls_per_day
                                             if max_cognition_calls_per_day is not None
@@ -445,10 +542,16 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
             logical_seconds: float, max_new_requests: int,
             request_total_limit: int = clockmod.HARD_CONFIG_MAX,
             historical_requests: int = 0,
+            request_utc_day_max: Optional[int] = None,
+            bounded_failstop: bool = False,
+            request_deadline: Optional[str] = None,
             max_cognition_calls_per_day: Optional[int] = None,
             state_root: Optional[Path] = None,
             memory_authority: Optional[Path] = None,
-            provision_instance: bool = False) -> dict[str, Any]:
+            provision_instance: bool = False,
+            allow_night_start: bool = False,
+            logical_anchor: Optional[datetime] = None,
+            now: Optional[datetime] = None) -> dict[str, Any]:
     if not root.is_absolute():
         return {"ok": False, "reason_code": REASON_ROOT_REQUIRED,
                 "detail": "必须显式给出绝对路径的全新根"}
@@ -477,6 +580,10 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
                                       max_new_requests, max_cognition_calls_per_day)
     if invalid is not None:
         return invalid
+    if request_utc_day_max is not None and (isinstance(request_utc_day_max, bool)
+            or not isinstance(request_utc_day_max, int)
+            or not 1 <= request_utc_day_max <= request_total_limit):
+        return {"ok": False, "reason_code": REASON_REQUEST_LIMIT_INVALID}
     cognition_max = int(max_cognition_calls_per_day
                         if max_cognition_calls_per_day is not None
                         else request_total_limit)
@@ -512,9 +619,25 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
                     "detail": ("删除底账必须落在实例业务根之外（%s）；根内文件会随实例"
                                "自己的备份一起被回滚" % root)}
 
+    # 起跑时段同样在任何写入之前判：纯输入拒绝排在既有拒绝码之后，保序不抢既有语义。
+    # 逻辑起点可以虚构（``--logical-anchor``），所以「她这一天从几点开始」由它决定；
+    # 没给起点时才退回看创建时刻（与旧行为逐字节一致）。
+    # ``hour_now`` / ``start_hour`` 都按本地时区算（见 local_hour）；clock-only 不建实例、
+    # 不花额度，不拦。
+    hour_now = local_hour(now)
+    if logical_anchor is not None and logical_anchor.tzinfo is None:
+        return {"ok": False, "reason_code": REASON_LOGICAL_ANCHOR_INVALID,
+                "detail": "逻辑起点必须带时区偏移量；收到无偏移量的 %r" % (logical_anchor,)}
+    start_hour = local_hour(logical_anchor) if logical_anchor is not None else hour_now
+    if provision_instance:
+        night = night_start_refusal(start_hour, allow_night_start=allow_night_start)
+        if night is not None:
+            return night
+
     if provision_instance:
         provision = _provision_instance(
             root, run_id=run_id, request_total_limit=int(request_total_limit),
+            request_utc_day_max=request_utc_day_max,
             max_cognition_calls_per_day=cognition_max,
             memory_authority=authority_path)
         if provision.get("ok") is not True:
@@ -537,6 +660,11 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
     try:
         clockmod.create_clock(state_root, run_id=ledger_run_id, rate=rate,
                               logical_seconds=logical_seconds, domain_id=domain)
+        # 显式逻辑起点只改时钟文件里的那三个既有字段；``created_utc`` 与真实时间面不动，
+        # 所以「她的一天从几点开始」可以是虚构的，「这个实验什么时候建的」仍是事实。
+        if logical_anchor is not None:
+            _apply_logical_anchor(state_root, logical_anchor,
+                                  logical_seconds=logical_seconds)
         cap = clockmod.ExperimentRequestCap(
             state_root, run_id=ledger_run_id, max_new_requests=int(max_new_requests),
             total_limit=int(request_total_limit),
@@ -570,10 +698,34 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
                  % (int(request_total_limit), int(historical_requests),
                     int(max_new_requests))),
     }
+    if request_utc_day_max is not None:
+        payload["request_utc_day_max"] = request_utc_day_max
+    if bounded_failstop:
+        payload["bounded_failstop"] = True
+        payload["request_deadline"] = request_deadline
+    if provision_instance and (bounded_failstop or request_utc_day_max is not None):
+        from components.phone import life as phone_life
+        nested = phone_life.read_nested_life(root)
+        env = nested.setdefault("environment", {})
+        env["NYA02_EXPERIMENT_CUMULATIVE_TOTAL"] = str(request_total_limit)
+        if bounded_failstop:
+            env["NYA02_BOUNDED_FAILSTOP"] = "1"
+            env["NYA02_REQUEST_DEADLINE"] = request_deadline or ""
+        phone_life._write_instance_file(phone_life.nested_life_dir(root), nested)
     _write_json(mode_path(root), payload)
     snap = _status_payload(root)
-    return {"ok": True, **payload, "provision": provision or None,
-            "clock": snap.get("clock"), "experiment": snap.get("experiment")}
+    # 起跑时段只汇报不落盘（fastday.json 的 schema 不动）：夜间起跑必须看得出来是
+    # 操作者显式放行的，不能静默。``started_local_hour`` 报的是判夜用的那个钟点——
+    # 给了 ``--logical-anchor`` 就是逻辑起点的本地小时，没给就是创建时刻的本地小时。
+    result = {"ok": True, **payload, "provision": provision or None,
+              "clock": snap.get("clock"), "experiment": snap.get("experiment"),
+              "started_local_hour": start_hour,
+              "allow_night_start": bool(allow_night_start)}
+    if logical_anchor is not None:
+        # 只在显式指定时出现：不传时返回字段与旧版完全相同。
+        result["logical_anchor"] = _iso(logical_anchor)
+        result["real_local_hour"] = hour_now
+    return result
 
 
 # -- status -----------------------------------------------------------------
@@ -684,6 +836,9 @@ def _resident_view(state_root: Path) -> dict[str, Any]:
         "started_at": data.get("started_at"),
         "stopped_at": data.get("stopped_at"),
         "last_tick_at": data.get("last_tick_at"),
+        # 最近一次 due 的形状：她这一轮为什么没动（没机会 / 被拦 / 自己选择不动）。
+        # 汇总层的 counters 是 wake 级的，四类静默在那里被压成一个总数。
+        "last_due": data.get("last_due"),
         "time_domain": data.get("time_domain"),
         "assembly": data.get("runtime_assembly"),
         "memory": data.get("memory_binding"),
@@ -701,7 +856,96 @@ def _resident_view(state_root: Path) -> dict[str, Any]:
     }
 
 
-def _status_payload(root: Path) -> dict[str, Any]:
+#: 心跳文件只读尾部这么多字节：它每秒一行，整份读进内存没有意义。
+CLOCK_TICK_TAIL_BYTES = 64 * 1024
+
+
+def _last_clock_tick(state_root: Path) -> dict[str, Any]:
+    """监督进程心跳（``fastday/clock_ticks.jsonl``）的最后一行。
+
+    这份每秒心跳之前全仓只有测试在读。它证明的是**监督进程**还在推进，不证明 resident
+    在推进；两边一比，"她落后自己的心跳多少秒"才是一个看得见的数字。读尾块，不整份读。
+    """
+
+    path = tick_path(state_root)
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - CLOCK_TICK_TAIL_BYTES))
+            tail = handle.read()
+    except FileNotFoundError:
+        return {"present": False, "reason": "NOT_FOUND", "path": str(path)}
+    except OSError as exc:
+        return {"present": False, "reason": "%s: %s" % (type(exc).__name__, exc),
+                "path": str(path)}
+    lines = [line for line in tail.splitlines() if line.strip()]
+    if not lines:
+        return {"present": False, "reason": "EMPTY", "path": str(path), "bytes": size}
+    try:
+        last = json.loads(lines[-1].decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        return {"present": False, "reason": "LAST_LINE_UNREADABLE: %s" % type(exc).__name__,
+                "path": str(path), "bytes": size}
+    if not isinstance(last, Mapping):
+        return {"present": False, "reason": "LAST_LINE_NOT_AN_OBJECT",
+                "path": str(path), "bytes": size}
+    return {"present": True, "path": str(path), "bytes": size,
+            "tick": last.get("tick"), "real_at": last.get("real_at"),
+            "logical_at": last.get("logical_at"),
+            "clock_state": last.get("clock_state"), "clock_only": last.get("clock_only")}
+
+
+def _moment(value: Any) -> Optional[datetime]:
+    """一个带时区的时刻；读不懂就是 None，不当成 0。"""
+
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
+def _stall_view(resident: Mapping[str, Any], heartbeat: Mapping[str, Any], *,
+                stall_threshold: Optional[float] = None) -> dict[str, Any]:
+    """resident 最近一次 tick 落后监督心跳多少秒。
+
+    **只标注数字，不自动判死**：一次长模型调用（默认 30 秒超时）会正常拉大这个差，
+    所以默认没有阈值、没有结论；只有操作者显式给 ``--stall-threshold`` 才说"超了"。
+    """
+
+    resident_at = _moment(resident.get("last_tick_at"))
+    heartbeat_at = _moment(heartbeat.get("real_at"))
+    lag: Optional[float] = None
+    if resident_at is not None and heartbeat_at is not None:
+        lag = round((heartbeat_at - resident_at).total_seconds(), 3)
+    return {
+        "resident_last_tick_at": resident.get("last_tick_at"),
+        "supervisor_heartbeat_at": heartbeat.get("real_at"),
+        "supervisor_heartbeat_tick": heartbeat.get("tick"),
+        "supervisor_heartbeat_present": bool(heartbeat.get("present")),
+        "supervisor_heartbeat_reason": heartbeat.get("reason"),
+        "tick_lag_seconds": lag,
+        **_health_review().stall_judgement(lag, stall_threshold),
+    }
+
+
+_HEALTH_MODULE: Any = None
+
+
+def _health_review() -> Any:
+    """延迟导入只读运行健康模块：它的阈值判据是**同一处**定义的，不在这里复制一份。"""
+
+    global _HEALTH_MODULE
+    if _HEALTH_MODULE is None:
+        import runtime_health_review as _review
+        _HEALTH_MODULE = _review
+    return _HEALTH_MODULE
+
+
+def _status_payload(root: Path, *, stall_threshold: Optional[float] = None) -> dict[str, Any]:
     mode = _read_json(mode_path(root))
     if not mode:
         return {"ok": False, "reason_code": REASON_MODE_MISSING,
@@ -721,6 +965,7 @@ def _status_payload(root: Path) -> dict[str, Any]:
     real_at = clock.get("real_at") or _iso(clockmod.real_now())
     logical_elapsed = clock.get("logical_elapsed_seconds")
     resident = _resident_view(state_root)
+    heartbeat = _last_clock_tick(state_root)
     child_report = dict(run.get("child") or {})
     child_alive = bool(child_report.get("pid")) and _pid_alive(child_report.get("pid"))
     supervisor_alive = bool(run.get("pid")) and _pid_alive(run.get("pid"))
@@ -772,6 +1017,9 @@ def _status_payload(root: Path) -> dict[str, Any]:
             "resident_exit_code": child_report.get("returncode"),
         },
         "resident": resident,
+        # 她是不是卡住了：resident 最近一次 tick 与监督心跳的最后一行之差。默认**只给数字、
+        # 不给结论**（长模型调用会正常拉大它）；传了 --stall-threshold 才有 EXCEEDED/WITHIN。
+        "stall": _stall_view(resident, heartbeat, stall_threshold=stall_threshold),
         # 装配/时钟健康是一个**可读的结论**，不是启动成功：子进程死了、时钟域不符、
         # 装配被拒都必须是 ok=false，不能把 RESIDENT_EXITED 报成完成。
         "health": {
@@ -941,6 +1189,10 @@ class FastDaySupervisor:
         env["NYA02_FASTDAY_CLOCK"] = str(clockmod.clock_path(state_root))
         env["NYA02_FASTDAY_DOMAIN"] = str(mode.get("domain_id") or "")
         env["NYA02_FASTDAY_RUN_ID"] = run_id
+        if mode.get("bounded_failstop"):
+            env["NYA02_BOUNDED_FAILSTOP"] = "1"
+            env["NYA02_REQUEST_DEADLINE"] = str(mode.get("request_deadline") or "")
+            env["NYA02_EXPERIMENT_CUMULATIVE_TOTAL"] = str(mode["request_total_limit"])
         # 显式贯通：resident 是检查 gate 的进程（Intent Executor 读进程环境），
         # 必须收到与 supervisor 记录一致的规范化值。默认 off 不会被这里改掉；
         # 只写子进程自己的 env，不改本进程 os.environ。
@@ -997,6 +1249,10 @@ class FastDaySupervisor:
             if not _inside_root(self.root, state_root):
                 return {"ok": False, "reason_code": REASON_STATE_ROOT_OUTSIDE,
                         "detail": str(state_root)}
+            if mode.get("bounded_failstop"):
+                from life_request_budget import LifeRequestBudget
+                LifeRequestBudget(state_root, run_id=ledger_run_id, failstop=True,
+                                  request_deadline=mode.get("request_deadline")).check_failstop()
             gate = resolve_world_intent_gate(os.environ)
             if not gate.get("ok"):
                 return {"ok": False, "reason_code": gate["reason_code"],
@@ -1148,7 +1404,10 @@ class FastDaySupervisor:
                         horizon_reached = bool(authority.exhausted)
                     except Exception:  # a clock read failure must not rewrite the label
                         horizon_reached = False
-                if reason == "operator" or reason.startswith("signal:"):
+                if reason == "BOUNDED_RUN_FAILSTOP":
+                    stopped = authority.stop()
+                    final_reason = reason
+                elif reason == "operator" or reason.startswith("signal:"):
                     stopped = authority.stop()
                     final_reason = "STOPPED_BY_OPERATOR"
                 elif horizon_reached:
@@ -1170,7 +1429,8 @@ class FastDaySupervisor:
             wall_closed = self._close_wall()
             resident_rc = child_report.get("returncode")
             resident_ok = resident_rc in (None, 0)
-            result = {"ok": bool(resident_ok and not spawn_failure),
+            result = {"ok": bool(resident_ok and not spawn_failure
+                                  and final_reason != "BOUNDED_RUN_FAILSTOP"),
                       "supervisor": closed, "ran": summary,
                       "resident_exit_code": resident_rc,
                       "experiment": _experiment_view(state_root, ledger_run_id),
@@ -1247,7 +1507,21 @@ class FastDaySupervisor:
         ticks = 0
         horizon_reached = False
         child_exited = False
+        mode = _read_json(mode_path(self.root))
         while not self._stop:
+            if mode.get("bounded_failstop"):
+                from life_request_budget import LifeRequestBudget, RequestBudgetError
+                try:
+                    LifeRequestBudget(state_root, run_id=mode.get("ledger_run_id"),
+                                      failstop=True,
+                                      request_deadline=mode.get("request_deadline")).check_failstop()
+                except RequestBudgetError:
+                    import life_pause
+                    life_pause.set_paused(state_root, True)
+                    clockmod.write_control(state_root, stop_requested=True,
+                                           reason="BOUNDED_RUN_FAILSTOP")
+                    self._stop_reason = "BOUNDED_RUN_FAILSTOP"
+                    break
             moment = authority.now()
             authority.checkpoint(ticks=ticks)
             snapshot = authority.snapshot()
@@ -1299,11 +1573,14 @@ def cmd_prepare(argv: list[str]) -> int:
     # 用户已授权的显式额度绑定：只在显式调用时生效，默认路径仍是 96/0/82。
     parser.add_argument("--request-total-limit", type=int,
                         default=clockmod.HARD_CONFIG_MAX,
-                        help="本实例的共同总请求上限（默认 96；仅在 1..300 内显式绑定）")
+                        help="本实例的共同总请求上限（默认 96；仅在 1..420 内显式绑定）")
+    parser.add_argument("--request-utc-day-max", type=int, default=None)
+    parser.add_argument("--bounded-failstop", action="store_true")
+    parser.add_argument("--request-deadline", default=None)
     parser.add_argument("--historical-requests", type=int, default=0,
                         help="本实验之前已经真实花掉的历史请求数（只用于证明总限，不写成本 run 计数）")
     parser.add_argument("--max-cognition-calls-per-day", type=int, default=None,
-                        help="认知每日配置（默认等于总限：默认 96，显式 300 时为 300）")
+                        help="认知每日配置（默认等于总限：默认 96，显式 420 时为 420）")
     parser.add_argument("--state-root", default=None)
     # Memory 的删除底账没有默认位置：非 clock-only 时必须由操作者显式给出，且必须
     # 落在实例业务根之外。原样交给既有 enable 入口，不猜 root.parent、不从环境兜底。
@@ -1311,7 +1588,21 @@ def cmd_prepare(argv: list[str]) -> int:
                         help="实例业务根之外的 Memory 删除底账路径（非 clock-only 时必填）")
     parser.add_argument("--clock-only", action="store_true",
                         help="只准备时钟/实验上限，不建实例（时钟冒烟用；不是可运行实例）")
+    # 逻辑时钟锚死在按下 prepare 的真实时刻：夜间起跑会把一天的额度烧在逻辑 00–06 点
+    # 几乎没有候选的时段上。默认拒绝，只有显式传这个开关才放行（放行会被记录在返回里）。
+    parser.add_argument("--allow-night-start", action="store_true",
+                        help="显式放行本地夜间（21:00–次日 07:00）起跑；默认拒绝，见 RUNBOOK")
+    # 逻辑起点不必跟真实时间同步：想让她的一天从早上开始，就显式给一个虚构起点，
+    # 不用等到白天。真实时间面（超时/暂停/预算/心跳/created_utc）不跟着变。
+    parser.add_argument("--logical-anchor", default=None,
+                        help=("这个逻辑日的起点，带时区的 ISO 8601（例如 "
+                              "2026-11-05T08:00:00+08:00）；不传时仍锚在 prepare 的真实时刻"))
     args = parser.parse_args(argv)
+    try:
+        logical_anchor = parse_logical_anchor(args.logical_anchor)
+    except ValueError as exc:
+        return _emit({"ok": False, "reason_code": REASON_LOGICAL_ANCHOR_INVALID,
+                      "detail": str(exc)}, code=EXIT_REFUSED)
     if args.rate is not None:
         try:
             rate = clockmod.validate_rate(args.rate)
@@ -1327,13 +1618,18 @@ def cmd_prepare(argv: list[str]) -> int:
                      max_new_requests=int(args.max_new_requests),
                      request_total_limit=int(args.request_total_limit),
                      historical_requests=int(args.historical_requests),
+                     request_utc_day_max=args.request_utc_day_max,
+                     bounded_failstop=bool(args.bounded_failstop),
+                     request_deadline=args.request_deadline,
                      max_cognition_calls_per_day=(None
                                                   if args.max_cognition_calls_per_day is None
                                                   else int(args.max_cognition_calls_per_day)),
                      state_root=(Path(args.state_root) if args.state_root else None),
                      memory_authority=(Path(args.memory_authority)
                                        if args.memory_authority else None),
-                     provision_instance=not args.clock_only)
+                     provision_instance=not args.clock_only,
+                     allow_night_start=bool(args.allow_night_start),
+                     logical_anchor=logical_anchor)
     if rate is not None and result.get("ok"):
         result["rate"] = rate
         result["real_seconds_for_logical_day"] = real_seconds
@@ -1343,8 +1639,16 @@ def cmd_prepare(argv: list[str]) -> int:
 def cmd_status(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="fast_day status")
     parser.add_argument("--root", required=True)
+    parser.add_argument("--stall-threshold", type=float, default=None,
+                        dest="stall_threshold",
+                        help="可选：tick 落后心跳超过这么多真实秒才说“超了”。"
+                             "不传就只报秒数、不下结论（长模型调用会正常拉大它）")
     args = parser.parse_args(argv)
-    payload = _status_payload(Path(args.root))
+    if args.stall_threshold is not None and args.stall_threshold <= 0:
+        return _emit({"ok": False, "reason_code": "STALL_THRESHOLD_INVALID",
+                      "detail": "--stall-threshold 必须是正的真实秒数"},
+                     code=EXIT_USAGE)
+    payload = _status_payload(Path(args.root), stall_threshold=args.stall_threshold)
     return _emit(payload, code=EXIT_OK if payload.get("ok") else EXIT_REFUSED)
 
 

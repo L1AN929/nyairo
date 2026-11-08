@@ -4,8 +4,9 @@ What this module is
 -------------------
 One read of the World observation seam turned into the present-tense facts a decision needs:
 **which place she is in (by name), what is in her hands, which places she could walk to and how
-long that takes, whether they are open, and which concrete things this observation really offers
-there** -- plus the honest list of what could *not* be read.  It replaces the old situation
+long that takes, whether they are open, which concrete things this observation really offers
+there, and -- when the instance enables it -- the World's own current ambient facts** -- plus
+the honest list of what could *not* be read.  It replaces the old situation
 context, where a place was only an id and the model had to guess that ``place:home`` was a room.
 
 Where the data comes from (and what it never does)
@@ -53,6 +54,12 @@ MAX_NAME_CHARS = 80
 MAX_TEXT_CHARS = 120
 MAX_REF_CHARS = 160
 MAX_SECONDS = 24 * 3600
+#: 地点自带文字（书里的一页、墙上的告示）比一句 premises 长，但仍有硬上限；
+#: 与世界包 content.json 的 400 字符校验同一口径，不在这里另发明一个数。
+MAX_READING_CHARS = 400
+#: v0.6 ambient background: the World's own per-day cap is 3; this view never enlarges it.
+MAX_AMBIENT_EVENTS = 3
+MAX_AMBIENT_SUMMARY_CHARS = 240
 
 REASON_NOT_WIRED = "WORLD_OBSERVATION_NOT_WIRED"
 REASON_CONTRACT_FAILED = "DAILY_LIFE_CONTEXT_FAILED"
@@ -170,6 +177,49 @@ def _bounded_contract(raw: Any, *, limit: int, observed_at: Optional[str]) -> di
         "unknowns": [_text(item, 60) for item in list(raw.get("unknowns") or [])[:limit]
                      if _text(item, 60)],
     }
+    ambient = _bound_ambient(raw.get("ambient"))
+    if ambient:
+        out["ambient"] = ambient
+    if status == STATUS_UNAVAILABLE:
+        out["reason_code"] = _text(raw.get("reason_code") or "", 60) or None
+    return out
+
+
+def _bound_ambient(raw: Any) -> dict[str, Any]:
+    """The World's own current ambient facts, bounded -- background only, never an offer.
+
+    The provider already decided which events are current and relevant here; this only keeps
+    the public identity fields and the summary unchanged (so a reader can still recognise the
+    same public template), caps the count at the World's own per-day bound, and drops
+    everything else.  An unavailable read keeps its reason code instead of looking like
+    "there is nothing happening".
+    """
+
+    if not isinstance(raw, Mapping):
+        return {}
+    status = _text(raw.get("status") or "", 24) or STATUS_OBSERVED
+    out: dict[str, Any] = {"status": status}
+    source = _text(raw.get("source") or "", 80)
+    if source:
+        out["source"] = source
+    events: list[dict[str, Any]] = []
+    for item in list(raw.get("events") or [])[:MAX_AMBIENT_EVENTS]:
+        if not isinstance(item, Mapping):
+            continue
+        event_id = _ref(item.get("event_id"))
+        # Verbatim apart from the length bound: the public template text must stay recognisable.
+        summary = str(item.get("summary") or "").strip()[:MAX_AMBIENT_SUMMARY_CHARS]
+        if not event_id or not summary:
+            continue
+        entry: dict[str, Any] = {"event_id": event_id, "summary": summary}
+        for key, limit in (("event_type", 64), ("location_id", MAX_REF_CHARS),
+                           ("local_date", 16), ("valid_from", 40), ("valid_until", 40)):
+            text = _text(item.get(key), limit)
+            if text:
+                entry[key] = text
+        events.append(entry)
+    if events:
+        out["events"] = events
     if status == STATUS_UNAVAILABLE:
         out["reason_code"] = _text(raw.get("reason_code") or "", 60) or None
     return out
@@ -181,7 +231,9 @@ def _bound_location(raw: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, limit in (("place_id", MAX_REF_CHARS), ("name", MAX_NAME_CHARS),
                        ("kind", 40), ("area_id", MAX_REF_CHARS), ("area_name", MAX_NAME_CHARS),
-                       ("scene_id", MAX_REF_CHARS), ("local_time", 40), ("timezone", 40)):
+                       ("scene_id", MAX_REF_CHARS), ("local_time", 40), ("timezone", 40),
+                       # 她脚下这个地方自己写的文字：书里的一页、墙上的告示。
+                       ("reading", MAX_READING_CHARS)):
         text = _text(raw.get(key), limit)
         if text:
             out[key] = text
@@ -275,6 +327,10 @@ def _bound_opportunities(raw: Any, *, limit: int) -> list[dict[str, Any]]:
         seconds = _seconds(item.get("duration_seconds"))
         if seconds is not None:
             entry["duration_seconds"] = seconds
+        # 显式执行机制的定义信息：只允许本版唯一的机制值，只作背景，不是动作。
+        execution = item.get("execution")
+        if isinstance(execution, Mapping) and execution.get("mechanism") == "stay_at_place":
+            entry["execution"] = {"mechanism": "stay_at_place"}
         for key in ("available", "in_hand", "observed_now"):
             if key in item:
                 entry[key] = bool(item.get(key))
@@ -323,6 +379,11 @@ def _fallback_from_observation(provider: Any, *, limit: int,
         unknowns.append(UNKNOWN_PLACE_NAMES)
     if here.get("kind"):
         location["kind"] = _text(here["kind"], 40)
+    # 她脚下这个地方自己写的文字（书里的一页、墙上的告示）一并给她看。
+    # 只是背景：不是候选、不是授权，也不代表她读过。
+    reading = _text(here.get("reading"), MAX_READING_CHARS)
+    if reading:
+        location["reading"] = reading
     if catalog.get("local_time"):
         location["local_time"] = _text(catalog["local_time"], 40)
 
@@ -440,11 +501,18 @@ def _fallback_from_observation(provider: Any, *, limit: int,
             entry["params"] = _text("pose=%s, orientation=%s"
                                     % (item.get("pose"), item.get("orientation")), MAX_TEXT_CHARS)
         if item.get("affordance"):
-            entry["label"] = _text("%s (%s)" % (item.get("affordance"), item.get("stay_seconds")),
-                                   MAX_NAME_CHARS)
+            # 世界包给这个地点、这个 descriptor 的可选标题优先；没有就沿用原来的
+            # "AFFORDANCE (seconds)"。标题只作为纯文本展示，不参与任何执行判断。
+            title = _text(item.get("title"), MAX_NAME_CHARS)
+            entry["label"] = title or _text(
+                "%s (%s)" % (item.get("affordance"), item.get("stay_seconds")), MAX_NAME_CHARS)
         seconds = _seconds(item.get("stay_seconds"))
         if seconds is not None:
             entry["duration_seconds"] = seconds
+        # 显式执行机制（世界包自己声明的定义信息），只透传本版唯一允许的值。
+        execution = item.get("execution")
+        if isinstance(execution, Mapping) and execution.get("mechanism") == "stay_at_place":
+            entry["execution"] = {"mechanism": "stay_at_place"}
         if place_observed == "not_observed":
             # Standing somewhere else is not seeing this place's inside; the offer is still real
             # (the owner published it), but its detail is not hers yet.
@@ -489,6 +557,9 @@ def bound_for_prompt(context: Any, *, limit: int = MAX_ENTRIES) -> dict[str, Any
         "opportunities": _bound_opportunities(context.get("opportunities"), limit=limit),
         "unknowns": [_text(item, 60) for item in list(context.get("unknowns") or [])[:limit]][:limit],
     }
+    ambient = _bound_ambient(context.get("ambient"))
+    if ambient:
+        out["ambient"] = ambient
     if context.get("reason_code"):
         out["reason_code"] = _text(context.get("reason_code"), 60)
     return {key: value for key, value in out.items() if value not in ("", [], {})}
@@ -496,6 +567,7 @@ def bound_for_prompt(context: Any, *, limit: int = MAX_ENTRIES) -> dict[str, Any
 
 __all__ = [
     "CONTRACT_FUNCTION",
+    "MAX_AMBIENT_EVENTS",
     "MAX_ENTRIES",
     "REASON_CONTRACT_FAILED",
     "REASON_CONTRACT_SHAPE",

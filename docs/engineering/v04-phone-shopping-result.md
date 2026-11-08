@@ -168,14 +168,14 @@ fixture 全部留在 `/tmp/nyaw05r.jdK3q/v04-phone-w-*`（`unique_home()` 创建
 4. **`use()` 目前只允许 `CONSUME`**：`submit_local_owner_action` 的动词白名单是
    `("CONSUME",)`。手机端要"拿起来"（PICK_UP）需要另行明确授权面，本轮没有偷偷放宽。
 5. **门禁脚本（R1 修正）**：AGENTS 的 write-notes 门禁**确实存在**，位于
-   `C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\`（不在本仓库树内，v1
+   `<USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\`（不在本仓库树内，v1
    报告写成"不存在"是错的）。从仓库 cwd 实跑：
 
    ```
    cd D:\nyairo-v04-backend
-   node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
+   node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
      ok: 31 note(s) tree and relative links verified        (exit 0)
-   node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
+   node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
      ok: 31 note(s) verified                                (exit 0)
    ```
 

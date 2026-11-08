@@ -132,12 +132,12 @@ def _interior_svg(package: WorldPackage, location_id: str, assets: dict[str, str
     for floor in space["floors"]:
         parts.append(
             f'<rect x="{floor["x"]}" y="{floor["y"]}" width="{floor["w"]}" height="{floor["h"]}" '
-            f'fill="{floor["color"]}"/>'
+            f'fill="{html.escape(str(floor["color"]), quote=True)}"/>'
         )
     for wall in space["walls"]:
         parts.append(
             f'<line x1="{wall["x1"]}" y1="{wall["y1"]}" x2="{wall["x2"]}" y2="{wall["y2"]}" '
-            f'stroke="{wall["color"]}" stroke-width="{max(0.6, wall["width"] / 8)}" stroke-linecap="round"/>'
+            f'stroke="{html.escape(str(wall["color"]), quote=True)}" stroke-width="{max(0.6, wall["width"] / 8)}" stroke-linecap="round"/>'
         )
     for kind in ("windows", "doors"):
         for opening in space[kind]:
@@ -178,11 +178,12 @@ def _interior_svg(package: WorldPackage, location_id: str, assets: dict[str, str
             parts.append(
                 f'<text x="{x}" y="{y + 7}" font-size="2.6" fill="#555" text-anchor="middle">{html.escape(name)}</text>'
             )
-    entry = space["entry"]
-    parts.append(
-        f'<circle cx="{entry["x"] * 5 + 2.5}" cy="{entry["y"] * 5 + 2.5}" r="2.4" fill="none" '
-        f'stroke="#d43f3f" stroke-width="0.7" stroke-dasharray="1.4 1"/>'
-    )
+    entry = space.get("entry")
+    if isinstance(entry, dict) and isinstance(entry.get("x"), (int, float)) and isinstance(entry.get("y"), (int, float)):
+        parts.append(
+            f'<circle cx="{entry["x"] * 5 + 2.5}" cy="{entry["y"] * 5 + 2.5}" r="2.4" fill="none" '
+            f'stroke="#d43f3f" stroke-width="0.7" stroke-dasharray="1.4 1"/>'
+        )
     return (
         '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" '
         'style="width:100%;max-width:420px;height:auto;background:#fff;'
@@ -315,7 +316,11 @@ def render_preview(
             f"{len(package.locations)} 个地点 · {len(package._topology['edges'])} 条道路 · "
             f"{len(package.npcs)} 位公共角色"
         ),
-        version=GENERATOR_VERSION,
+        version=html.escape(str(GENERATOR_VERSION)),
+        version_js=json.dumps(str(GENERATOR_VERSION), ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026"),
         svg=svg,
         interiors=interiors_html,
         instance=(
@@ -324,7 +329,12 @@ def render_preview(
             if instance_info
             else '<div class="instance-chip instance-none">未关联实例（用 --instance 叠加当前位置）</div>'
         ),
-        payload=json.dumps(payload, ensure_ascii=False),
+        payload=json.dumps(payload, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029"),
     )
     out = output_path or (package.package_dir / "preview.html")
     out.write_text(body, encoding="utf-8")
@@ -410,8 +420,17 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 <footer>由 NyAiro WorldGen {version} 生成的静态预览；运行时状态（位置、持有物、已发生事件）由 rc9 World Runtime 管理，不在此文件中。室内几何与家具是编辑器场景数据，rc9 不消费。</footer>
 <script>
 const DATA = {payload};
-const VERSION = "{version}";
+const VERSION = {version_js};
 const KIND_LABELS = DATA.kind_labels;
+function esc(v) {{
+  if (v == null) return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}}
 const byId = Object.fromEntries(DATA.locations.map(l => [l.location_id, l]));
 const legend = document.getElementById('legend');
 const seen = new Set();
@@ -424,13 +443,14 @@ const colors = {{"home":"#4f7c4f","street":"#8a8a8a","school":"#7b5ea7","store":
   "shrine":"#a03c5a","market":"#2a8f7a","station":"#5a6a8a","public":"#7a7a5a"}};
 for (const kind of seen) {{
   const item = document.createElement('span');
-  item.innerHTML = `<i style="background:${{colors[kind]}}"></i>${{KIND_LABELS[kind] || kind}}`;
+  const bg = colors[kind] || '#666666';
+  item.innerHTML = `<i style="background:${{esc(bg)}}"></i>${{esc(KIND_LABELS[kind] || kind)}}`;
   legend.appendChild(item);
 }}
 function hours(rule) {{
   if (rule.open_hour == null) return '全天开放';
   const end = rule.close_hour == null ? '未设' : rule.close_hour + '点';
-  return `${{rule.open_hour}}:00 – ${{rule.close_hour}}:00${{rule.weekdays_only ? '（周末休息）' : ''}}`;
+  return `${{esc(rule.open_hour)}}:00 – ${{esc(rule.close_hour)}}:00${{rule.weekdays_only ? '（周末休息）' : ''}}`;
 }}
 function fmtMinute(m) {{
   return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
@@ -440,16 +460,16 @@ function show(id) {{
   if (!l) return;
   const detail = document.getElementById('detail');
   const npcs = (l.npcs || []).map(n => {{
-    const win = n.windows.map(w => `${{fmtMinute(w.start_minute)}}–${{fmtMinute(w.end_minute)}}（周${{w.weekdays.join('、')}}）`).join('；');
-    return `<div class="row"><span class="k">出场</span>${{n.display_name}}（${{n.public_role}}）<br>
+    const win = n.windows.map(w => `${{esc(fmtMinute(w.start_minute))}}–${{esc(fmtMinute(w.end_minute))}}（周${{esc(w.weekdays.join('、'))}}）`).join('；');
+    return `<div class="row"><span class="k">出场</span>${{esc(n.display_name)}}（${{esc(n.public_role)}}）<br>
             <span class="sub">${{win}}</span></div>`;
   }}).join('');
-  const flavor = l.content && l.content.flavor ? `<div class="row sub">${{l.content.flavor}}</div>` : '';
-  const afford = (l.rule.affordances || []).map(a => `<span class="tag">${{a.description}}</span>`).join('');
+  const flavor = l.content && l.content.flavor ? `<div class="row sub">${{esc(l.content.flavor)}}</div>` : '';
+  const afford = (l.rule.affordances || []).map(a => `<span class="tag">${{esc(a.description)}}</span>`).join('');
   detail.innerHTML = `
-    <div id="detail-name">${{l.name}}<span class="tag" id="detail-kind">${{KIND_LABELS[l.kind] || l.kind}}</span></div>
-    <div class="row"><span class="k">ID</span>${{l.location_id}}</div>
-    <div class="row"><span class="k">介绍</span>${{l.content.intro || l.description}}</div>
+    <div id="detail-name">${{esc(l.name)}}<span class="tag" id="detail-kind">${{esc(KIND_LABELS[l.kind] || l.kind)}}</span></div>
+    <div class="row"><span class="k">ID</span>${{esc(l.location_id)}}</div>
+    <div class="row"><span class="k">介绍</span>${{esc(l.content.intro || l.description)}}</div>
     ${{flavor}}
     <div class="row"><span class="k">营业</span>${{hours(l.rule)}}</div>
     <div class="row"><span class="k">活动</span>${{afford || '<span class="sub">（无）</span>'}}</div>
@@ -462,7 +482,8 @@ document.querySelectorAll('a.loc').forEach(a => {{
 if (DATA.instance && DATA.instance.current_location) {{
   const note = document.createElement('div');
   note.className = 'row';
-  note.innerHTML = `<span class="tag warn">当前选中实例位于：${{byId[DATA.instance.current_location] ? byId[DATA.instance.current_location].name : DATA.instance.current_location}}</span>`;
+  const locLabel = byId[DATA.instance.current_location] ? byId[DATA.instance.current_location].name : DATA.instance.current_location;
+  note.innerHTML = `<span class="tag warn">当前选中实例位于：${{esc(locLabel)}}</span>`;
   document.querySelector('#detail').appendChild(note);
 }}
 </script>

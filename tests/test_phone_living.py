@@ -84,77 +84,73 @@ class BoundedWindowTest(unittest.TestCase):
         return {"ok": True, "status": "READY", "exit_code": 0, "model_called": True,
                 "status_word": "ACTED"}
 
-    def test_first_window_records_the_ledger_baseline_and_spends_only_what_was_asked(self):
+    def test_first_window_spends_only_what_was_asked_against_persisted_budget(self):
         result = living.run_bounded_window(self.root, duration_seconds=30, max_new_requests=1,
                                            run_fn=lambda root, **kw: self._spend(kw["max_new_requests"]))
         self.assertTrue(result.get("ok"))
         self.assertEqual(result["window"]["allowed_requests"], 1)
         self.assertEqual(result["window"]["spent_requests"], 1)
         budget = living.window_status(self.root)
-        self.assertEqual(budget["used"], 1)
-        self.assertEqual(budget["remaining"], 3)
+        self.assertEqual(budget["function_cap"], 96)
+        self.assertEqual(budget["used"], 14)
+        self.assertEqual(budget["remaining"], 82)
         doc = json.loads((self.root / "run" / "usable-window.json").read_text(encoding="utf-8"))
         self.assertEqual(doc["ledger_baseline_run_window_calls"], 13)
 
-    def test_cap_is_shared_across_supervisor_restarts(self):
-        for expected_used, expected_remaining in ((1, 3), (2, 2), (3, 1)):
+    def test_brand_new_absent_ledger_starts_cleanly_on_first_click(self):
+        from life_request_budget import budget_path
+
+        budget_path(self.state_root).unlink()
+        budget0 = living.window_status(self.root)
+        self.assertEqual(budget0["ledger"]["state"], "absent")
+        self.assertEqual(budget0["remaining"], 96)
+        result = living.run_bounded_window(
+            self.root, duration_seconds=30, max_new_requests=2,
+            run_fn=lambda root, **kw: _ledger(self.state_root, kw["max_new_requests"])
+            and {"ok": True, "status": "READY", "exit_code": 0, "model_called": True})
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(result["window"]["allowed_requests"], 2)
+        self.assertEqual(result["window"]["spent_requests"], 2)
+
+    def test_does_not_brick_after_four_windows_and_respects_persisted_ceiling(self):
+        # Clicking 6 times in normal usage must NOT brick at 4 anymore.
+        for step in range(1, 7):
             result = living.run_bounded_window(
                 self.root, duration_seconds=30, max_new_requests=1,
                 run_fn=lambda root, **kw: self._spend(kw["max_new_requests"]))
-            self.assertTrue(result.get("ok"), result)
+            self.assertTrue(result.get("ok"), (step, result))
             budget = living.window_status(self.root)
-            self.assertEqual(budget["used"], expected_used)
-            self.assertEqual(budget["remaining"], expected_remaining)
+            self.assertEqual(budget["used"], 13 + step)
+            self.assertEqual(budget["remaining"], 96 - (13 + step))
 
-        exhausted = living.run_bounded_window(
-            self.root, duration_seconds=30, max_new_requests=1,
-            run_fn=lambda root, **kw: self._spend(1))
-        self.assertTrue(exhausted.get("ok"))
+        # Reaching the real 96 ceiling refuses cleanly before calling the runner.
+        _ledger(self.state_root, 96)
         refused = living.run_bounded_window(
             self.root, duration_seconds=30, max_new_requests=1,
             run_fn=lambda root, **kw: self._spend(1))
         self.assertFalse(refused.get("ok"))
         self.assertEqual(refused["reason"], "FUNCTION_WINDOW_CAP_EXHAUSTED")
         self.assertFalse(refused["model_called"])
-        self.assertEqual(_calls(self.state_root), 17)
+        self.assertEqual(_calls(self.state_root), 96)
 
-    def test_losing_one_copy_does_not_refresh_the_cap(self):
+    def test_deleting_window_audit_files_neither_resets_ledger_nor_bricks_feature(self):
         living.run_bounded_window(self.root, duration_seconds=30, max_new_requests=2,
                                   run_fn=lambda root, **kw: self._spend(kw["max_new_requests"]))
-        self.assertEqual(living.window_status(self.root)["used"], 2)
+        self.assertEqual(living.window_status(self.root)["used"], 15)
         (self.root / "run" / "usable-window.json").unlink()
+        mirror = self.root / "one-day" / "run" / "usable-window.json"
+        if mirror.exists():
+            mirror.unlink()
         budget = living.window_status(self.root)
-        # The mirror next to the Life state still carries the baseline.
-        self.assertEqual(budget["baseline"], 13)
-        self.assertEqual(budget["used"], 2)
-        self.assertEqual(budget["remaining"], 2)
-
-    def test_losing_every_copy_refuses_instead_of_rebasing(self):
-        living.run_bounded_window(self.root, duration_seconds=30, max_new_requests=2,
-                                  run_fn=lambda root, **kw: self._spend(kw["max_new_requests"]))
-        (self.root / "run" / "usable-window.json").unlink()
-        (self.root / "one-day" / "run" / "usable-window.json").unlink()
-        budget = living.window_status(self.root)
-        self.assertTrue(budget["baseline_lost"])
-        self.assertEqual(budget["reason"], "WINDOW_BASELINE_LOST")
-        self.assertEqual(budget["remaining"], 0)
-        called = []
-        result = living.run_bounded_window(
+        # Authoritative LifeRequestBudget still holds 15 spent, and the feature stays usable.
+        self.assertFalse(budget["baseline_lost"])
+        self.assertEqual(budget["used"], 15)
+        self.assertEqual(budget["remaining"], 81)
+        nxt = living.run_bounded_window(
             self.root, duration_seconds=30, max_new_requests=1,
-            run_fn=lambda root, **kw: called.append(kw) or {"ok": True})
-        self.assertFalse(result.get("ok"))
-        self.assertEqual(result["reason"], "WINDOW_BASELINE_LOST")
-        self.assertEqual(called, [])
-        self.assertEqual(_calls(self.state_root), 15)
-
-    def test_ledger_rollback_never_lowers_the_used_high_water(self):
-        living.run_bounded_window(self.root, duration_seconds=30, max_new_requests=2,
-                                  run_fn=lambda root, **kw: self._spend(kw["max_new_requests"]))
-        self.assertEqual(living.window_status(self.root)["used"], 2)
-        _ledger(self.state_root, 13)  # a restored/older ledger
-        budget = living.window_status(self.root)
-        self.assertEqual(budget["used"], 2)
-        self.assertEqual(budget["remaining"], 2)
+            run_fn=lambda root, **kw: self._spend(kw["max_new_requests"]))
+        self.assertTrue(nxt.get("ok"), nxt)
+        self.assertEqual(_calls(self.state_root), 16)
 
     def test_unreadable_ledger_refuses_before_anything_starts(self):
         from life_request_budget import budget_path
@@ -169,14 +165,41 @@ class BoundedWindowTest(unittest.TestCase):
         self.assertEqual(called, [])
         self.assertFalse(result["model_called"])
 
-    def test_a_changed_run_window_refuses(self):
+    def test_a_new_run_window_continues_under_the_new_window_budget(self):
         living.run_bounded_window(self.root, duration_seconds=30, max_new_requests=1,
                                   run_fn=lambda root, **kw: self._spend(kw["max_new_requests"]))
-        _ledger(self.state_root, 14, run_id="run:another")
-        result = living.run_bounded_window(self.root, duration_seconds=30, max_new_requests=1,
-                                           run_fn=lambda root, **kw: self._spend(1))
-        self.assertFalse(result.get("ok"))
-        self.assertEqual(result["reason"], "RUN_WINDOW_CHANGED")
+        self.env["CHIYO_AUTONOMOUS_RUN_ID"] = "run:another"
+        _ledger(self.state_root, 3, run_id="run:another")
+        result = living.run_bounded_window(
+            self.root, duration_seconds=30, max_new_requests=1,
+            run_fn=lambda root, **kw: _ledger(self.state_root, 4, run_id="run:another")
+            and {"ok": True, "status": "READY", "exit_code": 0, "model_called": True})
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(living.window_status(self.root)["remaining"], 92)
+
+    def test_recorded_ambient_and_room_switches_reach_live_day_segment(self):
+        managed = self.root / "run" / "nyairo-day.instance.json"
+        managed.parent.mkdir(parents=True, exist_ok=True)
+        managed.write_text(json.dumps({
+            "schema": "nyairo.day.managed.v1",
+            "room_living": True,
+            "ambient_events": True,
+        }), encoding="utf-8")
+        captured = {}
+        orig_seg = living.live_day.run_segment
+
+        def fake_seg(root, **kwargs):
+            captured.update(kwargs)
+            return self._spend(kwargs["max_new_requests"])
+
+        living.live_day.run_segment = fake_seg
+        try:
+            res = living.run_bounded_window(self.root, duration_seconds=30, max_new_requests=1)
+        finally:
+            living.live_day.run_segment = orig_seg
+        self.assertTrue(res.get("ok"), res)
+        self.assertIs(captured.get("room_living"), True)
+        self.assertIs(captured.get("ambient_events"), True)
 
     def test_bounds_are_refused_before_the_ledger_is_touched(self):
         for kwargs, reason in (
@@ -255,7 +278,7 @@ class SupervisorTest(unittest.TestCase):
         supervisor = living.Supervisor(self.root, port=3831)
         snapshot = supervisor.snapshot()
         self.assertTrue(snapshot["running"])
-        self.assertEqual(snapshot["windows"]["remaining"], 4)
+        self.assertEqual(snapshot["windows"]["remaining"], 83)
         self.assertIsNone(snapshot["child"])
         self.assertFalse((self.root / "run" / "usable-window.json").exists())
 

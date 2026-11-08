@@ -77,6 +77,7 @@ READ_ACTIONS = {
     # F-140: 她认识谁（本实例 operator 登记过的参与者）——稳定 id、显示名/别名、创建来源
     # 与时间、关联过的来话条数。这是身份只读面，没有正文、没有关系分数，也不能创建/绑定/发送。
     "participants": "/api/phone/participants",
+    "projects": "/api/phone/projects",
 }
 WRITE_ACTIONS = ("note_save", "reference_save", "purchase", "store_purchase", "use",
                  "world_action", "reading_import", "reading_position", "reading_annotate",
@@ -97,7 +98,7 @@ PRIVATE_ARTIFACT_ACTIONS = frozenset({
     "today", "today_arrangements", "day_timeline",
     # 同一件作品的有界上下文（旧版/来历/真实结果/相关做法与评价/本地草稿）：它读的是她的私人
     # 作品与经历摘录，因此和其余私人档案读面共用同一条显式许可，不新增权限面。
-    "work_context", "work_version",
+    "projects", "work_context", "work_version",
     # 日记正文是她自己的私人文字：目录可只看时间/字数，但写与读正文都属于私人档案面。
     "diary", "diary_read", "diary_write",
     # 当前主张包含她观察到的位置等事实；与其余私人档案读面共用同一条显式许可。
@@ -301,6 +302,7 @@ PHONE_TOOL_SCHEMA = {
                 ),
                 "properties": {
                     "destination_location_id": {"type": "string", "maxLength": 96},
+                    "facility_id": {"type": "string", "maxLength": 128},
                     "object_id": {"type": "string", "maxLength": 128},
                     # (no room-specific ids: ARRANGE / TOGGLE_FIXTURE take the owner's object_id)
                     "slot_id": {"type": "string", "enum": ["left_hand", "right_hand"]},
@@ -1018,6 +1020,15 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 message = ("已读取相册目录：每张图的时间、说明与来源；这里不带图片字节，"
                            "看图用手机自己的图片地址（album_image 读说明与来源）。"
                            "generated_locally=true 的是本机按她的描述生成的图，不是真实相机照片。")
+            elif action == "projects":
+                try:
+                    from .companion_extras import list_future_questions
+                    all_fqs = list_future_questions(_profile_home(kwargs))
+                    if all_fqs and isinstance(result, Mapping):
+                        result = {**result, "future_questions": all_fqs}
+                except Exception:
+                    pass
+                message = "已读取作品列表。"
             else:
                 message = "已读取。"
             return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
@@ -1040,9 +1051,18 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
             if not doc.get("ok"):
                 message = "这件作品的上下文读不到；服务说明了原因（读不到不是空）。"
             else:
+                try:
+                    from .companion_extras import list_future_questions
+                    fq_items = list_future_questions(_profile_home(kwargs), artifact_id=artifact_id)
+                    if fq_items and isinstance(result, Mapping):
+                        result = {**result, "future_questions": fq_items}
+                except Exception:
+                    fq_items = []
                 message = ("已读取这件作品的有界上下文（只读）：版本与来历、指向它的真实结果、"
                            "证据指回这些结果的做法与最近一次评价、以它为来源的本地草稿。"
                            "没有证据的部分如实为空，草稿不会被发送。")
+                if fq_items:
+                    message += "（附带读取到过去版本留给未来的 %d 个问题，见 future_questions。）" % len(fq_items)
             return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
                            http_status=code, result=result)
 
@@ -1327,6 +1347,11 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
         if action in ("reading_import", "reading_position", "reading_annotate"):
             # 阅读写操作的每一条都是 owner 的话：导入 ≠ 读过，位置 ≠ 理解，页注 ≠ 读懂。
             message = _reading_message(action, status, str(doc.get("reason_code") or ""))
+        try:
+            from .companion_extras import record_phone_action_receipt
+            record_phone_action_receipt(_profile_home(kwargs), action, args, doc, operation_key=key)
+        except Exception:
+            pass
         return _result(bool(doc.get("ok")), status, message, http_status=code,
                        operation_key=key, result=result)
     except PhoneToolRefused as exc:

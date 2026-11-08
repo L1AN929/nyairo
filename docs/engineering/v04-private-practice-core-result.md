@@ -69,7 +69,7 @@
 
 ```bash
 wsl -e bash -lc 'cd /mnt/d/nyairo-rc1-body-backend && export PYTHONDONTWRITEBYTECODE=1 \
-  && python3 /mnt/c/Users/28556/.pi-desktop/scratch/<sid>/b_run_exact.py <module>:<Class>'
+  && python3 <WSL_USER_HOME>/.pi-desktop/scratch/<sid>/b_run_exact.py <module>:<Class>'
 ```
 
 | 文件 / 类 | exact IDs | 结果 | 运行器退出码 | 日志 |

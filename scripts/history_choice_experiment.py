@@ -1446,7 +1446,9 @@ def run_shadow(bundle: Mapping[str, Any], *, frozen: Mapping[str, Any],
                baseline: Mapping[str, Any], ledger: BatchLedger, budget: Any,
                env: Mapping[str, str], deadline_check: Callable[[], bool],
                cognition_factory: Optional[Callable[..., Any]] = None,
-               latch: Optional[SendLatch] = None) -> dict[str, Any]:
+               latch: Optional[SendLatch] = None,
+               pair_count: Optional[int] = None,
+               pair_order: Optional[Sequence[str]] = None) -> dict[str, Any]:
     runtime = bundle["runtime"]
     root = Path(bundle["root"])
     admission = bundle["admission"]
@@ -1455,11 +1457,15 @@ def run_shadow(bundle: Mapping[str, Any], *, frozen: Mapping[str, Any],
     arm_b = neutralise_history(arm_a)
     samples: list[dict[str, Any]] = []
     stop_reason = ""
+    #: 缺省完全沿用 20 对原协议；探索批只取既有 PAIR_ORDER 的前 N 个，不重排、不补样。
+    order_seq: tuple[str, ...] = tuple(pair_order) if pair_order is not None else PAIR_ORDER
+    if pair_count is not None:
+        order_seq = order_seq[:max(0, int(pair_count))]
 
     def make_recorder(experiences: Sequence[Mapping[str, Any]]) -> Callable[..., None]:
         return make_history_recorder(baseline, experiences)
 
-    for pair_index, order in enumerate(PAIR_ORDER, start=1):
+    for pair_index, order in enumerate(order_seq, start=1):
         for arm in order:
             if latch is not None:
                 if latch.closed:
@@ -1538,7 +1544,8 @@ def run_shadow(bundle: Mapping[str, Any], *, frozen: Mapping[str, Any],
         if stop_reason:
             break
     return {"samples": samples, "pairs": pair_summary(samples), "stop_reason": stop_reason,
-            "baseline": dict(baseline), "requests_used": BatchLedger.spent(budget.view())}
+            "baseline": dict(baseline), "requests_used": BatchLedger.spent(budget.view()),
+            "pairs_target": len(order_seq)}
 
 
 def pair_summary(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -2547,9 +2554,16 @@ def run(root: Path | str, *, execute_approved: bool,
 
 
 def shadow_statistics(shadow: Mapping[str, Any],
-                      continuation: Mapping[str, Any]) -> dict[str, Any]:
-    """按预登记 §6 事先写死的规则出结论，不补样、不筛样本。"""
+                      continuation: Mapping[str, Any], *,
+                      pair_count: Optional[int] = None) -> dict[str, Any]:
+    """按预登记 §6 事先写死的规则出结论，不补样、不筛样本。
 
+    ``pair_count`` 缺省仍是完整 20 对原协议；显式更小的值只用于探索批：只报配对计数与
+    比例差，标 ``EXPLORATORY_ONLY``，**不计算** McNemar、也不套 20 对的成功判据。
+    """
+
+    target = PAIR_COUNT if pair_count is None else max(0, int(pair_count))
+    exploratory = target != PAIR_COUNT
     samples = list(shadow.get("samples") or [])
     by_pair: dict[int, dict[str, Any]] = {}
     for sample in samples:
@@ -2565,21 +2579,28 @@ def shadow_statistics(shadow: Mapping[str, Any],
     discordant_b = sum(1 for arms in by_pair.values()
                        if (arms.get("A") or {}).get("classification") != CLASS_H
                        and (arms.get("B") or {}).get("classification") == CLASS_H)
-    delta = pair_delta(PAIR_COUNT, a_h, b_h)
-    p_value = mcnemar_exact_two_sided(discordant_a, discordant_b) \
-        if len(complete) == PAIR_COUNT else None
+    delta = pair_delta(target, a_h, b_h)
+    p_value = (mcnemar_exact_two_sided(discordant_a, discordant_b)
+               if (len(complete) == target and not exploratory) else None)
     failures = sum(1 for sample in samples
                    if sample.get("classification") in (CLASS_FAILURE, CLASS_INVALID))
     conclusion = "NO_FIXED_CONCLUSION"
     if not samples:
         conclusion = "SHADOW_NOT_RUN"
-    elif len(complete) == PAIR_COUNT and not shadow.get("stop_reason"):
-        if p_value is not None and p_value < 0.05 \
+    elif len(complete) == target and not shadow.get("stop_reason"):
+        if exploratory:
+            # 探索批：样本太少，不给统计判据，只给计数/比例差。
+            conclusion = "EXPLORATORY_ONLY"
+        elif p_value is not None and p_value < 0.05 \
                 and abs(delta["delta_count"]) >= (delta["threshold_count"] or 0):
             conclusion = "HISTORY_PACKAGE_CHANGED_H_CHOICE"
         else:
             conclusion = "NO_DETECTED_DIFFERENCE"
-    return {"pairs_complete": len(complete), "a_h": a_h, "b_h": b_h,
+    elif exploratory:
+        conclusion = "NOT_TESTED_INCOMPLETE"
+    return {"pairs_complete": len(complete), "pairs_target": target,
+            "exploratory_only": bool(exploratory),
+            "a_h": a_h, "b_h": b_h,
             "discordant_a_only": discordant_a, "discordant_b_only": discordant_b,
             "mcnemar_two_sided_p": p_value, "delta": delta, "invalid_or_failed": failures,
             "shadow_stop_reason": shadow.get("stop_reason"),

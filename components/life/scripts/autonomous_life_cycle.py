@@ -332,6 +332,30 @@ DAILY_ACTION_ACTIVITY_KIND = "DAILY_ACTION_IN_OBSERVED_WORLD"
 #: that no owner confirmed.
 STAY_REF_PREFIX = "stay:"
 STAY_ACTIVITY_KIND = "STAY_AT_OBSERVED_PLACE"
+#: 同一个 Activity 形状，名字按她在那个场所真正做的那件事来叫。读一本书、在殿前合掌和
+#: 坐在长椅上不是一回事，活动列表里也不该都写成「待一会儿」。表里没有的场所仍用原来那句。
+STAY_TITLES = {
+    "READ_HERE": "在这里读一本书",
+    "READ": "在这里读点东西",
+    "SELF_STUDY": "在这里自习一会儿",
+    "BROWSE_BOOKS": "翻一翻书",
+    "BROWSE_STORE": "在店里逛逛",
+    "PRAY": "在殿前合掌",
+    "SIT": "坐一会儿",
+    "SIT_AT_CAFE": "在店里坐着",
+    "REST": "歇一会儿",
+    "LOOK_AROUND": "看看周围",
+    "WALK": "走一走",
+    "USE_PHONE": "看看手机",
+    # 什么都不干的三档：说人话，别写成系统日志。
+    "DAZE": "坐着发会儿呆",
+    "POTTER": "在屋里随便转转",
+    "PEOPLE_WATCH": "站着看看街上的人",
+}
+STAY_TITLE_DEFAULT = "在这儿待一会儿"
+#: 只有真的是"读"的停留，结束后才在她自己的私人事项里留一条批注；坐着歇一会儿、看看手机
+#: 不算读过东西。表里放的正是世界包给"读书位"的那两个 affordance。
+WORLD_READING_STAY_DESCRIPTORS = frozenset({"READ_HERE", "READ"})
 WORLD_STAY_FACT_PREFIX = "world_fact:stay:"
 WORLD_STAY_FACT_KEY = "world_stay_ref"
 STAY_PHASE_START = "START"
@@ -375,10 +399,91 @@ OUTCOME_NO_STEP_AVAILABLE = "NO_STEP_AVAILABLE"
 #: she did not move it, so no request was spent.  Silence, not a choice and not a refusal.
 OUTCOME_QUIET = "QUIET"
 
+#: v0.4 day-life: the same situation must not be suppressed for ever.  When one whole-situation
+#: fingerprint is refused a request this many times *in a row*, the next round asks anyway: the
+#: requests the gate saves are exactly the ones that could have moved her, and a state nothing can
+#: move can never produce a new fingerprint (2026-11-05: 42 of 47 windows blocked before the
+#: request, 11 of 20 allowed requests spent in a whole day).  The count reuses the ledger row's own
+#: ``count``; no new field and no new file are introduced.
+MAX_CONSECUTIVE_SAME_STATE_BLOCKS = 3
+#: Named release reason: this round was let through because of *consecutive blocks*, never because
+#: the ttl ran out.  ``STATE_NOT_CONSIDERED_YET`` keeps its meaning (nothing recorded, or it
+#: expired) so the two releases can always be told apart in a round report or a wake record.
+REASON_FORCED_RELEASE = "CONSECUTIVE_SAME_STATE_BLOCKS_FORCED_RELEASE"
+
 #: Reason code used when a step is not attempted because the work already moved.
 REASON_HEAD_ADVANCED = "ARTIFACT_HEAD_ADVANCED"
 #: Reason code used when the owner refuses the write.
 REASON_OWNER_REFUSED = "ARTIFACT_OWNER_REFUSED"
+
+
+def reconsideration_gate(ledger: Any, *, parts: Mapping[str, Any],
+                         at: Optional[str] = None) -> dict[str, Any]:
+    """The whole-situation gate, plus "stop saving this request" after N identical blocks.
+
+    ``ledger.block_situation`` answers "was this exact situation already declined before?".  That is
+    the right answer for a handful of repeats and the wrong answer once nothing can move any more: a
+    state that does not change yields the same fingerprint for ever, so the gate can suppress every
+    round of a whole day while the budget that would have let her move goes unspent.
+
+    The suppression is therefore bounded by *count* and not only by the clock.  Each round the gate
+    suppresses is written back into the same ledger row (``count`` -- the field the ledger already
+    keeps, no new field, no new file), and once that row has suppressed
+    ``MAX_CONSECUTIVE_SAME_STATE_BLOCKS`` rounds in a row the next round is let through with a name
+    of its own.  Letting it through *drops* the row, so the count starts over at 1 with the next
+    decline: a release buys one request, never permanent immunity.
+
+    Nothing else moves: this function does not read or touch the request budget, the pause gate, a
+    candidate source or any owner.  The round that is let through pays for its request exactly like
+    every other round.
+
+    Returns the ledger's own view (same shape ``block_situation`` returns) plus
+    ``forced_release`` / ``consecutive_blocks`` / ``suppressed_reason_code``, so a report can tell
+    "the ttl ran out" from "we stopped trusting the gate on this state".
+    """
+
+    block = ledger.block_situation(parts=parts, at=at)
+    if not block.get("blocked"):
+        block["forced_release"] = False
+        block["consecutive_blocks"] = 0
+        return block
+    entry = dict(block.get("entry") or {})
+    # ``count`` counts every time this situation was written down: once for the request that
+    # declined it, plus once for every round the gate then suppressed.  The run of *suppressions*
+    # is therefore ``count - 1`` at the moment the gate is asked.
+    streak = max(0, int(entry.get("count") or 0) - 1)
+    if streak >= MAX_CONSECUTIVE_SAME_STATE_BLOCKS:
+        released: list[str] = []
+        error = ""
+        try:
+            released = ledger.release(key=str(block.get("fingerprint") or ""))
+        except OSError as exc:  # a failed write is reported, never hidden
+            error = "%s: %s" % (type(exc).__name__, exc)
+        view = dict(block)
+        view.update({
+            "blocked": False,
+            "forced_release": True,
+            "consecutive_blocks": streak,
+            #: The verdict the gate would have given, kept so the release stays auditable.
+            "suppressed_reason_code": str(block.get("reason_code") or ""),
+            "reason_code": REASON_FORCED_RELEASE,
+            "released": released,
+            "error": error,
+        })
+        return view
+    # Still quiet this round -- but the suppression is written down, because it is what the next
+    # round counts.  The outcome stored is the decline that was already recorded for this exact
+    # situation: this round asks no model and changes no owner.
+    error = ""
+    try:
+        ledger.record_situation(parts=parts, outcome=str(entry.get("outcome") or ""), at=at,
+                                target_ref=entry.get("target_ref"),
+                                activity_ref=entry.get("activity_ref"))
+    except OSError as exc:  # a failed ledger write never fails the round
+        error = "%s: %s" % (type(exc).__name__, exc)
+    view = dict(block)
+    view.update({"forced_release": False, "consecutive_blocks": streak + 1, "error": error})
+    return view
 
 
 def _compact_column(column: Any) -> Optional[dict[str, Any]]:
@@ -1232,6 +1337,14 @@ class AutonomousLifeCycle:
         self._last_foreground_record: Optional[dict[str, Any]] = None
         self._round_situation: Optional[dict[str, Any]] = None
         self._round_work_binding: Optional[dict[str, Any]] = None
+        #: The DecisionRecord AG-2 committed for *this* round, captured at the existing
+        #: ``pre_adoption_mutation_hook`` (the point right after the Decision commits and before
+        #: adoption).  A legal writer ``no_change`` can be raised from the lazy step
+        #: materialisation *inside* ``run_decision_and_adoption_cycle``, where the coordinator never
+        #: returns its result dict -- so the round would lose the very Decision it already paid for.
+        #: This is the record itself, not a reconstruction; it is reset at the top of every round so
+        #: a failed round can never borrow the previous one.
+        self._round_decision_record: Optional[Any] = None
         #: v0.4 stage A: the Activity this round's park offer named (if any).  A park writes its
         #: "later" item *after* adoption has already released the foreground, so the item must name
         #: the Activity from the offer, not from a foreground read that is now empty.
@@ -1297,6 +1410,10 @@ class AutonomousLifeCycle:
         self.last_method_usage: Optional[dict[str, Any]] = None
         self.last_method_trial: Optional[dict[str, Any]] = None
         self.last_practice_error: Optional[str] = None
+        #: Why this round offered no automatic review seed *because a source could not be
+        #: classified* (read failure / unknown type).  ``None`` means the seed path was either
+        #: available or simply had no usable experience.  Named, never conflated with "empty".
+        self.last_review_seed_withheld: Optional[str] = None
         self.last_practice_context: Optional[dict[str, Any]] = None
         self._round_methods: list[dict[str, Any]] = []
         self._round_practice_context: Optional[dict[str, Any]] = None
@@ -3071,6 +3188,171 @@ class AutonomousLifeCycle:
         document["doc_revision"] = target
         return pdi.encode_document(document)
 
+    # -- world reading: a note of her own after a real read ------------------------------
+
+    def _place_reading_text(self, place: Any) -> Optional[str]:
+        """这处地点自己写的文字，取自判定这次停留的**同一次**目录读取。
+
+        来源是 ``self.last_world_catalog``（``_observe_position`` 在同一轮刚刷新过），不另读
+        第二次：那段文字属于停留结束的这个瞬间。目录读不到、地点没有文字都答 ``None``，不猜。
+        """
+        name = str(place or "")
+        catalog = self.last_world_catalog
+        if not name or not isinstance(catalog, Mapping):
+            return None
+        if str(catalog.get("status") or "") != "available":
+            return None
+        for item in catalog.get("opportunities") or []:
+            if not isinstance(item, Mapping) or str(item.get("location_id")) != name:
+                continue
+            text = item.get("reading")
+            if isinstance(text, str) and text.strip():
+                return text.strip()[:400]
+            return None
+        return None
+
+    def _annotate_world_reading(self, base: dict[str, Any], *, place: Any, descriptor: Any,
+                                observed_at: str) -> None:
+        """在世界里的读书位读完，留下一条属于她自己的批注——或者如实说为什么没留下。
+
+        落点和读私人材料时完全一样：``private_daily_items`` 的取得 + 停点 + 一条 ``memo``
+        （或 ``unclear_marker``），由模型对这段文字的回答决定，经同一个纯规划器写出。世界文本
+        只是一个普通来源：``source_id="world:<place>"``，``source_revision`` 是这段文字的稳定
+        指纹（sha256），所以同一段文字再读一次还是同一页、同一把 operation key。
+
+        这是**停留完成之后**的后果，不是完成条件：任何失败都只记在本轮的 ``world_reading``
+        形状里（状态 / 条目类型 / 版本号 / 失败原因），不抛出、不改文档、不影响那次停留本身的
+        完成。原文与批注正文都不进这个报告、journal 或日志。
+        """
+        report: dict[str, Any] = {
+            "state": "NOT_WRITTEN", "place": str(place), "descriptor": str(descriptor),
+            "item_type": None, "version_number": None, "reason": None,
+        }
+        base["world_reading"] = report
+        text = self._place_reading_text(place)
+        if text is None:
+            report["state"] = "NO_READING_HERE"
+            return
+        if self.reading_response_writer is None:
+            report["state"] = "NOT_CONFIGURED"
+            return
+        if not (self.artifact_port and self.private_items_artifact_id):
+            report["reason"] = "NO_PRIVATE_ITEMS"
+            return
+        import private_daily_items as pdi
+
+        doc_id = str(self.private_items_artifact_id)
+        source_id = "world:%s" % str(place)
+        #: 这段文字的稳定指纹：同一段文字就是同一版，重读不会变成新的一页。
+        revision = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        try:
+            view = self.artifact_port.read_artifact(doc_id)
+            if not isinstance(view, Mapping):
+                raise AutonomousLifeError("the private items document could not be read")
+            head = dict(view.get("head") or {})
+            document = pdi.decode_document(view.get("content") or "")
+            planned = pdi.plan_page_read(
+                document, artifact_id=doc_id, source_id=source_id,
+                source_revision=revision,
+                receipt_ref="read:world:%s:%s" % (place, revision[:16]),
+                obtained={"pages": [1], "chars": len(text)}, excerpt=text[:200],
+                page=1, grant_ref=self.artifact_grant_id,
+                head_version_id=head.get("version_id"),
+                head_number=head.get("version_number"), now=observed_at)
+            annotation = self._reading_response_plan(
+                document=pdi.decode_document(planned["content"]), artifact_id=doc_id,
+                source_id=source_id, revision=revision, page=1, text=text, pages=1,
+                previous_page=None, observed_at=observed_at)
+        except ReadingResponseFailed:
+            report["reason"] = "READING_RESPONSE_FAILED"
+            return
+        except (life_pause.PauseConfirmedError, life_pause.RequestNotSentError):
+            report["reason"] = "PAUSED_BEFORE_REQUEST"
+            return
+        except life_request_budget.RequestBudgetError:
+            report["reason"] = "REQUEST_BUDGET_REFUSED"
+            return
+        except Exception as exc:  # noqa: BLE001 - the stay is already complete; say why not
+            report["reason"] = type(exc).__name__
+            return
+        if annotation is None:
+            report["state"] = "NOT_CONFIGURED"
+            return
+        kind = str(annotation.get("kind") or "")
+        report["item_type"] = ("memo" if kind == "note"
+                               else "unclear_marker" if kind == "unclear" else None)
+        if not planned.get("changed") and not annotation.get("changed"):
+            # 同一段文字已经读过（模型也给了同样的回答）：一页只有一组取得/停点和一条批注，
+            # 不再写第二个版本。
+            report["state"] = str(annotation.get("state") or "UNCHANGED")
+            report["version_number"] = head.get("version_number")
+            return
+        commit_content = planned["content"]
+        operation_key = planned["operation_key"]
+        if annotation.get("changed"):
+            planned_content = annotation.get("content")
+            if not isinstance(planned_content, str) or not planned_content:
+                report["reason"] = "ANNOTATION_PLAN_BROKEN"
+                return
+            # 取得/停点已把文档标到 owner 的下一个版本号，批注又标了一次：合并后回落到 owner
+            # 真正会创建的那**一个**版本号，和读私人材料时同一条规则。
+            commit_content = self._rebase_merged_version(
+                planned_content,
+                owner_version_number=int(head.get("version_number") or 0) + 1)
+            operation_key = operation_key_for(
+                str(operation_key), "page_annotation",
+                str(annotation.get("operation_key") or annotation.get("item_id") or ""),
+                str(annotation.get("intent") or ""))
+        # 一次有限的私人写入：和别的 owner 提交走同一个暂停边界，文档自己的 head 就是 CAS 前提。
+        if not self._pause_lease.acquire():
+            report["reason"] = "PAUSE_CONTENDED"
+            return
+        try:
+            held = life_pause.gate(self.pause_state_root)
+            if held.get("blocked"):
+                report["reason"] = str(held.get("reason_code") or "PAUSED_BEFORE_WRITE")
+                return
+            try:
+                outcome = self.artifact_port.commit_version(
+                    artifact_id=doc_id, expected_head=head.get("version_id"),
+                    content=commit_content, grant_id=str(self.artifact_grant_id),
+                    operation_key=operation_key)
+            except LifeArtifactUnavailable as exc:
+                outcome = ArtifactOutcome(
+                    effect_state=EffectState.UNKNOWN, status="UNREACHABLE",
+                    reason="ARTIFACT_OWNER_UNREACHABLE", detail=str(exc)[:200],
+                    artifact_id=doc_id, operation_key=operation_key)
+            except ArtifactOwnerRefused as exc:
+                outcome = ArtifactOutcome(
+                    effect_state=EffectState.REFUSED, status=exc.status, reason=exc.reason,
+                    detail=exc.detail[:200], artifact_id=doc_id,
+                    operation_key=operation_key)
+            except Exception as exc:  # noqa: BLE001 - the stay is already complete
+                # 写批注失败不能把这次停留也算失败：除了 owner 自己的两种答复，其它异常同样
+                # 落成 UNKNOWN 形状，随后按 owner 账本对账。
+                outcome = ArtifactOutcome(
+                    effect_state=EffectState.UNKNOWN, status="OWNER_CALL_FAILED",
+                    reason=type(exc).__name__, detail=str(exc)[:200],
+                    artifact_id=doc_id, operation_key=operation_key)
+        finally:
+            self._pause_lease.release()
+        if outcome.unknown:
+            # 不把一个未知的写入叫成功或失败：先问 owner 自己的账本。
+            try:
+                outcome = self.artifact_port.resolve_operation(operation_key)
+            except Exception:  # noqa: BLE001 - unresolved stays reported as UNKNOWN
+                pass
+        report["version_number"] = outcome.version_number
+        if outcome.applied:
+            report["state"] = "APPLIED"
+            report["version_created"] = outcome.version_created
+        elif outcome.unknown:
+            report["state"] = "UNKNOWN"
+            report["reason"] = outcome.reason or outcome.status
+        else:
+            report["state"] = "REFUSED"
+            report["reason"] = outcome.reason or outcome.status
+
     def _reading_adoption_spec(self) -> dict[str, Any]:
         """The Activity shape for reading: a positional read, open-ended like the work.
 
@@ -4034,6 +4316,7 @@ class AutonomousLifeCycle:
         not actually create would be a menu of things that fail when chosen.
         """
 
+        self.last_review_seed_withheld = None
         #: v0.5: today's two reserved slots are read first.  They do not need the project owner
         #: (an obligation is carried out on an existing artifact), and with no plan/obligation
         #: wired the list is empty and everything below is exactly as before.
@@ -4076,10 +4359,27 @@ class AutonomousLifeCycle:
         #: v0.4 C: the experiences a review could actually cite, read through A's Memory this round.
         #: The seam is asked once; an unbound Memory yields ``[]`` *and* a named error (never a lie).
         experiences: list[dict[str, Any]] = []
+        #: The owner's own classification of each experience's *source artifact*.  A review's
+        #: writing result must not become the next automatic review seed.  The classification is
+        #: one bounded owner read per distinct source (never a second index, never body text).
+        review_excluded_refs: list[str] = []
+        review_source_verified = True
         if practice_available:
             experiences = self.practice.experiences(query=self._practice_query())
             if self.practice.last_error:
                 self.last_practice_error = self.practice.last_error
+            if experiences:
+                classification = self.practice.review_result_artifact_ids(
+                    [row.get("artifact_ref") for row in experiences])
+                if str(classification.get("status") or "") == "UNKNOWN":
+                    # An unclassified source is never assumed ordinary: withhold this round's
+                    # automatic review seed (named), and leave every other candidate untouched.
+                    review_source_verified = False
+                    self.last_review_seed_withheld = str(
+                        classification.get("reason") or lpc.REASON_SOURCE_KIND_UNKNOWN)[:120]
+                else:
+                    review_excluded_refs = [str(ref) for ref in
+                                            (classification.get("review_ids") or ())]
         if due_items is not None:
             self._round_future_items = [dict(row) for row in due_items]
         options = lpo.build_options(
@@ -4090,6 +4390,8 @@ class AutonomousLifeCycle:
             research_available=research_available,
             experiences=experiences,
             practice_available=practice_available,
+            review_excluded_artifact_refs=review_excluded_refs,
+            review_source_verified=review_source_verified,
             limit=self.max_project_options,
             reserved=reserved)
         # The source reads this in the same round, so the candidates and this report agree.
@@ -5785,12 +6087,17 @@ class AutonomousLifeCycle:
         opportunity is part of the identity, so a re-observed identical set stays quiet while a real
         new one reopens the question.  Nothing here hides the World, disables an owner or replays a
         Decision.
+
+        The suppression is bounded: after ``MAX_CONSECUTIVE_SAME_STATE_BLOCKS`` identical blocks the
+        round is let through with ``REASON_FORCED_RELEASE``, so a state that cannot change can no
+        longer eat a whole day's worth of requests.  The budget, the pause gate and every owner stay
+        exactly as they were -- the round that is let through pays for its own request.
         """
 
         view = readiness if readiness is not None else self.step_readiness(act=True)
         parts = self._situation_parts(material=material, readiness=view)
         self._round_situation = parts
-        block = self.reconsideration.block_situation(parts=parts, at=observed_at)
+        block = reconsideration_gate(self.reconsideration, parts=parts, at=observed_at)
         self.last_reconsideration = dict(block)
         return block
 
@@ -5889,6 +6196,7 @@ class AutonomousLifeCycle:
         self._last_foreground_record = None
         self._round_situation = None
         self._round_work_binding = None
+        self._round_decision_record = None
         self._round_park_activity_ref = None
         # v0.4 C: per-round report state.  ``last_wait_basis`` is recomputed from this round's
         # owner reads only, and ``last_correlation_id`` names the round a step plan belongs to.
@@ -6435,11 +6743,14 @@ class AutonomousLifeCycle:
                                 llm_calls=1 if self._round_step_spec_built else 0,
                                 detail="request budget refused: %s" % exc.reason_code)
         except Exception as exc:  # a real failure, reported as one
-            self.last_error = f"{type(exc).__name__}: {exc}"
             if is_no_change(exc):
                 # A legal "nothing to change": the content request happened, the model answered
-                # and no owner was called.  It is reported as a no-op, not as a failure.
+                # and no owner was called.  It is reported as a no-op, not as a failure -- so it
+                # is not recorded as an error either (its self-note is the model's own text and
+                # has no place in a diagnostic read surface).
+                self.last_error = None
                 return self._work_no_change(base, llm_calls=1)
+            self.last_error = f"{type(exc).__name__}: {exc}"
             if isinstance(exc, ReadingResponseFailed):
                 # The private response (or its pure plan) is unusable: nothing was written, and
                 # this is a refused step rather than a decision failure.
@@ -7127,6 +7438,24 @@ class AutonomousLifeCycle:
         )
         return spec.to_dict()
 
+    def _stay_title(self, chosen_target: str, plan: Mapping[str, Any]) -> str:
+        """这一条停留的展示标题：同一次观察里同一 target 的世界包标题优先，否则用旧表。
+
+        标题只影响 Activity 怎么被叫，不参与 target、完成条件或任何执行判断；target 里
+        仍然只有 place/descriptor/seconds，所以计划不会因为标题而漂移。
+        """
+
+        for item in self.last_world_opportunity_view:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("target_ref") or "") != str(chosen_target):
+                continue
+            title = item.get("title")
+            if isinstance(title, str) and title.strip():
+                return " ".join(title.split())[:80]
+            break
+        return STAY_TITLES.get(str(plan.get("descriptor") or ""), STAY_TITLE_DEFAULT)
+
     def _stay_adoption_spec(self, targets: list[str], origin: str, chosen_target: str,
                             lr5: Any) -> dict[str, Any]:
         """The Activity shape for a bounded, non-productive stay she really chose.
@@ -7148,7 +7477,7 @@ class AutonomousLifeCycle:
         expected = "%s%s" % (WORLD_STAY_FACT_PREFIX, chosen_target[len(STAY_REF_PREFIX):])
         spec = ag2.ActivityAdoptionSpec(
             activity_kind=STAY_ACTIVITY_KIND,
-            title="在一个地方待一会儿",
+            title=self._stay_title(chosen_target, plan),
             target_refs=targets,
             origin_ref=origin,
             progress_contract_spec={
@@ -7910,8 +8239,13 @@ class AutonomousLifeCycle:
         The decision request was already started, so it is allowed to finish; its result
         may not be adopted, may not produce a content request and may not reach an owner.
         The round has no "cancelled adoption" status, so the abort is a raise.
+
+        It is also the one seam that sees the *committed* DecisionRecord before adoption, so the
+        round keeps it: a legal ``no_change`` raised later by the lazy content step must still be
+        reported against the Decision that was really committed, not as an anonymous NO_ACTION.
         """
 
+        self._round_decision_record = decision_record
         self._pause_confirmed("after_decision_before_adoption")
         # The Decision request was a real wait: what the round read before it is no longer
         # proof of the owners' state.  The very next thing that happens is the owner-side
@@ -8916,6 +9250,17 @@ class AutonomousLifeCycle:
                        % (plan["place"], elapsed, plan["seconds"]))
         stay["phase"] = STAY_PHASE_END
         stay["ended_at"] = obs
+        # 读完之后的后果：这处地点自己带着文字、这次停留又是"读"的那种，就在她自己的私人
+        # 事项里留一条批注。这是**完成之后**的后果，失败只记形状，不改这次停留的完成。
+        if str(plan["descriptor"]) in WORLD_READING_STAY_DESCRIPTORS:
+            try:
+                self._annotate_world_reading(
+                    base, place=plan["place"], descriptor=plan["descriptor"], observed_at=obs)
+            except Exception as exc:  # noqa: BLE001 - a note failure is never a stay failure
+                base["world_reading"] = {
+                    "state": "NOT_WRITTEN", "place": str(plan["place"]),
+                    "descriptor": str(plan["descriptor"]), "item_type": None,
+                    "version_number": None, "reason": type(exc).__name__}
         return self._finish(
             base, OUTCOME_ACTED, llm_calls=1,
             detail="stayed at %s for %ds (declared %ds); the World owner's own end "
@@ -9469,14 +9814,43 @@ class AutonomousLifeCycle:
         self._journal(receipt)
         return receipt
 
+    def _carry_committed_decision(self, base: dict[str, Any]) -> None:
+        """Carry this round's committed Decision identity into an already-paid no-op result.
+
+        Only fills fields the round does not already have; it never overwrites a value that is
+        already present and never reconstructs one from an outcome name.  ``_round_decision_record``
+        is the record AG-2 really committed (captured at the pre-adoption hook) and is reset at the
+        top of every round, so a failed round without a committed Decision stays empty instead of
+        borrowing the previous round's record.
+        """
+
+        record = self._round_decision_record
+        if record is None:
+            return
+        for key, value in (
+            ("decision", getattr(record, "decision", None)),
+            ("decision_id", getattr(record, "decision_id", None)),
+            ("decision_route", getattr(record, "decision_route", None)),
+            ("selected_candidate_ref", getattr(record, "selected_candidate_ref", None)),
+        ):
+            if value not in (None, "") and not base.get(key):
+                base[key] = value
+        if not base.get("reason_codes"):
+            codes = list(getattr(record, "reason_codes", []) or [])
+            if codes:
+                base["reason_codes"] = codes
+
     def _work_no_change(self, base: dict[str, Any], *, llm_calls: int) -> dict[str, Any]:
         """Report the work writer's explicit ``no_change`` as the legal no-op it is.
 
         No owner is called, no version/progress/experience exists and nothing is completed --
         the round really did consider the work and the subject really did have nothing to add.
         The model's own self-note is *not* copied here: it is text about a private work, and a
-        report is not the place for it.
+        report is not the place for it.  The one thing that *does* travel is the committed
+        Decision's own identity: the round chose ``CONTINUE``/``START`` and the writer then had
+        nothing to add, and both facts belong in the same report.
         """
+        self._carry_committed_decision(base)
         base["work_no_change"] = {"reason_code": "NO_CHANGE", "owner_called": False,
                                   "version_created": False}
         # v0.4 day-life: the no-op is *remembered*, not just reported.  The ledger entry is keyed by
@@ -9546,6 +9920,8 @@ class AutonomousLifeCycle:
             base["method_created"] = dict(self.last_method_created)
         if self.last_practice_error:
             base["practice_error"] = str(self.last_practice_error)[:200]
+        if self.last_review_seed_withheld:
+            base["review_seed_withheld"] = str(self.last_review_seed_withheld)[:160]
         # v0.5 same-work: the bounded context this round really read (or the named reason it
         # could not).  Reported on every exit path after it was read; a round that exited before
         # any read reports nothing rather than the previous round's view.

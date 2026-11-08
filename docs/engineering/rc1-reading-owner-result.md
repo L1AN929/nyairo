@@ -97,9 +97,9 @@ python3 tests/test_private_daily_items.py -v      # Ran 14 tests, OK, 12.9s, 退
 笔记门禁（父级指定，cwd = 仓库根，**不是**等价检查）：
 
 ```
-node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
+node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
   -> ok: 44 note(s) tree and relative links verified        (退出码 0)
-node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
+node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
   -> ok: 44 note(s) verified                                (退出码 0)
 ```
 

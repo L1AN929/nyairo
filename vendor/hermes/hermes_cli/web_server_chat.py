@@ -13,6 +13,7 @@ import re
 import sys
 import tempfile
 import threading
+import urllib.parse
 import urllib.request
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pathlib import Path
@@ -170,7 +171,7 @@ def _ws_host_origin_reason(ws: "WebSocket") -> Optional[str]:
     bound host.  Non-web origins (packaged Electron: file://, null, app://) are
     trusted — the credential check is the real auth boundary there.
     """
-    from hermes_cli.web_server import _is_accepted_host, app
+    from hermes_cli.web_server import _is_accepted_host, _origin_matches_host, app
     bound_host = getattr(app.state, "bound_host", None)
     if not bound_host:
         return None
@@ -184,7 +185,11 @@ def _ws_host_origin_reason(ws: "WebSocket") -> Optional[str]:
     parsed = urllib.parse.urlparse(origin)
     if parsed.scheme not in {"http", "https"}:
         return None
-    if not parsed.netloc or not _is_accepted_host(parsed.netloc, bound_host, trusted_public_hosts):
+    if (
+        not parsed.netloc
+        or not _is_accepted_host(parsed.netloc, bound_host, trusted_public_hosts)
+        or not _origin_matches_host(origin, host_header)
+    ):
         return f"origin_mismatch origin={origin} bound={bound_host}"
     return None
 

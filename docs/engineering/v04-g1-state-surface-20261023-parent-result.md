@@ -21,7 +21,7 @@ BLOCKED取最后一条真正考虑过事情的窗口，尾随NOT_DUE静默不是
 均在唯一工作树执行：
 
 1. WSL `/tmp/rc104-venv/bin/python -B -m unittest -v tests.test_g1_state_surface`，PYTHONDONTWRITEBYTECODE=1：6例、0.108秒、OK、shell0。
-2. `npx tsx C:/Users/28556/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts`：87篇tree/相对链接通过，shell0。
+2. `npx tsx <USER_HOME>/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts`：87篇tree/相对链接通过，shell0。
 3. 同路径verify-agent-note-format.ts：87篇通过，shell0。
 4. 同路径verify-archived-agent-notes.ts：archive0/seal0通过，shell0。
 5. WSL现成one_day_life.py status纯读验收，父级在同一命令前后记录state目录文件mode/size/mtime、读取canonical/ledger/Memory并只读检查lease。shell0，安全证据 `.agents/worker-runs/20261023-g1-state-surface-status-parent.json`，九项checks全真：WAITING、前台ref可见、PAUSED可见、canonical revision15、ledger13、Memory绑定存在、前后文件快照相等、lease FREE、status shell0。原pause仍absent/false。

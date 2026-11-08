@@ -771,25 +771,29 @@ def _reconcile(
             return _evidence("in_flight", None, current=current, record=mine)
         realized = wtd.realize_due_travel(hermes_home=home, environment=env, now=now)
         status = realized.get("status")
-        if status == "arrived":
-            records = _travel_index(home, env, wtd)
-            mine = records.get(segment["execution_id"])
-            current = _world_position(home, world, wtd, wf)
-        elif status == "in_progress":
+        if status == "in_progress":
             return _evidence("in_flight", None, current=current, record=mine)
-        elif status == "disabled":
+        if status == "disabled":
             # feature gate 关闭不是旅程失败：不写账本、不标记终态，开关恢复后可继续。
             return _evidence(
                 "feature_disabled", "TRAVEL_TIME_DISABLED", current=current, record=mine
             )
-        elif status == "unavailable":
+        if status == "unavailable":
             return _evidence(
                 "unavailable",
                 realized.get("reason_code", "TRAVEL_UNAVAILABLE"),
                 current=current,
                 record=mine,
             )
-        else:
+        # 故障窗口③：到达可能已经由 World owner 的另一条结算路径先一步落盘
+        # （owner tick、观察缝的 lazy realize，或并发的推进器）。本进程这一次
+        # realize_due_travel 若因 active 已被清掉而返回 none/failed，它不是位置
+        # 权威；必须按同一 execution_id 的 travel 记录与当前位置重新对账。
+        # 只有记录真的 ARRIVED 才补写账本；否则维持原判，不凭位置相同伪造成功。
+        records = _travel_index(home, env, wtd)
+        mine = records.get(segment["execution_id"])
+        current = _world_position(home, world, wtd, wf)
+        if status != "arrived" and (mine is None or mine["status"] != TRAVEL_ARRIVED):
             return _evidence(
                 "blocked",
                 realized.get("reason_code", "ARRIVAL_REALIZATION_FAILED"),

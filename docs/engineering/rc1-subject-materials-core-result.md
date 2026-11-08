@@ -157,8 +157,8 @@ python3 $PI_SCRATCH_DIR/c_run_new_exact.py test_subject_private_materials
 python3 $PI_SCRATCH_DIR/c_run_new_exact.py test_subject_reading_cycle
 
 # 决策笔记门禁（repo cwd）
-node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
-node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
+node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts
+node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-format.ts
 ```
 
 ---

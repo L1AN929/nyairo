@@ -6,10 +6,12 @@
 1. **``step_readiness``：当前前台 Activity 还有没有一步能真的执行？**
    「有材料」不等于「有可执行步骤」。材料读尽 / 来源被撤 / 作品 writer 在同一版本上明确
    ``no_change`` / 前台的 target 是这个世界进程执行不了的动词 / 前台本身就是只有一个动作、
-   一个完成条件的 BODY Activity（没有定义过的下一步） —— 这几种情况下 owner 里那条
-   Activity 仍是 ``ACTIVE``，但这一轮没有任何一步可以落地。判定只读，且**必须绑定**：只有
-   同时拿到 ``activity_ref`` 与它自己的 ``target_ref``（外加 source revision）时才算一条可
-   对外陈述的事实；否则 ``available=None``（不知道），绝不冒充「做不下去了」。
+   一个完成条件的 BODY Activity（没有定义过的下一步）/ 前台是一次 World 移动，而移动的唯一
+   Life 步骤就是出发（后续分段与到达结算都归 World owner，不属于本 Activity 的又一步） ——
+   这几种情况下 owner 里那条 Activity 仍是 ``ACTIVE``，但这一轮没有任何一步可以落地。判定
+   只读，且**必须绑定**：只有同时拿到 ``activity_ref`` 与它自己的 ``target_ref``（外加 source
+   revision）时才算一条可对外陈述的事实；否则 ``available=None``（不知道），绝不冒充
+   「做不下去了」。
 
    唯一对外的形状是 AG-1 已经消费的那一个 ASCII 布尔键
    ``current_step_unavailable_true``（``agency_decision_ag1.OBSERVED_FACT_CURRENT_STEP_UNAVAILABLE``），
@@ -61,6 +63,12 @@ REASON_WORLD_STEP_NOT_WIRED = "WORLD_STEP_NOT_WIRED"
 #: staged REST protocol.  The name says only that, never that the action failed or succeeded --
 #: submission, settlement and LR-5 completion stay separate layers.
 REASON_BODY_SINGLE_ACTION = "BODY_SINGLE_ACTION_NO_FURTHER_STEP"
+#: A World move Activity has exactly one Life step: the departure submission.  Reaching the
+#: destination is settled by the World owner's own observation (``settle_world_journey``), and
+#: the journey engine starts its own next timed segment after each confirmed one -- neither is a
+#: second Decision step.  While the Activity holds the foreground the cycle builds no
+#: ``world_step`` at all, so a CONTINUE offered here would always land on ``NO_STEP_AVAILABLE``.
+REASON_WORLD_MOVE_NO_FURTHER_STEP = "WORLD_MOVE_NO_FURTHER_STEP"
 REASON_ARTIFACT_STEP_AVAILABLE = "ARTIFACT_STEP_AVAILABLE"
 REASON_STAY_CHECKPOINT = "STAY_CHECKPOINT_STEP"
 REASON_READING_PREFIX = "READING_"
@@ -82,8 +90,14 @@ TARGET_ARTIFACT = "artifact:"
 STAY_ACTIVITY_KIND = "STAY_AT_OBSERVED_PLACE"
 #: The Activity shape of one body step (mirrors ``autonomous_life_cycle.BODY_ACTION_ACTIVITY_KIND``).
 #: One such Activity carries **one** body target -- one action with one completion condition -- so
-#: it is the one World-shaped Activity that has no follow-up step of its own.
+#: it is one of the two World-shaped Activities with no follow-up step of its own (the other is a
+#: GO_TO move, whose one Life step is its departure).
 BODY_ACTIVITY_KIND = "BODY_ACTION_AT_OBSERVED_PLACE"
+#: The Activity shape of one World move (mirrors ``autonomous_life_cycle``'s
+#: ``_world_adoption_spec(activity_kind=...)``).  Its one Life step is the departure; the rest of
+#: the journey belongs to the World owner, so it is the other World-shaped Activity with no
+#: follow-up step of its own.
+GO_TO_ACTIVITY_KIND = "GO_TO_OBSERVED_PLACE"
 
 
 def _token(value: Any) -> str:
@@ -251,6 +265,9 @@ def assess_step_readiness(
     * a stay -> its own internal checkpoint always exists;
     * a BODY Activity (its formal kind, or a ``bodyact:`` target) -> ``False``: one body target is
       one action with one completion condition, and no follow-up step exists in this tree;
+    * a World move Activity (its formal kind, or a ``place:`` target) -> ``False``: its one Life
+      step is the departure; the journey's own segments and the arrival settlement are the World
+      owner's, never a second Decision step;
     * the reading material -> its own situation's ``available`` (EXHAUSTED / REVOKED / ... is a
       *named* reason, and a page left is a real step);
     * a work whose writer already said ``no_change`` on this very revision -> ``False``;
@@ -298,6 +315,16 @@ def assess_step_readiness(
     if namespace == TARGET_STAY or kind == STAY_ACTIVITY_KIND:
         return build(True, REASON_STAY_CHECKPOINT,
                      "a stay's step is its own internal checkpoint")
+    if kind == GO_TO_ACTIVITY_KIND or namespace == TARGET_PLACE:
+        #: One move target == one Life step (the departure).  While this Activity holds the
+        #: foreground the cycle never builds a World step, and the journey engine advances its own
+        #: timed segments and settles the arrival from the World owner's observation -- none of
+        #: that is a second Decision step.  So there is positively no further step to execute.
+        #: This says nothing about whether the move succeeded or whether she arrived; arrival and
+        #: completion stay with LR-5 and the owner's own evidence.
+        return build(False, REASON_WORLD_MOVE_NO_FURTHER_STEP,
+                     "a GO_TO Activity's one Life step is the departure; arrival is settled by "
+                     "the World owner's observation, not by another step")
     if namespace == TARGET_ARTIFACT:
         if isinstance(reading_state, Mapping):
             state = _token(reading_state.get("state") or "UNKNOWN")
@@ -772,6 +799,7 @@ __all__ = [
     "RECORDED_OUTCOMES",
     "REASON_ARTIFACT_STEP_AVAILABLE",
     "REASON_BODY_SINGLE_ACTION",
+    "REASON_WORLD_MOVE_NO_FURTHER_STEP",
     "REASON_CALLER_CANNOT_ACT",
     "REASON_FOREGROUND_NOT_ACTIVE",
     "REASON_NO_BOUND_TARGET",
@@ -783,6 +811,7 @@ __all__ = [
     "REASON_WORLD_STEP_AVAILABLE",
     "REASON_WORLD_STEP_NOT_WIRED",
     "BODY_ACTIVITY_KIND",
+    "GO_TO_ACTIVITY_KIND",
     "ReconsiderationLedger",
     "STEP_UNAVAILABLE_FACT_KEY",
     "STAY_ACTIVITY_KIND",

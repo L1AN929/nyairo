@@ -80,6 +80,14 @@
         {
           "affordance_id": "USE_PHONE",
           "description": "在这里使用手机"
+        },
+        {
+          "affordance_id": "DAZE",
+          "description": "坐着发会儿呆"
+        },
+        {
+          "affordance_id": "POTTER",
+          "description": "在屋里随便转转"
         }
       ],
       "close_hour": null,
@@ -114,6 +122,10 @@
         {
           "affordance_id": "LOOK_AROUND",
           "description": "在这里看看周围"
+        },
+        {
+          "affordance_id": "PEOPLE_WATCH",
+          "description": "坐着看路过的人"
         }
       ],
       "close_hour": 21,
@@ -178,6 +190,10 @@
         {
           "affordance_id": "LOOK_AROUND",
           "description": "在这里看看周围"
+        },
+        {
+          "affordance_id": "PEOPLE_WATCH",
+          "description": "站在路边看路过的人"
         }
       ],
       "close_hour": null,
@@ -193,6 +209,10 @@
         {
           "affordance_id": "LOOK_AROUND",
           "description": "在这里看看周围"
+        },
+        {
+          "affordance_id": "PEOPLE_WATCH",
+          "description": "站在路边看路过的人"
         }
       ],
       "close_hour": null,
@@ -208,6 +228,10 @@
         {
           "affordance_id": "LOOK_AROUND",
           "description": "在这里看看周围"
+        },
+        {
+          "affordance_id": "PEOPLE_WATCH",
+          "description": "站在路边看路过的人"
         }
       ],
       "close_hour": null,

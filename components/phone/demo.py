@@ -70,6 +70,12 @@ ROOM_LIVING_FEATURES: dict[str, str] = {
     "CHIYO_WORLD_ROOM_ENVIRONMENT_ENABLED": "1",
 }
 
+#: ``--ambient-events``: explicit run-time switch so World, Phone and Life read the same
+#: ambient event projection for this run without editing ``instance.json`` or global defaults.
+AMBIENT_EVENTS_FEATURES: dict[str, str] = {
+    "CHIYO_WORLD_AMBIENT_EVENTS_ENABLED": "1",
+}
+
 #: Optional virtual lived-needs relief declared through the *existing* instance
 #: capability document (``state/world_object_capabilities.json``).  The package
 #: format has no consumable/facility schema, so this is the formal instance
@@ -99,8 +105,8 @@ LIVED_NEEDS_HOME_AREA = "bedroom"
 WORLD_INTENT_GATES = ("off", "shadow", "canonical")
 
 
-def effective_features(instance: Mapping[str, Any], *, room_living: bool = False
-                       ) -> dict[str, str]:
+def effective_features(instance: Mapping[str, Any], *, room_living: bool = False,
+                       ambient_events: bool = False) -> dict[str, str]:
     """The switches one ``serve`` runs with: the instance's recorded ``features`` + override.
 
     ``serve`` must not persist this: an old root keeps whatever it recorded, and the override
@@ -110,7 +116,19 @@ def effective_features(instance: Mapping[str, Any], *, room_living: bool = False
     features = {str(k): str(v) for k, v in (instance.get("features") or {}).items()}
     if room_living:
         features.update(ROOM_LIVING_FEATURES)
+    if ambient_events:
+        features.update(AMBIENT_EVENTS_FEATURES)
     return features
+
+
+def _serve_feature_overrides(*, room_living: bool = False,
+                             ambient_events: bool = False) -> Optional[dict[str, str]]:
+    overrides: dict[str, str] = {}
+    if room_living:
+        overrides.update(ROOM_LIVING_FEATURES)
+    if ambient_events:
+        overrides.update(AMBIENT_EVENTS_FEATURES)
+    return overrides or None
 
 
 class PhoneDemoError(RuntimeError):
@@ -452,6 +470,7 @@ def _reclaim_previous_generation(root: Path, instance: Mapping[str, Any]
 def _world_child(root: Path, instance: Mapping[str, Any], *,
                  tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
                  room_living: bool = False,
+                 ambient_events: bool = False,
                  world_intent_gate: Optional[str] = None,
                  business_clock: Optional[Path | str] = None,
                  clock_domain: Optional[str] = None,
@@ -462,7 +481,8 @@ def _world_child(root: Path, instance: Mapping[str, Any], *,
     # plus the serve-time override).  Without that, an old root's recorded
     # ``CHIYO_WORLD_DAILY_RHYTHM_ENABLED=0`` would be honoured by the phone while this hardcoded
     # "0" told the child the opposite -- the physical store could never be enabled consistently.
-    features = effective_features(instance, room_living=room_living)
+    features = effective_features(instance, room_living=room_living,
+                                  ambient_events=ambient_events)
     extra = {
         "CHIYO_WORLD_HOME": str(world_home),
         "HERMES_HOME": str(world_home),
@@ -483,6 +503,9 @@ def _world_child(root: Path, instance: Mapping[str, Any], *,
         # Only a declared switch is passed explicitly: an undeclared one keeps inheriting the
         # operator's environment exactly as before (old default unchanged).
         extra["CHIYO_WORLD_ROOM_ENVIRONMENT_ENABLED"] = room_flag
+    ambient_flag = features.get("CHIYO_WORLD_AMBIENT_EVENTS_ENABLED")
+    if ambient_flag is not None:
+        extra["CHIYO_WORLD_AMBIENT_EVENTS_ENABLED"] = ambient_flag
     if world_intent_gate is not None:
         gate = str(world_intent_gate).strip().lower()
         if gate not in WORLD_INTENT_GATES:
@@ -509,6 +532,7 @@ def _world_child(root: Path, instance: Mapping[str, Any], *,
 def owner_children(root: Path | str, *, generation: str, writer_instance: str,
                    tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
                    room_living: bool = False,
+                   ambient_events: bool = False,
                    world_intent_gate: Optional[str] = None,
                    business_clock: Optional[Path | str] = None,
                    clock_domain: Optional[str] = None,
@@ -525,6 +549,7 @@ def owner_children(root: Path | str, *, generation: str, writer_instance: str,
     supply = _supply_child(root_path, writer_instance=writer_instance, generation=generation)
     world = _world_child(root_path, instance, tick_seconds=float(tick_seconds),
                          room_living=bool(room_living),
+                         ambient_events=bool(ambient_events),
                          world_intent_gate=world_intent_gate,
                          business_clock=business_clock,
                          clock_domain=clock_domain, clock_run_id=clock_run_id)
@@ -1114,6 +1139,7 @@ def serve_instance(
     on_ready: Optional[Any] = None,
     tick_seconds: float = DEFAULT_WORLD_TICK_SECONDS,
     room_living: bool = False,
+    ambient_events: bool = False,
     world_intent_gate: Optional[str] = None,
     #: Explicit compressed-day business clock (a ``demo_business_clock`` file).  The World
     #: child and the phone's World/economy facades read the same file; ``None`` keeps the
@@ -1158,6 +1184,7 @@ def serve_instance(
                            generation=generation)
     world = _world_child(root_path, instance, tick_seconds=float(tick_seconds),
                          room_living=bool(room_living),
+                         ambient_events=bool(ambient_events),
                          world_intent_gate=world_intent_gate,
                          business_clock=business_clock,
                          clock_domain=clock_domain,
@@ -1214,7 +1241,10 @@ def serve_instance(
         # disagree about the physical store or the room light.
         service = phone_service.PhoneService(
             live_instance,
-            feature_overrides=ROOM_LIVING_FEATURES if room_living else None,
+            feature_overrides=_serve_feature_overrides(
+                room_living=bool(room_living),
+                ambient_events=bool(ambient_events),
+            ),
             world_clock=world_clock,
             activity_stop=activity_stop,
         )
@@ -1308,6 +1338,7 @@ def serve_instance(
             # Evidence of what this generation actually runs with (the flags below are the
             # effective ones; nothing here is written back into the instance's features).
             "room_living": bool(room_living),
+            "ambient_events": bool(ambient_events),
             "world_intent_gate": world_intent_gate,
             "business_clock": str(business_clock) if business_clock else None,
             "clock_domain": str(clock_domain) if clock_domain else None,
@@ -1394,6 +1425,7 @@ def _write_serve_marker(root: Path, announcement: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "AMBIENT_EVENTS_FEATURES",
     "CHILD_READY_TIMEOUT",
     "ChildService",
     "DEFAULT_WORLD_LOCATIONS",

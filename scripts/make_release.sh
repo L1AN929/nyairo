@@ -30,6 +30,7 @@
 # It never creates a tag, never touches a branch, and never writes into the
 # repository except inside the output directory.
 set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 usage() {
   cat >&2 <<'USAGE'
@@ -92,16 +93,27 @@ STAGE="$(mktemp -d "${TMPDIR:-/tmp}/nyairo-release.XXXXXXXX")" || exit 3
 echo
 echo "== 1. exporting the committed tree (LF, no .git)"
 git archive --format=tar --prefix='' "$RESOLVED" | tar -x -C "$STAGE" || exit 4
+find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} +
+find "$STAGE" -type f \( -name '*.pyc' -o -name '*.pyo' -o -name '*.pyd' \) -delete
 echo "   files: $(find "$STAGE" -type f | wc -l)"
 
 echo
-echo "== 2. the packaged manifest must verify before anything is published"
-if python3 "$STAGE/scripts/verify_manifest.py" --root "$STAGE"; then
+echo "== 2. the packaged manifest and public-source scan must pass before anything is published"
+if python3 -B "$STAGE/scripts/verify_manifest.py" --root "$STAGE"; then
   echo "   manifest gate: OK"
 elif [ "$ALLOW_UNVERIFIED" = "1" ]; then
   echo "   manifest gate: FAILED (continuing because --allow-unverified was given)" >&2
 else
   echo "   manifest gate: FAILED -- refusing to build the asset" >&2
+  exit 5
+fi
+if python3 -B "$STAGE/scripts/scan_public_source.py" --root "$STAGE" >/dev/null; then
+  echo "   public-source scan gate: OK"
+elif [ "$ALLOW_UNVERIFIED" = "1" ]; then
+  echo "   public-source scan gate: FAILED (continuing because --allow-unverified was given)" >&2
+else
+  echo "   public-source scan gate: FAILED -- refusing to build the asset" >&2
+  python3 -B "$STAGE/scripts/scan_public_source.py" --root "$STAGE" >&2
   exit 5
 fi
 

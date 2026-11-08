@@ -503,7 +503,7 @@ class ExplicitLimitBindingTest(unittest.TestCase):
             dict(max_new_requests=286, total_limit=300, historical_requests=15),
             dict(max_new_requests=287, total_limit=300, historical_requests=14),
             dict(max_new_requests=300, total_limit=300, historical_requests=14),
-            dict(max_new_requests=286, total_limit=301, historical_requests=0),
+            dict(max_new_requests=286, total_limit=1001, historical_requests=0),
             dict(max_new_requests=0, total_limit=300, historical_requests=14),
             dict(max_new_requests=-1, total_limit=300, historical_requests=14),
             dict(max_new_requests=286, total_limit=300, historical_requests=-1),
@@ -544,7 +544,7 @@ class ExplicitLimitBindingTest(unittest.TestCase):
     def test_prepare_refuses_invalid_limits_before_creating_the_root(self):
         combos = [
             dict(request_total_limit=-1, historical_requests=0, max_new_requests=1),
-            dict(request_total_limit=301, historical_requests=0, max_new_requests=1),
+            dict(request_total_limit=1001, historical_requests=0, max_new_requests=1),
             dict(request_total_limit=300, historical_requests=14, max_new_requests=287),
             dict(request_total_limit=300, historical_requests=20, max_new_requests=290),
             dict(request_total_limit=96, historical_requests=0, max_new_requests=96),

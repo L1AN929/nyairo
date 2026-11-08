@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -78,6 +79,23 @@ def _unavailable(reason_code: str, *, world_id: Optional[str] = None) -> dict[st
     }
     if world_id is not None:
         result["world_id"] = world_id
+    return result
+
+
+def _unavailable_world_data_error(error: BaseException) -> dict[str, Any]:
+    """世界包不可读；活动定义错误额外带加载时的同一条固定 code 与结构 path。
+
+    普通读取失败（文件缺失、JSON 坏了）没有这两个属性，仍是纯
+    ``WORLD_PACKAGE_UNREADABLE``，不被当成定义错误。
+    """
+
+    result = _unavailable("WORLD_PACKAGE_UNREADABLE")
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and code:
+        result["code"] = code
+        path = getattr(error, "path", None)
+        if isinstance(path, str) and path:
+            result["path"] = path
     return result
 
 
@@ -181,6 +199,37 @@ def _opening_expectation(
         }
 
 
+#: 地点自带文字的上限：与 content.json 校验（400 字符）同一口径，多一个字都不带。
+MAX_READING_CHARS = 400
+
+
+def _package_readings(world: wrd.WorldData) -> dict[str, str]:
+    """``{location_id: 文字}``，从世界包自己的 content.json 读一次。
+
+    ``entries[<place>].reading`` 是这个地点自己写的文字（书里的一页、墙上的告示）。
+    它只是背景：不是候选、不是动作授权，也不代表她读过。读不到就是空表，绝不猜。
+    """
+
+    package_dir = getattr(world, "package_dir", None)
+    if not package_dir:
+        return {}
+    try:
+        doc = json.loads((Path(package_dir) / "content.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    entries = doc.get("entries") if isinstance(doc, dict) else None
+    if not isinstance(entries, dict):
+        return {}
+    readings: dict[str, str] = {}
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get("reading")
+        if isinstance(text, str) and text.strip():
+            readings[str(key)] = text.strip()[:MAX_READING_CHARS]
+    return readings
+
+
 def _affordances(
     world: wrd.WorldData,
     location_id: str,
@@ -201,15 +250,23 @@ def _affordances(
         )
     except Exception:
         return []
-    return [
-        {
+    projected = []
+    for item in items:
+        entry = {
             "affordance_id": item["affordance_id"],
             "description": item["description"],
             "source": source,
             "action_grant": False,
         }
-        for item in items
-    ]
+        # 世界包声明的可选元数据原样透传；没有就不造默认键。
+        for key in ("title", "suggested_seconds"):
+            if key in item:
+                entry[key] = item[key]
+        # 显式执行机制是定义层引用，不改变 action_grant，也不在这里解释。
+        if isinstance(item.get("execution"), Mapping):
+            entry["execution"] = dict(item["execution"])
+        projected.append(entry)
+    return projected
 
 
 def _observed(
@@ -285,8 +342,8 @@ def location_opportunity_catalog(
     """
     try:
         world = wrd.active_world(environment)
-    except wrd.WorldDataError:
-        return _unavailable("WORLD_PACKAGE_UNREADABLE")
+    except wrd.WorldDataError as error:
+        return _unavailable_world_data_error(error)
     except Exception:
         return _unavailable("WORLD_DATA_UNAVAILABLE")
 
@@ -311,6 +368,7 @@ def location_opportunity_catalog(
     current_place = world.node_place(origin)
     _, current_area = world.split_node(origin)
 
+    readings = _package_readings(world)
     opportunities: list[dict[str, Any]] = []
     for place_id in sorted(world.locations):
         reachability = _reachability(world, origin, place_id)
@@ -319,40 +377,42 @@ def location_opportunity_catalog(
         availability = _availability(world, place_id, local, environment, source)
         location = world.location(place_id) or {}
         nav = world.navigation_of(place_id)
-        opportunities.append(
-            {
-                "location_id": place_id,
-                "name": location.get("name", place_id),
-                "kind": location.get("kind", ""),
-                "here": place_id == current_place,
-                "reachability": reachability,
-                "availability": availability,
-                "opening_expectation": _opening_expectation(
-                    world, place_id, local, environment, source
-                ),
-                "affordances": _affordances(
-                    world, place_id, local, availability, environment, source
-                ),
-                "observed": _observed(
-                    world, scene_snapshot, place_id, current_area, current_place
-                ),
-                "indoor_areas": [
-                    {"area_id": area["area_id"], "name": area["name"], "kind": area["kind"]}
-                    for area in (nav["areas"] if nav else [])
-                ],
-                "time": {
-                    "local_time": local.isoformat(timespec="seconds"),
-                    "local_date": local.date().isoformat(),
-                    "weekday": local.isoweekday(),
-                },
-                "validity": {
-                    "as_of": local.isoformat(timespec="seconds"),
-                    "scope": "NOW_ONLY",
-                    "future": "not_promised",
-                },
-                "action_grant": False,
-            }
-        )
+        entry: dict[str, Any] = {
+            "location_id": place_id,
+            "name": location.get("name", place_id),
+            "kind": location.get("kind", ""),
+            "here": place_id == current_place,
+            "reachability": reachability,
+            "availability": availability,
+            "opening_expectation": _opening_expectation(
+                world, place_id, local, environment, source
+            ),
+            "affordances": _affordances(
+                world, place_id, local, availability, environment, source
+            ),
+            "observed": _observed(
+                world, scene_snapshot, place_id, current_area, current_place
+            ),
+            "indoor_areas": [
+                {"area_id": area["area_id"], "name": area["name"], "kind": area["kind"]}
+                for area in (nav["areas"] if nav else [])
+            ],
+            "time": {
+                "local_time": local.isoformat(timespec="seconds"),
+                "local_date": local.date().isoformat(),
+                "weekday": local.isoweekday(),
+            },
+            "validity": {
+                "as_of": local.isoformat(timespec="seconds"),
+                "scope": "NOW_ONLY",
+                "future": "not_promised",
+            },
+            "action_grant": False,
+        }
+        # 这一处地点自己写的文字，原样带上（读不到就没有这个键）。
+        if readings.get(place_id):
+            entry["reading"] = readings[place_id]
+        opportunities.append(entry)
     opportunities.sort(
         key=lambda item: (
             0 if item["here"] else 1,

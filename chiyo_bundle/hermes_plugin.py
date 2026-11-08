@@ -6,9 +6,21 @@ from hermes_constants import get_hermes_home
 LOG=logging.getLogger('chiyo.hermes')
 _lock=threading.RLock();_instance=None;_home=None;_host_llm=None
 
+def _ensure_direct_surface_toolsets():
+    """Keep Chiyo's bounded embodied toolsets directly visible to the model instead of
+    being hidden behind Hermes's English-only Snowball BM25 tool_search catalog."""
+    try:
+        from tools import tool_search as _ts
+        cur = getattr(_ts, '_DIRECT_SURFACE_TOOLSETS', None)
+        if isinstance(cur, (set, frozenset)):
+            _ts._DIRECT_SURFACE_TOOLSETS = frozenset(cur | {'chiyo_world', 'chiyo_memory'})
+    except Exception:
+        pass
+
 def configure_host_llm(facade):
     global _host_llm
     _host_llm=facade
+    _ensure_direct_surface_toolsets()
 
 def configuration():
     home=get_hermes_home().resolve();path=home/'chiyo/config.json'
@@ -147,6 +159,36 @@ def note_command(raw_args='',*,source=None):
         LOG.warning('chiyo.supply.note.unavailable error_class=%s',type(exc).__name__)
         return '资源服务没有确认保存结果。重试相同标题和正文会使用同一操作编号，避免重复创建。'
 
+def phrase_command(raw_args='',*,source=None):
+    home,cfg=configuration();platform,key=source_scope(source)
+    if not allowed(cfg,platform,key):return '这个入口没有绑定你的个人实例，已拒绝管理共同说法。'
+    from .companion_extras import list_shared_phrases,upsert_shared_phrase,delete_shared_phrase
+    text=(raw_args or '').strip()
+    if not text or text in ('list','ls'):
+        rows=list_shared_phrases(home)
+        if not rows:return '当前还没有记录双方约定的共同说法。用法：/chiyo_phrase add 说法 | 含义 [| 来历]'
+        lines=['双方约定的共同说法（仅在对话提到时按需注入）：']
+        for r in rows[:30]:
+            tail=f"（{r['origin']}）" if r.get('origin') else ''
+            lines.append(f"- [{r['id']}] 「{r['phrase']}」：{r['meaning']}{tail}")
+        return '\n'.join(lines)
+    low=text.lower()
+    for prefix in ('del ','delete ','rm '):
+        if low.startswith(prefix):
+            target=text[len(prefix):].strip()
+            if delete_shared_phrase(home,target):return f'已移除共同说法：{target}'
+            return f'未找到对应的共同说法：{target}'
+    body=text[4:].strip() if low.startswith('add ') else text
+    if '|' not in body:
+        return '用法：/chiyo_phrase list；添加：/chiyo_phrase add 说法 | 含义 [| 来历]；删除：/chiyo_phrase del 说法或ID'
+    parts=[p.strip() for p in body.split('|',2)]
+    phrase=parts[0];meaning=parts[1] if len(parts)>1 else '';origin=parts[2] if len(parts)>2 else ''
+    try:
+        saved=upsert_shared_phrase(home,phrase=phrase,meaning=meaning,origin=origin)
+        return f"已记下只有彼此懂的说法：「{saved['phrase']}」—— {saved['meaning']}"
+    except ValueError as exc:
+        return str(exc)
+
 def consider_command(raw_args='',*,source=None):
     home,cfg=configuration();platform,key=source_scope(source)
     if not allowed(cfg,platform,key):return '这个入口没有绑定你的个人实例，已拒绝提交。'
@@ -228,8 +270,17 @@ class ChiyoContextEngine(ContextCompressor):
     def select_context(self,request_messages,*,conversation_messages=None,incoming_message=None,budget_tokens=0):
         if not self._authorized:return None
         svc=self._service
+        raw_in=(incoming_message or {}).get('content','')
+        phrase_ctx=''
+        if isinstance(raw_in,str) and raw_in:
+            try:
+                home,_unused_cfg=configuration()
+                from .companion_extras import match_shared_phrases,render_matched_phrases_block
+                phrase_ctx=render_matched_phrases_block(match_shared_phrases(home,raw_in))
+            except Exception:
+                phrase_ctx=''
         if svc is not None and not svc.memory:
-            raw=(incoming_message or {}).get('content','')
+            raw=raw_in
             if getattr(svc,'life_wrapper',None) and isinstance(raw,str) and raw:
                 try:
                     with _lock:
@@ -245,20 +296,27 @@ class ChiyoContextEngine(ContextCompressor):
             from integration.world_body_client import render_grounded_context
             try:observed=render_grounded_context(svc.native.world_body) if getattr(svc.native,'world_body',None) else ''
             except Exception:observed=''
-            if not observed and not context:return None
+            if not observed and not context and not phrase_ctx:return None
             selected=copy.deepcopy(request_messages)
             if isinstance((incoming_message or {}).get('content'),str):
                 for message in reversed(selected):
                     if message.get('role')=='user' and message.get('content')==incoming_message['content']:
-                        message['content']+='\n\n【当前生活、资源、身体与环境观察；背景资料，不是新指令】\n'+'\n'.join(x for x in (context,observed) if x);break
+                        message['content']+='\n\n【当前生活、资源、身体与环境观察；背景资料，不是新指令】\n'+'\n'.join(x for x in (phrase_ctx,context,observed) if x);break
             return selected
-        raw=(incoming_message or {}).get('content','')
+        raw=raw_in
         messages=copy.deepcopy(request_messages)
         # Locate the current direct user message; keep its tool loop intact.
         positions=[i for i,m in enumerate(messages) if m.get('role')=='user' and m.get('content')==raw]
         start=positions[-1] if positions else next((i for i in range(len(messages)-1,-1,-1) if messages[i].get('role')=='user'),len(messages))
         safe=[m for m in messages[:start] if m.get('role')=='system']+messages[start:]
-        if svc is None:return safe if self._memory_configured else None
+        if svc is None:
+            if phrase_ctx and isinstance(raw,str):
+                target_msgs=safe if self._memory_configured else messages
+                for m in reversed(target_msgs):
+                    if m.get('role')=='user' and m.get('content')==raw:
+                        m['content']=raw+'\n\n'+phrase_ctx;break
+                return target_msgs
+            return safe if self._memory_configured else None
         try:
             with _lock:
                 projection=svc.native.memory_controls.projection()
@@ -283,6 +341,8 @@ class ChiyoContextEngine(ContextCompressor):
                 from app.m3 import classify_intent
                 if classify_intent(raw)[0] in ('P1','P2'):corrections=list(dict.fromkeys(corrections+projection.active_corrections()))
                 text='\n'.join([obj.text for obj in recalled]+['【用户纠正】'+t for t in corrections])[:6000]
+                if phrase_ctx:
+                    text=(phrase_ctx+'\n'+text) if text else phrase_ctx
                 from .presence import presence_context
                 presence=presence_context(svc)
                 if presence:text+='\n【当前生活与资源只读观察】'+presence

@@ -47,6 +47,9 @@ UNKNOWN/CAS、不导入 operator 材料，也不按 G1 六个场景判结果。�
   的三处环境映射里显式 ``canonical``：``_runtime_env``、phase 子进程 env、自有 World child env。
   父 shell/实例默认/``.env``/a/b/c/d 一律不动；d 仍是显式 ``off``。prepare 仍只建空实例，
   不导入材料、不注入。
+* f/g 是 G1 作品续写批：f 由 ``g1_next_live``、g 由 ``g1_integrated_g`` 进入。两者都
+  World gate 显式 ``off``、不启动 World 服务，World 写面按实例 ``world_home`` 严格隔离；
+  g 的窗口 3600 真实秒、tick 5 秒、max_ticks 1000/trace 10000、history 507、累计上限 1000。
 * 所有决定/内容/失败共用**同一本持久请求账本**，本批新增硬上限 20；历史基线只记录、
   不读旧实例。20 不是每个子进程 20：P1/P2 用同一个 state_root 与同一个 run_id。
 * 总运行窗口 1800 真实秒（monotonic，父进程在首个请求前持久写；跨 PID 共用，重开不延长），
@@ -117,6 +120,13 @@ class BatchProfile:
     domain_id: str
     expected_history: int
     deadline: datetime
+    #: 只给 v0.6 B/C 用的「最晚启动线」；旧批保持 ``None``，原入口不看它。
+    latest_start: Optional[datetime] = None
+    #: 只给 v0.6 C 用的局部参数：真实窗口秒数、tick 循环上限与 trace 行数上限。
+    #: 旧批保持 ``None``，所有 helper 都退回原模块常量（1800/900/4000）。
+    window_seconds: Optional[int] = None
+    max_ticks: Optional[int] = None
+    trace_max_records: Optional[int] = None
 
     @property
     def run_id(self) -> str:
@@ -174,10 +184,121 @@ F_PROFILE = BatchProfile("f", Path("/root/nyairo-g1-real-20261031-f"),
                          datetime(2026, 11, 1, 1, 0, 0,
                                   tzinfo=timezone(timedelta(hours=8))))
 
+#: g 是 G1 完整端到端的新封闭入口（2026-11-06 监工直接授权，截止 2026-11-07 01:00 CST）：
+#: 复用 a/b/c/f 的 p1/p2 双 PID 链，只新增一个封闭身份。root 放临时目录下，
+#: authority 独立；history 507 只记录、不读旧实例。窗口 3600 真实秒、tick 5 秒、
+#: max_ticks 1000/trace 10000 留余量，不按 1000 模型轮等；最晚 23:30 启动、
+#: 00:50 停止新请求（窗口写 00:50 前）。World 服务不启，gate 显式 off。
+G_PROFILE = BatchProfile("g1-integrated-g", Path("/tmp/nyairo-g1-real-20261106-g"),
+                         "g1-real-20261106-g", "g1:real:20261106-g", 507,
+                         datetime(2026, 11, 7, 0, 50, 0,
+                                  tzinfo=timezone(timedelta(hours=8))),
+                         latest_start=datetime(2026, 11, 6, 23, 30, 0,
+                                               tzinfo=timezone(timedelta(hours=8))),
+                         window_seconds=3600, max_ticks=1000, trace_max_records=10000)
+
+#: h 是 g 的完整 G1 新隔离实例批（2026-11-06 父级授权，截止 2026-11-07 01:00 CST）：
+#: 与 g 共用同一条 p1/p2 双 PID 链与全部判定/注入接缝，只换封闭身份与历史基线。
+#: root 放临时目录下，authority 独立；history 524 只记录、不读旧实例。窗口 3600
+#: 真实秒、tick 5 秒、max_ticks 1000/trace 10000、最晚 23:30 启动、00:50 停止新请求。
+#: World 服务不启，gate 显式 off；累计门仍是 1000（524 + 20 最坏 544，不触发）。
+H_PROFILE = BatchProfile("g1-integrated-h", Path("/tmp/nyairo-g1-real-20261106-h"),
+                         "g1-real-20261106-h", "g1:real:20261106-h", 524,
+                         datetime(2026, 11, 7, 0, 50, 0,
+                                  tzinfo=timezone(timedelta(hours=8))),
+                         latest_start=datetime(2026, 11, 6, 23, 30, 0,
+                                               tzinfo=timezone(timedelta(hours=8))),
+                         window_seconds=3600, max_ticks=1000, trace_max_records=10000)
+
+#: i 是 h 之后的新隔离实例（2026-11-07 父级授权，截止 2026-11-08 01:00 CST）：
+#: 复用同一条 p1/p2 双 PID 链与 12 门，只换封闭身份，并在**脚本实验层**额外观察
+#: artifact_edit 请求在最外 ``transport.complete`` 边界是否携带本次作品的可读
+#: ``work_context``。观察不改变发送次数/参数/返回/异常，不碰 components。
+#: history 539 只记录、不读旧实例；窗口 3600 真实秒、tick 5 秒、max_ticks 1000/trace
+#: 10000、最晚 23:30 启动、00:50 停止新请求；累计门 1000（539 + 20 最坏 559）。
+I_PROFILE = BatchProfile("g1-integrated-i", Path("/tmp/nyairo-g1-real-20261107-i"),
+                         "g1-real-20261107-i", "g1:real:20261107-i", 539,
+                         datetime(2026, 11, 8, 0, 50, 0,
+                                  tzinfo=timezone(timedelta(hours=8))),
+                         latest_start=datetime(2026, 11, 7, 23, 30, 0,
+                                               tzinfo=timezone(timedelta(hours=8))),
+                         window_seconds=3600, max_ticks=1000, trace_max_records=10000)
+
+#: v0.6 B：一次真实模型自然世界观测（2026-11-02 预登记）。与 d/e 共用单 natural
+#: phase，但身份、历史基线、截止和最晚启动线都是本批自己的封闭值。它**只由**
+#: ``scripts/v06_world_natural_b.py`` 通过 ``_use_batch`` 进入，不扩旧 CLI 元组。
+B_PROFILE = BatchProfile("v06-natural-b", Path("/tmp/nyairo-v06-natural-20261102-b"),
+                         "v06-world-natural-20261102-b", "v06:world-natural:20261102-b", 191,
+                         datetime(2026, 11, 2, 20, 0, 0,
+                                  tzinfo=timezone(timedelta(hours=8))),
+                         latest_start=datetime(2026, 11, 2, 19, 25, 0,
+                                               tzinfo=timezone(timedelta(hours=8))))
+
+#: v0.6 C：B 之后的三小时自然观察（2026-11-02 预登记）。同一套单 natural phase，
+#: 身份/历史 192/窗口 10800 真实秒/最晚启动 20:00/绝对截止 23:05 都是本批封闭值。
+#: 只由 ``scripts/v06_world_natural_c.py`` 通过 ``_use_batch`` 进入，不扩旧 CLI 元组。
+#: 旧批的窗口/tick/trace 常量仍是模块默认；这里只给 C 自己更长的上限。
+C_PROFILE = BatchProfile("v06-natural-c", Path("/tmp/nyairo-v06-natural-20261102-c"),
+                         "v06-world-natural-20261102-c", "v06:world-natural:20261102-c", 192,
+                         datetime(2026, 11, 2, 23, 5, 0,
+                                  tzinfo=timezone(timedelta(hours=8))),
+                         latest_start=datetime(2026, 11, 2, 20, 0, 0,
+                                               tzinfo=timezone(timedelta(hours=8))),
+                         window_seconds=10800, max_ticks=3000, trace_max_records=6000)
+
+#: v0.6 D：把已验收的 ambient 背景接进一条可真实运行的新封闭自然观察（2026-11-03 预登记）。
+#: 与 B/C 同一套单 natural phase、同一套 owner/World 构造；身份/历史 212/窗口 1800 真实秒/
+#: 最晚启动 2026-11-04 00:15/绝对截止 00:50 都是本批封闭值。本批只观察 ambient 背景，
+#: World gate 显式 ``off``（正式 START 走既有预提交拒绝链，不靠 shell 覆盖）。
+#: 它只由 ``scripts/v06_world_natural_d.py`` 通过 ``_use_batch`` 进入，不扩旧 CLI 元组。
+V06_D_PROFILE = BatchProfile("v06-natural-d", Path("/tmp/nyairo-v06-natural-20261103-d"),
+                             "v06-world-natural-20261103-d",
+                             "v06:world-natural:20261103-d", 212,
+                             datetime(2026, 11, 4, 0, 50, 0,
+                                      tzinfo=timezone(timedelta(hours=8))),
+                             latest_start=datetime(2026, 11, 4, 0, 15, 0,
+                                                   tzinfo=timezone(timedelta(hours=8))),
+                             window_seconds=1800, max_ticks=900, trace_max_records=4000)
+
+#: v0.6 E：回顾反馈供给修复后的又一次全新自然观察（2026-11-03 预登记）。与 D 共用同一套
+#: 单 natural phase、ambient 开关、off gate、路径/预算/时间守卫；差异只在封闭身份与
+#: history 232。E 不复用 D 的根或身份，也不把 D 换个日期来跑。
+#: 它只由 ``scripts/v06_world_natural_e.py`` 通过 ``_use_batch`` 进入，不扩旧 CLI 元组。
+V06_E_PROFILE = BatchProfile("v06-natural-e", Path("/tmp/nyairo-v06-natural-20261103-e"),
+                             "v06-world-natural-20261103-e",
+                             "v06:world-natural:20261103-e", 232,
+                             datetime(2026, 11, 4, 0, 50, 0,
+                                      tzinfo=timezone(timedelta(hours=8))),
+                             latest_start=datetime(2026, 11, 4, 0, 15, 0,
+                                                   tzinfo=timezone(timedelta(hours=8))),
+                             window_seconds=1800, max_ticks=900, trace_max_records=4000)
+
+#: v0.6 D/E 是本仓库仅有的两条「自然观察 + ambient 开关」封闭身份；行为判定统一走这张
+#: 集合（不再逐个写 ``key == V06_D_PROFILE.key``）。旧 d/e/B/C 一个值都不进这里。
+V06_NATURAL_PROFILES = frozenset({V06_D_PROFILE.key, V06_E_PROFILE.key})
+
+#: D/E 的跨批累计额度只是**本批局部记账上限**：已有历史 + 本批最多 20 仍远低于本人批准
+#: 的 1000。它不是持久跨根自动总账；单根 UTC 日 300 保险丝仍是 ``UTC_DAY_CAP``，两者互不替代。
+V06_TOTAL_ACCOUNTING_CAP = 1000
+#: D 的旧常量名保留，既有断言/文档仍指同一个值。
+V06_D_TOTAL_ACCOUNTING_CAP = V06_TOTAL_ACCOUNTING_CAP
+#: g/h 的跨批累计记账上限：history + 本 run 已发 >= 1000 就在发送前停。
+#: 它只对 g/h 生效；旧批（含 a/b/c/f）不进入这个判断，不会被 1000 误拒。
+G_TOTAL_ACCOUNTING_CAP = 1000
+#: D/E 只在自己这份 phase/runtime/World 子环境里打开的 ambient 开关（旧批不设）。
+V06_D_AMBIENT_ENV = "CHIYO_WORLD_AMBIENT_EVENTS_ENABLED"
+
 #: 运行期可选身份：``_select_batch``/``_check_root``/CLI 都走这张表；
 #: ``BATCH_PROFILES`` 仍是 a/b/c 三批的原始映射。
 MODE_PROFILES: dict[str, BatchProfile] = {**BATCH_PROFILES, D_PROFILE.key: D_PROFILE,
-                                          E_PROFILE.key: E_PROFILE, F_PROFILE.key: F_PROFILE}
+                                          E_PROFILE.key: E_PROFILE, F_PROFILE.key: F_PROFILE,
+                                          G_PROFILE.key: G_PROFILE,
+                                          H_PROFILE.key: H_PROFILE,
+                                          I_PROFILE.key: I_PROFILE,
+                                          B_PROFILE.key: B_PROFILE,
+                                          C_PROFILE.key: C_PROFILE,
+                                          V06_D_PROFILE.key: V06_D_PROFILE,
+                                          V06_E_PROFILE.key: V06_E_PROFILE}
 #: 旧枚举**原样保留**（d 的既有断言钉着 ("a","b","c","d")）；CLI 另用
 #: ``CLI_BATCH_CHOICES`` 多认 e。f 只由 ``g1_next_live`` 通过 ``_use_batch`` 进入，
 #: 不扩这个旧 CLI 元组，d/e 的历史断言一个值都不动。
@@ -186,25 +307,83 @@ CLI_BATCH_CHOICES = BATCH_CHOICES + (E_PROFILE.key,)
 DEFAULT_BATCH = "a"
 
 #: 走「单 natural phase」的批（d/e）；a/b/c 仍是 p1/p2 的 G1 链。
+#: v0.6 B 也走单 natural phase，但**不进**这个旧集合（旧枚举断言原样保留）。
 NATURAL_PROFILES = frozenset({D_PROFILE.key, E_PROFILE.key})
 
 
+def _profile_window_seconds(profile: Optional[BatchProfile] = None) -> int:
+    """本批真实窗口秒数：只有 C 有自己的值，其余退回模块常量 ``WINDOW_SECONDS``。"""
+
+    return int((profile or _identity()).window_seconds or WINDOW_SECONDS)
+
+
+def _profile_max_ticks(profile: Optional[BatchProfile] = None) -> int:
+    """自然 phase 的 tick 循环上限：C 要 10800/5 秒的完整窗口，旧批仍是 900。"""
+
+    return int((profile or _identity()).max_ticks or MAX_TICKS)
+
+
+def _profile_trace_max_records(profile: Optional[BatchProfile] = None) -> int:
+    """本批 trace 行数上限：C 单独 6000，旧批仍 4000（落盘 schema 不变）。"""
+
+    return int((profile or _identity()).trace_max_records or CANDIDATE_TRACE_MAX_RECORDS)
+
+
+def _is_v06_natural(profile: Optional[BatchProfile] = None) -> bool:
+    """当前身份是否属于 v0.6 D/E 这条「自然观察 + ambient」封闭集合。"""
+
+    return (profile or _identity()).key in V06_NATURAL_PROFILES
+
+
 def _is_natural(profile: Optional[BatchProfile] = None) -> bool:
-    return (profile or _identity()).key in NATURAL_PROFILES
+    key = (profile or _identity()).key
+    return key in NATURAL_PROFILES or key in (B_PROFILE.key, C_PROFILE.key,
+                                              V06_D_PROFILE.key, V06_E_PROFILE.key)
+
+
+def _ambient_events_env(profile: Optional[BatchProfile] = None) -> Optional[str]:
+    """ambient 背景开关只给 v0.6 D/E；旧批返回 ``None``，调用方连这个键都不写。"""
+
+    return "1" if _is_v06_natural(profile) else None
+
+
+def _total_accounting_exceeded(calls: Any, *,
+                               profile: Optional[BatchProfile] = None) -> bool:
+    """跨批累计记账上限：已有历史 + 本轮已发 >= 本批上限就在发送前停。
+
+    它只做本批局部算术，不读也不写任何跨根总账；旧批不进入这个判断。
+    D/e 用 1000，g 用同一个 1000（507 + 20 最坏 527，远低于上限）；a/b/c/f 返回 False。
+    """
+
+    profile = profile or _identity()
+    if profile.key in (G_PROFILE.key, H_PROFILE.key, I_PROFILE.key):
+        cap = G_TOTAL_ACCOUNTING_CAP
+    elif _is_v06_natural(profile):
+        cap = V06_TOTAL_ACCOUNTING_CAP
+    else:
+        return False
+    try:
+        used = int(calls or 0)
+    except (TypeError, ValueError):
+        return False
+    return int(profile.expected_history) + used >= cap
 
 
 def _world_intent_gate(profile: Optional[BatchProfile] = None) -> Optional[str]:
     """该批**自己**钦定的 World gate 值；a/b/c 保持 ``None``（不碰原行为）。
 
-    e 是 ``canonical``；d 是显式 ``off``（父 shell 里可能有的 canonical 不能漏进来）。
-    返回值只用于本进程树的 env 映射，绝不写 ``os.environ``。
+    e/B/C 是 ``canonical``；d/D（新 v0.6 D）与 f 都是显式 ``off``——父 shell 里可能有的
+    canonical 不能漏进来。返回值只用于本进程树的 env 映射，绝不写 ``os.environ``。
     """
 
     key = (profile or _identity()).key
-    if key == E_PROFILE.key:
+    if key in (E_PROFILE.key, B_PROFILE.key, C_PROFILE.key):
+        # e 是既有世界观测；B/C 是同一机制的新封闭身份。都只在本进程树里 canonical。
         return "canonical"
-    if key in (D_PROFILE.key, F_PROFILE.key):
-        # d 是自然观测；f 是作品续写。两者都不要求世界动作，gate 显式 off。
+    if key in (D_PROFILE.key, F_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+               I_PROFILE.key, V06_D_PROFILE.key, V06_E_PROFILE.key):
+        # d 是自然观测；f/g 是作品续写；v0.6 D/E 都只观察自然背景，
+        # 不要求世界动作成功，gate 显式 off（拒绝链照常走正式门）。
         return "off"
     return None
 
@@ -220,6 +399,15 @@ DEADLINE = BATCH_PROFILES[DEFAULT_BATCH].deadline
 
 REQUEST_CAP = 20          # 本批新增请求硬上限（决定 + 内容 + 失败预留都算）
 EXPECTED_HISTORY = BATCH_PROFILES[DEFAULT_BATCH].expected_history  # 只记录，不读旧实例
+
+#: i 专属实验观测：只在 scripts 进程内包 artifact_edit 的 ``transport.complete``，
+#: 观察该请求在最外调用边界是否携带可读 ``work_context``。它不改发送语义，也不落生产字段。
+WORK_OBSERVATION_MODE = "g1_integrated_i"
+#: 观察记录只允许这些作品状态值；解析不出/不认识一律 ``UNKNOWN``。
+WORK_OBSERVATION_STATES = frozenset({
+    "OK", "PARTIAL", "UNAVAILABLE", "NO_BOUND_WORK", "UNKNOWN"})
+#: 每 phase 最多记录条数与请求上限一致；超过就停记，不新增第 21 条。
+WORK_OBSERVATION_MAX_RECORDS = int(REQUEST_CAP)
 WINDOW_SECONDS = 1800     # 总运行窗口（真实秒，monotonic，跨 PID）
 CHECK_INTERVAL_MINUTES = 1  # runner 自己的检查窗口；prepare 前的固定实例参数
 TICK_INTERVAL_SECONDS = 5.0
@@ -446,6 +634,8 @@ REASON_LEDGER_UNREADABLE = "REQUEST_LEDGER_UNREADABLE"
 REASON_NOT_PREPARED = "EXPERIMENT_NOT_PREPARED"
 REASON_EXECUTE_FLAG_MISSING = "RUN_REQUIRES_EXECUTE_APPROVED"
 REASON_DEADLINE_PASSED = "RUN_WINDOW_DEADLINE_PASSED"
+#: v0.6 B 的最晚启动线已过（比绝对截止更早；过线拒绝新 run，不自动延期）。
+REASON_LATEST_START_PASSED = "RUN_LATEST_START_PASSED"
 REASON_ALREADY_STARTED = "RUN_ALREADY_STARTED"
 REASON_NO_MODEL_CONFIG = "NO_REAL_MODEL_CONFIG"
 REASON_MODEL_PARAM_MISMATCH = "PREREG_MODEL_PARAM_MISMATCH"
@@ -461,7 +651,7 @@ REASON_PHASE_FAILED = "PHASE_PROCESS_FAILED"
 REASON_UNKNOWN_BATCH = "UNKNOWN_BATCH"
 REASON_BATCH_IDENTITY_MISMATCH = "BATCH_IDENTITY_MISMATCH"
 REASON_AUTHORITY_NOT_FRESH = "MEMORY_AUTHORITY_NOT_FRESH"
-#: 自然批的 World gate 必须就是该批自己的固定值（e=canonical，d=off），
+#: 自然批的 World gate 必须就是该批自己的固定值（e/B/C=canonical，d/D/f=off），
 #: 缺字段/带别的批的值/试图用父进程继承值替换都算身份不一致。
 REASON_WORLD_GATE_MISMATCH = "WORLD_GATE_MISMATCH"
 #: e 的路径守卫：实例 world_home 缺失/不可读/相对/解析后落在根外（含符号链接逃逸）
@@ -470,6 +660,10 @@ REASON_WORLD_GATE_MISMATCH = "WORLD_GATE_MISMATCH"
 REASON_WORLD_HOME_UNAVAILABLE = "WORLD_HOME_UNAVAILABLE"
 REASON_WORLD_HOME_OUTSIDE_ROOT = "WORLD_HOME_OUTSIDE_ROOT"
 REASON_WORLD_ENV_MISMATCH = "WORLD_CHILD_ENV_MISMATCH"
+#: D 只允许在自己这份 phase/runtime/World 子环境里打开 ambient；缺键/错值在装配前拒绝。
+REASON_AMBIENT_ENV_MISMATCH = "AMBIENT_ENV_MISMATCH"
+#: D 的跨批累计记账上限（212 + 本批已发 >= 1000）在发送前停；旧批不进入这个判断。
+REASON_TOTAL_ACCOUNTING_CAP = "TOTAL_ACCOUNTING_CAP_REACHED"
 #: 离线夹具参考时刻只能用在 mkdtemp 根里；本进程一旦带上它却指向真实根，写入之前拒绝。
 REASON_OFFLINE_CLOCK_REFUSED = "OFFLINE_CLOCK_REFUSED"
 
@@ -536,16 +730,30 @@ def _iso(moment: Optional[datetime] = None) -> str:
 #: → ``_run_phase_process``）构造的子进程 env 里放一个布尔标记；子进程还必须同时满足
 #: config.offline、scratch 根两道校验才采纳，缺一项都退回真实墙钟/明确拒绝。
 OFFLINE_FIXTURE_ENV = "NYAIRO_G1_OFFLINE_FIXTURE"
+#: 只给 v0.6 B 的离线子进程树：带这个标记时，phase 子进程在进入正式循环前
+#: 装同一份 AF_INET/AF_INET6 硬拒守卫；B 离线自己的 World/Supply owner 子进程
+#: 再通过下面两个变量由 argv 引导装载同一份局部守卫。旧 d/e 不带，行为不变。
+V06_OFFLINE_GUARD_ENV = "NYAIRO_V06_OFFLINE_GUARD"
+V06_OFFLINE_GUARD_DIR_ENV = "NYAIRO_V06_OFFLINE_GUARD_DIR"
+V06_OFFLINE_GUARD_STATUS_DIR_ENV = "NYAIRO_V06_OFFLINE_GUARD_STATUS_DIR"
 
 #: 本进程当前是否处于离线夹具参考时刻（None 表示正式进程，用真实墙钟）。
 _OFFLINE_REFERENCE: Optional[datetime] = None
 
 
 def offline_reference(profile: Optional[BatchProfile] = None) -> datetime:
-    """离线夹具的参考时刻：本批截止前 1 小时，绝不把截止延到今天。"""
+    """离线夹具的参考时刻：本批截止前 1 小时，绝不把截止延到今天。
+
+    有「最晚启动线」的批（B/C）还必须落在它之前，否则离线 start_run 会被自己的
+    启动线拒绝；C 的截止 23:05 减一小时是 22:05，已过 20:00，因此退到 19:55。
+    没有 latest_start 的旧批原样返回「截止前 1 小时」。
+    """
 
     profile = profile or _identity()
-    return profile.deadline - timedelta(hours=1)
+    moment = profile.deadline - timedelta(hours=1)
+    if profile.latest_start is not None and moment >= profile.latest_start:
+        moment = profile.latest_start - timedelta(minutes=5)
+    return moment
 
 
 def offline_reference_iso(profile: Optional[BatchProfile] = None) -> str:
@@ -604,6 +812,217 @@ def offline_clock(profile: Optional[BatchProfile] = None):
         yield
     finally:
         _OFFLINE_REFERENCE = previous
+
+
+@contextlib.contextmanager
+def offline_clock_at(moment: datetime):
+    """临时把本进程的离线参考时刻定在**一个明确值**（只给离线负控用）。
+
+    与 ``offline_clock`` 一样只改本进程内存；调用方必须已经在一个 scratch 根里。
+    它存在的唯一目的是验证「最晚启动线 / 绝对截止」会在写窗口之前拒绝，而不是
+    等到真实墙钟走到那个时刻。
+    """
+
+    global _OFFLINE_REFERENCE
+    previous = _OFFLINE_REFERENCE
+    _OFFLINE_REFERENCE = moment
+    try:
+        yield
+    finally:
+        _OFFLINE_REFERENCE = previous
+
+
+@contextlib.contextmanager
+def _offline_network_guard(root: Path | str):
+    """离线硬拒：不允许 AF_INET/AF_INET6 socket、DNS 或出站连接。
+
+    只用于离线检查的父进程与带 ``V06_OFFLINE_GUARD_ENV`` 标记的 phase 子进程。
+    AF_UNIX 仍放行——正式 Supply/World owner 之间就走它，且它们的目标 socket
+    由实例 ``world_home`` / 本根 ``LIFE_SUPPLY_SOCKET`` 绑定（见 ``_require_instance_world_home``）。
+    """
+
+    real_socket = socket.socket
+    real_create_connection = socket.create_connection
+    real_getaddrinfo = socket.getaddrinfo
+
+    class _GuardedSocket(real_socket):  # type: ignore[misc, valid-type]
+        def __init__(self, family: int = -1, type: int = -1, proto: int = -1,
+                     fileno: Optional[int] = None) -> None:
+            resolved = socket.AF_INET if family in (-1, None) else family
+            if resolved in (socket.AF_INET, socket.AF_INET6):
+                raise AssertionError("OFFLINE_INET_FORBIDDEN")
+            if fileno is None:
+                super().__init__(family, type, proto)
+            else:
+                super().__init__(family, type, proto, fileno)
+
+    def _deny(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("OFFLINE_NETWORK_FORBIDDEN")
+
+    socket.socket = _GuardedSocket
+    socket.create_connection = _deny
+    socket.getaddrinfo = _deny
+    try:
+        yield
+    finally:
+        socket.socket = real_socket
+        socket.create_connection = real_create_connection
+        socket.getaddrinfo = real_getaddrinfo
+
+
+#: v0.6 B 离线自有 World/Supply owner 的局部网络守卫（运行时生成到本次 scratch 根）。
+#: 它是一个**自包含**的 argv 引导模块，不是全局 sitecustomize，也不改 components/stdlib：
+#: World/Supply 的命令行在**这一次 B 离线调用**里被包成
+#: ``python -c <bootstrap> scripts/phone.py owner-...``，bootstrap 只做两件事——先
+#: ``import`` 这个模块装守卫并自检，再用 ``runpy.run_path`` 按原 argv 执行原入口。
+#: 守卫只拒 AF_INET/AF_INET6/DNS/``create_connection``；AF_UNIX 照常，本根 owner 通讯不受影响。
+_CHILD_GUARD_SOURCE = '''\
+"""v0.6 B 离线的子进程局部网络守卫（运行时生成在 scratch 根，不装进系统）。"""
+import json
+import os
+import socket
+
+if os.environ.get("NYAIRO_V06_OFFLINE_GUARD") == "1":
+    _real_socket = socket.socket
+
+    class _GuardedSocket(_real_socket):
+        def __init__(self, family=-1, type=-1, proto=-1, fileno=None):
+            resolved = socket.AF_INET if family in (-1, None) else family
+            if resolved in (socket.AF_INET, socket.AF_INET6):
+                raise AssertionError("OFFLINE_INET_FORBIDDEN")
+            if fileno is None:
+                super().__init__(family, type, proto)
+            else:
+                super().__init__(family, type, proto, fileno)
+
+    def _deny(*_args, **_kwargs):
+        raise AssertionError("OFFLINE_NETWORK_FORBIDDEN")
+
+    socket.socket = _GuardedSocket
+    socket.create_connection = _deny
+    socket.getaddrinfo = _deny
+
+    def _attempt(call):
+        try:
+            call()
+        except AssertionError:
+            return True
+        except Exception:
+            return False
+        return False
+
+    status = {
+        "guard": True,
+        "pid": os.getpid(),
+        "inet_refused": _attempt(
+            lambda: _GuardedSocket(socket.AF_INET, socket.SOCK_STREAM)),
+        "inet6_refused": _attempt(
+            lambda: _GuardedSocket(socket.AF_INET6, socket.SOCK_STREAM)),
+        "dns_refused": _attempt(lambda: socket.getaddrinfo("example.com", 80)),
+        "connect_refused": _attempt(
+            lambda: socket.create_connection(("192.0.2.1", 80), timeout=0.01)),
+        "unix_ok": False,
+    }
+    try:
+        probe = _GuardedSocket(socket.AF_UNIX, socket.SOCK_STREAM)
+        probe.close()
+        status["unix_ok"] = True
+    except Exception:
+        status["unix_ok"] = False
+    target = os.environ.get("NYAIRO_V06_OFFLINE_GUARD_STATUS_DIR") or ""
+    if target:
+        try:
+            os.makedirs(target, exist_ok=True)
+            path = os.path.join(target, "status-%d.json" % os.getpid())
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(status, handle, sort_keys=True)
+        except OSError:
+            pass
+'''
+
+_V06_OFFLINE_CHILD_BOOTSTRAP = (
+    "import os,sys,runpy;"
+    "sys.path.insert(0, os.environ['NYAIRO_V06_OFFLINE_GUARD_DIR']);"
+    "import v06_offline_guard;"
+    "sys.argv=sys.argv[1:];"
+    "runpy.run_path(sys.argv[0], run_name='__main__')"
+)
+
+
+def _offline_guard_dir(root: Path | str) -> Path:
+    """把局部守卫模块写进本次 scratch 根；每个 B 离线进程树各一份。"""
+
+    guard_dir = Path(root) / ".v06-offline-guard"
+    guard_dir.mkdir(parents=True, exist_ok=True)
+    module = guard_dir / "v06_offline_guard.py"
+    if not module.exists():
+        module.write_text(_CHILD_GUARD_SOURCE, encoding="utf-8")
+    return guard_dir
+
+
+def _install_offline_child_guard(child: Any, root: Path | str) -> Any:
+    """只给 v0.6 B 离线自有 World/Supply owner：argv 引导装载同一份局部守卫。"""
+
+    guard_dir = _offline_guard_dir(root)
+    environment = dict(getattr(child, "environment", {}) or {})
+    environment[V06_OFFLINE_GUARD_ENV] = "1"
+    environment[V06_OFFLINE_GUARD_DIR_ENV] = str(guard_dir)
+    environment[V06_OFFLINE_GUARD_STATUS_DIR_ENV] = str(guard_dir / "status")
+    child.environment = environment
+    command = list(getattr(child, "command", []) or [])
+    if command:
+        # 保留原入口路径与全部参数，只在最前面插一个只做「装守卫→执行原脚本」的 -c。
+        child.command = [command[0], "-c", _V06_OFFLINE_CHILD_BOOTSTRAP] + command[1:]
+    return child
+
+
+def _offline_guard_selfcheck() -> dict[str, Any]:
+    """在**已装守卫**的进程里实测 AF_INET/IPv6/DNS/连接拒绝且 AF_UNIX 可用。"""
+
+    def _refused(call: Callable[[], Any]) -> bool:
+        try:
+            call()
+        except AssertionError:
+            return True
+        except Exception:
+            return False
+        return False
+
+    unix_ok = False
+    try:
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        probe.close()
+        unix_ok = True
+    except Exception:  # noqa: BLE001 - 平台没有 AF_UNIX 就如实记 False
+        unix_ok = False
+    return {
+        "inet_refused": _refused(lambda: socket.socket(socket.AF_INET, socket.SOCK_STREAM)),
+        "inet6_refused": _refused(lambda: socket.socket(socket.AF_INET6, socket.SOCK_STREAM)),
+        "dns_refused": _refused(lambda: socket.getaddrinfo("example.com", 80)),
+        "connect_refused": _refused(
+            lambda: socket.create_connection(("192.0.2.1", 80), timeout=0.01)),
+        "unix_ok": unix_ok,
+    }
+
+
+def _offline_child_guard_report(root: Path | str) -> dict[str, Any]:
+    """读本次 B 离线 World/Supply 子进程自己写的守卫自检；只保留布尔与 pid。"""
+
+    status_dir = Path(root) / ".v06-offline-guard" / "status"
+    rows: list[dict[str, Any]] = []
+    try:
+        paths = sorted(status_dir.glob("status-*.json"))
+    except OSError:
+        paths = []
+    wanted = ("inet_refused", "inet6_refused", "dns_refused", "connect_refused", "unix_ok")
+    for path in paths:
+        row = _read_json(path)
+        if not row:
+            continue
+        rows.append({"pid": row.get("pid"),
+                     **{name: row.get(name) for name in wanted}})
+    ok = bool(rows) and all(all(row.get(name) is True for name in wanted) for row in rows)
+    return {"expected": 2, "found": len(rows), "ok": ok, "children": rows}
 
 
 def enter_offline_fixture(profile: Optional[BatchProfile] = None) -> None:
@@ -764,6 +1183,14 @@ def _verify_instance_identity(root: Path | str) -> Optional[dict[str, Any]]:
         return {"ok": False, "reason_code": REASON_BATCH_IDENTITY_MISMATCH,
                 "field": "deadline", "expected": profile.deadline.isoformat(),
                 "actual": recorded_deadline or None}
+    # v0.6 B 的「最晚启动线」也是封闭身份的一部分：prereg 里必须写同一个值。
+    # 旧批没有这个字段、profile 也没有值，下面整段不执行。
+    if profile.latest_start is not None:
+        recorded_latest = str(prereg.get("latest_start") or "")
+        if recorded_latest != profile.latest_start.isoformat():
+            return {"ok": False, "reason_code": REASON_BATCH_IDENTITY_MISMATCH,
+                    "field": "latest_start", "expected": profile.latest_start.isoformat(),
+                    "actual": recorded_latest or None}
     batch = _read_json(experiment / BATCH_FILENAME)
     if batch:
         for field, wanted in (("run_id", profile.run_id), ("domain_id", profile.domain_id)):
@@ -783,7 +1210,10 @@ def _window_path(root: Path | str) -> Path:
     return _experiment_dir(root) / WINDOW_FILENAME
 
 
-def _write_window(root: Path | str, *, window_seconds: int = WINDOW_SECONDS) -> dict[str, Any]:
+def _write_window(root: Path | str, *,
+                  window_seconds: Optional[int] = None) -> dict[str, Any]:
+    # 默认值不能写成 ``WINDOW_SECONDS``：那会在导入时早绑定，C 的 10800 永远进不来。
+    seconds = _profile_window_seconds() if window_seconds is None else int(window_seconds)
     path = _window_path(root)
     if path.exists():
         raise Refused(REASON_ALREADY_STARTED, "the run window already exists")
@@ -795,12 +1225,12 @@ def _write_window(root: Path | str, *, window_seconds: int = WINDOW_SECONDS) -> 
     now_wall = _wall_now()
     start_mono = time.monotonic()
     deadline = _identity().deadline
-    wall_deadline = min(now_wall + timedelta(seconds=int(window_seconds)), deadline)
+    wall_deadline = min(now_wall + timedelta(seconds=seconds), deadline)
     payload = {
         "schema": "g1.window.v1", "run_id": _identity().run_id,
-        "window_seconds": int(window_seconds),
+        "window_seconds": seconds,
         "started_monotonic": start_mono,
-        "deadline_monotonic": start_mono + float(window_seconds),
+        "deadline_monotonic": start_mono + float(seconds),
         "started_wall": _iso(now_wall),
         "deadline_wall": _iso(wall_deadline),
         "deadline_basis": "min(now+window, %s)" % deadline.isoformat(),
@@ -881,7 +1311,17 @@ def _ledger_calls(budget: Any) -> Optional[int]:
         view = budget.view()
     except Exception:
         return None
-    if str(view.get("state") or "") == "CORRUPT":
+    state = str(view.get("state") or "")
+    # 旧 a～f 的原语义：只有**精确大写** ``CORRUPT`` 才算读不出来，其余照常取计数。
+    # 原 HEAD 就是这样，不能因为新批而改动旧批的坏账行为。
+    if state == "CORRUPT":
+        return None
+    # v0.6 B / g：``LifeRequestBudget.view`` 实际用小写 ``corrupt``（以及 ``UNREADABLE``），
+    # 只在本批的身份分支里也按 fail-closed 处理；否则坏账会被当成 0 次而放行一次发送。
+    if _identity().key in (B_PROFILE.key, C_PROFILE.key, G_PROFILE.key,
+                           H_PROFILE.key, I_PROFILE.key, V06_D_PROFILE.key,
+                           V06_E_PROFILE.key) and state.upper() in {
+            "CORRUPT", "UNREADABLE"}:
         return None
     calls = view.get("run_window_calls")
     # 账本还不存在 = 0 次；只有损坏/读不出来才是 None（fail-closed）。
@@ -1004,6 +1444,10 @@ class G1CognitionGate:
             raise GateClosed(REASON_LEDGER_UNREADABLE, "run window count is unreadable")
         if calls >= REQUEST_CAP:
             raise GateClosed(REASON_REQUEST_CAP, "batch used %d of %d" % (calls, REQUEST_CAP))
+        if _total_accounting_exceeded(calls):
+            # 只对 D 生效：跨批累计记账到上限时，同样在发送前拒绝。
+            raise GateClosed(REASON_TOTAL_ACCOUNTING_CAP,
+                             "history + this batch reached the accounting ceiling")
         self.sends += 1
         if self.trace is not None:
             self.trace.record_request(request)
@@ -1080,6 +1524,10 @@ class G1ContentGate:
             raise GateClosed(REASON_LEDGER_UNREADABLE, "run window count is unreadable")
         if calls >= REQUEST_CAP:
             raise GateClosed(REASON_REQUEST_CAP, "batch used %d of %d" % (calls, REQUEST_CAP))
+        if _total_accounting_exceeded(calls):
+            # 只对 D 生效：跨批累计记账到上限时，同样在发送前拒绝。
+            raise GateClosed(REASON_TOTAL_ACCOUNTING_CAP,
+                             "history + this batch reached the accounting ceiling")
         self.sends += 1
         try:
             result = self.inner.complete(*args, **kwargs)
@@ -1174,15 +1622,21 @@ def _runtime_env(root: Path | str, *, offline: bool = False) -> dict[str, str]:
         # 离线夹具：让每次 tick 都落在自己的检查窗口里（不是生产默认）。
         env["CHIYO_AUTONOMOUS_CHECK_INTERVAL_MINUTES"] = "0"
     # 自然批的 World gate 只写进**返回给 runtime/assembly/World adapter 的环境映射**：
-    # e=canonical，d=显式 off；a/b/c 返回 None，这一行不执行，原行为不变。
+    # e/B/C=canonical，d/D=显式 off；a 返回 None，这一行不执行，原行为不变。
     # 不写 os.environ、不写实例默认、不写 .env。
     gate = _world_intent_gate(_identity())
     if gate is not None:
         env["WORLD_BODY_INTENT_MUTATION_GATE"] = gate
-    if _identity().key in (E_PROFILE.key, F_PROFILE.key):
-        # e/f：实例的 world_home 必须存在、可读、绝对且解析后仍在根内；缺/坏一律 Refused。
+    # D 的 ambient 背景只在这一份 runtime/phase/World 映射里打开；父 env、实例默认和
+    # 旧批都不写这个键。旧批返回 None，这一行不执行。
+    ambient_events = _ambient_events_env(_identity())
+    if ambient_events is not None:
+        env[V06_D_AMBIENT_ENV] = ambient_events
+    if _identity().key in (E_PROFILE.key, F_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+                           I_PROFILE.key, B_PROFILE.key, C_PROFILE.key,
+                           V06_D_PROFILE.key, V06_E_PROFILE.key):
+        # e/f/g/h/B/C/D/E：实例的 world_home 必须存在、可读、绝对且解析后仍在根内；缺/坏一律 Refused。
         # 绝不从父 shell 继承别的 home/registry/lifecycle，也不猜一个路径自动创建。
-        # f 只做 gate off 下的写面隔离，不启动 World 服务。
         env.update(_world_isolation_env(_require_instance_world_home(root)))
     elif _is_natural(_identity()):
         # d 保持 b6 交付时的宽松投影；a/b/c 不进入这里，原行为不变。
@@ -1229,13 +1683,80 @@ def _verify_model_config(env: Mapping[str, str]) -> dict[str, Any]:
             "model": actual["model"], "api_key_present": bool(config.get("api_key"))}
 
 
-def _start_supply(root: Path | str, *, tag: str):
-    import history_choice_experiment as base
+def _start_supply(root: Path | str, *, tag: str, offline: bool = False):
+    if not (offline and _identity().key in (B_PROFILE.key, C_PROFILE.key,
+                                            G_PROFILE.key, H_PROFILE.key,
+                                            I_PROFILE.key,
+                                            V06_D_PROFILE.key, V06_E_PROFILE.key)):
+        import history_choice_experiment as base
 
-    return base.start_supply_owner(root, tag=tag)
+        return base.start_supply_owner(root, tag=tag)
+
+    # v0.6 B/C 离线：同一条 owner 构造，只在**这一次**子进程的 env/argv 里装局部网络守卫。
+    from components.phone import demo, service as phone_service
+
+    generation = "g1s-%s-%d-%d" % (str(tag)[:16], int(time.time()), os.getpid())
+    children = demo.owner_children(root, generation=generation,
+                                   writer_instance="g1:%d" % os.getpid())
+    supply = _install_offline_child_guard(children["supply"], root)
+    supply.start()
+    try:
+        if not supply.wait_ready(supply.socket_path, timeout=demo.CHILD_READY_TIMEOUT,
+                                 probe="supply"):
+            raise Refused(REASON_SUPPLY_UNAVAILABLE, "the supply owner did not become ready")
+        instance = dict(phone_service.load_instance(root))
+        instance["supply_socket"] = str(supply.socket_path)
+        instance["supply_generation"] = generation
+        phone_service.write_instance(root, instance)
+    except Exception:
+        try:
+            supply.stop()
+        except Exception:  # noqa: BLE001 - the original failure is what must surface
+            pass
+        raise
+    return supply
 
 
 STOP_SIGNAL_WAIT_SECONDS = 10.0
+
+#: 自然 phase 窗口结束后允许的**总收尾冗余**（父级到这个点就杀本批自己的 phase 树）。
+#: 旧 d/e 保留原来的 120 秒；v0.6 B 用预登记写明的「正常收尾最多额外 60 真实秒」。
+NATURAL_PHASE_CLEANUP_SECONDS = 120.0
+V06_B_NATURAL_PHASE_CLEANUP_SECONDS = 60.0
+#: g 的 p1/p2 阶段总收尾冗余：窗口结束后最多再给 60 真实秒正规收尾，不拖到绝对线。
+G_PHASE_CLEANUP_SECONDS = 60.0
+
+
+def _phase_cleanup_seconds(profile: Optional[BatchProfile] = None) -> float:
+    """非自然 p1/p2 阶段窗口结束后的收尾冗余：g/h 是 60 秒，其余旧批仍是 120 秒。"""
+
+    return (G_PHASE_CLEANUP_SECONDS
+            if (profile or _identity()).key in (G_PROFILE.key, H_PROFILE.key,
+                                                I_PROFILE.key)
+            else NATURAL_PHASE_CLEANUP_SECONDS)
+
+
+def _natural_phase_timeout(profile: Optional[BatchProfile] = None,
+                           window_deadline_monotonic: Optional[float] = None, *,
+                           now: Optional[float] = None) -> float:
+    """自然 phase 子进程的总超时：窗口剩余 + 本批收尾冗余，且有 60 秒下限。
+
+    B 的冗余是 60 秒（停新提交后最多再收尾 60 秒），旧 d/e 原样 120 秒。父级
+    ``subprocess.run`` 到点会终止这个 phase 进程，World/Supply 再由各自的父死信号退出，
+    所以这是「总收尾界限 + 自有进程终止」，不是只靠逐个服务的更长 timeout。
+    """
+
+    profile = profile or _identity()
+    moment = time.monotonic() if now is None else float(now)
+    deadline = (float(window_deadline_monotonic)
+                if window_deadline_monotonic is not None
+                else float(_read_json(_window_path(profile.root)).get("deadline_monotonic")
+                           or moment))
+    grace = (V06_B_NATURAL_PHASE_CLEANUP_SECONDS
+             if profile.key in (B_PROFILE.key, C_PROFILE.key, V06_D_PROFILE.key,
+                                V06_E_PROFILE.key)
+             else NATURAL_PHASE_CLEANUP_SECONDS)
+    return max(60.0, deadline - moment + grace)
 
 
 def _socket_live(path: Any) -> bool:
@@ -1307,11 +1828,11 @@ def _socket_stop_tokens(log_path: Any) -> dict[str, Any]:
             "drained": drained == "True", "inflight": int(inflight)}
 
 
-def _start_world(root: Path | str, *, tag: str) -> Any:
+def _start_world(root: Path | str, *, tag: str, offline: bool = False) -> Any:
     """起本根自己的标准 World owner 子进程（只起这一个，不碰任何别的进程）。
 
     复用 ``components.phone.demo.owner_children`` 的 world child：同一命令、同一日志、
-    同一环境。gate 显式传**本批自己的值**：e=``canonical``，d=``off``；父 shell 里可能有的
+    同一环境。gate 显式传**本批自己的值**：e/B/C=``canonical``，d/D=``off``；父 shell 里可能有的
     ``canonical`` 不会因此漏进 d。旧 generation 的 socket 只由 ``demo.retire_socket``
     改名保留，不 unlink。返回的 child 由调用方用 ``_stop_world`` 停；起不来时这里先停掉再抛。
     """
@@ -1324,6 +1845,14 @@ def _start_world(root: Path | str, *, tag: str) -> Any:
     world = demo.owner_children(
         root_path, generation=generation, writer_instance="g1:%d" % os.getpid(),
         world_intent_gate=(_world_intent_gate(_identity()) or "off"))["world"]
+    ambient_events = _ambient_events_env(_identity())
+    if ambient_events is not None:
+        # D 的 ambient 背景只给这次起的 World 子进程；父 env 和旧批都不动。
+        world.environment[V06_D_AMBIENT_ENV] = ambient_events
+    if offline and _identity().key in (B_PROFILE.key, C_PROFILE.key,
+                                       V06_D_PROFILE.key, V06_E_PROFILE.key):
+        # v0.6 B/C/D/E 离线：World owner 与 Supply 装同一份局部守卫；AF_UNIX 本根通讯照常。
+        _install_offline_child_guard(world, root_path)
     world_home = Path(str(instance["world_home"]))
     demo.retire_socket(world_home / "run" / "gateway.sock", generation)
     world.start()
@@ -1362,7 +1891,8 @@ def _build_runtime(root: Path | str, *, state_root: Path | str, budget: Any, lat
                    plan: Optional[Sequence[str]] = None,
                    model_override: Optional[Mapping[str, Any]] = None,
                    trace: Optional[CandidateTrace] = None,
-                   world_feed: bool = False) -> dict[str, Any]:
+                   world_feed: bool = False,
+                   phase: Optional[str] = None) -> dict[str, Any]:
     """在真实 owner 上装出正式 runtime；只有最底层 transport 可能是明确替身。"""
 
     import autonomous_life_assembly as assembly
@@ -1385,7 +1915,10 @@ def _build_runtime(root: Path | str, *, state_root: Path | str, budget: Any, lat
 
     admission = assembly.pause_request_admission(state_root)
     if offline:
-        decision_transport = _ScriptedDecisionTransport(list(plan or []))
+        decision_transport = _ScriptedDecisionTransport(
+            list(plan or []),
+            # 只有 D 的离线检查需要在脚本 client 边界取输入副本；B/C/旧批不取。
+            capture_prompts=(_identity().key == V06_D_PROFILE.key))
         content_transport = _ScriptedContentTransport()
     else:
         decision_transport = OpenAICompatibleTransport(
@@ -1421,6 +1954,12 @@ def _build_runtime(root: Path | str, *, state_root: Path | str, budget: Any, lat
                       latch=latch, budget=budget),
         max_new_chars=300, timeout_s=30.0, max_output_tokens=CONTENT_OUTPUT_CAP,
         experience_provider=memory["experience_provider"])
+    # i 专属：只在脚本实验层包 writer/transport，观察 artifact_edit 的 complete 边界。
+    # 其它 profile 不安装，bundle 里也没有这个键。
+    work_observer: Optional[WorkContextObserver] = None
+    if _identity().key == I_PROFILE.key:
+        work_observer = WorkContextObserver(phase=str(phase or "UNKNOWN"))
+        _install_work_observer(writer, content_transport, work_observer)
 
     port = LifeArtifactPort(supply["supply_socket"], supply["subject_id"])
     artifact_adapter = SupplyManagedArtifactActionAdapter(
@@ -1483,7 +2022,8 @@ def _build_runtime(root: Path | str, *, state_root: Path | str, budget: Any, lat
             "port": port, "adapter": artifact_adapter, "env": dict(env),
             "state_root": str(state_root), "memory": memory, "writer": writer,
             "cognition": cognition, "decision_transport": decision_transport,
-            "content_transport": content_transport, "trace": trace}
+            "content_transport": content_transport, "trace": trace,
+            "work_observer": work_observer}
 
 
 def _release_runtime(bundle: Optional[Mapping[str, Any]]) -> dict[str, Any]:
@@ -1512,8 +2052,16 @@ class _ScriptedTransportBase:
     #: 与真实 transport 同一约定：能分开 send phase 与等响应（这里立刻返回）。
     send_split_capable = True
 
-    def __init__(self) -> None:
+    def __init__(self, *, capture_prompts: bool = False) -> None:
         self.calls: list[dict[str, Any]] = []
+        #: 只给 D 的离线检查：在**脚本 client 真正收到的输入**上取有界副本（最多 2 条），
+        #: 由 phase 在内存里算安全布尔后丢弃；不写进任何报告/日志。
+        self.capture_prompts = bool(capture_prompts)
+        self.captured_prompts: list[str] = []
+
+    def _capture_prompt(self, user_prompt: str) -> None:
+        if self.capture_prompts and len(self.captured_prompts) < 2:
+            self.captured_prompts.append(str(user_prompt or ""))
 
     def _result(self, text: str, purpose: str):
         from agency_model_client import ModelCallResult
@@ -1525,8 +2073,8 @@ class _ScriptedTransportBase:
 class _ScriptedDecisionTransport(_ScriptedTransportBase):
     """离线决策替身：按计划从本轮真实候选里挑一个，绝不自己编 candidate id。"""
 
-    def __init__(self, plan: Sequence[str]) -> None:
-        super().__init__()
+    def __init__(self, plan: Sequence[str], *, capture_prompts: bool = False) -> None:
+        super().__init__(capture_prompts=capture_prompts)
         self.plan = [str(step) for step in plan]
 
     def complete(self, *, system_prompt: str, user_prompt: str,
@@ -1534,6 +2082,7 @@ class _ScriptedDecisionTransport(_ScriptedTransportBase):
                  max_output_tokens: Optional[int] = None) -> Any:
         self.calls.append({"max_output_tokens": max_output_tokens,
                            "prompt_chars": len(user_prompt or "")})
+        self._capture_prompt(user_prompt)
         try:
             payload = json.loads(user_prompt or "{}")
         except ValueError:
@@ -1581,6 +2130,148 @@ class _ScriptedContentTransport(_ScriptedTransportBase):
         return self._result(json.dumps({"kind": "append_paragraph",
                                         "text": "末尾补了一句中性的练习说明。"},
                                        ensure_ascii=False), "offline-content")
+
+
+class WorkContextObserver:
+    """i 专属、只读的实验观测：artifact_edit 请求在 transport.complete 边界的样子。
+
+    它只在 scripts 实验层的进程内包住真实 ``next_content`` / ``transport.complete``：
+
+    * ``bind_expected`` 由 ``writer.next_content(point, ...)`` 的实际参数驱动；
+    * ``observe`` 在内存里解析已生成的 ``user_prompt`` JSON，只取允许字段；
+    * 每个 transport 调用至多一条记录、每 phase 最多 ``WORK_OBSERVATION_MAX_RECORDS`` 条；
+    * 任何解析/观测失败都记固定 ``UNKNOWN``，绝不阻断原调用、也不吞原异常。
+
+    不保存 payload / hash / 正文 / title / self_note / reasoning / usage / endpoint /
+    env / headers / 异常 message；不需要保留 artifact id，匹配只回布尔。
+    """
+
+    def __init__(self, *, phase: str,
+                 max_records: int = WORK_OBSERVATION_MAX_RECORDS) -> None:
+        self.phase = phase if phase in ("p1", "p2") else "UNKNOWN"
+        self.max_records = max(0, int(max_records))
+        self.calls: list[dict[str, Any]] = []
+        self._expected = ""
+
+    def bind_expected(self, artifact_id: Any) -> None:
+        try:
+            self._expected = _bare(artifact_id)
+        except Exception:  # noqa: BLE001 - observation never blocks the original call
+            self._expected = ""
+
+    def clear_expected(self) -> None:
+        self._expected = ""
+
+    @staticmethod
+    def _count(payload: Mapping[str, Any], key: str, *, absent: Any) -> Any:
+        if key not in payload:
+            return absent
+        value = payload.get(key)
+        if isinstance(value, (list, tuple)):
+            return max(0, min(1000, len(value)))
+        return "UNKNOWN"
+
+    def _record(self, *, parse_ok: bool, work_present: bool, work_state: Any,
+                matches: Any, research_present: bool, practice_present: bool,
+                earlier_count: Any, experience_count: Any) -> dict[str, Any]:
+        state = str(work_state)
+        return {
+            "phase": self.phase,
+            "call_index": len(self.calls) + 1,
+            "parse_ok": bool(parse_ok),
+            "work_present": bool(work_present),
+            "work_state": state if state in WORK_OBSERVATION_STATES else "UNKNOWN",
+            "expected_work_matches": matches if isinstance(matches, bool) else "UNKNOWN",
+            "research_present": bool(research_present),
+            "practice_present": bool(practice_present),
+            "earlier_count": earlier_count,
+            "experience_count": experience_count,
+        }
+
+    def _unknown_record(self) -> dict[str, Any]:
+        return self._record(parse_ok=False, work_present=False, work_state="UNKNOWN",
+                            matches="UNKNOWN", research_present=False,
+                            practice_present=False, earlier_count="UNKNOWN",
+                            experience_count="UNKNOWN")
+
+    def observe(self, user_prompt: Any) -> None:
+        """One transport call: at most one bounded record; failures are fixed UNKNOWN."""
+
+        if len(self.calls) >= self.max_records:
+            return
+        payload: Any = None
+        try:
+            parsed = json.loads(user_prompt) if isinstance(user_prompt, str) else None
+            if isinstance(parsed, dict):
+                payload = parsed
+        except Exception:  # noqa: BLE001 - bad JSON is an observation fact, not a stop
+            payload = None
+        try:
+            if payload is None:
+                self.calls.append(self._unknown_record())
+                return
+            work = payload.get("work_context")
+            work_present = isinstance(work, Mapping) and bool(work)
+            work_state: Any = "UNKNOWN"
+            matches: Any = "UNKNOWN"
+            if work_present:
+                work_state = str(work.get("state") or "")
+                if self._expected:
+                    matches = _bare(work.get("artifact_id")) == self._expected
+            elif self._expected:
+                # Parsed cleanly and there is really no work block: nothing to match.
+                matches = False
+            self.calls.append(self._record(
+                parse_ok=True, work_present=work_present, work_state=work_state,
+                matches=matches,
+                research_present=bool(payload.get("research_context")),
+                practice_present=bool(payload.get("practice_context")),
+                earlier_count=self._count(payload, "earlier_versions", absent=0),
+                experience_count=self._count(payload, "previous_experiences",
+                                             absent="UNKNOWN")))
+        except Exception:  # noqa: BLE001 - fixed UNKNOWN, original call still runs
+            try:
+                self.calls.append(self._unknown_record())
+            except Exception:  # noqa: BLE001
+                pass
+
+    def view(self) -> dict[str, Any]:
+        return {"mode": WORK_OBSERVATION_MODE,
+                "state": "OBSERVED" if self.calls else "NOT_EXERCISED",
+                "calls": [dict(row) for row in self.calls]}
+
+
+def _install_work_observer(writer: Any, transport: Any,
+                           observer: WorkContextObserver) -> None:
+    """只在 i 的实验路径里包 writer/transport；参数、返回、异常原样透传。"""
+
+    original_next = writer.next_content
+
+    def observed_next_content(point: Any, *, observed_at: str,
+                              context: Optional[Mapping[str, Any]] = None) -> Any:
+        observer.bind_expected(getattr(point, "artifact_id", ""))
+        try:
+            return original_next(point, observed_at=observed_at, context=context)
+        finally:
+            observer.clear_expected()
+
+    # 保持与原 writer 同形的 ``context`` 关键字，``accepts_context`` 的判定不变。
+    observed_next_content.__name__ = getattr(original_next, "__name__", "next_content")
+    writer.next_content = observed_next_content
+
+    original_complete = transport.complete
+
+    def observed_complete(*args: Any, **kwargs: Any) -> Any:
+        user_prompt = kwargs.get("user_prompt")
+        if user_prompt is None and len(args) >= 2:
+            user_prompt = args[1]
+        try:
+            observer.observe(user_prompt)
+        except Exception:  # noqa: BLE001 - observation never blocks the send
+            pass
+        return original_complete(*args, **kwargs)
+
+    transport.complete = observed_complete
 
 
 @contextlib.contextmanager
@@ -1649,6 +2340,28 @@ def _safe_wake(wake: Optional[Mapping[str, Any]], *, receipt: Optional[Mapping[s
                  "decision_route", "reason_codes"):
         if name in extra and name not in view:
             view[name] = extra.get(name)
+    # ``decision_id`` is an id, so it is validated with the same ``dec:`` shape here as it is
+    # when it arrives as a top-level field (a wake carries it in ``extra``).
+    if "decision_id" not in view and extra.get("decision_id"):
+        decision_id = _trace_id(extra.get("decision_id"), frozenset({"dec"}))
+        if decision_id:
+            view["decision_id"] = decision_id
+    # A legal writer ``no_change`` is its own structured fact: keep only the reason enum and the
+    # two booleans, never text.  It may sit on the cycle result or inside the wake's extra.
+    work_no_change = row.get("work_no_change")
+    if not isinstance(work_no_change, Mapping):
+        work_no_change = extra.get("work_no_change")
+    if isinstance(work_no_change, Mapping):
+        shaped: dict[str, Any] = {}
+        reason = work_no_change.get("reason_code")
+        if isinstance(reason, str) and reason:
+            shaped["reason_code"] = reason
+        for flag in ("owner_called", "version_created"):
+            value = work_no_change.get(flag)
+            if isinstance(value, bool):
+                shaped[flag] = value
+        if shaped:
+            view["work_no_change"] = shaped
     view["llm_calls"] = int(view.get("llm_calls") or 0)
     if isinstance(view.get("reason_codes"), (list, tuple)):
         view["reason_codes"] = [str(code) for code in view["reason_codes"]]
@@ -1674,6 +2387,13 @@ _SAFE_PHASE_FIELDS = (
     # 只有 d 的自然 phase 才有；a/b/c 的报告里没有这些键，输出形状不变。
     "natural_phase", "operator_material_provisioned", "control_created",
     "injector_constructed", "round_count", "observation", "world", "isolation",
+    # 只有 v0.6 B 的离线 phase 才有；旧批报告里没有这个键，输出形状不变。
+    "offline_child_guard",
+    # 只有 v0.6 D 才有：脚本 client 边界上的 ambient 开关/计数/ID 与原文匹配布尔。
+    "ambient_client",
+    # 只有 i 的 p1/p2 才有：artifact_edit 的 transport.complete 边界安全 summary；
+    # 旧 profile 报告里没有这个键，输出形状不变。
+    "work_observation",
 )
 
 
@@ -1985,6 +2705,8 @@ class CandidateTrace:
         self.enabled = bool(enabled)
         self.pause_material = bool(pause_material)
         self.path = _experiment_dir(self.root) / (CANDIDATE_TRACE_FILENAME % self.phase)
+        # 行数上限在**构造时**按本批解析：C 是 6000，旧批仍是 4000。
+        self.max_records = _profile_trace_max_records()
         self.records = 0
         self.error = ""
         self.dropped_records = 0
@@ -2426,7 +3148,7 @@ class CandidateTrace:
             # 写失败后不再反复尝试同一条路径；业务继续，只是观测不完整。
             self.dropped_records += 1
             return
-        if self.records >= CANDIDATE_TRACE_MAX_RECORDS:
+        if self.records >= self.max_records:
             self.dropped_records += 1
             return
         row = {"schema": CANDIDATE_TRACE_SCHEMA, "phase": self.phase,
@@ -2655,6 +3377,8 @@ class SubmissionInjector:
 
     def view(self) -> dict[str, Any]:
         return {"unknown_fired": int(self.unknown_fired),
+                # 提前武装的锁存还在不在：没有 A 的提交的那些轮次之后应当仍为 True。
+                "unknown_armed": bool(self.arm_unknown),
                 "concurrent_fired": int(self.concurrent_fired),
                 "concurrent": dict(self.concurrent)}
 
@@ -2770,6 +3494,18 @@ def _cas_evidence(injector: Any, owner: Optional[Mapping[str, Any]]) -> dict[str
             == CAS_OWNER_CONFLICT}
 
 
+def _arm_unknown_pre_round(injector: Any) -> None:
+    """p2 的第一轮之前武装 UNKNOWN 注入。
+
+    注入本身没变（真写落地、回执丢失、一次性自复位），变的只是武装时机：原来是
+    「上一轮已经写完 A 才武装」，模型只续一次作品时永远等不到下一次 A 的提交。提前挂上
+    之后，第一件 A 的 ``commit_version`` 就消费它；哪一轮没有 A 的提交，它就原样挂在锁存上
+    等着，不会被某一轮空转吃掉。
+    """
+
+    injector.arm_unknown = True
+
+
 def _apply_round(state: str, wake: Mapping[str, Any], *, versions_before: int,
                  versions_after: int, injector: SubmissionInjector,
                  activity_matches: bool = False, same_work: bool = False,
@@ -2794,7 +3530,10 @@ def _apply_round(state: str, wake: Mapping[str, Any], *, versions_before: int,
     target_ok = bool(activity_matches and same_work and round_has_receipt)
     if state == STATE_AWAIT_CONTINUE:
         if wrote and decision == "CONTINUE" and target_ok:
-            injector.arm_unknown = True
+            # 一次性：提前武装时这一轮就是「注入被第一件 A 的提交消费掉」的那一轮，
+            # 已经用掉就不再补挂，免得 ``arm_unknown`` 在报告里假装还挂着。
+            if int(getattr(injector, "unknown_fired", 0) or 0) == 0:
+                injector.arm_unknown = True
             return STATE_AWAIT_UNKNOWN
         return state
     if state == STATE_AWAIT_UNKNOWN:
@@ -2892,7 +3631,8 @@ def _phase_p1(config: Mapping[str, Any]) -> dict[str, Any]:
     trace = CandidateTrace(root, phase="p1",
                            enabled=bool(config.get("capture_candidates")))
     try:
-        child = _start_supply(root, tag="g1-p1")
+        # g 的离线 p1 也走同一份 owner child guard（B/C/D/E 不走 p1/p2，行为不变）。
+        child = _start_supply(root, tag="g1-p1", offline=offline)
         env = _runtime_env(root, offline=offline)
         if not offline:
             model = _verify_model_config(env)
@@ -2906,7 +3646,7 @@ def _phase_p1(config: Mapping[str, Any]) -> dict[str, Any]:
         report["ledger"] = _ledger_view(budget)
         bundle = _build_runtime(root, state_root=state_root, budget=budget, latch=latch,
                                 env=env, offline=offline, plan=config.get("plan"),
-                                trace=trace)
+                                trace=trace, phase="p1")
         driver = ExplicitDriver(bundle, clock=_FixtureClock()) if offline else RunnerDriver(bundle)
         excluded = _excluded_artifact_ids(bundle["cycle"], data)
         artifact_a = ""
@@ -2991,11 +3731,16 @@ def _phase_p1(config: Mapping[str, Any]) -> dict[str, Any]:
         report["close_runtime"] = _release_runtime(bundle)
         report["close_supply"] = _stop_supply(child)
         report["ledger"] = _ledger_view(budget) if "budget" in locals() else report.get("ledger")
-        if _identity().key == F_PROFILE.key:
-            # f：phase 子进程自己的实际 gate 与写面解析；只记路径/布尔，不读默认台账。
+        if _identity().key in (F_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+                               I_PROFILE.key):
+            # f/g/h/i：phase 子进程自己的实际 gate 与写面解析；只记路径/布尔，不读默认台账。
             report["world_gate"] = os.environ.get("WORLD_BODY_INTENT_MUTATION_GATE")
             report["isolation"] = _isolation_refresh(_isolation_view(root))
         report["candidate_trace"] = trace.view()
+        observer = (bundle or {}).get("work_observer") if isinstance(bundle, Mapping) else None
+        if observer is not None:
+            # 只有 i 装了这个对象；其它 profile 的报告不新增任何键。
+            report["work_observation"] = observer.view()
         _dump_phase(report, root)
     return report
 
@@ -3053,7 +3798,8 @@ def _phase_p2(config: Mapping[str, Any]) -> dict[str, Any]:
             cas_refused=cas_ok)
 
     try:
-        child = _start_supply(root, tag="g1-p2")
+        # g 的离线 p2 同 p1：owner child 也装局部网络守卫；旧批不进入这个分支。
+        child = _start_supply(root, tag="g1-p2", offline=offline)
         env = _runtime_env(root, offline=offline)
         if not offline:
             model = _verify_model_config(env)
@@ -3069,7 +3815,7 @@ def _phase_p2(config: Mapping[str, Any]) -> dict[str, Any]:
         report["state_at_start"] = odl.status(instance)["state"]["state_class"]
         bundle = _build_runtime(root, state_root=state_root, budget=budget, latch=latch,
                                 env=env, offline=offline, plan=config.get("plan"),
-                                trace=trace)
+                                trace=trace, phase="p2")
         driver = ExplicitDriver(bundle, clock=_FixtureClock()) if offline else RunnerDriver(bundle)
         injector = SubmissionInjector(bundle, artifact_a=artifact_a,
                                       grant_id=str(data.get("artifact_grant_id") or ""),
@@ -3116,6 +3862,10 @@ def _phase_p2(config: Mapping[str, Any]) -> dict[str, Any]:
                     activity_ref=report.get("activity_ref"))
         state = STATE_AWAIT_CONTINUE
         report["states"].append(state)
+        # 提前武装：p2 第一轮之前就挂上 UNKNOWN 注入，第一件 A 的提交就消费它。
+        # 只挂锁存，不等「上一轮已经写完」；没有 A 提交的轮次不会把它空转掉。
+        _arm_unknown_pre_round(injector)
+        report["unknown_armed_before_first_round"] = bool(injector.arm_unknown)
         last_versions = int(report.get("versions_at_start") or 0)
         expected_activity = report["activity_ref"]
         for index in range(MAX_TICKS):
@@ -3173,14 +3923,21 @@ def _phase_p2(config: Mapping[str, Any]) -> dict[str, Any]:
                     report["cas_owner"] = _action_owner_status(bundle, action_id)
                     cas_evidence = _cas_evidence(injector, report["cas_owner"])
                     report["cas_evidence"] = cas_evidence
-                new_state = _apply_round(
-                    state, wake, versions_before=last_versions, versions_after=versions_now,
-                    injector=injector, activity_matches=activity_matches,
-                    same_work=same_work, round_has_receipt=round_has_receipt,
-                    reconcile_ok=reconcile_ok, cas_evidence=cas_evidence)
-                if new_state != state:
+                # 提前武装之后，「续 A 的那次写入」「回执丢失变 UNKNOWN」「按原 operation
+                # 对账」可以落在同一轮里：本轮证据够几段就推进几段，每一段仍然按各自的门槛
+                # 校验（推不动就停在这一段）。
+                for _step in range(6):
+                    new_state = _apply_round(
+                        state, wake, versions_before=last_versions, versions_after=versions_now,
+                        injector=injector, activity_matches=activity_matches,
+                        same_work=same_work, round_has_receipt=round_has_receipt,
+                        reconcile_ok=reconcile_ok, cas_evidence=cas_evidence)
+                    if new_state == state:
+                        break
                     state = new_state
                     report["states"].append(state)
+                    if state == STATE_COVERED:
+                        break
                 last_versions = versions_now
                 if state == STATE_COVERED:
                     break
@@ -3214,11 +3971,16 @@ def _phase_p2(config: Mapping[str, Any]) -> dict[str, Any]:
             report.setdefault("injections", injector.view())
         report.setdefault("final_state", STATE_AWAIT_CONTINUE)
         report["coverage"] = _coverage_from_states(**_coverage_kwargs())
-        if _identity().key == F_PROFILE.key:
-            # f：p2 也用同一套实例 world_home 隔离；gate 必须是显式 off。
+        if _identity().key in (F_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+                               I_PROFILE.key):
+            # f/g/h/i：p2 也用同一套实例 world_home 隔离；gate 必须是显式 off。
             report["world_gate"] = os.environ.get("WORLD_BODY_INTENT_MUTATION_GATE")
             report["isolation"] = _isolation_refresh(_isolation_view(root))
         report["candidate_trace"] = trace.view()
+        observer = (bundle or {}).get("work_observer") if isinstance(bundle, Mapping) else None
+        if observer is not None:
+            # 只有 i 装了这个对象；其它 profile 的报告不新增任何键。
+            report["work_observation"] = observer.view()
         _dump_phase(report, root)
     return report
 
@@ -3226,6 +3988,46 @@ def _phase_p2(config: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------------------------
 # d 的唯一自然 phase：没有任何注入；只观察同次最终结构里的两条固定文本
 # ---------------------------------------------------------------------------------------------
+
+
+def _d_world_state_view(world_home: Any) -> dict[str, Any]:
+    """v0.6 D 专用只读：本实例 World 自己的位置与 Body 姿态。
+
+    只读 World 自己的两份持久状态文件（``world_state.json`` / ``body_substrate.json``），
+    和 roundtrip 检查用的是同一组路径；不新增协议、不读正文。只回固定枚举/ID，
+    用来证明 gate off 的预提交拒绝前后世界位置与姿态没有变化。
+    """
+
+    base = Path(str(world_home or ""))
+    view: dict[str, Any] = {
+        "world_state_present": False, "place_id": None, "area_id": None,
+        "world_revision": None, "body_present": False, "pose": None,
+        "orientation": None, "body_revision": None,
+    }
+    if not str(base):
+        return view
+    try:
+        state = json.loads((base / "data" / "world" / "world_state.json")
+                           .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state = None
+    if isinstance(state, Mapping):
+        location = state.get("location") if isinstance(state.get("location"), Mapping) else {}
+        view.update({"world_state_present": True,
+                     "place_id": str(location.get("place_id") or "") or None,
+                     "area_id": str(location.get("area_id") or "") or None,
+                     "world_revision": state.get("revision")})
+    try:
+        body = json.loads((base / "data" / "world" / "body_substrate.json")
+                          .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        body = None
+    if isinstance(body, Mapping):
+        view.update({"body_present": True,
+                     "pose": str(body.get("pose") or "") or None,
+                     "orientation": str(body.get("orientation") or "") or None,
+                     "body_revision": body.get("revision")})
+    return view
 
 
 def _phase_natural(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -3237,7 +4039,8 @@ def _phase_natural(config: Mapping[str, Any]) -> dict[str, Any]:
     """
 
     root = Path(str(config["root"]))
-    if _identity().key == E_PROFILE.key:
+    if _identity().key in (E_PROFILE.key, B_PROFILE.key, C_PROFILE.key,
+                           V06_D_PROFILE.key, V06_E_PROFILE.key):
         # 直接调用（绕过 cmd_phase）时同样先自查：服务/模型启动前失败关闭。
         _verify_isolated_child_env(root)
     offline = bool(config.get("offline"))
@@ -3260,11 +4063,11 @@ def _phase_natural(config: Mapping[str, Any]) -> dict[str, Any]:
                            enabled=bool(config.get("capture_candidates")),
                            pause_material=(_identity().key == D_PROFILE.key))
     try:
-        child = _start_supply(root, tag="g1-natural")
+        child = _start_supply(root, tag="g1-natural", offline=offline)
         # 标准 World：同一实例根、同一 world home/package；gate 用本批自己的值
-        # （e=canonical，d=off）。world child 起来且 socket 就绪之前不装配 runtime——
+        # （e/B/C=canonical，d/D=off）。world child 起来且 socket 就绪之前不装配 runtime——
         # 不做"先跑起来再补服务"。
-        world_child = _start_world(root, tag="g1-natural")
+        world_child = _start_world(root, tag="g1-natural", offline=offline)
         world_socket = str(getattr(world_child, "socket_path", "") or "")
         report["world"] = {"started": True, "pid": world_child.pid,
                            "socket": world_socket, "gate": gate, "ready": False,
@@ -3278,6 +4081,10 @@ def _phase_natural(config: Mapping[str, Any]) -> dict[str, Any]:
                                "WORLD_ACTION_AUTH_REGISTRY_DIR"),
                            "child_env_lifecycle": world_child.environment.get(
                                "WORLD_ACTION_LIFECYCLE_PATH")}
+        if _is_v06_natural():
+            # v0.6 D/E：只回这个开关是否存在/是什么，不输出整份环境；旧批不出现这个键。
+            report["world"]["child_env_ambient"] = world_child.environment.get(
+                V06_D_AMBIENT_ENV)
         env = _runtime_env(root, offline=offline)
         # 三处 env 映射必须是同一个固定值：runtime env 与装配进来的标准 adapter 读的是
         # 这一份；World child 的 env 已在 ``_start_world`` 里显式写入同一个值。
@@ -3287,6 +4094,13 @@ def _phase_natural(config: Mapping[str, Any]) -> dict[str, Any]:
             raise Refused(REASON_WORLD_GATE_MISMATCH,
                           "runtime env gate %r != %r"
                           % (env.get("WORLD_BODY_INTENT_MUTATION_GATE"), expected_gate))
+        expected_ambient = _ambient_events_env(_identity())
+        if (expected_ambient is not None
+                and str(env.get(V06_D_AMBIENT_ENV) or "") != expected_ambient):
+            # D 的 ambient 背景只在本进程树里显式打开；缺键/错值不带着跑。
+            raise Refused(REASON_AMBIENT_ENV_MISMATCH,
+                          "runtime env ambient %r != %r"
+                          % (env.get(V06_D_AMBIENT_ENV), expected_ambient))
         if str(env.get("WORLD_BODY_SOCKET") or "") != world_socket:
             raise Refused(REASON_WORLD_NOT_READY,
                           "instance world socket differs from the live world child")
@@ -3312,9 +4126,15 @@ def _phase_natural(config: Mapping[str, Any]) -> dict[str, Any]:
         if world_record.get("status") != "READY":
             raise Refused(REASON_WORLD_NOT_READY,
                           str(world_record.get("reason") or "world is not ready"))
+        if _is_v06_natural():
+            # v0.6 D/E：自然观察，World gate 显式 off。进入决策循环前先记录本实例自己的
+            # 位置/姿态基线；跑完只读同一组文件，证明预提交拒绝零效果。
+            report["world_before"] = _d_world_state_view(
+                (report.get("isolation") or {}).get("world_home"))
         driver = (ExplicitDriver(bundle, clock=_FixtureClock()) if offline
                   else RunnerDriver(bundle))
-        for index in range(MAX_TICKS):
+        # 循环上限按本批解析：C 要覆盖 10800/5 秒的完整窗口（3000），旧批仍是 900。
+        for index in range(_profile_max_ticks()):
             stop = _loop_stop(root, budget, latch)
             if stop:
                 report["stop_reason"] = stop
@@ -3357,11 +4177,74 @@ def _phase_natural(config: Mapping[str, Any]) -> dict[str, Any]:
         # 本次 trace 已逐行落盘（每行 open/close）；只读摘要放在 phase 报告里，
         # 父级 audit/run 与离线验收看到的是同一份事实，不另建观测。
         report["observation"] = _d_trace_observation(root)
+        if _identity().key == V06_D_PROFILE.key:
+            # D：只在**脚本 client 真正收到的输入**上核对 ambient 透传；prompt 正文不入报告。
+            report["ambient_client"] = _d_ambient_client_view(
+                (bundle or {}).get("decision_transport"),
+                ambient_env=(locals().get("env") or {}).get(V06_D_AMBIENT_ENV))
+        if offline and _identity().key in (B_PROFILE.key, C_PROFILE.key,
+                                           V06_D_PROFILE.key, V06_E_PROFILE.key):
+            # 只给 B/C/D/E 离线：World/Supply 子进程自己写的网络守卫自检（布尔/pid）。
+            report["offline_child_guard"] = _offline_child_guard_report(root)
+        if _is_v06_natural():
+            # v0.6 D/E：跑完只读同一组 World 文件，和进入循环前的基线对照。
+            report["world_after"] = _d_world_state_view(
+                (report.get("isolation") or {}).get("world_home"))
         # 跑完后只读本根 ledger 是否存在、里面有哪些固定枚举/ID；不碰仓库默认路径。
         if isinstance(report.get("isolation"), dict):
             report["isolation"] = _isolation_refresh(report["isolation"])
         _dump_phase(report, root)
     return report
+
+
+def _d_ambient_client_view(transport: Any, *,
+                           ambient_env: Optional[str] = None) -> dict[str, Any]:
+    """D 的 client 边界核对：只看脚本 client 收到的**那一份最终输入**。
+
+    这里不重新 ``build_prompt``、不重新读 World，也不把输入正文写进任何报告。只回答四个
+    事实：这次输入里有没有 ``ambient`` 背景键、事件数量、事件 ID，以及每个事件的
+    ``event_id``/公开 ``summary`` 是否以原文精确出现在同一份输入文本里。事件为 0 时
+    如实报 0，布尔保持 ``None``（没有事件不等于“匹配失败”）。
+    """
+
+    prompts = list(getattr(transport, "captured_prompts", []) or ())
+    view: dict[str, Any] = {
+        "ambient_env": ambient_env, "requests": len(prompts), "status": "NO_REQUEST",
+        "ambient_key_present": None, "event_count": 0, "event_ids": [],
+        "ids_exact_in_input": None, "summaries_exact_in_input": None,
+        "reason_code": None,
+    }
+    if not prompts:
+        return view
+    text = prompts[0]
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        view["status"] = "INPUT_NOT_JSON"
+        return view
+    if not isinstance(payload, Mapping):
+        view["status"] = "INPUT_NOT_OBJECT"
+        return view
+    situation = payload.get("situation_context")
+    world = situation.get("world") if isinstance(situation, Mapping) else None
+    ambient = world.get("ambient") if isinstance(world, Mapping) else None
+    if not isinstance(ambient, Mapping):
+        view["status"] = "AMBIENT_ABSENT"
+        return view
+    view["ambient_key_present"] = True
+    view["status"] = str(ambient.get("status") or "UNKNOWN")
+    view["reason_code"] = str(ambient.get("reason_code") or "") or None
+    events = [dict(row) for row in (ambient.get("events") or [])
+              if isinstance(row, Mapping)]
+    ids = [str(row.get("event_id") or "") for row in events]
+    summaries = [str(row.get("summary") or "") for row in events]
+    view["event_count"] = len(events)
+    view["event_ids"] = [value for value in ids if value][:8]
+    if events:
+        view["ids_exact_in_input"] = all(value and value in text for value in ids)
+        view["summaries_exact_in_input"] = all(
+            value and value in text for value in summaries)
+    return view
 
 
 def _d_trace_observation(root: Path | str) -> dict[str, Any]:
@@ -3392,7 +4275,7 @@ def _d_trace_observation(root: Path | str) -> dict[str, Any]:
     try:
         with open(path, encoding="utf-8") as handle:
             for line_no, line in enumerate(handle):
-                if line_no >= CANDIDATE_TRACE_MAX_RECORDS:
+                if line_no >= _profile_trace_max_records():
                     view["truncated"] = True
                     break
                 text = line.strip()
@@ -3471,6 +4354,9 @@ def _loop_stop(root: Path | str, budget: Any, latch: SendLatch) -> str:
         return REASON_LEDGER_UNREADABLE
     if calls >= REQUEST_CAP:
         return REASON_REQUEST_CAP
+    if _total_accounting_exceeded(calls):
+        # 只对 D 生效：212 + 本批已发 >= 1000 时在发送前停；旧批不进入这个判断。
+        return REASON_TOTAL_ACCOUNTING_CAP
     return ""
 
 
@@ -3557,7 +4443,9 @@ def prepare(root: Path | str, *, expected_root: Optional[Path | str] = None,
     control: Optional[dict[str, Any]] = {}
     if not natural:
         try:
-            child = _start_supply(root_path, tag="g1-prepare")
+            # prepare 里的真实 Supply owner 也走同一次离线调用：B/C/g/h/D/E 的
+            # 离线子进程必须装同一份 AF_INET 硬拒守卫（AF_UNIX 仍放行）。
+            child = _start_supply(root_path, tag="g1-prepare", offline=offline)
             data = _read_instance_data(root_path)
             env = _runtime_env(root_path, offline=offline)
             material, control = _provision_operator_material(
@@ -3609,7 +4497,8 @@ def prepare(root: Path | str, *, expected_root: Optional[Path | str] = None,
         "root": str(root_path), "state_root": str(state_root), "subject": subject,
         "workspace_id": workspace_id, "artifact_grant_id": grant_id,
         "memory_authority": str(authority),
-        "caps": {"request_cap": REQUEST_CAP, "window_seconds": WINDOW_SECONDS,
+        "caps": {"request_cap": REQUEST_CAP,
+                 "window_seconds": _profile_window_seconds(profile),
                  "utc_day_cap": UTC_DAY_CAP, "expected_history": profile.expected_history,
                  "check_interval_minutes": CHECK_INTERVAL_MINUTES},
         "model_params": {"provider": MODEL_PROVIDER,
@@ -3633,6 +4522,13 @@ def prepare(root: Path | str, *, expected_root: Optional[Path | str] = None,
         "note": "参数、材料与上限在第一次产品请求之前写在这里；之后只读。",
         "window_view": view.get("state"),
     }
+    if profile.latest_start is not None:
+        # 只给 v0.6 B/C：最晚启动线是封闭身份的一部分，跨 phase/audit 都要匹配。
+        prereg["latest_start"] = profile.latest_start.isoformat()
+    if profile.max_ticks is not None:
+        # 只给 C：tick 循环上限与 trace 行数上限也是本批参数，写进 prereg 供 audit 只读核对。
+        prereg["caps"]["max_ticks"] = _profile_max_ticks(profile)
+        prereg["caps"]["trace_max_records"] = _profile_trace_max_records(profile)
     if natural:
         # 路径事实：这些不是从别处读出来的结论，而是这条独立路径本身没有这些动作。
         # d 的观察项原样保留（旧断言钉着整块字典）；e 只写世界动作这一批自己的事实。
@@ -3652,6 +4548,12 @@ def prepare(root: Path | str, *, expected_root: Optional[Path | str] = None,
             }
         # 自然批的 gate 是封闭身份的一部分，写进 prereg 供 audit/摘要只读核对。
         prereg["world_intent_gate"] = _world_intent_gate(profile)
+        if _is_v06_natural(profile):
+            # v0.6 D/E：ambient 背景的开关与跨批累计记账上限也是本批封闭事实；
+            # 旧批没有这些键。
+            prereg["observation"]["ambient_events"] = "enabled"
+            prereg["observation"]["ambient_env"] = V06_D_AMBIENT_ENV
+            prereg["caps"]["total_accounting_cap"] = V06_TOTAL_ACCOUNTING_CAP
     if profile.key == F_PROFILE.key:
         # f：作品续写批，不启动 World 服务；gate/写面隔离仍是封闭事实，写进 prereg。
         prereg["world_intent_gate"] = _world_intent_gate(profile)
@@ -3659,6 +4561,37 @@ def prepare(root: Path | str, *, expected_root: Optional[Path | str] = None,
             "mode": "g1_limited_adoption", "world_service_started": False,
             "world_intent_gate": _world_intent_gate(profile),
         }
+    if profile.key == G_PROFILE.key:
+        # g：G1 完整端到端，不启动 World 服务；gate/写面隔离、累计上限和绝对线
+        # 都是本批封闭事实，写进 prereg 供 audit/摘要只读核对。
+        prereg["world_intent_gate"] = _world_intent_gate(profile)
+        prereg["observation"] = {
+            "mode": "g1_integrated_g", "world_service_started": False,
+            "world_intent_gate": _world_intent_gate(profile),
+            "total_accounting_cap": G_TOTAL_ACCOUNTING_CAP,
+        }
+        prereg["caps"]["total_accounting_cap"] = G_TOTAL_ACCOUNTING_CAP
+    if profile.key == H_PROFILE.key:
+        # h：与 g 同一套完整 G1 链，只换封闭身份；同样不启动 World 服务，
+        # gate/写面隔离、累计上限和绝对线写进 prereg 供 audit 只读核对。
+        prereg["world_intent_gate"] = _world_intent_gate(profile)
+        prereg["observation"] = {
+            "mode": "g1_integrated_h", "world_service_started": False,
+            "world_intent_gate": _world_intent_gate(profile),
+            "total_accounting_cap": G_TOTAL_ACCOUNTING_CAP,
+        }
+        prereg["caps"]["total_accounting_cap"] = G_TOTAL_ACCOUNTING_CAP
+    if profile.key == I_PROFILE.key:
+        # i：与 h 同一套完整 G1 链与 12 门，只换封闭身份；同样不启动 World 服务。
+        # 额外只在脚本实验层做 artifact_edit 调用边界观察（不写生产 schema）。
+        prereg["world_intent_gate"] = _world_intent_gate(profile)
+        prereg["observation"] = {
+            "mode": WORK_OBSERVATION_MODE, "world_service_started": False,
+            "world_intent_gate": _world_intent_gate(profile),
+            "total_accounting_cap": G_TOTAL_ACCOUNTING_CAP,
+            "call_boundary_observation": "artifact_edit transport.complete local only",
+        }
+        prereg["caps"]["total_accounting_cap"] = G_TOTAL_ACCOUNTING_CAP
     _write_json(_experiment_dir(root_path) / PREREG_FILENAME, prereg, private=True)
     _write_json(_experiment_dir(root_path) / BATCH_FILENAME, {
         "schema": "g1.batch.v1", "batch": profile.key,
@@ -3733,7 +4666,7 @@ def _provision_operator_material(root: Path | str, *, data: Mapping[str, Any],
 def _phase_child_env(profile: Optional[BatchProfile] = None,
                      root: Optional[Path | str] = None, *,
                      offline: bool = False) -> dict[str, str]:
-    """phase 子进程的环境映射：e 显式 canonical，d 显式 off，a/b/c 原样继承。
+    """phase 子进程的环境映射：e/B/C 显式 canonical，d/D 显式 off，a 原样继承。
 
     这里只构造要交给 ``subprocess.run`` 的 dict，不修改本进程的 ``os.environ``。
 
@@ -3749,6 +4682,7 @@ def _phase_child_env(profile: Optional[BatchProfile] = None,
     # 父 shell 里残留的离线标记一律不带进子进程；只有在**本次实际离线调用路径**里、
     # 父进程确实处于离线夹具参考时刻时，才给这一次的子进程树补上布尔标记。
     env.pop(OFFLINE_FIXTURE_ENV, None)
+    env.pop(V06_OFFLINE_GUARD_ENV, None)
     if offline and _OFFLINE_REFERENCE is not None:
         env[OFFLINE_FIXTURE_ENV] = "1"
     if offline:
@@ -3756,11 +4690,22 @@ def _phase_child_env(profile: Optional[BatchProfile] = None,
         # ``_runtime_env(offline=True)`` 的显式合成映射注入，不从生产 env 猜。
         for key in [name for name in env if name.startswith("NYA02_MODEL_")]:
             env.pop(key, None)
+        if profile.key in (B_PROFILE.key, C_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+                           I_PROFILE.key, V06_D_PROFILE.key, V06_E_PROFILE.key):
+            # 只给 B/C/g/h/D/E 的离线子进程：它在进入正式 phase 前装同一份 AF_INET 硬拒守卫。
+            # 旧 d/e 不带这个标记，行为不变。
+            env[V06_OFFLINE_GUARD_ENV] = "1"
     gate = _world_intent_gate(profile)
     if gate is not None:
         env["WORLD_BODY_INTENT_MUTATION_GATE"] = gate
-    if profile.key in (E_PROFILE.key, F_PROFILE.key) and root is not None:
-        # e/f：缺/坏 world_home 直接拒绝，不把父 shell 的 home/registry/lifecycle 带进子进程。
+    ambient_events = _ambient_events_env(profile)
+    if ambient_events is not None:
+        env[V06_D_AMBIENT_ENV] = ambient_events
+    if (profile.key in (E_PROFILE.key, F_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+                        I_PROFILE.key, B_PROFILE.key, C_PROFILE.key,
+                        V06_D_PROFILE.key, V06_E_PROFILE.key)
+            and root is not None):
+        # e/f/g/h/B/C/D/E：缺/坏 world_home 直接拒绝，不把父 shell 的 home/registry/lifecycle 带进子进程。
         env.update(_world_isolation_env(_require_instance_world_home(root)))
     elif _is_natural(profile) and root is not None:
         # d 维持 b6 交付时的宽松投影；a/b/c 不进入这里。
@@ -3975,8 +4920,10 @@ def start_run(root: Path | str, *, expected_root: Optional[Path | str] = None,
     identity_refusal = _verify_instance_identity(root_path)
     if identity_refusal is not None:
         return identity_refusal
-    if profile.key in (E_PROFILE.key, F_PROFILE.key):
+    if profile.key in (E_PROFILE.key, F_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+                       I_PROFILE.key, B_PROFILE.key, C_PROFILE.key, V06_E_PROFILE.key):
         # 路径守卫必须在任何服务/请求/窗口之前：坏 home 不继承父环境，也不写 started。
+        # D 的同一守卫在下方 natural 分支的 _runtime_env 里已生效，这里不做无关改动。
         try:
             _require_instance_world_home(root_path)
         except Refused as exc:
@@ -3989,6 +4936,10 @@ def start_run(root: Path | str, *, expected_root: Optional[Path | str] = None,
     if _wall_now() >= profile.deadline:
         return {"ok": False, "reason_code": REASON_DEADLINE_PASSED,
                 "deadline": profile.deadline.isoformat()}
+    # v0.6 B：最晚启动线比绝对截止更早；过线拒绝新 run，且不写窗口/started。
+    if profile.latest_start is not None and _wall_now() >= profile.latest_start:
+        return {"ok": False, "reason_code": REASON_LATEST_START_PASSED,
+                "latest_start": profile.latest_start.isoformat()}
     if _window_path(root_path).exists() and _deadline_passed(root_path):
         return {"ok": False, "reason_code": REASON_DEADLINE_PASSED,
                 "deadline": profile.deadline.isoformat()}
@@ -4052,8 +5003,9 @@ def start_run(root: Path | str, *, expected_root: Optional[Path | str] = None,
         report["observation"] = None
     try:
         if natural:
-            # d/e 只有一个自然 phase：没有 P1 成果门、没有暂停/重启、没有第二次运行。
-            remaining = max(60.0, float(window["deadline_monotonic"]) - time.monotonic() + 120.0)
+            # 单 natural phase：没有 P1 成果门、没有暂停/重启、没有第二次运行。
+            # B 的总收尾冗余是 60 秒；旧 d/e 保持原来的 120 秒。
+            remaining = _natural_phase_timeout(profile, window["deadline_monotonic"])
             code_n, phase, _stderr = _run_phase_process(
                 PHASE_NATURAL, root_path,
                 {"offline": bool(offline),
@@ -4066,7 +5018,8 @@ def start_run(root: Path | str, *, expected_root: Optional[Path | str] = None,
             report["stop_reason"] = str(phase.get("stop_reason")
                                         or (REASON_PHASE_FAILED if code_n else REASON_RUN_FINISHED))
         else:
-            remaining = max(60.0, float(window["deadline_monotonic"]) - time.monotonic() + 120.0)
+            remaining = max(60.0, float(window["deadline_monotonic"]) - time.monotonic()
+                            + _phase_cleanup_seconds(profile))
             code1, p1, _stderr = _run_phase_process(
                 "p1", root_path,
                 {"offline": bool(offline), "plan": ["START"],
@@ -4076,7 +5029,8 @@ def start_run(root: Path | str, *, expected_root: Optional[Path | str] = None,
             if code1 != 0 or not p1.get("artifact_a") or not p1.get("write_confirmed"):
                 report["stop_reason"] = str(p1.get("stop_reason") or REASON_PHASE_FAILED)
             else:
-                remaining = max(60.0, float(window["deadline_monotonic"]) - time.monotonic() + 120.0)
+                remaining = max(60.0, float(window["deadline_monotonic"]) - time.monotonic()
+                                + _phase_cleanup_seconds(profile))
                 code2, p2, _stderr = _run_phase_process(
                     "p2", root_path,
                     {"offline": bool(offline), "artifact_a": p1.get("artifact_a"),
@@ -4167,10 +5121,29 @@ def audit(root: Path | str, *, expected_root: Optional[Path | str] = None) -> di
         payload["observation"] = report.get("observation")
         payload["world_intent_gate"] = prereg.get("world_intent_gate",
                                                   _world_intent_gate(profile))
+        if profile.latest_start is not None:
+            # v0.6 B/C：只追加本批自己的封闭字段，旧自然批没有这一项。
+            payload["latest_start"] = profile.latest_start.isoformat()
+        if profile.max_ticks is not None:
+            # v0.6 C：窗口/tick/trace 上限也随 audit 只读回显，旧批没有这三个字段。
+            payload["window_seconds"] = _profile_window_seconds(profile)
+            payload["max_ticks"] = _profile_max_ticks(profile)
+            payload["trace_max_records"] = _profile_trace_max_records(profile)
     elif profile.key == F_PROFILE.key:
         # f：gate 固定 off，服务未启动；不复制自然批的 observation 语义。
         payload["world_intent_gate"] = prereg.get("world_intent_gate",
                                                   _world_intent_gate(profile))
+    elif profile.key in (G_PROFILE.key, H_PROFILE.key, I_PROFILE.key):
+        # g/h：G1 完整端到端；gate 固定 off、服务未启动。把本批封闭的时间/上限
+        # 只读回显，方便 status/audit 不读旧实例就能核对身份。
+        payload["world_intent_gate"] = prereg.get("world_intent_gate",
+                                                  _world_intent_gate(profile))
+        payload["latest_start"] = (profile.latest_start.isoformat()
+                                   if profile.latest_start is not None else None)
+        payload["window_seconds"] = _profile_window_seconds(profile)
+        payload["max_ticks"] = _profile_max_ticks(profile)
+        payload["trace_max_records"] = _profile_trace_max_records(profile)
+        payload["total_accounting_cap"] = G_TOTAL_ACCOUNTING_CAP
     return payload
 
 
@@ -4766,10 +5739,12 @@ def cmd_phase(argv: Sequence[str]) -> int:
         if refusal is not None:
             sys.stderr.write("phase refused: %s\n" % refusal.get("reason_code"))
             return EXIT_REFUSED
-        if ((profile.key == E_PROFILE.key and args.phase == PHASE_NATURAL)
-                or profile.key == F_PROFILE.key):
-            # e/f：进入正式 phase 之前先校验自己的实际 env 与实例固定映射一致。
-            # f 的 p1/p2 也必须逐项相等，不能把父 shell 的 world 写面带进来。
+        if ((profile.key in (E_PROFILE.key, B_PROFILE.key, C_PROFILE.key)
+             and args.phase == PHASE_NATURAL)
+                or profile.key in (F_PROFILE.key, G_PROFILE.key, H_PROFILE.key,
+                                   I_PROFILE.key)):
+            # e/f/g/B/C：进入正式 phase 之前先校验自己的实际 env 与实例固定映射一致。
+            # f/g 的 p1/p2 也必须逐项相等，不能把父 shell 的 world 写面带进来。
             try:
                 _verify_isolated_child_env(str(config.get("root") or ""))
             except Refused as exc:
@@ -4783,8 +5758,13 @@ def cmd_phase(argv: Sequence[str]) -> int:
             if not _is_offline_scratch_root(str(config.get("root") or "")):
                 sys.stderr.write("phase refused: %s\n" % REASON_OFFLINE_CLOCK_REFUSED)
                 return EXIT_REFUSED
-            with offline_clock(profile):
-                runner(config)
+            if str(os.environ.get(V06_OFFLINE_GUARD_ENV) or "") == "1":
+                # 只给 v0.6 B 的离线子进程：父/子都硬拒 AF_INET/AF_INET6 与出站连接。
+                with offline_clock(profile), _offline_network_guard(config.get("root") or ""):
+                    runner(config)
+            else:
+                with offline_clock(profile):
+                    runner(config)
             return EXIT_OK
         runner(config)
     return EXIT_OK
@@ -4794,9 +5774,10 @@ def cmd_reserve(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(prog="g1_real_adoption _reserve")
     parser.add_argument("--state-root", required=True)
     parser.add_argument("--count", type=int, required=True)
-    # 内部子命令：f 也要能被父级/测试用来核共享账本；旧公开 CLI 元组不动。
+    # 内部子命令：f/g/h 也要能被父级/测试用来核共享账本；旧公开 CLI 元组不动。
     parser.add_argument("--batch", default=DEFAULT_BATCH,
-                        choices=CLI_BATCH_CHOICES + (F_PROFILE.key,))
+                        choices=CLI_BATCH_CHOICES + (F_PROFILE.key, G_PROFILE.key,
+                                                     H_PROFILE.key, I_PROFILE.key))
     args = parser.parse_args(list(argv))
     with _use_batch(args.batch):
         Path(args.state_root).mkdir(parents=True, exist_ok=True)

@@ -48,7 +48,7 @@ Status: MECHANISM_AND_LOCAL_BROWSER_PASSED / REAL_MODEL_VALIDATION_FAILED。
 ## 4. 父级独立完整机制与真实浏览器证据
 
 所有脚本/原始证据在会话 scratch
-`C:/Users/28556/.pi-desktop/scratch/966ed2b0-27ad-4c2c-a4b3-9021a8121e37`。
+`<USER_HOME>/.pi-desktop/scratch/966ed2b0-27ad-4c2c-a4b3-9021a8121e37`。
 
 | 验证 | 实际结果与证据 |
 |---|---|

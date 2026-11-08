@@ -162,6 +162,7 @@ def _managed_config(root: Path) -> dict[str, Any]:
         "lived_needs": dict(record.get("lived_needs") or {}),
         "room_living": bool(record.get("room_living")),
         "world_actions": bool(record.get("world_actions")),
+        "ambient_events": bool(record.get("ambient_events")),
     }
 
 
@@ -206,13 +207,15 @@ def _resolve_run_switch(args: argparse.Namespace, name: str, stored: Any) -> boo
     return bool(value)
 
 
-def _persist_run_switches(root: Path, *, room_living: bool, world_actions: bool) -> None:
+def _persist_run_switches(root: Path, *, room_living: bool, world_actions: bool,
+                          ambient_events: bool = False) -> None:
     path = _managed_path(root)
     record = _read_json(path)
     if not record:
         return
     record.update({"room_living": bool(room_living),
-                   "world_actions": bool(world_actions)})
+                   "world_actions": bool(world_actions),
+                   "ambient_events": bool(ambient_events)})
     _write_json(path, record)
 
 
@@ -469,7 +472,7 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         "memory_authority": str(target_authority),
         "world_package": package_identity,
         "lived_needs": dict(lived_needs or {}),
-        "room_living": False, "world_actions": False,
+        "room_living": False, "world_actions": False, "ambient_events": False,
         "note": "this instance was created by scripts/nyairo_day.py; foreign instances are never adopted",
     })
     memory = phone_life.enable_instance_memory(
@@ -654,9 +657,10 @@ def _config_lines(root: Path) -> list[str]:
         lines.append("虚拟身体：已启用%s" % (("（%s）" % bands_text) if bands_text else ""))
     else:
         lines.append("虚拟身体：未启用（v1，没有饿/渴/如厕）")
-    lines.append("本地动作：%s；房间链：%s" % (
+    lines.append("本地动作：%s；房间链：%s；环境事件：%s" % (
         "显式开启" if config.get("world_actions") else "关闭（默认 gate off）",
-        "显式开启" if config.get("room_living") else "关闭"))
+        "显式开启" if config.get("room_living") else "关闭",
+        "显式开启" if config.get("ambient_events") else "关闭"))
     lines.append("手机工具：chiyo_phone 的 world / store / inventory / wallet（身体档位在 world 的 body.needs）")
     return lines
 
@@ -703,7 +707,8 @@ def _start_text(root: Path, port: int, *, already: bool) -> str:
 
 
 def _serve_forever(root: Path, port: int, *, room_living: bool = False,
-                   world_actions: bool = False) -> int:
+                   world_actions: bool = False,
+                   ambient_events: bool = False) -> int:
     """The child process: the existing ``demo.serve_instance`` plus a clean stop event."""
 
     import threading
@@ -735,7 +740,8 @@ def _serve_forever(root: Path, port: int, *, room_living: bool = False,
             "root": str(root), "started_at": _now_iso(), "status": "RUNNING",
             "ready_at": _now_iso(), "url": announcement.get("url"),
             "model_enabled": False, "room_living": bool(room_living),
-            "world_actions": bool(world_actions), "foreground": True,
+            "world_actions": bool(world_actions), "ambient_events": bool(ambient_events),
+            "foreground": True,
             "log": str(_log_path(root)),
         })
         sys.stdout.write("服务就绪，尚未开始自主活动。\n")
@@ -745,6 +751,7 @@ def _serve_forever(root: Path, port: int, *, room_living: bool = False,
     try:
         demo.serve_instance(root, port=int(port), stop_event=stop, on_ready=_on_ready,
                             room_living=bool(room_living),
+                            ambient_events=bool(ambient_events),
                             # 本地工具动作只在显式要求时对**本进程树**开启；默认 off 不变。
                             world_intent_gate=gate,
                             # 用户入口允许“停止后立刻重新打开同一端口”：只放过 TIME_WAIT，
@@ -779,7 +786,8 @@ def _serve_forever(root: Path, port: int, *, room_living: bool = False,
 
 
 def _spawn_background(root: Path, port: int, *, room_living: bool = False,
-                      world_actions: bool = False
+                      world_actions: bool = False,
+                      ambient_events: bool = False
                       ) -> tuple[Optional[subprocess.Popen], str]:
     log_path = _log_path(root)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -790,6 +798,8 @@ def _spawn_background(root: Path, port: int, *, room_living: bool = False,
         command.append("--room-living")
     if world_actions:
         command.append("--world-actions")
+    if ambient_events:
+        command.append("--ambient-events")
     try:
         child = subprocess.Popen(
             command,
@@ -801,6 +811,7 @@ def _spawn_background(root: Path, port: int, *, room_living: bool = False,
         "schema": SCHEMA_RECORD, "pid": child.pid, "port": int(port), "root": str(root),
         "started_at": _now_iso(), "status": "STARTING", "model_enabled": False,
         "room_living": bool(room_living), "world_actions": bool(world_actions),
+        "ambient_events": bool(ambient_events),
         "log": str(log_path),
     })
     return child, str(log_path)
@@ -867,6 +878,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     config = dict(prepared.get("config") or _managed_config(root))
     room_living = _resolve_run_switch(args, "room_living", config.get("room_living"))
     world_actions = _resolve_run_switch(args, "world_actions", config.get("world_actions"))
+    ambient_events = _resolve_run_switch(args, "ambient_events", config.get("ambient_events"))
 
     port = int(getattr(args, "port", None) or DEFAULT_PORT)
     if _port_open(port):
@@ -875,16 +887,19 @@ def cmd_start(args: argparse.Namespace) -> int:
                        as_json=json_output)
     # The run switches are this entry's own small preference: record them before
     # serving so a same-root restart (including foreground Ctrl-C) keeps them.
-    _persist_run_switches(root, room_living=room_living, world_actions=world_actions)
+    _persist_run_switches(root, room_living=room_living, world_actions=world_actions,
+                          ambient_events=ambient_events)
 
     if getattr(args, "foreground", False):
         sys.stdout.write("正在启动（前台；Ctrl-C 停止）…\n")
         sys.stdout.flush()
         return _serve_forever(root, port, room_living=room_living,
-                              world_actions=world_actions)
+                              world_actions=world_actions,
+                              ambient_events=ambient_events)
 
     child, log_path = _spawn_background(root, port, room_living=room_living,
-                                        world_actions=world_actions)
+                                        world_actions=world_actions,
+                                        ambient_events=ambient_events)
     if not _wait_ready(child, root, port):
         tail = _log_tail(log_path)
         record = _read_json(_record_path(root))
@@ -909,7 +924,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     record.update({"status": "RUNNING", "ready_at": _now_iso(),
                    "url": _urls(port)["手机页面"], "model_enabled": False,
                    "room_living": bool(room_living),
-                   "world_actions": bool(world_actions)})
+                   "world_actions": bool(world_actions),
+                   "ambient_events": bool(ambient_events)})
     _write_json(_record_path(root), record)
     _emit(record, as_json=json_output, text=_start_text(root, port, already=False))
     return EXIT_OK
@@ -1450,6 +1466,14 @@ def cmd_run_day(args: argparse.Namespace) -> int:
                             "没有边界就不会开始。",
                        as_json=json_output)
 
+    config = _managed_config(root) if _is_managed(root) else {}
+    ambient_events = _resolve_run_switch(args, "ambient_events", config.get("ambient_events"))
+    if _is_managed(root) and getattr(args, "ambient_events", None) is not None:
+        _persist_run_switches(root,
+                              room_living=bool(config.get("room_living")),
+                              world_actions=bool(config.get("world_actions")),
+                              ambient_events=ambient_events)
+
     from components.phone import live_day
 
     sys.stdout.write(
@@ -1459,9 +1483,14 @@ def cmd_run_day(args: argparse.Namespace) -> int:
         % (duration, requests))
     sys.stdout.flush()
     try:
+        _run_overrides = ({"WORLD_BODY_INTENT_MUTATION_GATE": "canonical"}
+                          if config.get("world_actions") else None)
         report = live_day.run_segment(
             root, duration_seconds=int(duration), max_new_requests=int(requests),
-            poll_seconds=2, act=True, start_services=live_day.SERVICE_AUTO)
+            poll_seconds=2, act=True, start_services=live_day.SERVICE_AUTO,
+            room_living=bool(config.get("room_living")),
+            ambient_events=ambient_events,
+            feature_overrides=_run_overrides)
     except Exception as exc:
         return _refuse("RUN_DAY_FAILED", type(exc).__name__, as_json=json_output)
     calls = report.get("model_calls")
@@ -1525,6 +1554,11 @@ def build_parser() -> argparse.ArgumentParser:
                        help="显式开启房间链（实体店/交付/布置/灯）；默认沿用本实例上次选择")
     start.add_argument("--no-room-living", action="store_false", dest="room_living",
                        help="显式关闭房间链")
+    start.add_argument("--ambient-events", action="store_true", dest="ambient_events",
+                       default=None,
+                       help="显式开启世界环境事件（同步传入 World/Phone 与后续 run-day）；默认沿用本实例上次选择")
+    start.add_argument("--no-ambient-events", action="store_false", dest="ambient_events",
+                       help="显式关闭世界环境事件")
     start.add_argument("--world-actions", action="store_true", dest="world_actions", default=None,
                        help="显式允许本进程树的本地世界动作（临时 canonical；默认 gate off）")
     start.add_argument("--no-world-actions", action="store_false", dest="world_actions",
@@ -1557,6 +1591,11 @@ def build_parser() -> argparse.ArgumentParser:
                      help="必须显式给出，才会允许真实模型请求")
     run.add_argument("--duration-seconds", type=int, default=None, dest="duration_seconds")
     run.add_argument("--max-new-requests", type=int, default=None, dest="max_new_requests")
+    run.add_argument("--ambient-events", action="store_true", dest="ambient_events",
+                     default=None,
+                     help="显式为本次运行开启世界环境事件；不写时沿用本实例上次 start/run-day 的选择（默认关闭）")
+    run.add_argument("--no-ambient-events", action="store_false", dest="ambient_events",
+                     help="显式关闭世界环境事件")
     run.add_argument("--json", action="store_true")
     run.set_defaults(handler=cmd_run_day)
 
@@ -1576,10 +1615,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         internal.add_argument("--port", type=int, required=True)
         internal.add_argument("--room-living", action="store_true", dest="room_living")
         internal.add_argument("--world-actions", action="store_true", dest="world_actions")
+        internal.add_argument("--ambient-events", action="store_true", dest="ambient_events")
         parsed = internal.parse_args(arguments[1:])
         return _serve_forever(Path(parsed.root).expanduser(), int(parsed.port),
                               room_living=bool(parsed.room_living),
-                              world_actions=bool(parsed.world_actions))
+                              world_actions=bool(parsed.world_actions),
+                              ambient_events=bool(parsed.ambient_events))
     parser = build_parser()
     try:
         args = parser.parse_args(arguments)

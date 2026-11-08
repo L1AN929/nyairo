@@ -11,8 +11,8 @@
 
 ``serve`` 只起手机面（既有的 ``phone.demo.serve_instance``：Supply/World 子进程 + loopback
 HTTP），**不启动 resident、不发模型请求**。真实运行只能由一个明确的 ``window`` 触发：它复用
-既有 ``phone.live_day.run_segment``，并且受本功能共享的 4 次请求上限约束——上限从持久请求
-账本推回，监督进程重启、窗口崩溃都不会刷新它。
+既有 ``phone.live_day.run_segment``，并受实例持久请求账本（当日与运行窗口上限）约束——
+监督进程重启、窗口崩溃都不会重置账本。
 
 ``view`` / ``status`` 是同一份纯读投影的两种输出；``view`` 给手机页面看的形状，``status``
 更接近 ``live_day status`` 的原始结构。两者都不写、不发请求。

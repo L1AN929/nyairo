@@ -123,7 +123,7 @@ A 也已经把身体与分享接进决定。但**手机**这两块都还是看�
   （`test_phone_ui` 34 / `test_phone_world_ui` 25）与 `test_phone_api` / `test_phone_projects_api` 仍全绿。
   精确命令、退码与失败形状见 `docs/engineering/v04-life-pacing-phone-result.md` §3 与 §6.4。
 * 门禁脚本**位置纠正**：决策树与格式校验不在本仓库 `scripts/` 下，而在全局 skills 目录
-  `C:/Users/28556/.agents/skills/write-notes-like-deepseek/scripts/`。以仓库为 cwd 可以直接跑
-  `node --experimental-strip-types C:\Users\28556\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts`
+  `<USER_HOME>/.agents/skills/write-notes-like-deepseek/scripts/`。以仓库为 cwd 可以直接跑
+  `node --experimental-strip-types <USER_HOME>\.agents\skills\write-notes-like-deepseek\scripts\verify-agent-note-tree.ts`
   （`ok: 72 note(s) tree and relative links verified`，exit 0）与同目录的 `verify-agent-note-format.ts`
   （`ok: 72 note(s) verified`，exit 0）。本 note 与结果文档 §5.7 已按这一点改正。

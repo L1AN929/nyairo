@@ -522,20 +522,60 @@ class HistoryDetector:
         return None
 
 
+def _bare_version(value: Any) -> str:
+    text = str(value or "")
+    for prefix in ("artifactversion:", "artifact-version:"):
+        while text.startswith(prefix):
+            text = text[len(prefix):]
+    return text
+
+
+def history_contains_exact(view: Mapping[str, Any], *, h_ref: str,
+                           h_version: Optional[str] = None) -> bool:
+    """冻结历史里是否真有这条 H。
+
+    ``h_version`` 缺省时保持**旧调用语义**：只按 artifact 身份做子串匹配（与改前一致）。
+    给了版本后改为精确对齐：artifact 必须整体相等（不是子串），version 也必须相等，
+    行里没有版本字段一律不算命中——UNKNOWN 不能当成「同版本」。
+    """
+
+    bare = baseline._bare_artifact(h_ref)
+    want_version = _bare_version(h_version) if h_version else ""
+    for item in view.get("prior_experiences") or ():
+        if not isinstance(item, Mapping):
+            continue
+        if not want_version:
+            # 旧行为原样保留：缺省版本时是 artifact 子串匹配。
+            if bare and bare in str(item.get("artifact_ref") or ""):
+                return True
+            continue
+        row_bare = baseline._bare_artifact(item.get("artifact_ref"))
+        if not (bare and row_bare == bare):
+            continue
+        row_version = _bare_version(item.get("version_ref"))
+        if row_version and row_version == want_version:
+            return True
+    return False
+
+
 def freeze_and_check(bundle: Mapping[str, Any], *, h_ref: str,
-                     work_refs: Sequence[str], attempts: int = 4,
+                     work_refs: Sequence[str], h_version: Optional[str] = None,
+                     attempts: int = 4,
                      sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     """冻结一次当前状态，并跑**正式** AG-1 结构门（离线替身只回一条合法 NO_ACTION，0 网络 0 预算）。
 
     H 的对应经历必须真的出现在冻结历史里；否则这次冻结不作数（``HISTORY_NOT_ADMITTED``）。
+
+    ``h_version`` 缺省时保持旧行为（只按 artifact 身份）；给了 owner 版本后改为**精确**
+    artifact + version 对齐：artifact 必须整体相等（不是子串），version 也必须相等；行里没有
+    版本字段一律不算命中——UNKNOWN 不能当成「同版本」。只读，不改冻结内容本身。
     """
 
     scenario = baseline.freeze_scenario(bundle, h_ref=h_ref)
-    bare = baseline._bare_artifact(h_ref)
+    want_version = _bare_version(h_version) if h_version else ""
 
     def _in_history(view: Mapping[str, Any]) -> bool:
-        return any(bare and bare in str(item.get("artifact_ref") or "")
-                   for item in view.get("prior_experiences") or ())
+        return history_contains_exact(view, h_ref=h_ref, h_version=h_version)
 
     for _attempt in range(max(1, int(attempts))):
         if _in_history(scenario):
@@ -543,9 +583,10 @@ def freeze_and_check(bundle: Mapping[str, Any], *, h_ref: str,
         sleep(0.05)
         scenario["prior_experiences"] = list(bundle["cycle"].consideration_context() or [])
     if not _in_history(scenario):
+        detail = ("the H experience is not in the frozen history"
+                  + (" at the exact owner version" if want_version else ""))
         return {"ok": False, "reason_code": baseline.REASON_HISTORY_NOT_ADMITTED,
-                "detail": "the H experience is not in the frozen history",
-                "frozen": None, "gate": None}
+                "detail": detail, "frozen": None, "gate": None}
 
     gate = structural_gate(bundle, scenario, work_refs=work_refs)
     return {"ok": bool(gate.get("ok")), "reason_code": gate.get("reason_code") or "",
@@ -1281,6 +1322,7 @@ def _open_scratch(scratch_parent: Path, name: str, plan: ExperimentPlan, *,
     except Exception as exc:
         _close_scratch(context)
         return {"ok": False, "reason_code": "SCRATCH_SETUP_FAILED",
+                "detail_kind": type(exc).__name__,
                 "detail": "%s: %s" % (type(exc).__name__, str(exc)[:200]),
                 "scratch_root": str(root)}
 

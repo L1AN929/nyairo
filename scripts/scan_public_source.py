@@ -20,6 +20,8 @@ PATTERNS={
  'telegram_identity':re.compile(r'telegram:[0-9]{10,}'),
 }
 STATE_SUFFIXES={'.sqlite','.sqlite3','.db','.db3','.jsonl','.log','.pem','.key'}
+BLOCKED_HOST_TOKEN_SHA256=frozenset(['071a3fac2ca94b29f56cefa24661e2ed054a4f54c1995b9e0a6f946e95686cda', '07e29c5993747fe78a96cacf7c172aec66d0fc7e545d7283b409cf1eb8859201', '25df7caaf692453cc7cd8042c5d718e706f3dd9bff6ceef75d91708e3c2e509c', '50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2'])
+HOST_TOKEN_RE=re.compile(r'(?<![A-Za-z0-9.-])[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?![A-Za-z0-9.-])')
 
 
 def source_files(root):
@@ -48,7 +50,15 @@ def scan(root,exceptions=None):
     hits=[];known=[];state=[];scanned=0
     for path,text in source_files(root):
         relative=path.relative_to(root).as_posix()
-        if path.is_symlink() or (path.suffix.lower() in STATE_SUFFIXES and approved_data.get(relative)!=hashlib.sha256(path.read_bytes()).hexdigest()):state.append(relative)
+        if path.is_symlink():
+            state.append(relative)
+        elif path.suffix.lower() in STATE_SUFFIXES:
+            try:
+                digest=hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                digest=None
+            if digest is None or approved_data.get(relative)!=digest:
+                state.append(relative)
         if text is None:continue
         scanned+=1
         for category,pattern in PATTERNS.items():
@@ -56,6 +66,16 @@ def scan(root,exceptions=None):
                 digest=hashlib.sha256(match.group().encode()).hexdigest()
                 item={'path':relative,'line':text.count('\n',0,match.start())+1,'pattern':category,'match_sha256':digest}
                 (known if (relative,category,digest) in approved else hits).append(item)
+        for match in HOST_TOKEN_RE.finditer(text):
+            tok=match.group().lower()
+            parts=tok.split('.')
+            candidates=[tok]+['.'.join(parts[i:]) for i in range(1,len(parts)-1)]
+            for cand in candidates:
+                digest=hashlib.sha256(cand.encode()).hexdigest()
+                if digest in BLOCKED_HOST_TOKEN_SHA256:
+                    item={'path':relative,'line':text.count('\n',0,match.start())+1,'pattern':'redacted_infra_host','match_sha256':digest}
+                    (known if (relative,'redacted_infra_host',digest) in approved else hits).append(item)
+                    break
     return {'status':'PASS' if not hits and not state else 'FAIL','scanned_text_files':scanned,
             'unapproved_matches':hits,'known_public_matches':known,'state_or_symlink_files':state,
             'scope':'Entire source tree including vendor, documentation and website. Dependency environments excluded. No matched secret values are printed.'}

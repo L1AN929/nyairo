@@ -103,9 +103,9 @@
 7. 笔记门禁：
 
    ```bash
-   node --experimental-strip-types C:/Users/28556/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts
-   node --experimental-strip-types C:/Users/28556/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts
-   node --experimental-strip-types C:/Users/28556/.claude/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts
+   node --experimental-strip-types <USER_HOME>/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts
+   node --experimental-strip-types <USER_HOME>/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts
+   node --experimental-strip-types <USER_HOME>/.claude/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts
    ```
 
    结果：tree 82 篇 OK、format 82 篇 OK、archive 0 篇 OK；均 exit 0。

@@ -2,10 +2,28 @@
   "scope": "Exact public upstream fixture/example matches and generic tutorial placeholders. Review exceptions do not prove that a token is inactive. Newly added matches fail. No credential values are recorded.",
   "matches": [
     {
+      "path": ".agents/notes/implemented/feature/2026-10-17-v04-phone-web-ui-consumer.md",
+      "pattern": "windows_home",
+      "match_sha256": "b824f4c3ee4e0d34274e0a602ed822990a9976070fd46931b6cfec0e43d752fb",
+      "reason": "Generic redaction behavior documentation placeholder (C:\\Users\\...)"
+    },
+    {
       "path": "docs/USER_GUIDE.zh-CN.md",
       "pattern": "wsl_home",
       "match_sha256": "e23b0301d62034e1e7f4038e8e06d26a30ddfafade1766f23f26c8027201c43f",
       "reason": "Public upstream fixture/example or generic user tutorial path"
+    },
+    {
+      "path": "docs/engineering/rc1-reading-ui-result.md",
+      "pattern": "windows_home",
+      "match_sha256": "ad4971851f8a9a8b841e5d8e6e60f7dded1c1e831c5e588ab007975c60d2f809",
+      "reason": "Generic redaction behavior documentation placeholder (C:\\Users\\...)"
+    },
+    {
+      "path": "docs/engineering/v04-phone-ui-result.md",
+      "pattern": "windows_home",
+      "match_sha256": "b824f4c3ee4e0d34274e0a602ed822990a9976070fd46931b6cfec0e43d752fb",
+      "reason": "Generic redaction behavior documentation placeholder (C:\\Users\\...)"
     },
     {
       "path": "vendor/hermes/acp_adapter/content.py",

@@ -31,6 +31,7 @@ import hashlib
 import inspect
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
@@ -145,7 +146,9 @@ def request_budget(environment: Mapping[str, str], state_root: Path | str) -> An
     run_id = str(environment.get(ENV_RUN_ID) or "").strip() or (
         "run:" + hashlib.sha256(str(state_root).encode("utf-8")).hexdigest()[:16])
     budget = LifeRequestBudget(Path(state_root), utc_day_max=day_max,
-                               run_window_max=window_max, run_id=run_id)
+                               run_window_max=window_max, run_id=run_id,
+                               failstop=str(environment.get("NYA02_BOUNDED_FAILSTOP") or "") == "1",
+                               request_deadline=environment.get("NYA02_REQUEST_DEADLINE"))
     allow_new = str(environment.get(ENV_NEW_RUN_WINDOW) or "").strip().lower() in {
         "1", "true", "yes", "on"}
     budget.ensure_window(allow_new=allow_new)
@@ -532,7 +535,7 @@ def _model_config(environment: Mapping[str, str]) -> Any:
     return config
 
 
-def pause_request_admission(state_root: Path | str) -> Any:
+def pause_request_admission(state_root: Path | str, requests: Any = None) -> Any:
     """W05R-R1c: the pause send guard bound to one instance's pause bit.
 
     It is handed to the real transport (which holds the shared confirmation lock across the
@@ -543,7 +546,19 @@ def pause_request_admission(state_root: Path | str) -> Any:
 
     import life_pause
 
-    return life_pause.RequestSendGuard(state_root)
+    guard = life_pause.RequestSendGuard(state_root)
+    if requests is None or not getattr(requests, "failstop", False):
+        return guard
+    from contextlib import contextmanager
+
+    class BoundedSendGuard:
+        @contextmanager
+        def sending(self, kind="request"):
+            with guard.sending(kind) as view:
+                requests.check_failstop()
+                yield view
+
+    return BoundedSendGuard()
 
 
 def _model_writer(environment: Mapping[str, str], *, timeout_s: float = 30.0,
@@ -693,8 +708,10 @@ def _model_reading_response(environment: Mapping[str, str], *, timeout_s: float 
         base_url=config["base_url"], api_key=config["api_key"], model=config["model"],
         provider=config.get("provider") or "custom", timeout_s=timeout_s,
         purpose="reading_response", request_json_object=True, pause_guard=pause_guard)
+    # 512 会被推理过程吃光：同一次运行里决策调用的 reasoning 就有数千字符，读书这条
+    # 输出上限太小，连着两次「reading response failed」很可能就是它。给到 2048。
     client = AgencyModelClient(config=config, transport=transport, purpose="reading_response",
-                               timeout_s=timeout_s, max_output_tokens=512)
+                               timeout_s=timeout_s, max_output_tokens=2048)
     if requests is not None:
         from life_request_budget import BudgetedModelClient
 
@@ -947,7 +964,7 @@ def assemble_autonomous_life(
     #: W05R-R1b: every real request attempt is admitted at its send boundary against the
     #: instance's own pause bit (the same root the operator's ``pause`` writes).
     admission = (pause_admission if pause_admission is not None
-                 else pause_request_admission(root))
+                 else pause_request_admission(root, requests))
     try:
         import sys
 
@@ -1228,13 +1245,149 @@ def assemble_autonomous_life(
     }
 
 
-def runner_tick(assembled: Mapping[str, Any], *, act: bool = True) -> dict[str, Any]:
+#: 维护观察行允许出现的 feed 事件类型（固定枚举）。其它类型不原样透出。
+_TRACE_EVENT_KINDS = frozenset({
+    "RESUME_ELIGIBILITY_OPENED", "ARTIFACT_CHANGED", "WORLD_OPPORTUNITY",
+})
+_TRACE_UNKNOWN_EVENT = "UNKNOWN_EVENT_TYPE"
+
+
+def _trace_count(value: Any) -> Optional[int]:
+    """只接受真实计数；bool/缺失一律 None，不把「没读到」写成 0。
+
+    ``maintain_waiting`` 的 ``satisfied`` / ``emitted_eligibilities`` 返回的是 list
+    （本次满足/新发的资格逐条列出），按长度计数，空列表就是真实的 0。整数字段
+    （``checked``/``changed`` 等）原样保留；字符串、dict、bool 和其它类型仍是 UNKNOWN。
+    """
+
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, list):
+        return len(value)
+    return None
+
+
+def _trace_quiet_reason(due: Any) -> Optional[str]:
+    if not isinstance(due, Mapping) or str(due.get("status") or "") != "QUIET":
+        return None
+    extra = due.get("extra")
+    block = extra.get("reconsideration") if isinstance(extra, Mapping) else None
+    reason = block.get("reason_code") if isinstance(block, Mapping) else None
+    return str(reason) if isinstance(reason, str) and reason.strip() else "UNKNOWN"
+
+
+def _trace_world_revision(upkeep: Any) -> tuple[str, str]:
+    """World *revision* 是否真的变了。
+
+    只有当次维护返回里同时带了真实的 ``world_revision_before`` / ``world_revision_after``
+    两个值时才能比较；没有这种前后值就只能是 ``UNKNOWN``——不新增 owner 读、不额外
+    poll/maintain 去猜。feed 签名事件（``world_revision_ref|target_refs``）不是 revision
+    变化本身，不得写进本字段。
+    """
+
+    report = upkeep if isinstance(upkeep, Mapping) else {}
+    before = report.get("world_revision_before")
+    after = report.get("world_revision_after")
+    if isinstance(before, str) and isinstance(after, str) and before and after:
+        return ("CHANGED" if before != after else "NOT_CHANGED"), "REVISION_VALUES"
+    return "UNKNOWN", "NO_REVISION_READ_PORT"
+
+
+def _trace_world_signature(events: Any, feed_errors: Any, poller: Any) -> tuple[str, str]:
+    """World 可达*签名*的三态（另名字段，不冒充 revision 变化）。
+
+    ``WorldOpportunityFeed`` 的签名是 ``world_revision_ref|target_refs``，并且受去重、
+    启用状态和错误影响；它变了只说明签名事件出现，不等于世界 revision 变化。稳定同理。
+    没有 World feed 或该 feed 读失败时只能是 ``UNKNOWN``——不新增读取去猜。
+    """
+
+    feeds = getattr(poller, "feeds", None) or ()
+    present = any(str(getattr(feed, "name", "")) == "world_opportunity" for feed in feeds)
+    errored = any(isinstance(err, Mapping) and str(err.get("ref") or "") == "world_opportunity"
+                  for err in (feed_errors or ()))
+    if errored:
+        return "UNKNOWN", "WORLD_FEED_ERROR"
+    kinds = {str(item.get("kind") or "") for item in (events or ())
+             if isinstance(item, Mapping)}
+    if "WORLD_OPPORTUNITY" in kinds:
+        return "CHANGED", "WORLD_SIGNATURE_EVENT"
+    if present:
+        return "NOT_CHANGED", "WORLD_SIGNATURE_STABLE"
+    return "UNKNOWN", "NO_WORLD_SIGNATURE_READ_PORT"
+
+
+def maintain_trace_row(*, index: int, upkeep: Any, events: Any, feed_errors: Any,
+                       due: Any, poller: Any) -> dict[str, Any]:
+    """一次真实 tick 的维护/事件摘要（固定字段；不读额外端口、不写产品状态）。"""
+
+    kinds = sorted({str(item.get("kind") or "") for item in (events or ())
+                    if isinstance(item, Mapping) and item.get("kind")})
+    kinds = [kind if kind in _TRACE_EVENT_KINDS else _TRACE_UNKNOWN_EVENT for kind in kinds]
+    revision, revision_basis = _trace_world_revision(upkeep)
+    signature, signature_basis = _trace_world_signature(events, feed_errors, poller)
+    waiting = upkeep if isinstance(upkeep, Mapping) else {}
+    return {
+        "tick": int(index),
+        "observed_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "checked": _trace_count(waiting.get("checked")),
+        "changed": _trace_count(waiting.get("changed")),
+        "satisfied": _trace_count(waiting.get("satisfied")),
+        "emitted_eligibilities": _trace_count(waiting.get("emitted_eligibilities")),
+        "feed_events": kinds,
+        "world_revision_changed": revision,
+        "world_revision_basis": revision_basis,
+        "world_signature_changed": signature,
+        "world_signature_basis": signature_basis,
+        "quiet_reason": _trace_quiet_reason(due),
+        "status": (str(due.get("status") or "")[:40] if isinstance(due, Mapping)
+                   and due.get("status") else None),
+    }
+
+
+def _emit_tick_trace(assembled: dict[str, Any], *, observer: Any, poller: Any,
+                     result: Mapping[str, Any]) -> None:
+    """把这一 tick 的维护摘要交给可选 observer；observer 出错只记类型，不改控制流。"""
+
+    target = observer if observer is not None else assembled.get("tick_observer")
+    if target is None:
+        return
+    try:
+        index = int(assembled.get("tick_index") or 0) + 1
+        try:
+            assembled["tick_index"] = index
+        except (TypeError, AttributeError):
+            pass
+        row = maintain_trace_row(index=index, upkeep=result.get("waiting"),
+                                 events=result.get("events"),
+                                 feed_errors=result.get("feed_errors"),
+                                 due=result.get("due"), poller=poller)
+        target(dict(row))
+    except Exception as exc:  # 观察失败不能改变产品控制流
+        errors = assembled.get("tick_observer_errors")
+        if not isinstance(errors, list):
+            errors = []
+            try:
+                assembled["tick_observer_errors"] = errors
+            except (TypeError, AttributeError):
+                return
+        if len(errors) < 8:
+            errors.append(type(exc).__name__)
+
+
+def runner_tick(assembled: dict[str, Any], *, act: bool = True,
+                observer: Optional[Callable[[Mapping[str, Any]], None]] = None
+                ) -> dict[str, Any]:
     """One bounded step of the resident runner.
 
     Poll the real feeds, hand any fresh event to the runner, and run the check window
     if it is due.  It is deliberately a *step* and not a loop: this batch adds no
     scheduler and no background thread, so the host drives it (the plugin's own turn
     hook, or ``run-once`` from the CLI).
+
+    ``observer``（缺省取 ``assembled["tick_observer"]``）在维护与 feed 完成后收到一行
+    固定字段摘要。它只是读侧的旁路：不额外读端口、不写产品状态，抛错也只记类型。
     """
 
     if assembled.get("state") != READY:
@@ -1264,17 +1417,19 @@ def runner_tick(assembled: Mapping[str, Any], *, act: bool = True) -> dict[str, 
     if contact_step and int(contact_step.get("llm_calls") or 0) > 0:
         # The invitation already used this tick's fresh decision. Leave feeds untouched so
         # their events remain available to the next normal tick, rather than asking twice.
-        return {"ok": True, "waiting": upkeep, "contacts": contact_step, "events": [],
-                "feed_errors": [], "due": {"kind": "CHECK_WINDOW", "status": "CONTACT_DECISION_HANDLED",
-                                           "llm_calls": 0, "decision": None,
-                                           "detail": "this tick already considered an explicit invitation"}}
+        early = {"ok": True, "waiting": upkeep, "contacts": contact_step, "events": [],
+                 "feed_errors": [], "due": {"kind": "CHECK_WINDOW", "status": "CONTACT_DECISION_HANDLED",
+                                            "llm_calls": 0, "decision": None,
+                                            "detail": "this tick already considered an explicit invitation"}}
+        _emit_tick_trace(assembled, observer=observer, poller=poller, result=early)
+        return early
     events: list[Any] = []
     if poller is not None:
         for event in poller.poll():
             events.append(runner.wake_on_event(event, act=act, maintain=False,
                                                maintained=upkeep))
     due = runner.run_due(act=act, maintain=False, maintained=upkeep)
-    return {
+    result = {
         "ok": True,
         "waiting": upkeep,
         "contacts": contact_step,
@@ -1282,6 +1437,8 @@ def runner_tick(assembled: Mapping[str, Any], *, act: bool = True) -> dict[str, 
         "feed_errors": list(getattr(poller, "last_errors", []) or []),
         "due": due.to_dict(),
     }
+    _emit_tick_trace(assembled, observer=observer, poller=poller, result=result)
+    return result
 
 
 def run_once(assembled: Mapping[str, Any], *, act: bool = True) -> dict[str, Any]:
@@ -1304,6 +1461,7 @@ __all__ = [
     "WORLD_SOCKET_ENV",
     "assemble_autonomous_life",
     "model_cognition",
+    "maintain_trace_row",
     "resolve_world_provider",
     "resolve_supply_configuration",
     "run_once",

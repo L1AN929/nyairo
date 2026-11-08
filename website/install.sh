@@ -3,7 +3,10 @@
 set -euo pipefail
 
 main() {
-  local version=v0.5.1
+  local version=v0.6.0
+  local expected_sha="${NYAIRO_EXPECTED_SHA256:-}"
+  local uv_version="${NYAIRO_UV_VERSION:-0.11.6}"
+  local uv_expected_sha="${NYAIRO_UV_SHA256:-}"
   local archive_sha
   local prefix="${HOME:?}/.local/share/nyairo" profile="$HOME/.nyairo" owner=local-owner
   local setup=1 launch=1
@@ -17,7 +20,7 @@ main() {
       --no-launch) launch=0; shift;;
       -h|--help)
         printf '%s\n' 'nyairo 一条命令引导安装（Linux / Windows WSL）' \
-          '默认：下载固定 v0.5.1 公开测试版（GitHub prerelease）→ 准备 uv / Python → 安装依赖 → 创建个人配置 → 模型设置 → 聊天。' \
+          '默认：下载固定 v0.6.0 公开测试版（GitHub prerelease）→ 准备 uv / Python → 安装依赖 → 创建个人配置 → 模型设置 → 聊天。' \
           '--prefix DIR    程序目录，默认 ~/.local/share/nyairo' \
           '--profile DIR   个人数据目录，默认 ~/.nyairo' \
           '--owner ID      本地身份标识，默认 local-owner' \
@@ -75,8 +78,29 @@ main() {
   elif [[ -x $HOME/.local/bin/uv ]]; then
     uv="$HOME/.local/bin/uv"
   else
-    curl -fsSL --retry 2 --connect-timeout 20 https://astral.sh/uv/install.sh -o "$temp/uv-install.sh"
-    UV_INSTALL_DIR="$HOME/.local/bin" UV_NO_MODIFY_PATH=1 sh "$temp/uv-install.sh"
+    local machine uv_arch uv_asset uv_sha
+    machine=$(uname -m)
+    case "$machine" in
+      x86_64|amd64) uv_arch="x86_64" ;;
+      aarch64|arm64) uv_arch="aarch64" ;;
+      *) printf '暂不支持当前 CPU 架构自动下载 uv：%s（请先手动安装 uv >= 0.6）。\n' "$machine" >&2; return 1 ;;
+    esac
+    [[ $uv_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf 'uv 版本号格式无效：%s\n' "$uv_version" >&2; return 1; }
+    uv_asset="https://github.com/astral-sh/uv/releases/download/${uv_version}/uv-${uv_arch}-unknown-linux-gnu.tar.gz"
+    curl -fsSL --retry 2 --connect-timeout 20 "${uv_asset}.sha256" -o "$temp/uv.tar.gz.sha256"
+    uv_sha=$(awk 'NR==1 {print $1}' "$temp/uv.tar.gz.sha256")
+    [[ $uv_sha =~ ^[0-9a-f]{64}$ ]] || { printf 'uv 校验值无效。\n' >&2; return 1; }
+    if [[ -n $uv_expected_sha ]]; then
+      [[ $uv_sha == "${uv_expected_sha,,}" ]] || { printf 'uv 校验值与预设固定值不一致。\n' >&2; return 1; }
+    fi
+    curl -fsSL --retry 2 --connect-timeout 20 "$uv_asset" -o "$temp/uv.tar.gz"
+    printf '%s  %s\n' "$uv_sha" "$temp/uv.tar.gz" | sha256sum -c -
+    mkdir -p "$temp/uv-extract"
+    tar -xzf "$temp/uv.tar.gz" -C "$temp/uv-extract"
+    install -m 0755 "$temp/uv-extract/uv-${uv_arch}-unknown-linux-gnu/uv" "$HOME/.local/bin/uv"
+    if [[ -f "$temp/uv-extract/uv-${uv_arch}-unknown-linux-gnu/uvx" ]]; then
+      install -m 0755 "$temp/uv-extract/uv-${uv_arch}-unknown-linux-gnu/uvx" "$HOME/.local/bin/uvx"
+    fi
     uv="$HOME/.local/bin/uv"
   fi
   export PATH="$HOME/.local/bin:$PATH"
@@ -88,6 +112,9 @@ main() {
   curl -fsSL --retry 2 --connect-timeout 20 "$asset.sha256" -o "$temp/source.sha256"
   archive_sha=$(awk 'NR==1 {print $1}' "$temp/source.sha256")
   [[ $archive_sha =~ ^[0-9a-f]{64}$ ]] || { printf '发行校验值无效。\n' >&2; return 1; }
+  if [[ -n $expected_sha ]]; then
+    [[ $archive_sha == "${expected_sha,,}" ]] || { printf '发行包校验值与固定签名不一致。\n' >&2; return 1; }
+  fi
   if [[ -d $release ]]; then
     [[ ! -L $release && -f $state && $(cat "$state") == "$archive_sha" ]] || {
       printf '%s 已存在但没有匹配的安装记录，不会覆盖。请指定新的 --prefix。\n' "$release" >&2; return 1;

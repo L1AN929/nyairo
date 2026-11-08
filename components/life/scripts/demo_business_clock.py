@@ -630,7 +630,12 @@ HARD_CONFIG_MAX = 96
 #: 默认配置下实验额外上限的旧上限（96 总配置不提高）。
 MAX_EXPERIMENT_REQUESTS = 82
 #: 用户已授权的共同总请求上限。总上限只能显式绑定到单个新实例，不能变成全项目默认。
-MAX_TOTAL_REQUESTS_LIMIT = 300
+#: 2026-11-04 本人本窗口三次批准：300 -> 320（累计 299 时留一批 20），-> 340
+#: （上一批走错了上下文分支，那页字没送到），-> 360（书店改成「读这本书」，验她选不选）。
+#: 2026-11-04 本窗口批准 360 -> 420（累计 359 时留三批 20），用途是验证世界读书批注与后续批次。
+#: 2026-11-05 用户本窗口批准 420 -> 440（累计已用 410，本批 20：410 + 20 = 430 已越过 420）。
+#: 2026-11-05 用户本窗口批准 440 -> 1000，与 authorized_shared_total 1000 对齐，不再按批零敲。
+MAX_TOTAL_REQUESTS_LIMIT = 1000
 
 
 def experiment_cap_ceiling(total_limit: int, historical_requests: int = 0) -> int:
@@ -1075,6 +1080,8 @@ class CappedRequestBudget:
         # 路径不能各自看到「还剩 1」然后一起花掉。崩溃留下的中间态只会让下一次检查
         # 更保守，不会被读成免费额度。
         with _cap_exclusive(self.cap.state_root):
+            if getattr(self.inner, "failstop", False):
+                self.inner.check_failstop()
             try:
                 view = self.cap.view(self._ledger_view())
             except BusinessClockError as exc:
@@ -1092,7 +1099,9 @@ class CappedRequestBudget:
                 self.cap.note_reservation()
                 self.cap.view(self._ledger_view())
             except BusinessClockError:
-                pass
+                if getattr(self.inner, "failstop", False):
+                    self.inner.note_failure("CAP_PERSIST_FAILED")
+                    raise self._refusal(REASON_EXPERIMENT_CAP_UNREADABLE, "cap persistence failed")
         return record
 
     def view(self) -> dict[str, Any]:

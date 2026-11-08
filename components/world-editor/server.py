@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 import sqlite3
 import sys
+import tempfile
 import threading
 import uuid
 import webbrowser
@@ -22,7 +24,44 @@ ROOT = Path(__file__).resolve().parent
 MAX_BODY = 18_000_000
 
 
-def nyairo_export(data):
+def _allowed_editor_roots(extra_roots=()):
+    roots = [
+        ROOT.parents[1].resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+        (Path.home() / ".nyairo").resolve(),
+        (Path.home() / ".nyairo-day").resolve(),
+        (Path.home() / ".nyairo-world-editor").resolve(),
+    ]
+    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    if hermes_home:
+        roots.append(Path(hermes_home).expanduser().resolve())
+    for item in os.environ.get("NYAIRO_EDITOR_ALLOWED_ROOTS", "").split(os.pathsep):
+        if item.strip():
+            roots.append(Path(item.strip()).expanduser().resolve())
+    for extra in extra_roots:
+        if extra is not None:
+            roots.append(Path(extra).resolve())
+    return roots
+
+
+def _confine_editor_dir(raw: str, label: str, extra_roots=()) -> Path:
+    candidate = Path(raw.strip()).expanduser()
+    if not candidate.is_absolute():
+        fail(f"{label}需要是绝对路径。", "PATH_FORBIDDEN", 403)
+    if ".." in candidate.parts:
+        fail(f"{label}不允许包含上级目录跳转（..）。", "PATH_FORBIDDEN", 403)
+    resolved = candidate.resolve()
+    for allowed in _allowed_editor_roots(extra_roots):
+        if resolved == allowed or allowed in resolved.parents:
+            return resolved
+    fail(
+        f"{label}超出允许的工作目录范围（仅允许仓库目录、个人实例目录、编辑器数据目录或 NYAIRO_EDITOR_ALLOWED_ROOTS）。",
+        "PATH_FORBIDDEN",
+        403,
+    )
+
+
+def nyairo_export(data, *, extra_roots=()):
     """「导出 NyAiro 世界包」（v0.2 桥接）：以原始世界包为基础回写编辑器修改。
 
     编辑器 v3 文件不包含 NPC、环境事件、世界规则等完整世界事实，因此回写
@@ -32,12 +71,10 @@ def nyairo_export(data):
     original_raw = data.get("original_dir")
     if not isinstance(original_raw, str) or not original_raw.strip():
         fail("需要提供原始 WorldGen 世界包目录（original_dir）。")
-    original = Path(original_raw.strip()).expanduser()
-    if not original.is_absolute():
-        fail("原始世界包目录需要是绝对路径。")
+    original = _confine_editor_dir(original_raw, "原始世界包目录", extra_roots=extra_roots)
     if not (original / "world.json").is_file() or not (original / "MANIFEST.json").is_file():
         fail(
-            f"{original} 不是 WorldGen 世界包（缺少 world.json / MANIFEST.json）。"
+            "指定目录不是有效的 WorldGen 世界包（缺少 world.json / MANIFEST.json）。"
             "编辑器 v3 文件不包含 NPC、环境事件等完整世界信息，无法凭空回写；"
             "请提供生成该场景时使用的原始世界包目录。",
             "ORIGINAL_REQUIRED",
@@ -59,7 +96,7 @@ def nyairo_export(data):
         fail(str(exc))
 
 
-def nyairo_perception(data):
+def nyairo_perception(data, *, extra_roots=()):
     """「AI 视角预览」（v0.4）：查看某位置通过感知适配器能获得的世界信息。
 
     三层信息明确区分：世界包静态数据 / 该位置允许观察的信息 /
@@ -79,20 +116,25 @@ def nyairo_perception(data):
     package_raw = data.get("package_dir") or data.get("original_dir")
     if not isinstance(package_raw, str) or not package_raw.strip():
         fail("需要提供 WorldGen 世界包目录（package_dir）。")
-    package_dir = Path(package_raw.strip()).expanduser()
+    package_dir = _confine_editor_dir(package_raw, "世界包目录", extra_roots=extra_roots)
     if not (package_dir / "world.json").is_file():
-        fail(f"{package_dir} 不是 WorldGen 世界包（缺少 world.json）。")
+        fail("指定目录不是有效的 WorldGen 世界包（缺少 world.json）。")
     room = data.get("room") or {}
     place_id = data.get("place_id") or room.get("id")
     if not isinstance(place_id, str) or not place_id.strip():
         fail("需要提供位置（place_id 或选中区域）。")
-    instance_home = data.get("instance_home")
+    instance_raw = data.get("instance_home")
+    resolved_instance = (
+        _confine_editor_dir(instance_raw, "实例目录", extra_roots=extra_roots)
+        if isinstance(instance_raw, str) and instance_raw.strip()
+        else None
+    )
     try:
         return observe_local(
             package_dir,
             place_id=place_id.strip(),
             area_id=data.get("area_id"),
-            instance_home=Path(instance_home.strip()).expanduser() if isinstance(instance_home, str) and instance_home.strip() else None,
+            instance_home=resolved_instance,
         )
     except ValueError as exc:
         fail(str(exc))
@@ -248,8 +290,8 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if origin and origin not in {"http://" + x for x in allowed}:
             fail("来源不被允许。", "ORIGIN", 403)
-        if self.headers.get("Sec-Fetch-Site") == "cross-site":
-            fail("不允许跨站访问。", "ORIGIN", 403)
+        if self.headers.get("Sec-Fetch-Site") not in (None, "", "same-origin", "none"):
+            fail("不允许跨源访问。", "ORIGIN", 403)
         if mutation and self.headers.get("X-Nyairo-Editor") != "1":
             fail("操作需要编辑器请求标记。", "CSRF", 403)
 
@@ -335,11 +377,11 @@ class Handler(BaseHTTPRequestHandler):
                         self.server.exports[token] = (filename, payload)
                     return self.send(201, {"url": "/api/exports/" + token, "filename": filename, "local_file": "exports/" + local_name, "cover_file": "exports/" + cover_file if cover_file else None})
                 if path == "/api/nyairo/export":
-                    return self.send(200, nyairo_export(data))
+                    return self.send(200, nyairo_export(data, extra_roots=(self.store.path.parent,)))
                 if path == "/api/nyairo/interior":
                     return self.send(200, nyairo_interior(data))
                 if path == "/api/nyairo/perception":
-                    return self.send(200, nyairo_perception(data))
+                    return self.send(200, nyairo_perception(data, extra_roots=(self.store.path.parent,)))
                 if len(parts) == 4 and parts[:2] == ["api", "trials"] and parts[3] == "actions":
                     return self.send(200, self.store.execute(parts[2], data.get("execution_id"), data.get("revision"), data.get("command")))
             else:

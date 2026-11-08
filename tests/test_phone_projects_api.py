@@ -279,6 +279,27 @@ class ProjectsWriteTest(ProjectsAPIBase):
             self.assertEqual(doc["reason_code"], "EXPECTED_REVISION_INVALID")
         self.assertEqual(self.writes(), [])
 
+    def test_get_project_keep_alive_emits_single_http_response(self) -> None:
+        import http.client
+
+        host, port = self.httpd.server_address
+        conn = http.client.HTTPConnection(host, int(port), timeout=10)
+        try:
+            for _ in range(3):
+                conn.request(
+                    "GET",
+                    "/api/phone/projects/%s" % self.work_id,
+                    headers={"Host": "%s:%d" % (host, int(port)), "Connection": "keep-alive"},
+                )
+                resp = conn.getresponse()
+                raw = resp.read()
+                self.assertEqual(resp.status, 200)
+                doc = json.loads(raw.decode("utf-8"))
+                self.assertTrue(doc["ok"])
+                self.assertEqual(doc["project"]["artifact_id"], self.work_id)
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

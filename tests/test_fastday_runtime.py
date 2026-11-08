@@ -28,8 +28,10 @@ for entry in (str(ROOT), str(ROOT / "components"),
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
+import autonomous_life_resident as life_resident  # noqa: E402
 import demo_business_clock as dbc  # noqa: E402
 import fast_day  # noqa: E402
+import runtime_health_review as health_review  # noqa: E402
 
 LOGICAL = datetime(2026, 10, 23, 9, 0, tzinfo=timezone.utc)
 
@@ -170,7 +172,7 @@ class ExplicitLimitCliTest(unittest.TestCase):
         cases = [
             ("--request-total-limit", "300", "--historical-requests", "14",
              "--max-new-requests", "287"),
-            ("--request-total-limit", "301", "--historical-requests", "0",
+            ("--request-total-limit", "1001", "--historical-requests", "0",
              "--max-new-requests", "1"),
             ("--request-total-limit", "-1", "--historical-requests", "0",
              "--max-new-requests", "1"),
@@ -179,7 +181,7 @@ class ExplicitLimitCliTest(unittest.TestCase):
             ("--request-total-limit", "96", "--historical-requests", "0",
              "--max-new-requests", "96"),
             ("--request-total-limit", "300", "--historical-requests", "14",
-             "--max-new-requests", "286", "--max-cognition-calls-per-day", "301"),
+             "--max-new-requests", "286", "--max-cognition-calls-per-day", "1001"),
         ]
         for index, extra in enumerate(cases):
             root = _root() / "instance"
@@ -445,10 +447,12 @@ class RunIdentityBindingTest(unittest.TestCase):
         retained = _root() / "retained-memory-authority" / "authority.db"
         retained.parent.mkdir(parents=True, exist_ok=True)
 
+        # 本用例验的是 run 身份绑定，不是起跑时段：显式放行夜间起跑，让结论与跑测试的
+        # 钟点无关（白天跑更是照常）。夜间守卫本身由 NightStartGuardTest 覆盖。
         code, prepared = _cli("prepare", "--root", str(root), "--run-id", "fastday-int",
                               "--real-seconds", "60", "--logical-seconds", "120",
                               "--max-new-requests", "286", "--request-total-limit", "300",
-                              "--historical-requests", "14",
+                              "--historical-requests", "14", "--allow-night-start",
                               "--memory-authority", str(retained), timeout=300.0)
         self.assertEqual(code, 0, prepared)
         self.assertEqual(prepared["run_id"], "fastday-int")
@@ -980,6 +984,341 @@ class RealWorldOwnerClockSafetyTest(unittest.TestCase):
                 self.assertEqual(payload.get("status"), "rejected", payload)
         finally:
             child.stop()
+
+
+class NightStartGuardTest(unittest.TestCase):
+    """压缩日的时钟锚死在按下 prepare 的真实时刻，所以起跑时段本身就是输入。
+
+    2026-11-04 u/v 两批在本地 21:37 / 22:37 起跑：逻辑 00–06 点几乎没有候选，等早上
+    机会爆发时额度已经花光（u 批最后一次 token 打在 22:01）。夜间起跑因此必须在
+    **写入之前**拒绝。判据按本地时区：u 批 ``created_utc`` 13:34Z 其实是本地 21:34，
+    按 UTC 判会误放过。
+    """
+
+    def test_night_anchor_is_refused_before_any_instance_is_built(self):
+        root = _root() / "instance"
+        # 本地 23:00 的锚点：naive 按系统本地解释，与机器时区无关。
+        refused = self._prepare(root, run_id="night-start",
+                                now=datetime(2026, 11, 4, 23, 0))
+        self.assertFalse(refused["ok"], refused)
+        self.assertEqual(refused["reason_code"], fast_day.REASON_NIGHT_START_REFUSED)
+        self.assertEqual(refused["started_local_hour"], 23)
+        # 拒绝发生在任何写入之前：没有实例目录，也没有 fastday.json 和半套时钟。
+        self.assertFalse(root.exists(),
+                         list(root.iterdir()) if root.exists() else [])
+        self.assertFalse((root / fast_day.MODE_FILENAME).exists())
+        # 边界：本地 21:00 起算夜间，07:00 已是白天；显式放行对两者都不拦。
+        for hour in (21, 22, 0, 6):
+            self.assertIsNotNone(fast_day.night_start_refusal(hour,
+                                                              allow_night_start=False))
+        for hour in (7, 12, 20):
+            self.assertIsNone(fast_day.night_start_refusal(hour,
+                                                           allow_night_start=False))
+        self.assertIsNone(fast_day.night_start_refusal(23, allow_night_start=True))
+
+    def test_daytime_anchor_prepares_normally(self):
+        root = _root() / "instance"
+        prepared = self._prepare(root, run_id="day-start",
+                                 now=datetime(2026, 11, 4, 12, 0))
+        self.assertTrue(prepared["ok"], prepared)
+        self.assertEqual(prepared["started_local_hour"], 12)
+        # 白天起跑不是「显式放行」，返回里如实区分。
+        self.assertFalse(prepared["allow_night_start"])
+        self.assertTrue((root / fast_day.MODE_FILENAME).exists())
+
+    def test_explicit_allow_night_start_passes_and_is_reported(self):
+        # CLI 开关真的接上了 prepare 的解析器。
+        code, help_lines = _cli("prepare", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--allow-night-start", help_lines.get("_stdout", ""))
+        root = _root() / "instance"
+        prepared = self._prepare(root, run_id="night-allowed",
+                                 now=datetime(2026, 11, 4, 23, 0),
+                                 allow_night_start=True)
+        self.assertTrue(prepared["ok"], prepared)
+        self.assertEqual(prepared["started_local_hour"], 23)
+        # 放行不静默：返回里要能看出这是显式放行的夜间起跑。
+        self.assertTrue(prepared["allow_night_start"])
+        self.assertTrue((root / fast_day.MODE_FILENAME).exists())
+
+    def _prepare(self, root: Path, *, run_id: str, now: datetime,
+                 allow_night_start: bool = False) -> dict:
+        # 真实例走真实的 provision 入口（不 mock）：只有 memory-authority 是操作者
+        # 必须显式给出的那个外部底账。
+        retained = root.parent / (root.name + "-memory-authority") / "authority.db"
+        retained.parent.mkdir(parents=True, exist_ok=True)
+        return fast_day.prepare(root, run_id=run_id, real_seconds=60.0,
+                                logical_seconds=120.0, max_new_requests=82,
+                                memory_authority=retained,
+                                provision_instance=True,
+                                allow_night_start=allow_night_start, now=now)
+
+
+def _stub_provision(root: Path, *, run_id: str, **_kwargs: Any) -> dict[str, Any]:
+    """只把「建一整套真实例」这段重活换成桩：时段判定与时钟装配仍走真实代码。"""
+
+    return {"ok": True, "provisioned": True,
+            "state_root": str(Path(root) / "state"),
+            "ledger_run_id": fast_day.run_identity(run_id)}
+
+
+class LogicalAnchorTest(unittest.TestCase):
+    """``--logical-anchor``：她的一天从几点开始可以虚构，真实时间面不动。
+
+    下午五点按下 prepare 就等于让她下午才起床，走到书店时店已经关门；起点因此必须
+    可以由操作者指定，而超时/暂停/预算/心跳/``created_utc`` 仍按真实墙钟走。
+    """
+
+    ANCHOR = "2026-11-05T08:00:00+08:00"
+    ANCHOR_UTC = "2026-11-05T00:00:00.000+00:00"
+    HORIZON_UTC = "2026-11-05T01:00:00.000+00:00"
+
+    def test_cli_anchor_moves_the_clock_start_and_keeps_created_utc_real(self):
+        root = _root()
+        code, prepared = _cli("prepare", "--clock-only", "--root", str(root),
+                              "--run-id", "anchor-a", "--rate", "24",
+                              "--logical-seconds", "3600",
+                              "--logical-anchor", self.ANCHOR)
+        self.assertEqual(code, 0, prepared)
+        self.assertTrue(prepared["ok"], prepared)
+        self.assertEqual(prepared["logical_anchor"], self.ANCHOR_UTC)
+        clock = json.loads(dbc.clock_path(root / "state").read_text(encoding="utf-8"))
+        # 起点与 horizon 都按显式起点算（+08:00 的 08:00 就是 UTC 00:00）。
+        self.assertEqual(clock["logical_anchor"], self.ANCHOR_UTC)
+        self.assertEqual(clock["logical_checkpoint"], self.ANCHOR_UTC)
+        self.assertEqual(clock["horizon_logical"], self.HORIZON_UTC)
+        # created_utc 仍是真实时刻：它记的是实验什么时候建的，不是她的一天从几点开始。
+        created = datetime.fromisoformat(clock["created_utc"])
+        self.assertLess(abs((created - datetime.now(timezone.utc)).total_seconds()), 300,
+                        clock["created_utc"])
+        self.assertNotEqual(clock["created_utc"], clock["logical_anchor"])
+        code, status = _cli("status", "--root", str(root))
+        self.assertEqual(code, 0, status)
+        self.assertEqual(status["logical"]["at"], self.ANCHOR_UTC)
+        self.assertEqual(status["logical"]["horizon_logical"], self.HORIZON_UTC)
+        self.assertEqual(status["logical"]["horizon_remaining_seconds"], 3600)
+
+    def test_without_anchor_the_start_is_still_the_creation_instant(self):
+        """回归保护：不传新参数时 ``logical_anchor`` 仍等于创建时刻。"""
+
+        root = _root()
+        code, prepared = _cli("prepare", "--clock-only", "--root", str(root),
+                              "--run-id", "anchor-off", "--rate", "24",
+                              "--logical-seconds", "3600")
+        self.assertEqual(code, 0, prepared)
+        # 不传时返回字段与旧版完全相同：没有新增锚点字段。
+        self.assertNotIn("logical_anchor", prepared)
+        clock = json.loads(dbc.clock_path(root / "state").read_text(encoding="utf-8"))
+        anchor = datetime.fromisoformat(clock["logical_anchor"])
+        created = datetime.fromisoformat(clock["created_utc"])
+        self.assertLess(abs((anchor - created).total_seconds()), 5,
+                        {"anchor": clock["logical_anchor"],
+                         "created_utc": clock["created_utc"]})
+        self.assertEqual(clock["logical_checkpoint"], clock["logical_anchor"])
+        self.assertEqual(datetime.fromisoformat(clock["horizon_logical"]),
+                         anchor + timedelta(seconds=3600))
+
+    def test_night_guard_reads_the_logical_anchor_not_the_real_clock(self):
+        """真实时刻是深夜、逻辑起点是早上 08:00 → 放行（这正是本开关要解决的场景）。"""
+
+        root = _root() / "instance"
+        morning = datetime(2026, 11, 5, 8, 0).astimezone()
+        with mock.patch.object(fast_day, "_provision_instance", _stub_provision):
+            prepared = fast_day.prepare(
+                root, run_id="anchor-morning", real_seconds=3600.0,
+                logical_seconds=3600.0, max_new_requests=82,
+                memory_authority=root.parent / "authority.db",
+                provision_instance=True, logical_anchor=morning,
+                now=datetime(2026, 11, 4, 23, 0))
+        self.assertTrue(prepared["ok"], prepared)
+        self.assertEqual(prepared["started_local_hour"], 8)
+        self.assertEqual(prepared["real_local_hour"], 23)
+        self.assertEqual(prepared["logical_anchor"],
+                         morning.astimezone(timezone.utc).isoformat(timespec="milliseconds"))
+        clock = json.loads(dbc.clock_path(root / "state").read_text(encoding="utf-8"))
+        self.assertEqual(clock["logical_anchor"],
+                         morning.astimezone(timezone.utc).isoformat(timespec="milliseconds"))
+
+    def test_a_night_logical_anchor_is_refused_even_at_noon(self):
+        """真实时刻是白天、逻辑起点是 23:00 → 拒绝，且拒绝发生在任何写入之前。"""
+
+        root = _root() / "instance"
+        night = datetime(2026, 11, 5, 23, 0).astimezone()
+        prepared = fast_day.prepare(
+            root, run_id="anchor-night", real_seconds=3600.0, logical_seconds=3600.0,
+            max_new_requests=82, memory_authority=root.parent / "authority.db",
+            provision_instance=True, logical_anchor=night,
+            now=datetime(2026, 11, 4, 12, 0))
+        self.assertFalse(prepared["ok"], prepared)
+        self.assertEqual(prepared["reason_code"], fast_day.REASON_NIGHT_START_REFUSED)
+        self.assertEqual(prepared["started_local_hour"], 23)
+        self.assertFalse(root.exists(),
+                         list(root.iterdir()) if root.exists() else [])
+        # 夜间起点仍然可以被显式放行，且放行是可见的。
+        with mock.patch.object(fast_day, "_provision_instance", _stub_provision):
+            allowed = fast_day.prepare(
+                root, run_id="anchor-night-allowed", real_seconds=3600.0,
+                logical_seconds=3600.0, max_new_requests=82,
+                memory_authority=root.parent / "authority.db",
+                provision_instance=True, allow_night_start=True,
+                logical_anchor=night, now=datetime(2026, 11, 4, 12, 0))
+        self.assertTrue(allowed["ok"], allowed)
+        self.assertTrue(allowed["allow_night_start"])
+        self.assertEqual(allowed["started_local_hour"], 23)
+
+    def test_a_naive_or_garbage_anchor_is_refused_before_any_write(self):
+        code, help_lines = _cli("prepare", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--logical-anchor", help_lines.get("_stdout", ""))
+        for index, bad in enumerate(("2026-11-05T08:00:00", "早上八点")):
+            root = _root() / "instance"
+            code, refused = _cli("prepare", "--clock-only", "--root", str(root),
+                                 "--run-id", "anchor-bad-%d" % index,
+                                 "--rate", "24", "--logical-seconds", "3600",
+                                 "--logical-anchor", bad)
+            self.assertEqual(code, 1, (bad, refused))
+            self.assertEqual(refused["reason_code"], fast_day.REASON_LOGICAL_ANCHOR_INVALID,
+                             (bad, refused))
+            self.assertFalse(root.exists(), (bad, list(root.iterdir()) if root.exists() else []))
+
+
+class _QuietWindowTest(unittest.TestCase):
+    """她"安静"和"卡住"必须能从 status 上看出来，而且默认不下结论。
+
+    ``fast_day status`` 以前只报 wake 级 counters，一条具体理由都看不见；每秒一行的
+    supervisor 心跳全仓只有测试在读。这三条钉住：最近一次 due 的形状带进
+    ``resident_summary``、status 报"tick 落后心跳 N 秒"、不传阈值时行为与以前一致。
+    """
+
+    HEARTBEAT = "2026-11-05T04:00:00+00:00"
+    LAG_SECONDS = 120
+
+    def _ready_root(self, run_id: str = "quiet") -> Path:
+        root = _root()
+        code, prepared = _cli("prepare", "--clock-only", "--root", str(root),
+                              "--run-id", run_id, "--rate", "24",
+                              "--logical-seconds", "60", "--max-new-requests", "82")
+        self.assertEqual(code, 0, prepared)
+        return root
+
+    def _write_heartbeat(self, state_root: Path, real_at: str) -> None:
+        path = state_root / "fastday" / "clock_ticks.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [{"tick": 0, "logical_at": "2026-11-05T12:00:00+00:00",
+                 "real_at": "2026-11-05T03:59:00+00:00", "clock_state": "RUNNING",
+                 "clock_only": False},
+                {"tick": 1, "logical_at": "2026-11-05T12:00:01+00:00",
+                 "real_at": real_at, "clock_state": "RUNNING", "clock_only": False}]
+        path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    def _write_summary(self, state_root: Path, *, last_tick_at: str,
+                       due: dict, extra: dict | None = None) -> None:
+        payload = {"kind": "autonomous_life_resident", "pid": 4242,
+                   "state_root": str(state_root), "running": True, "ticks": 7,
+                   "last_tick_at": last_tick_at, "last_due": due,
+                   "counters": {"wakes": 16, "by_class": {"silence": 15, "acted": 1}},
+                   "runtime_assembly": {"runtime_present": True, "state": "READY"}}
+        payload.update(extra or {})
+        (state_root / "resident_summary.json").write_text(
+            json.dumps(payload), encoding="utf-8")
+
+    def test_summary_carries_the_last_due_shape_for_all_four_classes(self):
+        """四类静默都必须带得出具名理由，不能压成一个总数。"""
+
+        cases = (
+            # (status, status_class, outcome, detail)
+            ("NOT_DUE", "silence", None, "the check window is not open yet: NOT_DUE"),
+            ("QUIET", "silence", "NO_MATERIAL",
+             "SAME_STATE_ALREADY_CONSIDERED since 2026-11-05T02:00:00+00:00"),
+            ("NO_ACTION", "choice", "NO_ACTION", "candidates existed; none adopted"),
+            ("BLOCKED", "blocked", "BUDGET_EXHAUSTED", "ROUND_BUDGET_EXHAUSTED"),
+        )
+        resident = life_resident.AutonomousLifeResident(
+            state_root=_root(), environment={}, poll_seconds=180,
+            clock=lambda: datetime(2026, 11, 5, 4, 0, tzinfo=timezone.utc),
+            sleeper=lambda seconds: None, monotonic=lambda: 0.0)
+        # 还没走完第一个 tick：没有最近 due，不能编一个出来。
+        self.assertIsNone(resident.summary()["last_due"])
+        for status, status_class, outcome, detail in cases:
+            resident.last_tick = {
+                "at": "2026-11-05T03:58:00+00:00", "tick": 7, "events": [],
+                "due": {"kind": "CHECK_WINDOW", "reason": "check-window",
+                        "status": status, "status_class": status_class,
+                        "outcome": outcome, "detail": detail,
+                        "at": "2026-11-05T03:58:00+00:00", "trigger_kind": "",
+                        "llm_calls": 0, "extra": {}}}
+            last_due = resident.summary()["last_due"]
+            self.assertEqual(last_due["status"], status, last_due)
+            self.assertEqual(last_due["status_class"], status_class, last_due)
+            self.assertEqual(last_due["outcome"], outcome, last_due)
+            self.assertEqual(last_due["detail"], detail, last_due)
+            self.assertEqual(last_due["at"], "2026-11-05T03:58:00+00:00", last_due)
+            self.assertEqual(last_due["tick"], 7, last_due)
+
+    def test_status_names_the_reason_and_the_seconds_behind_the_heartbeat(self):
+        root = self._ready_root()
+        state_root = root / "state"
+        due = {"at": "2026-11-05T03:58:00+00:00", "tick": 7, "kind": "CHECK_WINDOW",
+               "status": "BLOCKED", "status_class": "blocked",
+               "outcome": "BUDGET_EXHAUSTED", "reason": "check-window",
+               "detail": "ROUND_BUDGET_EXHAUSTED"}
+        self._write_heartbeat(state_root, self.HEARTBEAT)
+        self._write_summary(state_root, last_tick_at="2026-11-05T03:58:00+00:00", due=due)
+
+        code, status = _cli("status", "--root", str(root))
+        self.assertEqual(code, 0, status)
+        # 一：这一轮她为什么没动——具名理由，不是"动了 4 次"。
+        self.assertEqual(status["resident"]["last_due"]["status"], "BLOCKED", status)
+        self.assertEqual(status["resident"]["last_due"]["detail"],
+                         "ROUND_BUDGET_EXHAUSTED", status)
+        # 二：tick 落后 supervisor 心跳多少秒，只标数字。
+        self.assertEqual(status["stall"]["supervisor_heartbeat_at"], self.HEARTBEAT, status)
+        self.assertEqual(status["stall"]["tick_lag_seconds"], float(self.LAG_SECONDS), status)
+        self.assertEqual(status["stall"]["judgement"], health_review.STALL_NOT_JUDGED, status)
+        self.assertIsNone(status["stall"]["threshold_seconds"], status)
+
+        # 显式给阈值才判：60 秒超了，300 秒没超。
+        code, over = _cli("status", "--root", str(root), "--stall-threshold", "60")
+        self.assertEqual(code, 0, over)
+        self.assertEqual(over["stall"]["judgement"], health_review.STALL_EXCEEDED, over)
+        self.assertEqual(over["stall"]["threshold_seconds"], 60.0, over)
+        code, within = _cli("status", "--root", str(root), "--stall-threshold", "300")
+        self.assertEqual(code, 0, within)
+        self.assertEqual(within["stall"]["judgement"], health_review.STALL_WITHIN, within)
+        # 阈值不是"判死"的开关：verdict/ok/退出码都不变。
+        self.assertTrue(within["ok"])
+        code, refused = _cli("status", "--root", str(root), "--stall-threshold", "0")
+        self.assertEqual(code, 2, refused)
+        self.assertEqual(refused["reason_code"], "STALL_THRESHOLD_INVALID", refused)
+
+    def test_an_old_record_without_last_due_and_no_threshold_behaves_as_before(self):
+        """回归保护：没有 last_due 的旧记录照样读；不传阈值就没有任何结论。"""
+
+        root = self._ready_root("legacy")
+        state_root = root / "state"
+        self._write_heartbeat(state_root, self.HEARTBEAT)
+        self._write_summary(state_root, last_tick_at="2026-11-05T03:59:00+00:00",
+                            due={"status": "NOT_DUE", "status_class": "silence"},
+                            extra={"last_due": None})
+        code, status = _cli("status", "--root", str(root))
+        self.assertEqual(code, 0, status)
+        self.assertIsNone(status["resident"]["last_due"], status)
+        self.assertEqual(status["stall"]["tick_lag_seconds"], 60.0, status)
+        self.assertEqual(status["stall"]["judgement"], health_review.STALL_NOT_JUDGED, status)
+
+        # health() 不传阈值时，输出与加这个参数之前完全一致。
+        default = health_review.health(
+            _root(), now=datetime(2026, 11, 5, 4, 0, tzinfo=timezone.utc))
+        self.assertNotIn("stall", default["progress"], default)
+        self.assertTrue(default["progress"]["no_timeout_rule"])
+        self.assertIn("是否卡死：没有正式超时/失败合同，不判断", default["cannot_judge"])
+        judged = health_review.health(
+            _root(), now=datetime(2026, 11, 5, 4, 0, tzinfo=timezone.utc),
+            stall_threshold_seconds=60)
+        self.assertFalse(judged["progress"]["no_timeout_rule"])
+        self.assertIn("stall", judged["progress"])
+        self.assertEqual(judged["progress"]["stall"]["judgement"],
+                         health_review.STALL_UNKNOWN, judged)
 
 
 if __name__ == "__main__":

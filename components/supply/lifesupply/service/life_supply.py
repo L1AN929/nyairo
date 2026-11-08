@@ -2557,7 +2557,11 @@ class LifeSupplySocketServer(socketserver.ThreadingUnixStreamServer):
         self._inflight_idle = threading.Event()
         self._inflight_idle.set()
         try:
-            super().__init__(str(path), LifeSupplyRequestHandler)
+            prev_umask = os.umask(0o177)
+            try:
+                super().__init__(str(path), LifeSupplyRequestHandler)
+            finally:
+                os.umask(prev_umask)
             os.chmod(str(path), self.socket_mode)
             applied = stat.S_IMODE(os.stat(str(path)).st_mode)
             if applied != self.socket_mode:
@@ -2619,7 +2623,7 @@ def run_service(settings: ServiceSettings, *, service: LifeSupplyService | None 
     server: LifeSupplySocketServer | None = None
     drained = True
     try:
-        socket_path.parent.mkdir(parents=True, exist_ok=True)
+        socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
         socket_handling = prepare_socket_path(socket_path)
         active = service or LifeSupplyService(
             settings.data_root, operator_uids=settings.operator_uids,

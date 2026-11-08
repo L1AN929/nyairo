@@ -134,7 +134,7 @@ plan_page_annotation(document, *, artifact_id, source_id, source_revision, page,
 
 ```bash
 wsl -e bash -lc 'cd /mnt/d/nyairo-rc1-body-backend && export PYTHONDONTWRITEBYTECODE=1 \
-  && python3 /mnt/c/Users/28556/.pi-desktop/scratch/966ed2b0-27ad-4c2c-a4b3-9021a8121e37/a_run_new_exact.py'
+  && python3 <WSL_USER_HOME>/.pi-desktop/scratch/966ed2b0-27ad-4c2c-a4b3-9021a8121e37/a_run_new_exact.py'
 ```
 
 | 文件 / 类 | exact IDs | 结果 | 运行器退出码 | 原日志 |

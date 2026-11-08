@@ -86,7 +86,14 @@
       "affordances": [
         [
           "REST",
-          "在这里休息"
+          "在这里休息",
+          {
+            "title": "在窗边歇一会儿",
+            "suggested_seconds": 240,
+            "execution": {
+              "mechanism": "stay_at_place"
+            }
+          }
         ],
         [
           "READ",
@@ -95,6 +102,14 @@
         [
           "USE_PHONE",
           "在这里使用手机"
+        ],
+        [
+          "DAZE",
+          "坐着发会儿呆"
+        ],
+        [
+          "POTTER",
+          "在屋里随便转转"
         ]
       ],
       "close_hour": null,
@@ -599,8 +614,15 @@
     {
       "affordances": [
         [
-          "BROWSE_STORE",
-          "在书店翻翻书"
+          "READ_HERE",
+          "在书店读这本书",
+          {
+            "title": "在书店读一本书",
+            "suggested_seconds": 600,
+            "execution": {
+              "mechanism": "stay_at_place"
+            }
+          }
         ]
       ],
       "close_hour": [
@@ -618,6 +640,7 @@
         "青卷书店"
       ],
       "open_hour": 10,
+      "reading": "《潮汐记》翻开第一页：「这个镇子的名字来自一次涨潮。那年冬天海水漫过堤坝，退下去以后留下一条新的沙脊，人们就在沙脊上盖起第一批房子——所以说，这地方从出生起就是海让出来的。」下面有一行很旧的手写批注：「让出来的地方，早晚要还。」",
       "slot": "bookstore",
       "weekdays_only": false,
       "weight": 2,
@@ -659,6 +682,10 @@
         [
           "LOOK_AROUND",
           "在这里看看周围"
+        ],
+        [
+          "PEOPLE_WATCH",
+          "坐在长椅上看人来人往"
         ]
       ],
       "close_hour": 22,
@@ -778,6 +805,10 @@
       [
         "LOOK_AROUND",
         "在这里看看周围"
+      ],
+      [
+        "PEOPLE_WATCH",
+        "站在路边看看人"
       ]
     ],
     "kind": "street",

@@ -216,6 +216,16 @@
       "path": "hermes_cli/update_contract.py",
       "clean_sha256": "85a39c3ddb40b7aae92ac229440a33b4393895e435f86c60b18a7ffcdcf73c43",
       "patched_sha256": "53bfd0cb163ed932081cac7ba9fd88573de16442e51172dc25afe1cdec3f93b4"
+    },
+    {
+      "path": "hermes_cli/web_server.py",
+      "clean_sha256": "083f4b1918d82dff613323f77e0b406fdfbc28a281a6f1f1827d57c528c9afe1",
+      "patched_sha256": "c041365e6006bc4a99f1b0ab3c5e5d763abe19882216b1d16519dd5057744df9"
+    },
+    {
+      "path": "hermes_cli/web_server_chat.py",
+      "clean_sha256": "c510283bf6d84f35f5ec3722a6750cceecf493ab8b742263a13663f4408662fc",
+      "patched_sha256": "c04d632a9254e6df36d0db68a865085cfff63a30875261eaab542fd295cdc6f4"
     }
   ],
   "new_modules": [

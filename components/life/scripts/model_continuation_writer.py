@@ -76,6 +76,22 @@ MAX_EARLIER_ENTRIES = 2
 MAX_EARLIER_CHARS = 600
 
 
+def _work_context_view(context: Any) -> Optional[dict[str, Any]]:
+    """The bounded ``work_context`` half of a typed writing context, or ``None``.
+
+    The cycle reads this block once per round through ``life_work_context.WorkContextReader`` and
+    only passes a readable (``OK`` / ``PARTIAL``) view.  The writer forwards it verbatim under its
+    own top-level key: it is the work's own document context (old versions, results, the methods
+    whose evidence points back at those results, local drafts), **not** research, so it is never
+    folded into ``research_context``.  A non-mapping or empty value is simply absent, exactly like
+    the other halves.
+    """
+    if not isinstance(context, Mapping):
+        return None
+    raw = context.get("work_context")
+    return dict(raw) if isinstance(raw, Mapping) else None
+
+
 def _earlier_view(context: Any) -> list[dict[str, Any]]:
     """The bounded ``earlier_versions`` half of a writing context, or an empty list.
 
@@ -190,6 +206,12 @@ class ModelContinuationWriter:
                 payload["research_context"] = research_context
             if practice_context:
                 payload["practice_context"] = practice_context
+            work_context = _work_context_view(context)
+            if work_context:
+                # v0.5 same-work: the block itself was read from the owner by the cycle; the
+                # writer only carries it.  Its ``state`` / ``reason_code`` travel unchanged, and
+                # nothing here invents an association or a new field.
+                payload["work_context"] = work_context
             earlier = _earlier_view(context)
             if earlier:
                 # v0.4 work-revisit: a *version-pinned* look at what this same work said earlier.
@@ -199,18 +221,28 @@ class ModelContinuationWriter:
                 payload["earlier_versions"] = earlier
         return json.dumps(payload, ensure_ascii=False)
 
+    #: The keys that mark a *typed* writing context.  A mapping carrying any of them has already
+    #: had its document context split into named halves by the caller; it must not be read back as
+    #: one bare research document.  ``work_context`` and ``earlier_versions`` count even when they
+    #: are the only keys present: a work-only payload used to arrive as
+    #: ``research_context={"work_context": ...}``, which both dropped the work and mislabelled it.
+    TYPED_CONTEXT_KEYS = ("research_context", "practice_context", "work_context",
+                          "earlier_versions")
+
     @staticmethod
     def _split_context(context: Any) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-        """Split the one ``context`` argument into its two documented halves.
+        """Split the one ``context`` argument into its research and practice halves.
 
-        ``{"research_context": ..., "practice_context": ...}`` is the v0.4 C shape; anything else
-        is the earlier bare research mapping, kept working byte for byte so a caller (or a test)
-        that predates the practice workspace is not silently changed.
+        A mapping carrying any :attr:`TYPED_CONTEXT_KEYS` is the typed shape the cycle sends; only
+        its ``research_context`` / ``practice_context`` members are returned here (each kept only
+        when it is a mapping), and the remaining halves are read by their own helpers.  A mapping
+        that carries none of those keys keeps the earlier bare-research meaning byte for byte, so
+        a caller (or a test) that predates the practice workspace is not silently changed.
         """
 
         if not isinstance(context, Mapping):
             return None, None
-        if "research_context" not in context and "practice_context" not in context:
+        if not any(key in context for key in ModelContinuationWriter.TYPED_CONTEXT_KEYS):
             return dict(context), None
         research = context.get("research_context")
         practice = context.get("practice_context")

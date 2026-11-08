@@ -188,6 +188,90 @@ class StateMachineTest(unittest.TestCase):
         self.assertEqual(coverage["not_covered"], [])
 
 
+class PreArmedUnknownTest(unittest.TestCase):
+    """UNKNOWN 注入在 p2 第一轮之前就武装：第一件 A 的提交消费它，没提交就继续挂着。
+
+    改的只是武装时机（原来是「上一轮已经写完 A 才武装」，模型只续一次作品时永远等不到
+    下一次 A 的提交）；注入语义不变：真写落地、回执丢失、一次性自复位。
+    """
+
+    ARTIFACT_A = "ba763339199b48a88c130c016fdcfd7d"
+    ARTIFACT_B = "0123456789abcdef0123456789abcdef"
+
+    class _Adapter:
+        """只占住 ``adapter.submit`` 这个接缝：注入器直接把提交拦在这里。"""
+
+        def __init__(self):
+            self.fault_injection_drop_response_after_write = False
+            self.submitted = []
+            #: 每次真正走到 adapter.submit 时，丢回执开关是不是被注入器打开了。
+            self.drop_flag_at_submit: list[bool] = []
+
+        def submit(self, *, payload, **kwargs):
+            self.submitted.append(dict(payload))
+            self.drop_flag_at_submit.append(
+                bool(self.fault_injection_drop_response_after_write))
+            # 真实适配器在丢回执那一支里自己把开关复位；这里手工复位的效果一样。
+            self.fault_injection_drop_response_after_write = False
+            return SimpleNamespace(status="SUBMITTED")
+
+    def _injector(self):
+        adapter = self._Adapter()
+        injector = g1.SubmissionInjector({"port": SimpleNamespace(), "adapter": adapter},
+                                         artifact_a=self.ARTIFACT_A, grant_id="grant:g1",
+                                         operation_prefix="g1:p2")
+        return adapter, injector
+
+    def _commit(self, adapter, injector, artifact_id):
+        return adapter.submit(payload={"op": injector.maaa.OP_COMMIT_VERSION,
+                                       "artifact_id": "artifact:" + artifact_id,
+                                       "expected_head": "artifact-version:head"})
+
+    def test_the_pre_armed_injection_fires_on_the_first_a_commit(self):
+        # 先写一件别的作品：那不是目标，注入必须还挂着。
+        adapter, injector = self._injector()
+        g1._arm_unknown_pre_round(injector)
+        self.assertTrue(injector.arm_unknown)
+        self._commit(adapter, injector, self.ARTIFACT_B)
+        self.assertEqual(injector.unknown_fired, 0)
+        # 第一件 A 的提交就消费掉这次注入，不用等第二轮再续一次。
+        self._commit(adapter, injector, self.ARTIFACT_A)
+        self.assertEqual(injector.unknown_fired, 1)
+        self.assertTrue(adapter.drop_flag_at_submit[-1])
+        self.assertFalse(injector.arm_unknown)
+        # 一次性：再提交一件 A 也不会第二次丢回执。
+        self._commit(adapter, injector, self.ARTIFACT_A)
+        self.assertEqual(injector.unknown_fired, 1)
+        self.assertFalse(adapter.drop_flag_at_submit[-1])
+
+    def test_a_round_without_an_a_commit_keeps_the_injection_armed(self):
+        adapter, injector = self._injector()
+        g1._arm_unknown_pre_round(injector)
+        # 第一轮根本没有 A 的提交：别的作品的新版本、以及对 A 的读。
+        self._commit(adapter, injector, self.ARTIFACT_B)
+        adapter.submit(payload={"op": injector.maaa.OP_READ_ARTIFACT,
+                                "artifact_id": "artifact:" + self.ARTIFACT_A})
+        self.assertEqual(injector.unknown_fired, 0)
+        self.assertTrue(injector.arm_unknown)
+        self.assertFalse(any(adapter.drop_flag_at_submit))
+        self.assertTrue(injector.view()["unknown_armed"])
+        # 挂着不动，真的等来一件 A 的提交才用掉。
+        self._commit(adapter, injector, self.ARTIFACT_A)
+        self.assertEqual(injector.unknown_fired, 1)
+        self.assertFalse(injector.view()["unknown_armed"])
+
+    def test_a_consumed_injection_is_never_re_armed(self):
+        # 提前武装的那一轮会同时走完「续作→UNKNOWN」：状态机不能再补挂已经用掉的那一次。
+        injector = SimpleNamespace(arm_unknown=False, arm_concurrent=False,
+                                   unknown_fired=1, concurrent_fired=0)
+        after = g1._apply_round(
+            g1.STATE_AWAIT_CONTINUE,
+            {"llm_calls": 1, "decision": "CONTINUE", "action_status": "UNKNOWN"},
+            versions_before=1, versions_after=2, injector=injector, **CONTINUE_EVIDENCE)
+        self.assertEqual(after, g1.STATE_AWAIT_UNKNOWN)
+        self.assertFalse(injector.arm_unknown)
+
+
 class GateTest(unittest.TestCase):
     def _window(self, root: Path, *, offset_seconds: float) -> None:
         now = datetime.now(timezone.utc)

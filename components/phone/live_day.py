@@ -836,7 +836,9 @@ class _ServeHandle:
 
 
 def _default_service_runner(root: Path | str, *, stop_event: threading.Event,
-                            ready_timeout: float) -> _ServeHandle:
+                            ready_timeout: float,
+                            room_living: bool = False,
+                            ambient_events: bool = False) -> _ServeHandle:
     """Start the phone's own owners in-process through ``demo.serve_instance``.
 
     Reusing that function (instead of spawning a second CLI generation) keeps the live binding,
@@ -857,6 +859,8 @@ def _default_service_runner(root: Path | str, *, stop_event: threading.Event,
     def target() -> None:
         try:
             demo.serve_instance(Path(root), port=0, ready_timeout=float(ready_timeout),
+                                room_living=bool(room_living),
+                                ambient_events=bool(ambient_events),
                                 stop_event=stop_event, announce=False, on_ready=on_ready)
         except BaseException as exc:  # a real startup failure is reported, not swallowed
             state["error"] = "%s: %s" % (type(exc).__name__, exc)
@@ -872,6 +876,8 @@ def _default_service_runner(root: Path | str, *, stop_event: threading.Event,
 def _ensure_services(root: Path | str, phone: Mapping[str, Any], *,
                      mode: str, stop_event: threading.Event,
                      ready_timeout: float,
+                     room_living: bool = False,
+                     ambient_events: bool = False,
                      service_runner: Optional[Callable[..., _ServeHandle]] = None
                      ) -> tuple[dict[str, Any], Optional[_ServeHandle]]:
     supply = str(phone.get("supply_socket") or "").strip()
@@ -891,8 +897,14 @@ def _ensure_services(root: Path | str, phone: Mapping[str, Any], *,
         report["status"] = UNAVAILABLE
         report["reason"] = "OWNER_SERVICES_NOT_RUNNING"
         return report, None
-    runner = service_runner or _default_service_runner
-    handle = runner(Path(root), stop_event=stop_event, ready_timeout=float(ready_timeout))
+    if service_runner is None:
+        handle = _default_service_runner(Path(root), stop_event=stop_event,
+                                         ready_timeout=float(ready_timeout),
+                                         room_living=bool(room_living),
+                                         ambient_events=bool(ambient_events))
+    else:
+        handle = service_runner(Path(root), stop_event=stop_event,
+                                ready_timeout=float(ready_timeout))
     if handle.error() or not handle.announcement.get("port"):
         detail = handle.error() or "CHILD_SERVICE_TIMEOUT"
         handle.stop()
@@ -979,6 +991,8 @@ def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_D
                 max_ticks: Optional[int] = None, poll_seconds: Optional[int] = None,
                 max_new_requests: Optional[int] = None, act: bool = True,
                 start_services: str = SERVICE_AUTO,
+                room_living: bool = False,
+                ambient_events: bool = False,
                 environment: Optional[Mapping[str, str]] = None,
                 service_runner: Optional[Callable[..., _ServeHandle]] = None,
                 resident_factory: Optional[Callable[..., Any]] = None,
@@ -1092,8 +1106,11 @@ def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_D
         return refused("NESTED_LIFE_INSTANCE_MISSING",
                        "this phone root has no %s/instance.json; this entry never prepares one"
                        % phone_life.ONE_DAY_DIRNAME)
+    feature_overrides = demo._serve_feature_overrides(
+        room_living=bool(room_living), ambient_events=bool(ambient_events))
     binding_env = phone_life.map_life_environment(
-        phone, nested, base_env=environment if environment is None else dict(environment))
+        phone, nested, base_env=environment if environment is None else dict(environment),
+        feature_overrides=feature_overrides)
     state_root = phone_life.life_state_root(root_path, nested)
     report["state_root"] = str(state_root)
     report["run_id"] = binding_env.get("CHIYO_AUTONOMOUS_RUN_ID")
@@ -1123,6 +1140,8 @@ def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_D
     # -- the owner children (only when they are not already up) ---------------------------
     services, serve = _ensure_services(root_path, phone, mode=start_services, stop_event=event,
                                        ready_timeout=ready_seconds,
+                                       room_living=bool(room_living),
+                                       ambient_events=bool(ambient_events),
                                        service_runner=service_runner)
     report["services"] = services
     if serve is not None:
@@ -1165,7 +1184,8 @@ def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_D
                     duration_seconds=(duration_seconds if duration_seconds is not None
                                       else DEFAULT_DURATION_SECONDS),
                     poll_seconds=poll_seconds, act=bool(act),
-                    environment=environment, resident_factory=factory)
+                    environment=environment, feature_overrides=feature_overrides,
+                    resident_factory=factory)
             except BaseException as exc:  # a cancel is not a crash: report it as one
                 control.cancel("%s: %s" % (type(exc).__name__, exc))
                 report["cancelled"] = True
@@ -1248,6 +1268,7 @@ def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_D
 
 
 def status(root: Path | str, *, environment: Optional[Mapping[str, str]] = None,
+           ambient_events: bool = False,
            live: bool = False, limit: int = DEFAULT_SUMMARY_LIMIT) -> dict[str, Any]:
     """Pure read: where the instance is, without starting a service or creating anything.
 
@@ -1284,7 +1305,9 @@ def status(root: Path | str, *, environment: Optional[Mapping[str, str]] = None,
                        "detail": "this phone root has no nested Life instance"})
         return report
     bound = phone_life.map_life_environment(
-        phone, nested, base_env=environment if environment is None else dict(environment))
+        phone, nested, base_env=environment if environment is None else dict(environment),
+        feature_overrides=({"CHIYO_WORLD_AMBIENT_EVENTS_ENABLED": "1"}
+                           if ambient_events else None))
     state_root = phone_life.life_state_root(root_path, nested)
     summary = _read_json(state_root / "resident_summary.json")
     running_flag = summary.get("running")

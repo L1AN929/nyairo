@@ -241,14 +241,17 @@ def serve_marker(root: Path | str) -> Optional[dict[str, Any]]:
 
 
 def map_life_environment(phone: Mapping[str, Any], nested: Optional[Mapping[str, Any]],
-                         *, base_env: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+                         *, base_env: Optional[Mapping[str, str]] = None,
+                         feature_overrides: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     """The environment the existing Life runtime is assembled with.  See :func:`build_binding`."""
 
-    return dict(build_binding(phone, nested, base_env=base_env)["environment"])
+    return dict(build_binding(phone, nested, base_env=base_env,
+                              feature_overrides=feature_overrides)["environment"])
 
 
 def build_binding(phone: Mapping[str, Any], nested: Optional[Mapping[str, Any]],
-                  *, base_env: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
+                  *, base_env: Optional[Mapping[str, str]] = None,
+                  feature_overrides: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
     """Map *one* phone instance onto the Life runtime's own environment names.
 
     Order is the whole design: an operator's stray shell export can never decide anything
@@ -307,6 +310,9 @@ def build_binding(phone: Mapping[str, Any], nested: Optional[Mapping[str, Any]],
     #: The phone's own recorded switches (daily rhythm / room environment / world runtime).
     for name, value in dict(phone.get("features") or {}).items():
         put((str(name),), value, "phone_features")
+    #: Explicit per-run feature switches from a controlled entry point (never os.environ).
+    for name, value in dict(feature_overrides or {}).items():
+        put((str(name),), value, "feature_override")
 
     #: Life's own root/state/switch facts.  Recorded values win; the defaults are the very paths
     #: ``one_day_life.prepare`` would have written for this root.
@@ -1509,6 +1515,7 @@ def life_run(root: Path | str, *, once: bool = False,
              poll_seconds: Optional[int] = None,
              act: bool = True,
              environment: Optional[Mapping[str, str]] = None,
+             feature_overrides: Optional[Mapping[str, str]] = None,
              resident_factory: Optional[Callable[..., Any]] = None,
              verify_owners: bool = True) -> dict[str, Any]:
     """Run the **existing** resident once (or finitely) on this phone instance's live binding.
@@ -1555,7 +1562,8 @@ def life_run(root: Path | str, *, once: bool = False,
                             "run window live there" % ONE_DAY_DIRNAME)
         return report
 
-    binding = build_binding(phone, nested, base_env=environment)
+    binding = build_binding(phone, nested, base_env=environment,
+                            feature_overrides=feature_overrides)
     env = binding["environment"]
     state_root = life_state_root(root_path, nested)
     report["state_root"] = str(state_root)

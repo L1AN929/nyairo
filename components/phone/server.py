@@ -77,7 +77,7 @@ MAX_ALBUM_CAPTION = 200
 #: The local supervisor's run controls.  The client only names a bound and a pause intent; the
 #: shared feature cap, the ledger baseline and every refusal stay in ``living``/the supervisor.
 LIVING_WINDOW_FIELDS = frozenset({"duration_seconds", "max_new_requests"})
-LIVING_PAUSE_FIELDS = frozenset({"paused"})
+LIVING_PAUSE_FIELDS = frozenset({"paused", "operation_key"})
 MAX_OPERATION_KEY_LEN = phone_service.MAX_OPERATION_KEY
 
 STATIC_FILES: dict[str, tuple[str, str]] = {
@@ -573,6 +573,15 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         itself still reaches ``_dispatch``'s error path, so a real failure stays visible.
         """
 
+        if getattr(self, "_responded", False):
+            LOG.warning("phone.duplicate_response_suppressed path=%s", self.path.split("?", 1)[0])
+            self.close_connection = True
+            return False
+        if not getattr(self, "_body_consumed", True):
+            raw_len = self.headers.get("Content-Length")
+            if raw_len is None or str(raw_len).strip() != "0":
+                self.close_connection = True
+        self._responded = True
         try:
             emit()
         except _CLIENT_GONE_ERRORS:
@@ -590,6 +599,8 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
@@ -714,6 +725,7 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         if length > limit:
             raise PhoneRequestError("BODY_TOO_LARGE", 413)
         raw = self.rfile.read(length)
+        self._body_consumed = True
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
@@ -878,6 +890,8 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         self._dispatch("HEAD")
 
     def _dispatch(self, method: str) -> None:
+        self._responded = False
+        self._body_consumed = (method != "POST")
         path = urlsplit(self.path).path
         if path in STATIC_FILES:
             if method not in ("GET", "HEAD"):
@@ -1021,6 +1035,7 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
                 return
             if _PROJECT_PATH.match(path):
                 self._get_project(service, _PROJECT_PATH.match(path).group(1))
+                return
             # v0.4 work-revisit: her old versions (metadata page), one named old version, its
             # bounded compare against today's head, and a sourced work's provenance.  All pure
             # reads under the same host/source guard as the rest of this surface.
@@ -1037,7 +1052,6 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
                 return
             if _PROJECT_PROVENANCE_PATH.match(path):
                 self._get_project_provenance(service, _PROJECT_PROVENANCE_PATH.match(path).group(1))
-                return
                 return
             # The material library and the research workbench (B's research workspace service):
             # guarded pure reads; the list carries no text, the detail does.
@@ -1284,8 +1298,6 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/living/stop":
                 self._post_living_stop(service)
                 return
-            self._send(404, _failure("NOT_FOUND"))
-            return
             self._send(404, _failure("NOT_FOUND"))
             return
         self._send(405, _failure("METHOD_NOT_ALLOWED"))
@@ -1908,7 +1920,7 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         # stream would corrupt the next keep-alive request.
         length = self.headers.get("Content-Length")
         if length is not None and str(length).strip().isdigit() and int(str(length)) > 0:
-            self._read_body(frozenset())
+            self._read_body(frozenset({"operation_key"}))
         result = supervisor.stop_window()
         service.record_operation(actor=self._actor(), action="living:stop",
                                  operation_key="living-stop:%d" % int(time.time()),

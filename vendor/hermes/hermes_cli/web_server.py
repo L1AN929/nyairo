@@ -361,14 +361,16 @@ _DASHBOARD_EMBEDDED_CHAT_ENABLED = True
 _DESKTOP_ATTACHMENT_WS_MAX_BYTES = 384 * 1024 * 1024
 
 
-# CORS: localhost origins only — allow_origins=["*"] on 0.0.0.0 would let any
-# website read/modify config and secrets.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS: production dashboard is served same-origin; do not expose cross-port
+# localhost CORS by default so untrusted local web servers on other ports
+# cannot read dashboard endpoints. Opt in explicitly for Vite dev servers only.
+if os.environ.get("HERMES_WEB_DEV") == "1":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):(5173|5174)$",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Endpoints that do NOT require the session token; everything else under /api/
 # is gated below. Shared with the OAuth gate so the two allowlists cannot
@@ -548,23 +550,53 @@ def _is_accepted_host(
     return host_only == bound_lc
 
 
+def _origin_matches_host(origin: str, host_header: str) -> bool:
+    """True when an HTTP(S) Origin header matches the request Host authority (including port)."""
+    if os.environ.get("HERMES_WEB_DEV") == "1" and re.fullmatch(
+        r"https?://(localhost|127\.0\.0\.1):(5173|5174)", origin.strip()
+    ):
+        return True
+    try:
+        parsed = urllib.parse.urlparse(origin.strip())
+        if parsed.scheme not in {"http", "https"}:
+            return True
+        if not parsed.netloc or not _host_header_hostname(host_header):
+            return False
+        default_port = 443 if parsed.scheme == "https" else 80
+        origin_host = (parsed.hostname or "").lower()
+        origin_port = parsed.port or default_port
+        req_parsed = urllib.parse.urlparse(f"{parsed.scheme}://{host_header.strip()}")
+        req_host = (req_parsed.hostname or "").lower()
+        req_port = req_parsed.port or default_port
+    except ValueError:
+        return False
+    return bool(origin_host and req_host) and origin_host == req_host and origin_port == req_port
+
+
 @app.middleware("http")
 async def host_header_middleware(request: Request, call_next):
     """Reject requests whose Host header doesn't match the bound interface (DNS rebinding, GHSA-ppp5-vxwm-4cf7)."""
     # app.state.bound_host is set by start_server() at listen time.
     bound_host = getattr(app.state, "bound_host", None)
-    if bound_host and not _is_accepted_host(
-        request.headers.get("host", ""), bound_host, getattr(app.state, "trusted_public_hosts", frozenset())
-    ):
-        return JSONResponse(
-            status_code=400,
-            content={
-                "detail": (
-                    "Invalid Host header. Dashboard requests must use the "
-                    "bound hostname or the configured public hostname."
-                ),
-            },
-        )
+    if bound_host:
+        trusted_hosts = getattr(app.state, "trusted_public_hosts", frozenset())
+        host_hdr = request.headers.get("host", "")
+        if not _is_accepted_host(host_hdr, bound_host, trusted_hosts):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "detail": (
+                        "Invalid Host header. Dashboard requests must use the "
+                        "bound hostname or the configured public hostname."
+                    ),
+                },
+            )
+        origin_hdr = request.headers.get("origin", "")
+        if origin_hdr and not _origin_matches_host(origin_hdr, host_hdr):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin dashboard request rejected."},
+            )
     return await call_next(request)
 
 

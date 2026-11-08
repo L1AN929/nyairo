@@ -159,12 +159,78 @@ class NyairoDayEntryTest(unittest.TestCase):
         args = entry.build_parser().parse_args(["start", "--root", "/root/nyairo-day"])
         self.assertIsNone(args.room_living)
         self.assertIsNone(args.world_actions)
+        self.assertIsNone(args.ambient_events)
         self.assertTrue(entry._resolve_run_switch(args, "room_living", True))
+        self.assertTrue(entry._resolve_run_switch(args, "ambient_events", True))
         args_on = entry.build_parser().parse_args([
             "start", "--root", "/root/nyairo-day", "--no-room-living",
-            "--world-actions"])
+            "--world-actions", "--ambient-events"])
         self.assertFalse(entry._resolve_run_switch(args_on, "room_living", True))
         self.assertTrue(entry._resolve_run_switch(args_on, "world_actions", False))
+        self.assertTrue(entry._resolve_run_switch(args_on, "ambient_events", False))
+
+    def test_ambient_events_switch_persists_across_start_and_run_day(self) -> None:
+        entry = _entry()
+        root = Path(tempfile.mkdtemp(prefix="nyairo-day-ambient-"))
+        (root / "run").mkdir(parents=True, exist_ok=True)
+        (root / "run" / entry.MANAGED_NAME).write_text(
+            json.dumps({"schema": entry.SCHEMA_MANAGED}), encoding="utf-8")
+        self.assertFalse(entry._managed_config(root)["ambient_events"])
+
+        entry._persist_run_switches(root, room_living=False, world_actions=False,
+                                    ambient_events=True)
+        self.assertTrue(entry._managed_config(root)["ambient_events"])
+
+        run_default = entry.build_parser().parse_args([
+            "run-day", "--root", str(root), "--live-model",
+            "--duration-seconds", "60", "--max-new-requests", "1"])
+        self.assertIsNone(run_default.ambient_events)
+        self.assertTrue(entry._resolve_run_switch(
+            run_default, "ambient_events", entry._managed_config(root)["ambient_events"]))
+
+        run_off = entry.build_parser().parse_args([
+            "run-day", "--root", str(root), "--live-model", "--no-ambient-events",
+            "--duration-seconds", "60", "--max-new-requests", "1"])
+        self.assertFalse(entry._resolve_run_switch(
+            run_off, "ambient_events", entry._managed_config(root)["ambient_events"]))
+
+    def test_ambient_events_reaches_world_and_life_binding_not_stray_os_environ(self) -> None:
+        from components.phone import demo, life as phone_life
+
+        phone = {
+            "root": "/tmp/nyairo-ambient-check",
+            "subject": "chiyo",
+            "supply_socket": "/tmp/nyairo-ambient-check/run/supply.sock",
+            "workspace_id": "ws-1",
+            "artifact_grant_id": "grant-1",
+            "world_home": "/tmp/nyairo-ambient-check/world",
+            "private_items_artifact_id": "priv-1",
+            "work_artifact_id": "work-1",
+            "features": {
+                "CHIYO_WORLD_LIVING_SKELETON_ENABLED": "1",
+                "CHIYO_WORLD_PACKAGE": str(demo.resolve_world_package("daily_neighborhood_v1")),
+            },
+        }
+        nested = {
+            "environment": {
+                "CHIYO_WORLD_AMBIENT_EVENTS_ENABLED": "0",
+                "CHIYO_AUTONOMOUS_RUN_ID": "run:test",
+                "CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_UTC_DAY": "10",
+            }
+        }
+        # 1. Stray shell export alone is stripped and overwritten back to nested "0".
+        stray_env = phone_life.map_life_environment(
+            phone, nested, base_env={"CHIYO_WORLD_AMBIENT_EVENTS_ENABLED": "1"})
+        self.assertEqual(stray_env["CHIYO_WORLD_AMBIENT_EVENTS_ENABLED"], "0")
+        self.assertNotIn("CHIYO_WORLD_AMBIENT_EVENTS_ENABLED",
+                         demo.effective_features(phone, ambient_events=False))
+
+        # 2. Explicit --ambient-events override reaches both World/Phone and Life binding.
+        world_features = demo.effective_features(phone, ambient_events=True)
+        self.assertEqual(world_features["CHIYO_WORLD_AMBIENT_EVENTS_ENABLED"], "1")
+        bound_env = phone_life.map_life_environment(
+            phone, nested, feature_overrides=demo.AMBIENT_EVENTS_FEATURES)
+        self.assertEqual(bound_env["CHIYO_WORLD_AMBIENT_EVENTS_ENABLED"], "1")
 
 
 if __name__ == "__main__":

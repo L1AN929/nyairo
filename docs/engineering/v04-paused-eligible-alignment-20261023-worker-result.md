@@ -29,7 +29,7 @@ eligibility after: STALE STALE_ACTIVITY_REVISION
 activity after: PAUSED
 ```
 
-当时在仓库外临时副本（`C:\Users\28556\AppData\Local\Temp\probe-scripts-69b19d82\`）里两处都
+当时在仓库外临时副本（`<USER_HOME>\AppData\Local\Temp\probe-scripts-69b19d82\`）里两处都
 改后跑通，**那只是阻塞点证明，不是交付**：没有仓库内改动、没有正式测试、没有 note。
 本次所有验收都基于当前唯一工作树的正式改动，不以临时副本导入充当修复版验收。
 
@@ -86,7 +86,7 @@ activity after: PAUSED
 
 - 把当前模块复制到 `/tmp/b1-baseline/activity_waiting_agenda.py`，仅把两处
   `not in (STATUS_WAITING, STATUS_PAUSED)` 还原为 `!= STATUS_WAITING`（共 2 处），
-  用同一探针（`C:\Users\28556\AppData\Local\Temp\b1_baseline_probe.py`）：
+  用同一探针（`<USER_HOME>\AppData\Local\Temp\b1_baseline_probe.py`）：
   - 旧谓词：`reconcile invalidated_eligibilities 1 -> STALE STALE_ACTIVITY_REVISION`，
     `RESUME REFUSED: EligibilityNotOpenError ... (status='STALE')`。
   - 当前树：`reconcile invalidated_eligibilities 0 -> OPEN`，`RESUME -> ACTIVE`，

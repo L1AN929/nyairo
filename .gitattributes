@@ -97,6 +97,7 @@ vendor/hermes/contributors/emails/uperLu@users.noreply.github.com -text
 /life_request_budget.lock                                         export-ignore
 /components/supply/lifysupply/**                                  export-ignore
 /components/supply/lifysupply_real/**                             export-ignore
+/components/supply/lifesupply_real/**                             export-ignore
 /docs/engineering/20261101-release-offline-final-guard-result.md  export-ignore
 /docs/engineering/20261101-release-offline-final-guard-result.json export-ignore
 /tests/fixtures/frozen_clock.py                                   export-ignore

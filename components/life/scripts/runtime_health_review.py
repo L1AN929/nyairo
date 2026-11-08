@@ -22,8 +22,10 @@ So the projection keeps four things apart and reads each from the authority that
    existence of a pid is not evidence.  A different host, a missing identity or a platform
    without ``/proc`` is ``UNKNOWN`` -- never "alive", never "dead";
 3. **progress** -- the last real tick/heartbeat instant, reported as an instant and an age.
-   There is **no threshold** here: a long model/owner call and a legitimate WAIT are not
-   deadlocks, so a quiet process stays quiet;
+   There is **no threshold by default**: a long model/owner call and a legitimate WAIT are
+   not deadlocks, so a quiet process stays quiet.  ``stall_threshold_seconds`` is an
+   *operator-supplied* criterion (``stall_judgement``); absent it, the projection carries a
+   number and no conclusion;
 4. **queue** -- the persisted AR-0 action state (open submission intents and unresolved
    actions), read directly, never through ``load_state`` (which replays the WAL).  Backlog is
    reported as backlog.  Without a formal timeout/failure fact it is *not* called stalled; a
@@ -413,8 +415,44 @@ def _recorded_view(summary: Mapping[str, Any], coverage: Mapping[str, Any],
     }
 
 
+#: 阈值判据的三个结果。默认 ``NOT_JUDGED``：没有阈值的秒数只是秒数，不是结论。
+STALL_NOT_JUDGED = "NOT_JUDGED"
+STALL_EXCEEDED = "EXCEEDED"
+STALL_WITHIN = "WITHIN"
+STALL_UNKNOWN = "UNKNOWN"
+
+
+def stall_judgement(seconds: Optional[float],
+                    threshold_seconds: Optional[float] = None) -> dict[str, Any]:
+    """把"落后多少秒"变成一个**可选**判据；不给阈值就只有数字，没有结论。
+
+    默认不启用是刻意的：一次长模型/owner 调用和一次正当 WAIT 都会把"多久没动"拉长，
+    它们不是死锁。只有操作者显式给出阈值，才把一个秒数变成"超了"这个事实，而且它仍然
+    只是**一个数字对着一个阈值**，不是对死活的判定。
+    """
+
+    value = None if seconds is None else float(seconds)
+    out: dict[str, Any] = {
+        "threshold_seconds": None if threshold_seconds is None else float(threshold_seconds),
+        "judgement": STALL_NOT_JUDGED,
+        "note": "没有阈值：只报秒数，不判是否卡死（长模型/owner 调用与正当 WAIT 都会拉长它）",
+    }
+    if threshold_seconds is None:
+        return out
+    if value is None:
+        out["judgement"] = STALL_UNKNOWN
+        out["note"] = "没有可比的进度数字（缺 tick 时间或心跳），不拿阈值猜"
+        return out
+    out["judgement"] = STALL_EXCEEDED if value > out["threshold_seconds"] else STALL_WITHIN
+    out["note"] = ("超过给定阈值；这是一条操作者设定的判据，不是系统对死活的结论"
+                   if out["judgement"] == STALL_EXCEEDED
+                   else "在给定阈值之内")
+    return out
+
+
 def _verdict(recorded_present: bool, process_status: str, running_claim: Any,
              queue_verdict: str) -> str:
+
     if not recorded_present:
         return VERDICT_NO_RECORD
     if process_status == PROCESS_MATCHED:
@@ -438,8 +476,14 @@ _EXPLAIN = {
 
 def health(state_root: Path | str, *, now: Optional[datetime] = None,
            hostname: Optional[str] = None, proc_root: Path | str = "/proc",
-           needles: Optional[list[str]] = None) -> dict[str, Any]:
-    """The whole read-only projection.  It reads files and ``/proc``; it writes nothing."""
+           needles: Optional[list[str]] = None,
+           stall_threshold_seconds: Optional[float] = None) -> dict[str, Any]:
+    """The whole read-only projection.  It reads files and ``/proc``; it writes nothing.
+
+    ``stall_threshold_seconds`` 是**操作者显式给的**可选判据，默认不传。不传时输出与
+    加这个参数之前完全相同：``no_timeout_rule`` 仍是 ``True``，"是否卡死"仍列在
+    ``cannot_judge`` 里。
+    """
 
     root = Path(state_root)
     moment = now if isinstance(now, datetime) else datetime.now(timezone.utc)
@@ -481,10 +525,15 @@ def health(state_root: Path | str, *, now: Optional[datetime] = None,
         "since_last_heartbeat_seconds": (recorded.get("coverage") or {}).get(
             "last_heartbeat_age_seconds") if recorded_present else None,
         "verdict": progress_verdict,
-        "no_timeout_rule": True,
+        "no_timeout_rule": stall_threshold_seconds is None,
         "note": ("这里只报最后真实进度与距今秒数；没有“多少秒没动就卡死”的规则，"
                  "长模型/owner 调用和正当 WAIT 不会被判死锁"),
     }
+    if stall_threshold_seconds is not None:
+        # 只在操作者显式给阈值时才出现这个键：不传时输出与加参数之前完全相同。
+        progress["stall"] = stall_judgement(tick_age, stall_threshold_seconds)
+        progress["note"] = ("这里报最后真实进度、距今秒数与**操作者设定**的阈值判据；"
+                            "阈值之外仍然不是系统对死活的结论")
 
     verdict = _verdict(recorded_present, process["status"],
                        summary_map.get("running"), queue["verdict"])
@@ -495,7 +544,8 @@ def health(state_root: Path | str, *, now: Optional[datetime] = None,
         cannot_judge.append("队列是否有待处理事实：%s" % queue["verdict"])
     if progress_verdict == "NO_PROGRESS_FACT":
         cannot_judge.append("任务是否有进展：记录里没有 tick 时间")
-    cannot_judge.append("是否卡死：没有正式超时/失败合同，不判断")
+    if stall_threshold_seconds is None:
+        cannot_judge.append("是否卡死：没有正式超时/失败合同，不判断")
 
     return {
         "kind": KIND,
@@ -533,6 +583,10 @@ __all__ = [
     "QUEUE_PENDING",
     "QUEUE_UNKNOWN",
     "SCHEMA_VERSION",
+    "STALL_EXCEEDED",
+    "STALL_NOT_JUDGED",
+    "STALL_UNKNOWN",
+    "STALL_WITHIN",
     "SUMMARY_FILENAME",
     "VERDICT_ALIVE_PENDING",
     "VERDICT_ALIVE_QUIET",
@@ -543,5 +597,6 @@ __all__ = [
     "health",
     "probe_process",
     "queue_facts",
+    "stall_judgement",
     "state_root_for",
 ]

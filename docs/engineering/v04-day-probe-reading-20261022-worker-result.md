@@ -64,9 +64,9 @@ verify 纯读、无回执拒绝、能识破手机绑定漂移与账本被重置�
 ### B. notes 门禁
 
 ```bash
-npx tsx C:/Users/28556/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts
-npx tsx C:/Users/28556/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts
-npx tsx C:/Users/28556/.claude/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts
+npx tsx <USER_HOME>/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts
+npx tsx <USER_HOME>/.claude/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts
+npx tsx <USER_HOME>/.claude/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts
 ```
 
 结果：tree `ok: 84 note(s) tree and relative links verified`（exit 0）；
