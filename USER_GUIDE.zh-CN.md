@@ -1,1011 +1,1074 @@
-# nyairo：第一版使用教程
+# nyairo 中文使用指南（v0.6.0）
 
-本文帮助你在自己的电脑或服务器上安装 nyairo，开始聊天，再按需要连接机器人和额外功能。网页只放教程，聊天在实际程序里进行。
+> 在线阅读与桌面端下载：[https://nyairo.com/](https://nyairo.com/)  
+> 当前公开测试版本：**v0.6.0**（GitHub prerelease，提供原生 Windows 桌面端与 Linux / WSL 一行命令安装）
 
-当前最新发布版本为 **v0.5.1（身体与街区日常版）**，以 GitHub prerelease 形式发布，属于公开测试版，不是稳定版。这一版整理了身体需求与休息/补给、街区早晚与物件阅读、手机日记/相册/相机入口，以及作品续作与挂起换事的接线。下面提供一行命令的安装入口，安装器仍会做环境检查并需要你本地填写模型配置；本版尚未完成完整联网新装实测，请按后文的验证说明确认结果。
+---
 
-## 00 第一次使用，从这里开始
+## 01 · 项目介绍与核心能力
 
-### 先准备好这三样
+认识 nyairo：给数字个体一方住得下来的空间、存在本机的长期记忆，以及按真实时间流动的日常。
 
-- 一台能上网的电脑。Windows 用户按下一章先装 Ubuntu；Linux 用户可以直接开始。
-- 一个可以使用的模型账号，以及它提供的密钥。模型负责生成回复；nyairo 按配置提供记忆、生活状态，以及可选的观察、认知与文档能力。
-- 一点安装时间：第一次要下载程序需要的小工具，过程中保持网络连接。
+> **框架与人设说明**
+> nyairo 是一个开源的数字个体框架（Apache-2.0）。新装默认提供干净的中性底板，不预设固定角色身份——你可以自己给她起名字、定语气、改房间，慢慢养出属于你们的日常。
 
-这里是使用教程。聊天要在电脑上的程序或你自己的 Telegram 机器人里进行。
+### 为什么要做 nyairo？
 
-### 一条命令引导安装
+平时用大多数 AI 聊天工具，只要关掉窗口，对方的时间就彻底停了；下次再打开，又要从零开始客套。说去哪里也是一秒钟瞬移过去，聊完就忘，很难让人觉得对面住着一个活生生的伙伴。
 
-Windows 用户先按 [Windows 安装](https://nyairo.com/#windows) 打开 WSL / Ubuntu；Linux 用户打开终端。用自己的普通账号，在这个窗口运行：
+**nyairo 想解决的就是这件事：**让她在你关掉窗口之后依然有自己的时间流速，有具体的房间和街道可以走动，聊过的往事稳稳存在你自己的电脑里。你们的每一次对话，都接在上一次分别之后的生活里。
+
+### 现在能做什么？
+
+| 模块 | 实际作用 | 当前状态 |
+| --- | --- | --- |
+| **本地长期记忆** | 把聊过的习惯、约定和经历存进本机 SQLite 数据库，跨会话自然想起；记错了能当面纠正，不想再提的事也能设为停止召回。 | 默认开启 · 数据留在本机 |
+| **连续起居状态** | 关窗或重启电脑后，所处位置与手头进度不会清零；按需开启后台自主活动后，闲暇时也会自己散步、休息或写随笔。 | 基础连续默认开启 · 自主活动按需开启 |
+| **虚拟街区与房间** | 出门按路网距离真实计时，半路问起会如实说「正在路上」；支持在房间平面里走动、开关灯具，自带离线地图编辑器。 | 默认附带示例世界 · 随机生成规划中 |
+| **相册、共读与文稿** | 保存旅途明信片与日常手记，支持导入书稿双人同步阅读做批注，也能对比同一篇文稿的前后修订差异。 | 桌面端与 Web 界面直接可用 |
+| **独立分析建议** | 遇到纠结的问题或代码排错时，可用命令请她单独梳理利弊与思路，分析完继续回到日常聊天。 | 按需开启（`/chiyo_consider`） |
+
+### 开始前需要准备什么？
+
+- **一台普通电脑**：Windows 10 / 11（提供 5 MB 免管理员桌面端，配合系统内置 WSL 2 运行）或 Linux 均可。对话推理走你填写的模型接口，**不需要独立显卡**，日常轻薄本就能跑。
+
+- **一个大模型 API Key**：比如 DeepSeek、OpenAI、Claude 或兼容 OpenAI 格式的服务密钥，用来驱动对话。
+
+- **几分钟安装时间**：首次安装会自动拉取运行环境与校验包，保持网络通畅即可。
+
+准备好后，直接前往 [第一次使用，从这里开始](https://nyairo.com/#quickstart)。
+
+---
+
+## 02 · 版本动态与更新说明
+
+如实记录每一版的改动、修补与当前还没做完的边界。当前最新公开测试版为 v0.6.0，旧版标签与安装包均保留在 GitHub Releases。
+
+> **版本说明**
+> 当前最新发布包为 **v0.6.0**（GitHub prerelease 公开测试版，尚非正式稳定版），同时提供原生 Windows 桌面安装器（`nyairo-0.6.0-setup.exe`）。此前发布的 `v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 等历史标签与压缩包均原样保留。升级前建议先备份自己的 `~/.nyairo` 目录。
+
+### v0.6.0 · 日常相处回执、未来问题与共读体验（GitHub prerelease）
+
+公开测试版 · 日常相处与桌面端体验升级
+
+这一版重点打磨了日常聊天、街区散步、双人共读与桌面客户端的细节体验：
+
+- **对话生活感知与动作回执**：聊天窗口顶部实时显示她当前所在的房间或街道、身体姿态与手头进度；当对话里触发了出门散步、写随笔或加书签等真实动作时，气泡下方会浮现可点击的跳转胶囊，一键跳到对应地图或文稿。
+
+- **未来问题与习惯话头管理**：桌面端「记忆 → 未来与默契」支持随时手动记下她回头想问你的问题、直接回答或划掉，也能把常聊的共同默契沉淀为习惯话头，并在「总览」页一键带入聊天。
+
+- **双人共读示范书与初次向导**：共读书架支持一键放入《凪浦海风手记（共读示范）》立即体验翻页、书签与页码批注；全新世界提供起床、喝水、写随笔与逛书店的四步轻巧引导。
+
+- **模型接口一键连通测试**：桌面端「设置」页新增大模型接口直连测试按钮，当场返回响应耗时或错误原因，省去盲猜排错。
+
+相关链接：[GitHub Release v0.6.0](https://github.com/L1AN929/nyairo/releases/tag/v0.6.0) · [Windows 桌面端安装](https://nyairo.com/#windows)
+
+### v0.5.1 · 身体节律、街区早晚与桌面端（GitHub prerelease）
+
+公开测试版 · 分段测试与发行清单校验通过 · 同步推出 Windows 桌面端
+
+这一版把近期围绕日常起居、街区细节、随身相册文稿以及桌面客户端的工作整合成了可直接安装的测试版本：
+
+- **Windows 原生桌面客户端**：新增约 5 MB 的免管理员安装包（[安装说明](https://nyairo.com/#windows)），常驻系统托盘，首次打开自动检测 WSL 2 并引导配齐环境，内置总览、流式引用对话、街区与室内平面、文稿对比和微信扫码面板。
+
+- **起居与补给节律**：加入困倦休息、饮水与简餐补给的时间节律，动作按真实耗时推进（目前仍是轻量节律，不是完整的饥饿/营养数值系统）。
+
+- **街区早晚变化与可读风物**：同一条街在早晚不同时段会呈现不同风貌，路边设施与阅读角支持驻足查看具体内容。
+
+- **相册、日记与文稿续写**：补齐相机留影、相册翻看、双人共读批注，以及未写完文稿的挂起续写与历史版本差异对比。
+
+- **工程清理与脱敏**：统一安装器版本号与记忆模块显式配置，对公开源码中的内部测试地址做了彻底脱敏。
+
+> **本版验收边界（还没做什么）**
+> 已完成专项分段测试、9 项脱敏离线检查、`MANIFEST.json` 与 ZIP 哈希核对及桌面端实机联调；本轮未重跑历史四万余项宿主全量回归，也未进行 24 小时真实大模型连续挂机长测。随机生成专属世界、到点主动发消息提醒、完整营养情绪曲线与跨设备一键搬家尚未实现。
+
+相关链接：[GitHub Release v0.5.1](https://github.com/L1AN929/nyairo/releases/tag/v0.5.1) · [Windows 桌面端安装](https://nyairo.com/#windows)
+
+### v0.4.0 · 多段出行与多事挂起（GitHub prerelease）
+
+公开测试版 · 世界与身体专项 263 项测试通过
+
+在 0.3 打通单次出门闭环的基础上，0.4 解决了「远门分几段走」和「手头几件事穿插着做」的问题：
+
+- **多段连贯行程**：去较远的地方会自动拆成多段路程（例如：卧室 → 客厅 → 街道 → 书店）依次推进，每走完一段单独记录进度，中途停下也不会乱跳。
+
+- **多件事挂起，同一时刻专心做一件**：手头的事如果暂时做不完，可以记下等待条件先挂到一边去干别的；等条件满足了再接回来继续，前台始终只跑一件事。
+
+- **跨天天气与街区见闻**：阴晴变化与街坊小事会持续几天并分阶段演变，过期后自然翻篇，不再死循环触发。
+
+- **状态回执更清晰**：修复了不同活动之间动作编号偶发串用的问题；明确区分「操作被拒绝」与「结果暂时未知」，不再混成同一种报错。
+
+- **文稿版本对比**：加入受管文稿的历史版本列表与增删对比视图，续写时自动参考上一版摘要。
+
+### v0.3.0 · 出行、消费与连续闭环（GitHub prerelease）
+
+公开测试版 · 8 组 51 项核心机制检查通过
+
+这一版把出门、在途等待、临时改主意、进店买东西、回家接着做原来的事，串成了可暂停、可恢复的连续过程：
+
+- **按真实路网寻路**：直接从当前地图解析地点与房间出入口，名字有歧义或路不通就如实告知，不再靠硬编码瞬移。
+
+- **半路暂停不重走**：暂停指令只拦住还没出发的下一段路，已经在路上的这一段会如实走完，恢复后从断点接着走。
+
+- **网络抖动不重复执行**：提交动作后如果没收到回执，会先核对账本结果，不会盲目重发导致同一件事做两遍。
+
+- **每日模型调用预算**：支持按天和按单次运行窗口设置请求上限，暂停后绝不在后台偷偷消耗额度。
+
+- **进店消费与经历留痕**：在店里买下的饮品或读物会真实消耗并记入随身记录，后续聊天与选择都能感知到刚刚发生的事；支持查询未来几天店铺的营业时间表。
+
+### v0.2.0-rc3 · 聊天内移动与在途感知
+
+发布时间：2026 年 10 月 14 日
+
+- **一句话让她出门**：新增 `world_move` 移动工具，在终端、微信或 Telegram 里直接跟她说去便利店或公园，不相邻的地点会自动经街道中转。
+
+- **真实步行耗时**：每段路按距离需要走 5 到 13 分钟不等；半路发消息问她，她能准确说出大概还要走几分钟才到。
+
+- **权限放行与测试补齐**：修复了记忆安全策略误拦移动工具的问题，补齐 16 项专项测试与文件清单校验。
+
+### v0.2.0-rc2 · 安装与升级元数据修复
+
+修复了 rc1 压缩包内更新登记版本号仍停留在旧版的问题，新增打包自动核对脚本防止版本号错配，并修正了 Telegram 绑定说明中的命令笔误。
+
+### v0.2.0-rc1 · 自主日常与地图编辑器
+
+发布时间：2026 年 10 月 13 日
+
+- **后台自主节律（默认关闭）**：开启后，就算没人找她说话，她也会按节奏醒来看看周围、散步或接着写没写完的随笔。
+
+- **结果核实后才算数**：避免大模型「嘴上说写完了其实没存盘」——只有底层服务确认写入成功才记账，拿不准的状态如实标为不确定。
+
+- **自带离线地图编辑器**：随包附带可视化空间编辑器与多套城镇模板，可以在浏览器里画墙、装门、摆家具。
+
+### v0.1.0-rc9 · Agent 辅助安装与社区入口
+
+发布时间：2026 年 10 月 10 日
+
+- **AI Agent 辅助安装规范**：上线 [AGENT_INSTALL.zh-CN.md](https://nyairo.com/AGENT_INSTALL.zh-CN.md)，支持把标准指令复制给 Claude Code、Codex 等工具，自动完成环境自检、实例隔离与 SHA256 校验安装。
+
+- **社区交流入口**：开通官方 QQ 交流群（`1126943805`）与 Telegram 频道（`@nyairoai`），方便反馈问题与交流配置经验。
+
+- **文档站样式整理**：优化了官网首屏与文档阅读排版。
+
+### v0.1.0-rc6 · 一条命令更新与回滚
+
+发布时间：2026 年 10 月 6 日
+
+- **整包平滑升级**：新增 `nyairo update`，只替换 `~/.local/share/nyairo` 下的程序目录，`~/.nyairo` 里的聊天记录、记忆、密钥与 `SOUL.md` 原样保留。
+
+- **一键回滚与中断恢复**：升级后若遇到兼容问题，可用 `nyairo update --rollback` 退回上一版（期间新聊的内容不会丢）；断网中断可用 `nyairo update --recover` 修复。
+
+### v0.1.0-rc5 · 自定义人设与隐私加固
+
+发布时间：2026 年 10 月 4 日
+
+- **人设模板解耦**：新实例默认采用干净的中性 `SOUL.md` 模板，方便自由设定名字、称呼与性格。
+
+- **短对话上下文修复与工具限制**：修复了简短对话偶发漏记上下文的问题；启用记忆模式时默认限制任意文件读取工具，防止模型绕过「停止召回」设置去翻旧日志。
+
+### v0.1.0-rc4 · 首个公开体验版
+
+发布时间：2026 年 10 月 2 日
+
+搭起 nyairo 的基础骨架：本地 SQLite 长期记忆、跨重启保留的生活状态，以及最初的位置与姿态感知接口。
+
+---
+
+## 03 · 第一次使用，从这里开始
+
+根据你手头的电脑选择最顺手的装法：Windows 用户直接装桌面端，Linux 或终端用户复制一行命令即可。
+
+### 先选适合你的安装方式
+
+开始前只需要准备好一台能上网的电脑，以及一个大模型 API Key（例如 DeepSeek、OpenAI 等）。按你的系统二选一：
+
+- **如果你用 Windows 10 / 11（推荐）**：直接下载约 5 MB 的 [**Windows 桌面端安装包**](https://nyairo.com/downloads/nyairo-0.6.0-setup.exe)，双击安装后会自动检测 WSL 2 并引导配好后台环境，不需要自己记终端命令。安装步骤见 [在 Windows 上安装](https://nyairo.com/#windows)，界面用法见 [桌面客户端使用指南](https://nyairo.com/#desktop-guide)。
+
+- **如果你用 Linux，或习惯纯终端操作**：继续看下面的一行命令安装步骤即可。
+
+- **如果你平时用 Claude Code / Codex 等编程助手**：也可以直接把 [交给 AI 助手自动安装](https://nyairo.com/#agent-install) 里的标准指令复制给它代装。
+
+### Linux / WSL 一行命令安装
+
+打开你的 Linux 终端（Windows 纯终端用户请先打开 **Ubuntu** 窗口），复制下面这行命令并回车：
 
 ```bash
 curl -fsSL https://nyairo.com/install.sh | bash
 ```
 
-不需要先下载 Git 仓库，也不用自己装 uv 或 Python。安装器会下载固定的 `v0.5.1`，核对文件，准备运行环境，再创建独立的个人配置，开启记忆与生活状态，并允许当前 Linux 账号通过本地命令行使用。
+不用提前装 Python 或 Git。脚本会自动下载并校验官方 `v0.5.1` 发行包，配好 Python 3.13 运行环境，并在 `~/.nyairo` 下建好你的个人数据目录。
 
-看到 `[5/5] 程序安装完成` 后，会自动进入 Hermes 模型设置。选择自己的服务和模型，填写 API Key；自定义服务还要填写 Base URL。设置结束后进入聊天，先发一句话检查能否收到回复。账号与密钥仍需你自己提供。
+看到终端提示 `[5/5] 程序安装完成` 后，会自动进入模型配置向导：
 
-如果提示找不到 `curl`，Ubuntu / Debian 用户先运行 `sudo apt update && sudo apt install -y curl`，再粘贴安装命令。首次下载可能需要几分钟，请保持网络连接。
+1. 用上下方向键选择你的模型服务商；
 
-以后重新打开 Ubuntu / Linux 终端，输入 `nyairo` 就能继续；重新选择模型用 `nyairo setup model`。刚装完若当前窗口找不到命令，打开新终端，或直接运行 `~/.local/bin/nyairo`。
+2. 粘贴你的 **API Key**（如果用的是第三方兼容接口，顺手填一下 Base URL）；
 
-程序保存在 `~/.local/share/nyairo/releases/v0.5.1`，个人数据保存在 `~/.nyairo`。名字与人格改 `~/.nyairo/SOUL.md`；聊天、记忆和模型配置也在这套个人目录里。重复运行安装命令会核对程序并保留已有个人数据，再打开模型向导；它不会自动升级到别的版本。
+3. 回车保存后就会直接进入对话界面，发一句「你好」，能收到回复就说明跑通了。
 
-这条路线在早期版本完成过 Linux 和 Windows WSL / Ubuntu 的普通账号首次安装复核，该实测属于早期版本，不代表 v0.5.1。v0.5.1 目前只验证了公开下载、包内清单与定向检查，完整联网新装和升级/回滚实测尚未进行，不要把历史版本的验证结果当成本版本的验证结果。Windows 用户仍需先装好 WSL。Telegram、认知、World/Body 和资源服务仍按对应章节另外配置。
+> **提示找不到 curl？**
+> 极少数刚装好的 Ubuntu 镜像还没带 `curl`，先跑一句 `sudo apt update && sudo apt install -y curl` 再执行上面的安装命令即可。
 
-### 继续阅读手动教程时，用对目录
+### 装好之后怎么聊天
 
-后面的 Git / ZIP 手动路线使用 `~/apps/chiyo-v0.1` 和 `~/.chiyo-v1`；一条命令安装使用上述新目录。已经完成引导安装，就跳过手动下载和创建配置，不要再建立第二套个人数据。
+- **桌面端用户**：点击桌面或右下角托盘里的 **nyairo** 图标就能打开窗口，在侧边栏切换「总览」「对话」「街区」「记忆」或「设置」。
 
-阅读后面的模块、更新或备份示例时，将程序路径 `~/apps/chiyo-v0.1` 换成 `~/.local/share/nyairo/releases/v0.5.1`，将个人路径 `~/.chiyo-v1` 换成 `~/.nyairo`。`bash scripts/hermes.sh` 可直接换成 `nyairo`；需要在程序目录执行的其他脚本仍先进入实际程序目录。
+- **终端用户**：平时打开终端输入 `nyairo` 回车就能接着聊；输入 `/chiyo_status` 可以看记忆（`READY`）与生活状态（`IDLE`）是否在线；想换模型随时运行 `nyairo setup model`。
 
-### 手动安装的路线（可选）
+- **连到手机微信**：希望出门在外也能用手机跟她聊，按 [接入微信](https://nyairo.com/#weixin) 扫个码就能绑好。
 
-1. Windows 用户先看 [在 Windows 上安装](https://nyairo.com/#windows)，把 Ubuntu 打开。
-2. 在 [下载与安装](https://nyairo.com/#linux) 中完成工具准备，再选择 Git 或 ZIP，**两种下载方法选一种就够了**。
-3. 接着 [设置并开始聊天](https://nyairo.com/#configuration)，建立自己的数据文件夹，选择模型，再发一句话试试。
-4. 能正常聊天后，再按 [接入 Telegram](https://nyairo.com/#telegram) 设置自己的机器人。
-5. 查看 [日常命令](https://nyairo.com/#cli-reference)，试着查看、纠正和删除记忆。
+### 给她起名字、改性格
 
-从 Git 和 ZIP 安装都使用同一个程序文件夹：`$HOME/apps/chiyo-v0.1`。后面的启动命令也使用它，跟着本文安装时无需改名字。
+默认人设是一张干净的白纸。想给她起个名字、定下说话语气和你们之间的称呼，用编辑器打开个人目录下的 `SOUL.md` 即可：
 
-### 第一次成功时，会看到什么
+```bash
+nano "$HOME/.nyairo/SOUL.md"
+```
 
-安装完成只是第一步。能收到模型的真实回复，才说明聊天已经跑起来。
+直接用日常中文写清楚她叫什么、性格偏安静还是活泼、平时怎么称呼你。改完按 `Ctrl + O` 回车保存，再按 `Ctrl + X` 退出，下次对话就会按新设定生效。
 
-输入 `/chiyo_status` 查看状态。记忆显示 READY 表示已准备好；生活显示 IDLE 表示当前没有正在进行的活动。其他功能显示 OFF 时，可以先继续聊天，之后按 [额外功能](https://nyairo.com/#modules) 配置。
+---
 
-第一次先体验聊天、记忆和生活状态。世界身体、资源文档和“只给建议”的认知功能，需要另外设置。
+## 04 · 安装前准备与系统要求
 
-### 遇到这些词，不用先学一遍技术
+装之前花一分钟确认系统环境、磁盘空间与目录结构，省去后面来回折腾。
 
-- **终端**：输入命令的窗口。Windows 的 PowerShell 和 Ubuntu 的终端是两个不同窗口。
-- **配置文件**：保存你的模型、账号和功能设置的文件。
-- **个人数据文件夹**：保存聊天记录、记忆和设置的地方。本文用 `$HOME/.chiyo-v1`。
-- **模型密钥 / API Key**：模型服务给你的访问凭证，按它的说明填写，不要发给别人。
-- **profile**：下文旧文件或提示里可能出现这个词，它指的就是这一套个人设置和数据。
+### 支持哪些操作系统
 
-## 01 项目定位与新增功能
+- **Windows 10 / 11**：提供原生桌面客户端（`nyairo-0.6.0-setup.exe`），生活与记忆后端运行在 Windows 官方自带的 WSL 2（Ubuntu）里。操作步骤见 [在 Windows 上安装](https://nyairo.com/#windows)。
 
-### 第一版和 Hermes 的关系
+- **Linux 桌面或服务器**：在 Ubuntu / Debian 环境下验证最完整，直接运行一行引导命令即可。其他发行版需自行安装基础解压与编译工具。
 
-nyairo 包含完整 Hermes 源码、千代插件、独立组件及必要的宿主补丁。正常使用由 Hermes 提供命令行、模型选择、工具、技能和消息平台连接。nyairo 探索的是持久数字个体：长期记忆、生活状态、世界与身体观察、认知判断和个人文档共同组成框架；各模块有自己的启用条件与边界。
+- **macOS**：目前还没有做完完整的打包与流程验证，暂不承诺开箱即用；熟悉命令行的用户可以参考源码手动尝试，或等后续专门适配。
 
-| 新增功能 | 用户能做什么 | 本版限制 |
-| --- | --- | --- |
-| 长期记忆 | 跨会话询问过去的个人经历，查看、纠正和停止使用记忆 | 默认保守组织经历；模型 M1/M2 形成需额外配置 |
-| 生活连续性 | 读取真实生活状态，保存入站事件与审计，重启后恢复 | 没有正式活动时为 IDLE；不自主安排生活 |
-| 认知判断 | 提交明确请求，由真实模型给出判断与原因 | Shadow 观察，不执行；通用安装默认关闭 |
-| 世界与身体 | 读取位置、姿态和身体信号 | 标准插件只读，不移动或执行动作 |
-| 个人资源 | 在个人 Workspace 中保存和读取独立文档 | 需要独立 Life Supply 服务与真实有限授权 |
-| 身份边界 | 明确绑定个人 DM，限制其他身份写入个人记忆 | 不是本地管理员或任意文件工具的访问沙箱 |
+### 程序与个人数据存在哪
 
-### 哪些不属于完成的功能
+为了避免升级软件时误伤你的聊天记录，nyairo 把「程序文件」和「个人数据」彻底分在两个目录里：
 
-自主活动执行、主动 Contact、N8 正式权限撤销和新 Open Inquiry 正式入库尚未交付。已有 Alpha 策略、认知判断及底层动作组件，不等于完整执行闭环已经完成。
+- **程序目录**：Linux / WSL 下位于 `~/.local/share/nyairo/releases/v0.6.0`（Windows 桌面端界面程序位于 `%LOCALAPPDATA%\Programs\nyairo`），升级时只替换这一块；
 
-Native Runtime 也随包提供，用于独立运行及研发验证，但本手册的标准安装方式是 Hermes 加千代插件，不需要同时启动 Native。
+- **个人数据目录**：位于 `~/.nyairo`，里面放着你的人设（`SOUL.md`）、模型配置、聊天记录和本地 SQLite 长期记忆数据库。
 
-### 开始前要准备什么
+哪怕卸载重装客户端或回滚版本，只要不手动删掉 `~/.nyairo`，之前的记忆和设置就都在。
 
-需要一台持续联网的电脑或服务器，以及你自己的模型服务配置。模型可以通过 Hermes setup/model 流程选择；是否收费、能否访问和额度取决于你使用的服务。
+### 硬件与网络要求
 
-只用命令行不需要 Telegram 账号配置。要接 Telegram，需要自己的机器人 token 和允许用户设置。千代记忆、生活状态和资源保存在自己的设备上，不会随公开源码包赠送某个部署实例的私人关系或历史。
+- **硬件要求**：使用在线模型 API（如 DeepSeek、OpenAI 等）时，推理计算在云端完成，本机只负责跑轻量服务和本地数据库，**不需要独立显卡**。建议留出至少 **3 GB** 可用磁盘空间（用于存放 Python 环境、程序包与后续数据备份）。
 
-## 02 安装前先看这里
+- **网络要求**：首次安装需要从 GitHub 和 `astral.sh` 下载发行包与 Python 运行工具；日常使用时，只需要本机能正常连上你所选的模型 API（以及微信或 Telegram，如果你启用了它们）。
 
-### 先确认自己用哪种电脑
+- **离线表现说明**：关掉电脑、系统休眠或执行 `wsl --shutdown` 后，后台生活进程也会随之停下；想让她 24 小时在线，需要跑在常开的电脑或 Linux 云服务器上。
 
-- **Windows 电脑**：先安装 WSL 2。它相当于在 Windows 里准备一套能运行 Linux 程序的环境，本文使用 Ubuntu。具体步骤在 [Windows 安装](https://nyairo.com/#windows)。
-- **Linux 电脑或服务器**：直接按 [下载与安装](https://nyairo.com/#linux) 操作。工具安装命令以 Ubuntu / Debian 为例，其他系统需要使用自己的安装方式。
-- **macOS**：还没有单独完成整套安装检查，暂时不把它列为已验证的完整方案。
+---
 
-目前提供 Linux / WSL 引导安装脚本，以及源码和源码 ZIP；Windows 原生一键安装包、官方 Docker 整套镜像和 pip 安装包还没有交付。上游目录里出现 Docker 文件，也不等于 nyairo 已提供完整容器安装方案。
+## 05 · 在 Windows 上安装（桌面客户端 + WSL2）
 
-### 引导安装与手动下载，选一种就好
+推荐使用免管理员权限的原生 Windows 桌面端（自动完成六步环境引导），也支持纯 WSL 2 终端命令行安装。
 
-第一次使用推荐上面的“一条命令引导安装”。想先保存源码或检查每一步时，选下面的 Git / ZIP 手动路线。
+### 方式一：Windows 桌面客户端（推荐）
 
-**Git 下载**：复制教程中的命令，就能拿到指定的体验版本；适合第一次按命令安装，也便于以后查看改动。
+Windows 10 / 11 用户可以直接装原生桌面端（约 5 MB，装在当前用户目录下，不会弹管理员权限框）：
 
-**ZIP 下载**：从 [GitHub Releases](https://github.com/L1AN929/nyairo/releases/tag/v0.5.1) 下载 `v0.5.1` 的源码 ZIP，检查文件后再解压；适合希望先把压缩包保存好的用户。旧的 `v0.4.0`、`v0.2.0-rc3` 下载页仍然可用。
+1. 下载安装包：[**nyairo-0.6.0-setup.exe**](https://nyairo.com/downloads/nyairo-0.6.0-setup.exe)（SHA256：`01e0a8c01f85300760f0e63192c42a3c0c3a6776caff6bf9f1513ea0bbc2747e`）；
 
-无论选哪种，都下载 nyairo 整套项目，随后运行 `bash scripts/install.sh`。请按下一章操作，不要只下载其中一个插件文件夹。
+2. 双击完成安装并打开 **nyairo**，程序图标会常驻在屏幕右下角系统托盘；
 
-程序 ZIP 是 `nyairo-v0.5.1.zip`，同名 `.sha256` 文件记录校验值；旧的 v0.4.0、rc4 安装包保持原样；首次安装请使用 v0.5.1。
+3. 首次启动时，客户端走两步引导：**第一步自动准备环境**（下载校验 `v0.6.0` 发行包 → 装好 Python 依赖 → 建立独立个人目录 → 生成本机通信密钥 → 启动网关 → 探活验证）；**第二步填配置**（当场设置怎么称呼她、代词、模型名与 API Key，不用再去翻设置页）；
 
-### 电脑和网络需要满足什么
+4. 点「完成，开始使用」即可进入主界面。各页面的具体功能与快捷操作见 [桌面客户端使用指南](https://nyairo.com/#desktop-guide)。
 
-使用网上的模型服务时，模型在对方的服务器上运行，nyairo 本身不要求你有显卡。选择在自己电脑上运行模型时，硬件要求要看那个模型的说明。
+> **卸载不会删记忆**
+> 桌面端界面程序装在 `%LOCALAPPDATA%\Programs\nyairo`，而聊天记忆和人设独立保存在 WSL 的个人目录里。卸载桌面客户端只会停掉网关、清理开机自启项与窗口缓存，不会动你的个人数据（详见 [数据目录、备份与卸载](https://nyairo.com/#data)）。
 
-首次安装需要联网下载依赖，源码 ZIP 并不是完全离线的安装包。聊天时，电脑也要能连上模型服务；接 Telegram 时，还要能连上 Telegram。
+### 前置准备：开启 WSL 2 与 Ubuntu
 
-还没有完成最低内存和多人同时使用的性能测试，因此本文不给出未经验证的最低配置保证。电脑关机或睡眠后，机器人也会离线。
+如果你的电脑之前没开过 WSL 2（桌面端首次打开时也会提示你），按下面两步花几分钟装好就行：
 
+1. 在 Windows 开始菜单搜索 **PowerShell**，右键选**以管理员身份运行**；
 
-## 03 在 Windows 上安装
-
-### 第一步：打开 PowerShell，安装 Ubuntu
-
-在开始菜单搜索 **PowerShell**，右键选择“以管理员身份运行”。在打开的窗口里复制下面这一行，按回车：
+2. 粘贴下面这行命令并按回车：
 
 ```powershell
 wsl --install -d Ubuntu
 ```
 
-按提示完成安装；如果要求重启，就先重启电脑。WSL 是让 Linux 程序在 Windows 里运行的工具，Ubuntu 是本文用的 Linux 系统。
+装完如果提示重启电脑，先重启一次；接着从开始菜单打开 **Ubuntu**，按提示设一个英文用户名和密码（Linux 终端输密码时屏幕不显示星号是正常现象，输完直接回车）。设好之后再打开 nyairo 桌面端，剩下的配置它会自动接手。
 
-安装遇到虚拟化、系统版本或下载问题时，按 [微软 WSL 安装说明](https://learn.microsoft.com/windows/wsl/install) 排查。
+### 方式二：纯 WSL 终端命令行安装
 
-### 第二步：打开 Ubuntu，建立自己的账号
-
-从开始菜单打开 **Ubuntu**。第一次打开时，会让你设置 Linux 用户名和密码。这个账号可以和 Windows 账号不同。
-
-输入密码时，窗口通常不会显示星号或文字，这是正常的；输完按回车即可。以后安装工具时，如果 `sudo` 要求输入密码，就用这里设置的密码。
-
-回到 PowerShell，输入：
-
-```powershell
-wsl --list --verbose
-```
-
-列表中的 Ubuntu，VERSION 一栏应为 **2**。
-
-### 第三步：后面的命令都在 Ubuntu 里运行
-
-接下来回到 [第一次使用](https://nyairo.com/#quickstart)，运行引导安装命令。希望手动下载时，再按 [下载与安装](https://nyairo.com/#linux) 操作。里面的 `sudo`、`bash`、`export` 等命令，全部复制到 **Ubuntu 终端**，不要复制到 PowerShell。
-
-本文把程序放在 Ubuntu 的用户目录里，把聊天数据放在另一个独立文件夹里；这样以后换程序版本时，个人记录仍有自己的保存位置。关于两个系统的文件位置，可看 [微软的 WSL 环境说明](https://learn.microsoft.com/windows/wsl/setup/environment)。
-
-### 如果 ZIP 已经下载到 Windows
-
-先完成下一章的工具准备。如果选 Git 下载，可以跳过这一步。
-
-选择 ZIP 时，Windows 的 C 盘在 Ubuntu 中通常写作 `/mnt/c`。下面用下载文件夹举例，**把用户名和 ZIP 文件名换成自己的**：
+如果你不喜欢图形界面、只想在终端里敲命令使用，打开 **Ubuntu** 终端粘贴这一行即可：
 
 ```bash
-mkdir -p "$HOME/apps/chiyo-v0.1"
-unzip "/mnt/c/Users/你的Windows用户名/Downloads/你下载的发行包.zip" -d "$HOME/apps/chiyo-v0.1"
-cd "$HOME/apps/chiyo-v0.1"
+curl -fsSL https://nyairo.com/install.sh | bash
 ```
 
-解压后的这个文件夹应该直接包含 `scripts`、`vendor`、`components` 和 `MANIFEST.json`。然后按下一章的 ZIP 步骤安装、检查文件。
+装完按屏幕提示填好模型 API Key，之后每次打开 Ubuntu 输入 `nyairo` 就能对话。
 
-### 关掉窗口以后，机器人还在吗
+---
 
-第一次在窗口里启动程序时，请保持窗口和电脑运行。关闭正在运行聊天程序的终端，程序可能随之停止；Windows 关机、睡眠或执行 `wsl --shutdown`，也会让它离线。
+## 06 · Linux 与手动安装
 
-先把聊天跑通，再考虑长期开机或 [让程序在后台运行](https://nyairo.com/#troubleshooting)。需要全天在线时，可以使用一直开机的 Linux 服务器，但仍要按自己的系统设置自动启动。
+适合想自己查看每一步脚本、离线保存发行包，或在服务器上手动部署的用户。
 
+> **先看这里**
+> 如果你已经用 `curl -fsSL https://nyairo.com/install.sh | bash` 一行命令装好了，**不需要再做本章任何步骤**，直接去 [日常启动、人设与模型](https://nyairo.com/#configuration) 即可。本章提供给希望逐步手动检查并部署的用户。
 
-## 04 下载与安装
+### 第一步：准备基础系统工具
 
-本章是可选的手动路线。已经用一条命令完成安装时，直接用 `nyairo` 开始聊天；无需再执行本章步骤。
-
-### 第一步：准备安装工具
-
-**Windows 用户在 Ubuntu 终端操作；Linux 用户在自己的终端操作。**下面的工具安装命令适用于 Ubuntu / Debian。
-
-先复制这两行：
+在 Linux 终端（或 Windows 的 Ubuntu 终端）里先装齐基础工具（以 Ubuntu / Debian 为例）：
 
 ```bash
 sudo apt update
-sudo apt install -y git curl unzip ripgrep less nano
+sudo apt install -y git curl unzip ripgrep less nano python3
 ```
 
-需要密码时，输入你的 Linux 密码，按回车。看到报错就先处理；不要把后面的所有步骤一次性粘进去。Git 用来下载项目，unzip 用来解压，其他工具会帮助安装和查看文件。
+输入当前 Linux 账号密码回车，确认没有报错再继续下一步。
 
-### 第二步：装好 Python 的安装工具
+### 第二步：准备 uv 与 Python 3.13
 
-这里使用 **uv** 下载合适的 Python 并安装程序需要的依赖。按 [uv 官方安装说明](https://docs.astral.sh/uv/getting-started/installation/)，先下载并查看安装脚本，再运行：
+项目使用 [uv](https://docs.astral.sh/uv/getting-started/installation/) 来管理独立的 Python 环境与依赖，不会污染系统自带的 Python。你可以先把脚本下载下来看一眼再执行：
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh -o /tmp/chiyo-uv-install.sh
-less /tmp/chiyo-uv-install.sh
-sh /tmp/chiyo-uv-install.sh
+curl -LsSf https://astral.sh/uv/install.sh -o /tmp/uv-install.sh
+less /tmp/uv-install.sh
+sh /tmp/uv-install.sh
 ```
 
-查看脚本的窗口里，按 **q** 退出，再执行最后一行。完成后，按安装器提示重新打开终端。检查工具，再安装 Python：
+浏览时按 `q` 退出 `less`。装完重新打开一个终端窗口，拉取 Python 3.13：
 
 ```bash
 uv --version
-git --version
-rg --version
 uv python install 3.13
-export UV_PYTHON=3.13
 ```
 
-前三行能显示版本号，Python 安装也没有报错，就可以继续。重新打开终端后，必要时再执行 `export UV_PYTHON=3.13`。
+### 路线 A：通过 Git 标签克隆安装
 
-组件支持 Python 3.11–3.13；历史检查使用过 3.13.5 与 3.11.15，公开候选也在 WSL 的 3.12.3 下完成过安装复核。这里选择 3.13 系列，不要求下载的补丁版本和旧检查完全相同。更多细节见 [uv 的 Python 安装说明](https://docs.astral.sh/uv/guides/install-python/)。
-
-### 方法 A：用 Git 下载并安装
-
-第一次按命令安装，可以选这条路线。**如果选择了这里，就不用再做 ZIP 下载。**
-
-下面会下载已经公开的 `v0.5.1` 预发布版本，并把程序放在后续教程使用的同一个文件夹里：
+路线 A 和路线 B 选一种就行。使用 Git 时，请固定检出已发布的 `v0.5.1` 标签（不要直接装正在变动中的开发分支）：
 
 ```bash
 mkdir -p "$HOME/apps"
 git clone --branch v0.5.1 --depth 1 \
-  https://github.com/L1AN929/nyairo.git "$HOME/apps/chiyo-v0.1"
-cd "$HOME/apps/chiyo-v0.1"
-bash scripts/install.sh
-vendor/hermes/.venv/bin/python scripts/verify_manifest.py
+  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.5.1"
+cd "$HOME/apps/nyairo-v0.5.1"
+bash scripts/bootstrap.sh
 ```
 
-下载标签时，Git 可能提示 **detached HEAD**，这是选择固定版本时的正常提示。安装完成后，文件检查结果中的 `changed_or_missing` 应为 `[]`，表示没有发现变动或缺失的发行文件。
-
-如果提示目标文件夹已经存在，先确认那里是否有旧版本。不要为了重装就删除聊天数据；需要另用一个程序文件夹时，后面的 `cd` 路径也要相应改成它。
-
-接着打开 [设置并开始聊天](https://nyairo.com/#configuration)。
-
-### 方法 B：用 ZIP 下载并安装
-
-如果更喜欢先下载压缩包，从 [公开下载页](https://github.com/L1AN929/nyairo/releases/tag/v0.5.1) 取得这一版的 ZIP 和校验值。下面带中文的 ZIP 文件名，需要换成你实际下载的名字。
-
-先检查 ZIP 文件：
+检出固定标签时 Git 提示 `detached HEAD` 是正常现象。安装完成后，可以跑一遍清单自检确认所有文件完整无缺：
 
 ```bash
-sha256sum 你下载的发行包.zip
+~/.local/share/nyairo/releases/v0.6.0/vendor/hermes/.venv/bin/python -B \
+  ~/.local/share/nyairo/releases/v0.6.0/scripts/verify_manifest.py
 ```
 
-打印出的长串字符应和这次发行公布的 SHA256 一样。它用来确认文件没有下错或损坏；不要拿其他版本的值来比较。
+输出中包含 `"valid": true` 即代表文件校验完全一致。
 
-然后解压、安装并检查程序文件：
+### 路线 B：下载官方 ZIP 校验安装
+
+如果你想先把发行包保存下来核对哈希，再解压安装：
 
 ```bash
-mkdir -p "$HOME/apps/chiyo-v0.1"
-unzip 你下载的发行包.zip -d "$HOME/apps/chiyo-v0.1"
-cd "$HOME/apps/chiyo-v0.1"
-bash scripts/install.sh
-vendor/hermes/.venv/bin/python scripts/verify_manifest.py
+mkdir -p "$HOME/apps" && cd "$HOME/apps"
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.5.1/nyairo-v0.5.1.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.5.1/nyairo-v0.5.1.zip.sha256
+sha256sum -c nyairo-v0.5.1.zip.sha256
 ```
 
-ZIP 在 Windows 下载文件夹时，使用上一章的完整路径来解压；已经解压好了，就从 `cd` 这一行继续，不必重复解压。
-
-文件检查结果中的 `changed_or_missing` 应为 `[]`。如果不是，先重新核对下载来源和文件，不要删掉清单来跳过检查。随后打开 [设置并开始聊天](https://nyairo.com/#configuration)。
-
-程序 ZIP 是 `nyairo-v0.5.1.zip`，同名 `.sha256` 文件记录校验值；旧的 v0.4.0、rc4 安装包保持原样；首次安装请使用 v0.5.1。
-
-### 已经装过 Hermes，怎么处理
-
-保留原来的安装，另外建立本文的 nyairo 程序文件夹和个人数据文件夹。nyairo 这一版已经带上匹配的 Hermes 和插件，直接把几个插件文件覆盖到任意新版 Hermes 里，不能保证正常使用。
-
-模型账号可以在下一章重新填写。原来的人格、技能、聊天记录和记忆要分别核对后再迁移，当前没有通用的一键搬家工具。
-
-
-## 05 设置并开始聊天
-
-引导安装已创建个人配置并打开模型向导。再次聊天用 `nyairo`，重新设置模型用 `nyairo setup model`，修改人设用 `nano "$HOME/.nyairo/SOUL.md"`。下列创建配置步骤只用于 Git / ZIP 手动安装；不要在引导安装后再执行。
-
-### 第一步：进入刚才安装的程序文件夹
-
-下面仍然在 Ubuntu / Linux 终端里操作。保持使用自己的普通 Linux 账号，进入刚才下载或解压的位置：
+确认屏幕输出 `nyairo-v0.5.1.zip: OK` 后，解压并调用包内安装器：
 
 ```bash
-cd "$HOME/apps/chiyo-v0.1"
+python3 -m zipfile -e nyairo-v0.5.1.zip "$HOME/apps/nyairo-v0.5.1"
+cd "$HOME/apps/nyairo-v0.5.1"
+bash scripts/bootstrap.sh
 ```
 
-如果你自行选了其他安装位置，把这一行改成那个文件夹。运行 `ls` 应能看到 `scripts` 和 `vendor`；看不到时，先找到真正的程序文件夹。
+如果 ZIP 是你在 Windows 浏览器里提前下载好的，WSL 里可以通过 `/mnt/c/Users/你的Windows用户名/Downloads/nyairo-v0.5.1.zip` 访问它。
 
-### 第二步：建立自己的数据文件夹
+### 机器上已经装过 Hermes 怎么办
 
-**这一步只在第一次创建时运行。**它会把你的设置、聊天记录和记忆放到程序文件夹之外：
+不用删掉你原来的 Hermes。nyairo 自带了经过版本匹配测试的配套 Hermes 环境，并把数据独立放在 `~/.nyairo` 下，跟原版互不干扰。请不要手动把 nyairo 的插件目录硬拷进其他版本的 Hermes 里混用，否则很容易因为接口差异报错。
 
-```bash
-vendor/hermes/.venv/bin/python scripts/setup_profile.py \
-  --home "$HOME/.chiyo-v1" \
-  --owner local-owner \
-  --memory --life --allow-local-owner
-export HERMES_HOME="$HOME/.chiyo-v1"
-```
+---
 
-看到 **Profile ready** 就表示个人设置已经建好。后面要继续使用同一个终端、同一个数据文件夹。
+## 07 · 交给 AI 助手自动安装
 
-如果提示 **profile already exists**，说明已有一套设置，不需要再次创建。先核对自己是否打开了正确的位置，之后直接按“下次怎么启动”操作，不要删除旧记录来消除提示。
+如果你平时在用 Claude Code、Codex 或其他带终端权限的 AI 编程工具，可以把这段标准说明直接复制给它，让它先检查环境再安全安装。
 
-### 第三步：选择模型，填自己的密钥
+> **纯本地执行，不索取密钥**
+> 官网只提供这份文字规范（独立原文见 [AGENT_INSTALL.zh-CN.md](https://nyairo.com/AGENT_INSTALL.zh-CN.md)），所有检查和下载都在你自己的电脑终端里由你自己的 AI 工具完成。**请勿把任何密码、SSH 私钥或模型 API Key 粘贴进 AI 助手对话框。**
 
-启动设置向导：
+### 适合哪些工具与场景
 
-```bash
-bash scripts/update.sh --adopt
-~/.local/bin/nyairo setup
-```
+- **适用工具**：Claude Code、OpenAI Codex CLI、Cursor Agent、Windsurf 或任何能在你的 Linux / WSL 终端里执行命令的本地助手。
 
-按向导选择你使用的模型服务和模型名称，再填写服务商提供的密钥。**API Key 就是密钥，Base URL 就是服务地址。**使用自定义服务时，地址和模型名称都按服务商的说明填写。
+- **特别省心的场景**：手头是一台刚开的 Linux 云服务器，或者你的电脑里以前装过旧版实例、怕自己敲命令不小心覆盖旧数据——这份指令强制要求 AI 先做只读摸底汇报，经你点头后再动手。
 
-填完能启动，只说明设置被接受；下一步收到真实回复，才说明账号和网络可以用。密钥留在自己的配置里，不要贴进 GitHub 或发给别人。
+### 整段复制给 AI 助手的指令
 
-### 第四步：开始聊天，再看看记忆状态
-
-运行：
-
-```bash
-~/.local/bin/nyairo
-```
-
-进入聊天后，先发一句普通消息。能收到模型回复，再输入：
+点击代码块右上角的「复制」，原样发给你的 AI 助手即可：
 
 ```text
-/chiyo_status
+请帮我在这台电脑上安装 NyAiro（v0.5.1）。请严格按 https://nyairo.com/AGENT_INSTALL.zh-CN.md 的规范执行，每一步用中文告诉我你在做什么，不要跳过检查，也不要假装成功：
+
+1. 【只读检查，先别安装】检查系统环境（需 Linux 或 WSL 2）、磁盘剩余空间（建议 ≥ 3 GB）、能否连上 github.com 与 astral.sh；检查当前 HOME 是否已有 ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1，以及是否有正在运行的 m0_writer_worker 或 gateway 进程。若发现已有实例，必须立刻停下来汇报并建议换独立 Linux 用户或独立 HOME，绝不能覆盖已有数据，也绝不能终止已有实例的进程。
+2. 【征求确认】向我说明即将创建的目录（~/.local/share/nyairo/releases/v0.6.0、~/.nyairo、~/.local/bin/nyairo），涉及 sudo 或新建系统用户必须先等我同意。
+3. 【校验安装】从 https://github.com/L1AN929/nyairo/releases/download/v0.5.1/ 下载 nyairo-v0.5.1.zip 与同名 .sha256，执行 sha256sum -c 校验通过后解压，运行包内 bash scripts/bootstrap.sh（无交互终端可加 --no-setup --no-launch）。
+4. 【实机核验】检查 ~/.local/state/nyairo/install.json 版本为 v0.5.1，用包内 Python 运行 scripts/verify_manifest.py 确认输出 "valid": true，执行一次 ~/.local/bin/nyairo -z "安装自检" 并确认新实例无残留进程。我未填密钥前，模型与外部通道一律如实标为「尚未验证」。
+5. 【中文交付】用简明中文告诉我启动（nyairo）、配模型（nyairo setup model）、接微信/Telegram、更新与备份方法。全程绝不要让我把 API Key 或密码发到聊天框里。
 ```
 
-记忆显示 **READY** 表示已经准备好；生活显示 **IDLE** 表示当前没有正在进行的活动。附加功能显示 OFF，可以之后再配置。
+### 为什么要设这四条安全规矩
 
-接着试试告诉它一个小事实，换一个新会话后再问。提问时别把答案重复写进去，否则无法判断它是否真的记住了。
+- **不覆盖旧记忆**：很多 AI 助手看到目录已存在会习惯性删掉重装。指令里明确规定只要发现现存的 `~/.nyairo` 或 `~/.chiyo-v1` 就必须停手，引导用独立账号隔离。
 
-### 下次打开电脑，怎么启动
+- **不乱杀正在跑的进程**：如果你机器上本来就挂着一个正在用的实例，AI 在做环境清理时不能去 `kill` 原实例的网关和记忆写入进程。
 
-重新打开 Ubuntu / Linux 终端，复制下面三行即可；不用再安装，也不用再创建个人设置：
+- **只认官方哈希与清单**：强制核对 GitHub Release 同名 `.sha256` 与包内 `MANIFEST.json`，不拉取未发布的开发分支代码。
+
+- **密钥留在本地填**：AI 把基础环境装完就交还给你，你自己运行 `nyairo setup model` 把 API Key 写进本机 `0600` 权限的配置文件里，避免密钥流经第三方对话日志。
+
+### 装完后你自己核对哪几项
+
+AI 汇报「安装完成」后，你可以顺手看一眼这三件事确认没被糊弄：
+
+1. `cat ~/.local/state/nyairo/install.json` 里的 `version` 确实是 `v0.5.1`（注：直接敲 `nyairo --version` 显示的是底层宿主 Hermes 的版本号，看 nyairo 自身版本以 `install.json` 为准）；
+
+2. `~/.nyairo` 目录下已经生成了 `SOUL.md`、`config.yaml` 和 `chiyo/config.json`；
+
+3. 运行 `nyairo setup model` 填好你自己的 API Key，再敲 `nyairo` 发一句问候，能正常收到回复就大功告成了。
+
+---
+
+## 08 · 日常启动、人设与模型
+
+平时怎么唤醒她聊天、怎么自定义名字与说话习惯，以及随时切换底层大模型。
+
+### 平时怎么打开聊天
+
+- **Windows 桌面端**：双击桌面快捷方式或点开右下角托盘里的猫咪图标即可。按 `Ctrl + K` 可以随时呼出快捷操作栏，切换界面或发起新对话。
+
+- **Linux / WSL 终端**：打开终端输入一行 `nyairo` 回车就能开聊；聊完输入 `/exit` 或按 `Ctrl + D` 退回命令行。
+
+### 修改名字与人设 (SOUL.md)
+
+她叫什么名字、平时怎么称呼你、说话简洁还是细腻，都写在个人数据目录的 `SOUL.md` 文件里。用任意文本编辑器或终端自带的 `nano` 打开就能改：
 
 ```bash
-cd "$HOME/apps/chiyo-v0.1"
-export HERMES_HOME="$HOME/.chiyo-v1"
-~/.local/bin/nyairo
+nano "$HOME/.nyairo/SOUL.md"
 ```
 
-第二行是在告诉程序“这次使用哪一个数据文件夹”。换了这个位置，看到的就会是另一套设置和记录。如果历史突然不见了，先核对这一行。
+不需要写复杂的提示词套路，像写人物小传一样用自然中文写清楚这三点就够了：
 
-### 给自己的个体改名字和设定
+- **名字与关系**：她的名字，以及你们平时以什么身份相处（朋友、室友、搭档等）；
 
-rc5 在没有现有 `SOUL.md` 时会创建中性模板。nyairo 是框架，千代是作者的私人个体；你可以给自己的个体取名和设置人格。
+- **说话习惯**：口吻偏安静克制还是轻松随性，喜不喜欢长篇大论；
 
-第一次建立数据文件夹后，可以在开始聊天前打开它：
+- **基本默契**：认真对待聊过的约定，不知道的事如实说不知道，不硬编。
+
+在 `nano` 里改完后，按 `Ctrl + O` 回车保存，再按 `Ctrl + X` 退出，重新进入对话即生效。
+
+### 切换模型或更换 API Key
+
+想换用别的模型（比如在 DeepSeek、Claude、OpenAI 或本地兼容接口之间切换），或者更新过期的 API Key：
+
+- **桌面端用户**：直接在左侧「设置」面板里修改模型供应商、模型名称与 API Key，点保存并测试连通即可（密钥只写入本机配置，界面不会明文回显旧密钥）。
+
+- **终端用户**：在命令行运行：
 
 ```bash
-nano "$HOME/.chiyo-v1/SOUL.md"
+nyairo setup model
 ```
 
-用自己的名字和人格描述替换默认文字。按 **Ctrl+O** 保存，回车确认，再按 **Ctrl+X** 退出。已经在聊天时，修改后重新启动程序。
+换模型不会影响已经攒下的聊天记录、房间状态和长期记忆。
 
-已有的 `SOUL.md` 会被保留。改名字不需要改 `/chiyo_*` 命令名；这些历史名称保留着，是为了让旧配置继续能用。
+---
 
-### 这些参数是什么意思
+## 09 · 接入微信
 
-- `--home`：个人数据保存在哪里，必须和程序文件夹分开。
-- `--owner`：这套个人数据的内部编号。第一次可保持 `local-owner`，它不是昵称或 Telegram 用户 ID；自行修改时，用 1–128 个英文字母、数字、下划线或连字符，第一位是字母或数字。
-- `--memory`：打开长期记忆；安装器会关闭 Hermes 原本的自动记忆，避免两套记忆同时影响回复。
-- `--life`：保存生活状态和收到的事件，重启后继续读取。
+不用折腾公众号或第三方破解端，手机微信扫一下码就能连上本机的她，出门在外也能随时发消息。
 
-这些命令先准备聊天、记忆和生活状态。世界身体、资源文档和认知观察，按 [额外功能](https://nyairo.com/#modules) 单独设置。
+### 连上微信是什么体验？
 
+总不能每次想说句话都得坐回电脑前开窗口。把 nyairo 连进微信之后，手机上就是一个再熟悉不过的私聊对话框：
 
-## 06 接入 Telegram
+- **出门接着聊**：刚在电脑前讨论到一半的事，下楼买杯水的工夫掏出手机就能顺着往下说，两边连的是同一个记忆库；
 
-引导安装用户用 `nyairo gateway setup` 设置平台，`nyairo gateway run` 启动网关；绑定文件在 `~/.nyairo/chiyo/config.json`，个人数据目录是 `~/.nyairo`，命令统一是 `/nyairo_*`。
+- **实时感知她在哪**：问一句「在干嘛呢」，她会根据后台真实的房间或街区状态回答你是在屋里看书，还是刚走到街口；
 
-本节的步骤已在 `v0.1.0-rc8` 上用真实账号走通：托管机器人接入、长轮询连接、与 QQ / 微信三平台并存、私人会话绑定、命令收发、普通对话、记忆写入，以及**跨平台记忆召回**。
+- **重启不断线**：电脑重启或网关重新连上后，之前的对话脉络依然接得上。
 
-### 第一步：准备机器人（推荐托管自动接入）
+### 扫码绑定步骤
 
-Telegram 不需要公网地址、不需要开放端口、也不需要 webhook——它默认用**长轮询**主动去 Telegram 取消息，只要能上网就能接。
+nyairo 内置了官方轻量机器人通道，无需申请企业号或公网域名。
 
-准备机器人有两条路，推荐第一条。
+#### 方式 A：Windows 桌面端扫码（最省事）
 
-**路径 A：托管机器人自动接入（不用去 BotFather）**
+1. 打开 nyairo 桌面客户端，进入左侧 **设置** 页面；
 
-```bash
-export HERMES_HOME="$HOME/.nyairo"
-~/.local/bin/nyairo gateway setup
-```
+2. 找到「微信接入」卡片，点击生成绑定二维码；
 
-在平台清单里找到 **Telegram** 打勾。向导会问：
+3. 用你自己的手机微信扫一扫并确认授权，看到状态变为「已连接」就绑好了。
 
-```text
-  Telegram can be configured automatically with a managed bot:
-  [1] Automatic (scan QR → confirm in Telegram → done)
-  [2] Manual BotFather token
-  Choice [1/2]
-```
+#### 方式 B：Linux / WSL 终端扫码
 
-选 **1**。终端会打印一张二维码和一段 `t.me/NousHostedHermesBot` 链接：
-
-- 用手机或电脑的 Telegram 扫二维码，或者直接打开那段链接；
-- Telegram 里会弹出「**Create Bot**」确认页，**点确认**（想改显示名可以改完再确认）。
-
-确认后程序会自动拿到 token，**并且自动识别你的 Telegram 数字用户 ID**，问你「Allow this Telegram account to use the bot?」，选是即可。这一步不用手抄任何东西。
-
-**路径 B：手动 BotFather token（兜底）**
-
-1. 在 Telegram 里找 **@BotFather**，发 `/newbot`；
-2. 起一个显示名，再起一个 username（必须以 `bot` 结尾）；
-3. BotFather 回你一个 token，形如 `123456789:ABCdefGHIjklMNOpqrSTUvwxYZ`；
-4. 把这个 token 填进向导。
-
-token 就是操作这个机器人的凭证，别写进公开教程、别发给别人。万一泄露，去 BotFather 用 `/revoke` 换一个。
-
-**怎么拿到你的数字用户 ID**
-
-访问控制用的是**数字 ID**（形如 `7621700062`），不是 `@用户名`，也不是昵称。
-
-- 推荐：找 **@userinfobot** 或 **@get_id_bot**，它会直接把你的 ID 回给你；
-- 走路径 A 时，托管服务会自动识别并问你；
-- 也可以先给机器人发一句话，再看网关日志里的 `user=` 字段。
-
-最后确认 `~/.nyairo/.env` 里有这三项（个人私聊的 chat ID 和用户 ID 是同一个数）：
-
-```bash
-TELEGRAM_BOT_TOKEN=你的token
-TELEGRAM_ALLOWED_USERS=你的数字用户ID
-TELEGRAM_HOME_CHANNEL=你的数字用户ID
-```
-
-### 第二步：绑定你的私聊
-
-**这一步最容易漏，漏了所有 nyairo 命令都会被拒绝。**和 QQ、微信是同一套机制。
-
-平台连上之后，从 Telegram 私聊发 `/nyairo_status`，你可能会收到：
-
-```text
-这个入口没有绑定你的个人实例，已拒绝读取。
-```
-
-这是**安全设计，不是故障**：没有绑定的私聊读不到你的私人记忆。用随包的官方函数算出你这个私聊的会话 key，把下面整段复制运行：
-
-```bash
-cd "$HOME/.local/share/nyairo/releases/v0.5.1"
-export HERMES_HOME="$HOME/.nyairo"
-PYTHONPATH="$PWD:$PWD/vendor/hermes" vendor/hermes/.venv/bin/python - <<'PY'
-import os, re
-from gateway.config import Platform
-from gateway.session import SessionSource, build_session_key
-vals = dict(re.findall(r'(?m)^\s*([A-Za-z_]\w*)\s*=\s*(.*)$',
-                       open(os.path.expanduser("~/.nyairo/.env")).read()))
-uid = vals.get("TELEGRAM_ALLOWED_USERS") or vals.get("TELEGRAM_HOME_CHANNEL")
-src = SessionSource(platform=Platform.TELEGRAM, chat_type="dm", chat_id=uid, user_id=uid)
-print(build_session_key(src))
-PY
-```
-
-它会打印出形如 `agent:main:telegram:dm:你的数字用户ID` 的一串文字。然后打开配置文件：
-
-```bash
-nano "$HOME/.nyairo/chiyo/config.json"
-```
-
-找到 `gateway_bindings`，把打印出来的那串填进去。**只改这一项**，其他字段原样保留（`qqbot`、`weixin` 等其他平台的绑定不要动）：
-
-```json
-{
-  "gateway_bindings": {
-    "telegram": ["agent:main:telegram:dm:你的数字用户ID"]
-  }
-}
-```
-
-按 Ctrl+O 回车保存，再按 Ctrl+X 退出。改完**必须重启网关**才生效。
-
-把 `Platform.TELEGRAM` 换成 `Platform.QQBOT` 或 `Platform.WEIXIN`、绑定键换成 `"qqbot"` 或 `"weixin"`，就是另外两个平台的同一套做法。
-
-### 第三步：启动网关，检查是否能用
-
-```bash
-export HERMES_HOME="$HOME/.nyairo"
-~/.local/bin/nyairo gateway run
-```
-
-这个窗口先保持打开。WSL 里推荐前台运行 `gateway run`，不要装成开机自启的系统服务。
-
-**一个 token 同时只能交给一个正在收消息的程序。**旧的 Hermes、nyairo 或独立 Native 同时使用它，会出现 Telegram 409 冲突。
-
-启动后日志里应该能看到：
-
-```text
-[Telegram] Connected to Telegram (polling mode)
-✓ telegram connected
-```
-
-然后按顺序检查：
-
-1. 找到自己的机器人，发一句普通消息，确认它会回复（这一步走模型，是真实对话）。
-2. 发 `/nyairo_status`，确认返回 nyairo 模块状态，而不是那句拒绝文案。
-3. 发 `/nyairo_memory list`，确认个人记忆已经绑定；没有记忆记录也可能是正常的新安装。
-4. 告诉它一个小事实，再问一句**带「之前 / 上次 / 以前」这类词**的问题，确认它能回忆起来。
-5. 重启网关，再检查同一套个人数据和状态是否仍然可用。
-
-> **为什么第 4 步要那样问**：nyairo 的记忆召回有一道**意图门控**，只有当前这句话里出现特定线索词（`之前`、`以前`、`上次`、`昨天`、`说过`、`记得我`…）时才会去取记忆。像「哈哈哈」这种普通聊天不会触发召回，状态里会显示 `memory_last_resolve: DENIED`——**这是正常的，不是故障**。
-
-### Telegram 常见问题
-
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| 连上了但发命令没反应 | **私人会话未绑定**（最常见） | 按第二步绑定，然后重启网关 |
-| 机器人完全不理我 | 你的**数字用户 ID** 不在 `TELEGRAM_ALLOWED_USERS` 里 | 网关默认拒绝所有用户，把数字 ID 加进白名单 |
-| 填了 `@用户名` 不生效 | 鉴权**只认数字 ID** | 用 @userinfobot 取数字 ID |
-| 群里 @ 它没反应 | 机器人**隐私模式默认开着**，普通群消息收不到 | @BotFather → `/mybots` → Bot Settings → **Group Privacy → Turn off**；改完**必须把机器人移出群再加回来** |
-| 连接慢或连不上 | `api.telegram.org` 直连不稳 | 程序会自动用 DNS-over-HTTPS 找备用 IP；也可以设 `TELEGRAM_PROXY` |
-| `/` 菜单里找不到某个命令 | Telegram 菜单上限 **60 条** | 用 `/commands` 看全量，或在 `config.yaml` 里用 `command_menu.priority` 提优先级 |
-| 提示 `No messaging platforms enabled` | `TELEGRAM_BOT_TOKEN` 没写或写错 | Telegram 只需要这一项凭据；用 Bot API 的 `getMe` 验证 token |
-
-**传输方式**：长轮询（`getUpdates`），不是 QQ 那种 WebSocket，所以不需要公网地址、端口或反向代理。
-
-**群聊**：Telegram 是三条通道里原生支持群聊的（个人微信 iLink 基本不行），但受隐私模式限制，见上表。
-
-**未实测**：群聊、媒体收发、语音转写、webhook 模式、断线重连。
-
-### QQ 机器人怎么接
-
-本节的步骤已在 `v0.1.0-rc8` 上用真实 QQ 机器人账号走通：扫码接入、WebSocket 连接、真实收发、断线重连与记忆读写。
-
-QQ 走的是**腾讯官方 QQ 机器人 API v2**，用的是机器人身份，不是你的个人 QQ 号。先在 <https://q.qq.com> 注册一个机器人应用。
-
-**第一步：接入。** 在 Ubuntu / Linux 终端运行：
+在终端里先启用微信通道：
 
 ```bash
 nyairo gateway setup
 ```
 
-在平台清单里用方向键找到 **🐧 QQ Bot**，按**空格**打勾，再把光标移到 **Done** 按回车。向导会问接入方式，推荐第一种：
-
-- **扫码自动接入（推荐）**：终端会打印二维码和一段链接，用手机 QQ 扫码或打开链接授权，程序自动取回 App ID 与密钥，不用手抄。
-- **手动填写**：在 q.qq.com 应用页复制 **App ID** 和 **App Secret**，按提示粘贴。密钥不要写到公开教程或发给别人。
-
-之后问的**私聊授权**推荐选 **Use DM pairing approval**（陌生人的私聊需要你批准；扫码接入时会顺带问要不要把你自己加入白名单，选是），最后是 **home channel**，设成你自己即可。二维码有效期约 10 分钟，过期会自动刷新。凭据写入 `~/.nyairo/.env`，不需要手改 `config.yaml`。
-
-**第二步：绑定你的私聊。这一步最容易漏，漏了所有 nyairo 命令都会被拒绝。**
-
-平台连上之后，从 QQ 私聊发 `/nyairo_status`，你可能会收到：
-
-```
-这个入口没有绑定你的个人实例，已拒绝读取。
-```
-
-这是安全设计，不是故障：没有绑定的私聊读不到你的私人记忆，陌生人给你的机器人发消息也读不到。用随包的官方函数算出你这个私聊的会话 key，把下面整段复制运行：
+在菜单中勾选启用 **Weixin**（对应配置文件 `~/.nyairo/config.yaml` 中的 `platforms.weixin.enabled: true`），随后启动网关：
 
 ```bash
-cd "$HOME/.local/share/nyairo/releases/v0.5.1"
-export HERMES_HOME="$HOME/.nyairo"
-PYTHONPATH="$PWD:$PWD/vendor/hermes" vendor/hermes/.venv/bin/python - <<'PY'
-import os, re
-from gateway.config import Platform
-from gateway.session import SessionSource, build_session_key
-vals = dict(re.findall(r'(?m)^\s*([A-Za-z_]\w*)\s*=\s*(.*)$',
-                       open(os.path.expanduser("~/.nyairo/.env")).read()))
-openid = vals.get("QQ_ALLOWED_USERS") or vals.get("QQBOT_HOME_CHANNEL")
-src = SessionSource(platform=Platform.QQBOT, chat_type="dm", chat_id=openid, user_id=openid)
-print(build_session_key(src))
-PY
+nyairo gateway run
 ```
 
-它会打印出形如 `agent:main:qqbot:dm:你的OpenID` 的一串文字。然后打开 `~/.nyairo/chiyo/config.json`，找到 `gateway_bindings`，只改这一项，其他字段原样保留：
+终端会打印出字符二维码（及备用链接），拿手机微信扫码确认即可完成绑定。
+
+### 在微信里能互动什么？
+
+- **让她出门散步或办事**：发微信跟她说「去书店看看吧」或「出去吹吹风」，她会在后台真正动身出发，并告诉你路程大概需要几分钟；半路问她走到哪了，她会照实回答还要走多久，不会一秒瞬移。
+
+- **感知早晚与店铺开关门**：深夜让她去已经打烊的咖啡馆，她会发现店门关了并如实跟你说，再自己决定去别处转转还是回家。
+
+- **安安静静待着**：跟她说「忙完了早点歇着吧」，她就会留在房间里休息，不会没话找话刷屏。
+
+### 隐私与防打扰机制
+
+- **仅限号主本人私聊**：默认开启严格白名单（`allowlist`）并关闭群聊响应，只有扫码绑定的你本人发消息她才会理会，不怕陌生人乱加消耗你的 API 额度；
+
+- **数据不经第三方云端留存**：长期记忆与生活状态依然只写在你自己电脑的 `~/.nyairo` 目录里。
+
+---
+
+## 10 · 接入 Telegram 与 QQ
+
+通过 Telegram 机器人或 QQ 官方机器人连接本机的她；重点注意会话白名单授权，避免配好凭证却收不到回复。
+
+### Telegram · 创建机器人并填 Token
+
+建议先确认本机终端或桌面端里能正常收到模型回复，再来配外部聊天软件。
+
+1. 在 Telegram 里搜索官方的 **@BotFather**，发送 `/newbot` 按提示创建一个机器人，复制它发给你的那串 **HTTP API Token**（这串凭证相当于机器人钥匙，切勿发到公开群或贴进截图）；
+
+2. 在终端运行网关向导（Windows 桌面端用户也可直接在「设置 → 模型与通道」页填写）：
+
+```bash
+nyairo gateway setup
+```
+
+选择 **Telegram**，填入刚才拿到的 Token；在「允许访问的用户（Allowed Users）」里**只填你自己的纯数字 Telegram User ID**（注意不是 `@用户名`，也不是昵称）。如果向导自动识别出了 `Detected your Telegram user ID`，核对无误直接确认即可。
+
+### Telegram · 绑定私聊记忆权限
+
+为了防止陌生人误触机器人读到你的私人记忆，nyairo 要求明确指定「哪一个私聊会话拥有读写长期记忆的权限」。
+
+如果你用的是一行命令默认安装（数据在 `~/.nyairo`），运行下面这段脚本，按提示输入你的纯数字私聊 User ID，它会算出对应的会话标识：
+
+```bash
+REL="$HOME/.local/share/nyairo/releases/v0.6.0"
+PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" -c '
+from gateway.config import Platform
+from gateway.session import SessionSource, build_session_key
+uid = input("请输入你的 Telegram 纯数字 User ID: ").strip()
+source = SessionSource(platform=Platform.TELEGRAM, chat_type="dm", chat_id=uid, user_id=uid)
+print("请复制下面这行绑定标识：")
+print(build_session_key(source))
+'
+```
+
+复制算出来的那串标识，打开 `~/.nyairo/chiyo/config.json`：
+
+```bash
+nano "$HOME/.nyairo/chiyo/config.json"
+```
+
+保留文件里的其他字段不动，把 `gateway_bindings` 里的 `telegram` 数组填成刚才算出的那串字符串（Windows 桌面端用户可以直接在「设置 → 模型与通道」底部的会话白名单里勾选放行）：
 
 ```json
 {
   "gateway_bindings": {
-    "qqbot": ["agent:main:qqbot:dm:你的OpenID"]
+    "telegram": ["粘贴刚才打印出来的会话标识"]
   }
 }
 ```
 
-改完立即生效，不需要重启网关。和 Telegram 的差异是：`Platform.TELEGRAM` 换成 `Platform.QQBOT`，绑定键 `"telegram"` 换成 `"qqbot"`，`chat_id` 与 `user_id` 都填同一个 QQ OpenID。
+### Telegram · 启动网关并自检
 
-**第三步：启动并检查。** 先 `export HERMES_HOME="$HOME/.nyairo"`，再运行 `~/.local/bin/nyairo gateway run`，这个窗口保持打开（WSL 里推荐前台运行，不要装成开机自启的系统服务）。日志里应该出现 `Ready, session_id=...` 和 `✓ qqbot connected`。然后依次检查：从 QQ 私聊发一句普通消息确认它会回复；发 `/nyairo_status` 确认返回模块状态而不是那句拒绝文案；发 `/nyairo_memory list` 确认记忆已经绑定；告诉它一个小事实后再 `list` 一次，确认这条已经写进去；重启网关，再检查同一套个人数据和状态是否仍然可用。一个 App ID 同时只能交给一个正在收消息的程序，第二个网关会被拒绝启动。
-
-**排错。** 日志反复出现 `Too many quick disconnects`，说明 App ID / App Secret 不对或开放平台权限没开（到 QQ 开放平台开启 C2C 私聊、群 @、频道消息等 intents）；提示 `QQ startup failed: QQ_APP_ID and QQ_CLIENT_SECRET are required`，说明凭据没有写进 `.env`；配置好了却提示 `No messaging platforms enabled`，检查 `config.yaml` 里是否显式写了 `platforms.qqbot.enabled: false`（显式的 false 会压过 `.env` 里的凭据）。断线重连会自动进行，退避间隔依次为 2 / 5 / 10 / 30 / 60 秒，网络恢复后自动回到 `Ready`，不需要重启网关；即使 QQ 域名被劫持指向内网地址，适配器也会拒绝连接（fail-closed）。
-
-### 微信怎么接（iLink）
-
-**先说清楚连上的是什么**：微信走腾讯 **iLink 机器人**接口。扫码之后你得到的是一个 **iLink 机器人身份**（形如 `xxxxxxxxxxxx@im.bot`），**不是你的个人微信号**。后果很实际：**普通微信群基本用不了** —— 这个机器人身份通常不能被拉进普通群，iLink 一般也不投递群消息。实际可用的是**私聊**。这不是程序缺陷，是 iLink 侧的限制。
-
-**第一步：扫码接入。** 在 Ubuntu / Linux 终端运行 `nyairo gateway setup`，在平台清单里找到 **💬 Weixin / WeChat**，空格打勾、移到 Done 回车。向导问是否现在扫码登录就选是，终端会打印二维码和一段 `liteapp.weixin.qq.com` 链接：
-
-- 用**手机微信扫码**，然后在手机上确认；
-- 或者直接打开打印出来的那段 `liteapp` 链接（注意要扫的是链接，不是旁边那串十六进制字符）。
-
-成功后终端显示 `微信连接成功，account_id=...`，程序自动把凭据写进 `~/.nyairo/.env`，并在 `~/.nyairo/weixin/accounts/` 留一份账号文件，不用手抄。接着问私聊授权，推荐选 **Use DM pairing approval**；想只让自己用就选只允许指定用户再填自己的 ID。二维码有效期约 8 分钟，过期会自动刷新（最多 3 次）。
-
-**第二步：绑定你的私聊。这一步最容易漏，漏了所有 nyairo 命令都会被拒绝。** 和 Telegram、QQ 是同一套机制。平台连上后从微信私聊发 `/nyairo_status`，可能收到「这个入口没有绑定你的个人实例，已拒绝读取。」—— 这是安全设计，不是故障。用随包的官方函数算出会话 key：
+保存退出后，运行网关保持在线：
 
 ```bash
-cd "$HOME/.local/share/nyairo/releases/v0.5.1"
-export HERMES_HOME="$HOME/.nyairo"
-PYTHONPATH="$PWD:$PWD/vendor/hermes" vendor/hermes/.venv/bin/python - <<'PY'
-import os, re
-from gateway.config import Platform
-from gateway.session import SessionSource, build_session_key
-vals = dict(re.findall(r'(?m)^\s*([A-Za-z_]\w*)\s*=\s*(.*)$',
-                       open(os.path.expanduser("~/.nyairo/.env")).read()))
-uid = vals.get("WEIXIN_ALLOWED_USERS") or vals.get("WEIXIN_HOME_CHANNEL")
-src = SessionSource(platform=Platform.WEIXIN, chat_type="dm", chat_id=uid, user_id=uid)
-print(build_session_key(src))
-PY
+nyairo gateway run
 ```
 
-它会打印形如 `agent:main:weixin:dm:你的用户ID@im.wechat` 的一串文字。打开 `~/.nyairo/chiyo/config.json`，在 `gateway_bindings` 里加一项（**只加这一项，其他平台的绑定不要动**）：
+注意同一个机器人 Token 同一时刻只能由一个网关进程轮询接收；如果报 `409 Conflict`，说明你开了两个网关窗口（比如桌面端后台网关和手动终端同时在跑），关掉其中一个就行。
 
-```json
-{
-  "gateway_bindings": {
-    "weixin": ["agent:main:weixin:dm:你的用户ID@im.wechat"]
-  }
-}
-```
+打开手机 Telegram 给你的机器人发几条消息验证一下：
 
-改完立即生效，但新平台要重启网关才会加载。
+1. 发一句日常问候，确认能正常收到回复；
 
-**第三步：启动并检查。** `export HERMES_HOME="$HOME/.nyairo"` 后运行 `~/.local/bin/nyairo gateway run`。日志里应出现 `[Weixin] Connected account=... base=https://ilinkai.weixin.qq.com` 与 `✓ weixin connected`。然后依次检查：私聊发一句普通消息确认会回复（这步走模型，是真实对话）；发 `/nyairo_status` 确认返回模块状态；发 `/nyairo_memory list`；告诉它一个小事实后再 `list` 一次确认写进去了；重启网关再检查数据和状态仍可用。
+2. 发送 `/chiyo_status`，确认返回模块状态（`Memory: READY`）；
 
-**排错。** 微信群收不到消息是 iLink 限制（群聊请改用企业微信入口）；@ 你扫码用的那个个人微信号没反应，是因为机器人和它是**两个身份**；扫码后仍提示未绑定，是没做第二步或没重启网关；提示 `No messaging platforms enabled`，检查 `account_id` 与 `token` 是否两项都齐，以及 `config.yaml` 里有没有显式写 `platforms.weixin.enabled: false`（显式 false 会压过 `.env`）。
+3. 发送 `/chiyo_memory list`，确认私聊已正常绑定记忆权限（新装列表为空属正常现象）。
 
-**传输方式**：微信用的是**长轮询**（不是 QQ 那种 WebSocket），不需要公网地址、端口或 webhook。`WEIXIN_GROUP_POLICY` 默认就是 `disabled`，和个人微信 iLink 身份进不了普通群的现实一致。
+### QQ 官方机器人接入与两个必看避坑点
 
-### 飞书怎么接
+底层网关内置了 QQ 官方机器人（API v2）适配器。如果你想在 QQ 私聊里跟她说话，前往 [QQ 开放平台 (q.qq.com)](https://q.qq.com) 创建一个机器人，拿到 **AppID** 和 **AppSecret**。在 Windows 桌面端「设置 → 模型与通道」的「接入 QQ」栏填入保存，网关会自动重启连接，并在界面上原样展示网关日志里的真实连接结果。
 
-飞书（Feishu / Lark）走独立入口：先按随包的 `vendor/hermes/website/docs/user-guide/messaging/feishu.md` 说明连接平台，再按上面同样的方法设置 nyairo 的私人会话绑定（`Platform.FEISHU`、绑定键 `"feishu"`）。代码里有适配器，并不表示已经用真实账号完成整套收发与断线重连检查。
+如果手动改配置文件，或者遇到「明明连上了却不回话」，请重点核对这两个实测踩过的坑：
 
+1. **配置键名必须是 `qqbot`，不能写成 `qq`**：在 `config.yaml` 的 `gateway.platforms` 下，平台名称严格叫 `qqbot`。如果手敲写成 `qq`，网关会直接忽略整段配置，日志里连报错都不会打一行。
 
+2. **光填好 AppID 和密钥还不够，必须把具体私聊会话加进白名单**：nyairo 的隐私门禁只放行 `gateway_bindings.qqbot` 里明确授权过的私聊键（格式为 `agent:main:qqbot:dm:你的用户标识`）。没加白名单前，QQ 消息就算到了网关也会被安静拦下——先给机器人发一句话，再去桌面端「谁可以跟 TA 说话」面板里把刚出现的会话勾上（或从日志里抄下该键写入 `chiyo/config.json`）即可正常对话。
 
+### 其他聊天平台说明
 
-## 06-1 接入微信 (Weixin)
+- **个人微信（最省事）**：无需注册开放平台或填复杂 ID，手机微信扫一下二维码就能连上，详见上一章 [接入微信](https://nyairo.com/#weixin)。
 
-nyairo 支持将虚拟生命直接连接到你的个人微信。无需复杂配置，终端扫码即可绑定，随时随地查岗、闲聊并查看她在虚拟世界里的真实出行。
+- **飞书 / 企业微信 / Discord 等**：底层宿主代码里虽然保留了部分第三方平台文件，但我们尚未做完记忆权限绑定与断线重连实测，目前不作为正式支持渠道。
 
-### 为什么要把她接入微信？
+---
 
-- **随时随地查岗**：掏出手机发句“在干嘛呢”，她会调取后台物理世界告诉你她是在房间发呆，还是在离家不远的街上散步；
-- **自然陪伴与倾诉**：下班路上、深夜失眠时，像跟真人朋友私聊一样发微信，没有复杂的命令提示符，只有熟悉的聊天气泡；
-- **断点无缝续接**：关机或者重启服务器后，微信聊天上下文不会丢，开机后能自然接着上次的话题聊。
+## 11 · 桌面客户端使用指南
 
-### 快速扫码接入步骤
+把 Windows 桌面端的五个主栏目、自由身份与 SOUL.md 保护机制、记忆召回细节以及一键脱敏诊断包一次讲清。
 
-1. **开启微信接入**：
-   在终端运行：
-   `ash
-   nyairo gateway setup
-   `
-   在交互菜单中选择 **Weixin** 并开启。或者确认个人配置文件 ~/.nyairo/config.yaml 包含：
-   `yaml
-   platforms:
-     weixin:
-       enabled: true
-       dm_policy: allowlist
-       group_policy: disabled
-   `
+### 总览与对话：接话、引用、重试与导出
 
-2. **扫码绑定**：
-   运行网关服务：
-   `ash
-   nyairo gateway run
-   `
-   终端会输出二维码，使用手机微信扫一扫确认登录，即可完成绑定。
+桌面端把繁杂的后台运行参数收进了折叠栏，日常打开主要用到左侧前两个栏目：
 
-### 微信专属生活交互
+- **总览**：顶部用一句干净的状态行告诉你她是否在线、已运行多久、记住了多少条事；左栏摆着你们**上一轮问答与快捷输入框**，不用切页就能直接接着聊；右栏展示最近记住的几句原话（已自动过滤掉左栏刚显示过的那句，避免重复）。底部的「运行详情」默认收起，点开才能看到模块状态与后台事件。
 
-在微信里，她不仅能回答日常对话，更能实时联动 v0.5.1 的底层物理世界：
-- **真实出行与步行倒计时**：跟她说“去便利店买包烟”或“去街上散步”，她会在后台真正调用移动工具启程，并汇报步行耗时。途中问她“走到哪了”，她会如实告诉你还剩几分钟，绝不搞瞬间瞬移；
-- **打烊感知与合法发呆**：深夜去咖啡馆如果打烊了，她知道进不去并主动转头；跟她说“今天累了就在家发呆”，系统不会扣除任何健康惩罚，安安心心陪你发呆。
+- **对话**：支持流式逐字回复、悬停复制单条消息、**选中某句话引用追问**；遇到网络波动没发出去时可以直接点气泡旁的**重试**按钮重发原话，不用重新打字。右上角支持一键把当前整段会话**导出为本地 Markdown 文件**。
 
+### 街区、商店与四类记忆记录
 
-## 07 额外功能怎么设置
+- **街区**：直观看到当前示例世界（如 17 处地点的临海小镇）与她所在的房间平面。你可以直接点选地点让她步行前往、在室内走动或开关灯具，也可以打开内置的[离线地图编辑器](https://nyairo.com/#world-editor)。
 
-### 让它给出建议：认知观察
+- **商店**：查看随身钱包与物品。注意商店遵循真实空间规则——**只有她人真的走到了营业中的店面里才能逛店购买**，待在家里点开会如实提示当前不在店内。
 
-认知观察会调用模型，对你明确提出的请求给出判断和原因。它不会因为判断“可以做”就自动执行动作。旧文件把这种方式称为 **Shadow**。
+- **记忆（含四个子栏目）**：
+  
+    **常驻记忆**：右上角搜索框可直接按关键词实时过滤已记住的条目，支持手动纠错或停用；
 
-第一次新建另一套个人设置时，可以使用：
+    - **随笔与创作**：集中查看她写的随笔与受管文稿，对比不同历史版本的增删差异；
+
+    - **相册与共读**：翻看留存的明信片相册，或导入文本读物跟她一起看（详见下一章 [共读、文稿、相册与节律](https://nyairo.com/#daily-companions)）；
+
+    - **共处与实践**：查看近期的共同活动记录与待办安排。
+
+  
+
+</li>
+</ul>
+
+### 自由称呼、代词与 SOUL.md 保护
+
+在左下角「**设置 → 身份与偏好**」里，你可以随时修改她的名字和第三人称代词：
+
+- **代词完全自由输入**：除了提供 `TA`、`她`、`他`、`它` 四个快捷按钮外，输入框接受任意不超过 8 个字的自定义称谓，客户端全界面文案也会跟着名字动态变化，不再硬塞固定的「她」。
+
+- **手改 `SOUL.md` 不会被意外覆盖**：客户端保存基础称呼时会记录一份内容指纹。如果你后来自己写了一篇详尽的自定义 `SOUL.md`（可在设置页在线编辑，也可直接改文件），桌面端检测到指纹变化后**会自动开启保护**——之后你再改界面显示名时，不会粗暴重写真正的 `SOUL.md` 正文，避免心血白费。若想推倒重来，点「恢复默认模板」即可。
+
+### 实用细节：「新对话」与记忆召回窗口
+
+用桌面端聊天时，有一个值得提前知道的底层脾气：
+
+- **顺着同一个会话聊（推荐）**：只要你不点「新对话」，哪怕隔了一整天甚至关机重启再来聊，她都能靠本地持久保存的会话历史准确记得之前聊过的细节。
+
+- **点了「新对话」之后**：开启全新会话后的 **15 分钟内**，记忆解析器会自动从最近证据窗口里捞回刚聊过的事；但如果距离上次说话已经**超过 15 分钟**才开新会话，由于当前公开测试版的经历分段器默认采取保守不自动封存策略，早先聊的内容可能暂时不会被自动带进这个新会话里。因此平时像微信那样一直顺着聊下去体验最连贯，只有确实想彻底换个新话题重来时再点「新对话」。
+
+### 托盘常驻、快捷键与一键脱敏诊断包
+
+- **系统托盘与单实例保护**：点窗口右上角关闭按钮默认收进右下角系统托盘，右键托盘图标可以随时「重启网关」、打开日志目录（`%LOCALAPPDATA%\nyairo\desktop.log`）或彻底退出。客户端内置单实例锁，防止不小心双开两个窗口争抢同一个后台网关。
+
+- **全局快捷面板**：在窗口内按 `Ctrl + K`（或点顶栏放大镜图标）可随时呼出快捷指令与街区地点搜索。
+
+- **一键导出脱敏诊断包**：遇到奇怪问题需要找开发者帮忙看时，不用自己去 WSL 里翻配置——打开「**设置 → 环境与诊断**」点击导出诊断包，程序会在本地打包一份 `diagnose-时间戳.zip`（内含模块状态摘要、最后 300 行日志与配置副本），并**自动把所有 `api_key`、`token`、`secret`、`password` 字段打码替换成 `<redacted>`**，也不会把你的私人聊天数据库和 `SOUL.md` 正文塞进去，发群里求助更安心。
+
+---
+
+## 12 · 共读、文稿、相册与节律
+
+详细介绍双人共读、受管文稿版本对比、她的日记隐私折起、本地相机生图前提，以及后台自主活动的额度控制。
+
+### 随笔与受管文稿：版本对比与外部编辑
+
+除了日常对话，她还可以维护长篇随笔、读书笔记或你们一起整理的专题文稿（桌面端位于「记忆 → 随笔与创作」，命令行可用 `/chiyo_note`）：
+
+- **历史快照与增删对比**：每次修订都会留存独立版本，你可以在桌面端直接点选任意两个版本查看逐行增删对比；如果一篇长文写到一半去忙别的事了，手头进度会挂起保留，回来时顺着上一版摘要接着写，不会从头重写。
+
+- **你在外部改了文件怎么办**：工作区里的 `.md` 文件是受管文稿的一份本地投影。如果你自己用 VS Code 或记事本直接改了这份文件，系统不会悄悄拿它覆盖她的原稿，也不会假装那段话是她自己写的——它会把改动识别为「外部编辑候选」，等你明确确认导入后才生成新版本，并如实注明来源为外部导入。
+
+### 双人共读与她的日记边界
+
+- **把书或文章放上共读书架**：你可以在桌面端「记忆 → 相册与共读」里导入本地文本材料（如 `.txt` 或 Markdown 章节）。这里的设计原则是**「递给她，而不是强塞给她」**——放进书架只代表桌上有这本书可读，她会在合适的闲暇节奏里自己翻阅、记下读到哪一页和批注感受，而不是收到文件一秒钟吐出一篇机器总结。
+
+- **她的日记（默认收起正文）**：开启日常活动后，她有时会自己写日记。为了保留一点呼吸感，日常状态面板和概览接口默认只列出「写了哪几篇、日期与字数」，不会把她的日记全文直接摊在首页大屏上。（当然，因为所有数据都在你自己的电脑里，日记底层仍是以明文存储在你本机目录中的，不存在瞒过电脑主人的加密锁。）
+
+### 相册与本地拍照的真实前提
+
+很多初次打开相册的用户会好奇「她能不能真的拍张照发给我」。这里把目前已经做好的部分和硬性前提如实说清：
+
+- **相册翻看开箱即用**：随街区活动留下的记录卡片与已有相册图片，在桌面端可直接浏览。
+
+- **本地相机生图（`local_generated`）需自备本机绘画服务**：如果你想让她根据当前所处的真实街景与天气自己按快门生成一张画面，**nyairo 本身不捆绑几 GB 的绘图大模型，也不联网调付费生图接口**。你需要在本机自行启动两个本地回环服务：
+  
+
+    1. 本地 Stable Diffusion WebUI 接口（默认监听 `127.0.0.1:7860`）；
+
+    2. 本地提示词转换小服务（默认监听 `127.0.0.1:18190`）。
+
+  
+
+  只要这两个本机服务没开，相机功能就会干净利落地返回「当前不可用」，绝不会拿预制假图冒充刚拍的照片，也不会报错崩溃。
+
+### 后台自主活动、身体节律与费用上限
+
+- **不偷偷跑流量：真实模型行动必须显式打开**：默认状态下，你不找她说话时，后台不会向大模型发任何请求（0 额外消耗）。只有你在桌面端开启自主活动，或在命令行运行 `scripts/nyairo_day.py run-day` 时显式加上 `--live-model` 开关，她才会在闲暇时自己做决定出门或写东西。
+
+- **双重预算刹车**：开启后台活动时，可以同时设定**最长运行秒数**（`--duration-seconds`）与**最多新增请求次数**（`--max-new-requests`），并受实例持久账本的每日配额约束——达到上限立刻停手，哪怕请求失败也不会死循环重试刷爆账单。
+
+- **可选的轻量身体节律**：新实例如果显式启用虚拟身体需求（`--lived-needs`），白天会随在线时间慢慢产生轻微的困倦、口渴或进食倾向（只分「无 / 轻微 / 明显 / 强烈」四档自然感受，不搞网游血条）。**关机或停服期间的时间不会秋后算账倒扣数值，也没有生病或死亡惩罚**，纯粹是为了让日常作息多一点真实的烟火气。
+
+---
+
+## 13 · 地图编辑器与世界包
+
+怎么用内置离线地图编辑器改房间与街道、怎么切换随包附带的示例世界，以及当前模板生成与「随机世界规划」之间的真实边界。
+
+### 随包附带的几套示例世界
+
+虽然首次安装默认进入的是临海小镇「凪浦」，但发行包的 `examples/worlds/` 目录下其实已经随附了好几套结构完整、可直接预览或加载的示例世界包：
+
+- **凪浦（`nagiura`）**：默认示例海滨小镇，包含住居、书店、海鸥咖啡、公园、海滩等 17 处地点与 18 条连接道路（另有经过编辑器实机改建演示的 `nagiura-edited`）；
+
+- **若叶（`wakaba`）**：偏日常居住氛围的生活小镇模板（16 处地点、17 条道路）；
+
+- **日常街区与更多主题演示**：包含带营业时间与阅读角的 `daily_neighborhood_v1`，以及山城（`mountain_town-demo`）、乡野（`rural_farming-demo`）等不同风貌的示例包，每个目录下自带 `preview.html`，双击就能在浏览器里直接看整张小镇拓扑图。
+
+### 打开离线地图编辑器画房间与改街道
+
+仓库 `components/world-editor/` 内置了一套纯本地运行的可视化空间编辑器（只监听本机 `127.0.0.1`，无需联网、不耗模型额度）。你可以从桌面端「街区」页进入，也可以在终端直接启动它：
 
 ```bash
-vendor/hermes/.venv/bin/python scripts/setup_profile.py \
-  --home "$HOME/.chiyo-shadow-v1" \
-  --owner local-owner --memory --life --allow-local-owner --cognition-shadow
+cd ~/.local/share/nyairo/releases/v0.6.0/components/world-editor
+python3 server.py --port 8766
 ```
 
-这会使用单独的数据文件夹 `$HOME/.chiyo-shadow-v1`。之后启动时，把 `HERMES_HOME` 也设置到这个位置，不能继续指向原来的文件夹。
+随后在浏览器打开 `http://127.0.0.1:8766`，就可以动手改造世界了：
 
-如果已有设置，就不要重跑创建命令。需要修改两处：
-- 个人 `chiyo/config.json` 里的 `cognition_shadow` 改为 `true`。
-- 个人 `config.yaml` 里的 `plugins.entries.chiyo.llm.enabled` 改为 `true`，保留其他设置。
+1. **把现有世界包转成编辑器格式**：运行 `python3 -m components.worldgen editor-export examples/worlds/nagiura`，会在包内生成 `editor-world.json`；
 
-重新启动后，用 `/chiyo_consider 你的请求` 提问，再用 `/chiyo_status` 看结果。模型预算用完、服务出错或审计不可用时，它应告诉你实际原因。额外判断也可能产生模型费用。
+2. **可视化改造**：在浏览器里导入这份文件，自由修改书店名字和营业时间、增删街道连线、新建街角咖啡摊，或者切进室内视图画墙、开门窗、摆放书桌与台灯，还能点「AI 视角预览」看看她在房间里能观察到哪些家具；
 
-### 读取位置和姿态：世界与身体
+3. **一键回写并校验**：点界面上的「**导出 NyAiro 世界包 ⤴**」（或用命令行 `editor-import`），系统只会差量更新你改过的字段，保留原有的 NPC 与环境事件，并自动做连通性检查（如果不小心把唯一出路删断了，或者删掉了还有 NPC 上班的店铺，会直接用中文指出具体冲突，防止导出坏档）。
 
-这个功能读取世界中的位置、姿态和身体信号。标准插件只能读取这些信息，不会移动个体或执行动作。
+### 进阶：命令行按模板与种子生成世界包
 
-先在程序文件夹里创建一份独立世界，**只在第一次运行**：
+如果你熟悉终端命令，也可以直接调用仓库里的 `components.worldgen` 工具，在现有的四套城镇主题模板（`coastal_town` 海滨、`town_life` 生活街区、`mountain_town` 山城、`rural_farming` 乡野）上输入任意数字种子生成新的世界包：
 
 ```bash
-export PYTHONPATH="$PWD:$PWD/vendor/hermes"
-vendor/hermes/.venv/bin/python -m chiyo_bundle.world_read_service init \
-  --home "$HOME/.chiyo-world-v1"
+REL="$HOME/.local/share/nyairo/releases/v0.6.0"
+cd "$REL"
+# 用自定义种子生成一个山城世界包并校验、输出本地预览地图
+"$REL/vendor/hermes/.venv/bin/python" -m components.worldgen generate \
+  --theme mountain_town --seed 20261106 --out "$HOME/my-world"
+"$REL/vendor/hermes/.venv/bin/python" -m components.worldgen validate "$HOME/my-world"
+"$REL/vendor/hermes/.venv/bin/python" -m components.worldgen preview "$HOME/my-world" --out "$HOME/my-world/preview.html"
 ```
 
-再开一个 Ubuntu / Linux 终端，进入同一个程序文件夹，用**同一个 Linux 账号**启动世界服务：
+同一个主题加同一个种子，生成的道路耗时与地点结构逐字节可复现；启动世界服务时通过环境变量 `CHIYO_WORLD_PACKAGE="$HOME/my-world"` 即可挂载该世界包。
 
-```bash
-cd "$HOME/apps/chiyo-v0.1"
-export PYTHONPATH="$PWD:$PWD/vendor/hermes"
-vendor/hermes/.venv/bin/python -m chiyo_bundle.world_read_service run \
-  --home "$HOME/.chiyo-world-v1"
-```
+### 当前真实限制（哪些还没打通）
 
-这个窗口先保持运行。然后在个人 `chiyo/config.json` 里，把 `world_body_socket` 填成真实连接文件的完整位置，例如 `/home/你的Linux用户名/.chiyo-world-v1/run/read.sock`，再重新启动聊天。
+为了避免大家对编辑器和生成器产生过高预期，下面这几条尚未打通的边界请提前知悉：
 
-这里的 socket 可以理解为聊天程序连接世界服务的本机入口。填写配置时用完整路径，不要把 `$HOME` 或 `~` 原样写进去。两个程序用不同的 Linux 账号启动，会被拒绝连接。
+- **还不是「开箱即用的千人千面随机世界」**：目前的桌面端安装向导还没有集成首次启动自动按人生成专属世界，命令行生成器也仍受限于四套预设主题骨架（且住居 `home` 与 `school` 节点 ID 固定）。真正无需敲命令、摆脱固定模板束缚的随机专属世界仍在 [未来规划](https://nyairo.com/#roadmap) 中。
 
-第一次创建的世界是卧室、站姿和空物件列表，不带作者的私人世界数据。已有世界不要重复创建；服务停止时应显示不可用。
+- **墙体与地板暂不阻挡移动**：编辑器里画的墙面和地面材质保存在 `scene.json` 中供可视化展示与后续编辑恢复；底层运行时目前按「建筑入口 ↔ 室内功能区（如卧室、客厅，切换耗时 30 秒）」的节点图寻路，还没有像素级的绕墙碰撞计算。
 
-### 保存资源文档：目前需要管理员设置
+- **自定义世界暂未接通商店购买与跨夜营业**：目前商品下单与送货上门常量仍绑在默认街区店面上，自定义生成的世界包里暂不支持进店扣款买家具；店铺营业时间暂不支持跨午夜写法（如 `22:00–06:00` 回写时会明确提示不支持）。
 
-Life Supply 用来在自己的工作区保存、读取独立文档。已经设置好的实例可以使用；普通安装的这部分仍需要管理员处理账号、服务与授权。
+---
 
-**下面是设置检查表，还不是经过验证的双账号完整安装教程。**只运行基础安装脚本，还不能直接用 `/chiyo_note` 保存文档。
+## 14 · 常用命令与记忆管理
 
-1. 给资源服务准备独立的数据文件夹和连接文件位置，分别填入 `LIFE_SUPPLY_DATA_ROOT`、`LIFE_SUPPLY_SOCKET`。
-2. 让“负责批准权限的管理账号”和“聊天程序使用的账号”分开，均不使用 root。对应的设置是 `LIFE_SUPPLY_OPERATOR_UIDS`、`LIFE_SUPPLY_SERVICE_UIDS`；`LIFE_SUPPLY_ALLOWED_SUBJECTS` 指定允许使用资源的个人身份。
-3. 通过资源服务的正式管理接口，为这个个人身份建立自己的工作区。
-4. 通过管理账号的正式接口批准有限的保存权限：`COMMIT_MANAGED_ARTIFACT`、`artifact:personal`，限定到该工作区，并明确开启 `ARTIFACT_EXTERNAL_ACTION`。
-5. 把自己服务的连接位置、个人身份和权限编号填入 `life_supply_socket`、`life_supply_subject`、`life_supply_artifact_grant`；开启 Life，再重新启动聊天。
-6. 实际保存并读取一篇测试文档；还要检查没权限时会拒绝、重复保存不会创建多份、重启后文档仍存在。
+平时用得最多的几个斜杠指令：看她当前状态、翻看她记住了什么、改掉记错的事，以及随手存备忘。
 
-服务入口是 `scripts/supply_service.py`。新旧资源服务使用的数据格式不同，不要混用同一个数据文件夹。权限编号必须来自自己的服务，随便填一串文字不会自动取得权限。
+### 查看运行状态 (/chiyo_status)
 
-### 资源服务的已知连接问题
-
-公开候选默认只允许连接文件的所属账号访问，也就是权限 `0600`。两个不同的普通 Linux 账号连接同一个默认入口时，管理账号会遇到 **PermissionError**：系统先拒绝连接，程序还没来得及检查它有没有资源权限。
-
-因此只填好两个账号的 UID，还没有解决连接安排。这里尚未提供验证通过的完整方案；遇到这个错误，先记录两个程序实际使用的账号与错误，交给管理员处理。不要把入口改成所有人都能连接的 `0666`，也不要拿权限编号去代替连接权限。
-
-这是第一版现有的装配问题。本次网页改写只把限制讲清楚，没有修改资源服务的运行时代码。
-
-
-## 08 日常命令与几天使用测试
-
-### 查看真实状态
+无论在终端、桌面端还是微信 / Telegram 对话框里，随时可以发送：
 
 ```text
 /chiyo_status
 ```
 
-检查 Memory、Life、World/Body、Life Supply 与认知的实际状态。Life 为 IDLE 表示没有正式活动，不是系统为了保持在线必须编造一项生活行为。
+她会返回当前各模块的真实状态：
 
-### 记忆操作
+- **Memory（长期记忆）**：显示 `READY` 说明本地记忆读写正常；
+
+- **Life（生活连续性）**：显示 `IDLE` 代表当前安静待命，若有正在进行的出行或活动也会如实显示；
+
+- 其他未开启的可选模块显示 `OFF` 属于正常现象，不影响日常对话。
+
+### 查看、纠正与停用记忆 (/chiyo_memory)
+
+聊过的习惯、经历和约定会自动整理进本机数据库。如果怕大模型听岔了记错，你可以随时透明查看并手动修正：
+
+- **看看她记住了哪些事**：
 
 ```text
 /chiyo_memory list
-/chiyo_memory correct ID 新内容
-/chiyo_memory delete ID
 ```
 
-ID 使用 list 返回的真实值。纠正会改变后续采用的事实；删除停止召回并排除旧上下文，原始审计保留。纠正产生的新事实也能独立删除。当前会保守排除旧短期历史，因此该段里其他未删除的话题也可能不再进入短期上下文。
+会列出近期沉淀下来的记忆条目，每条前面都有一个短编号（例如 `mem-...`）。
 
-旧 rc4 的提示文案有一个错误，rc5 已修复：不带参数输入 `/chiyo_memory` 或输入错误格式时，可能提示使用 `/memory list/delete/correct`。在 Hermes CLI 与消息网关中，请使用上面的 `/chiyo_memory` 命令；Hermes 自带的 `/memory` 是另一套审批命令。独立 Native 运行器的命令名称仍以其自身说明为准。
-
-### 资源文档
+- **把记错的事改过来**：
 
 ```text
-/chiyo_note 旅行计划 | 周末想去海边
-/chiyo_note read 文档ID
+/chiyo_memory correct 记忆编号 正确的事实内容
 ```
 
-保存后记下返回的 ID，再读取。相同标题与正文重试使用同一操作编号，避免重复创建。删除聊天记忆不删除资源文档，它们是独立的内容。
+比如她把「平时喝冰美式不加糖」记成了「爱喝全糖拿铁」，用这条命令改过来后，以后再聊起就会按更正后的事实回应，旧的错误印象不再采用。
 
-### 认知观察
+- **让某件事不再被提起**：
 
 ```text
-/chiyo_consider 请考虑响应这个请求
-/chiyo_status
+/chiyo_memory delete 记忆编号
 ```
 
-查看有效判断、理由和实际模型调用；不要把“建议响应”理解为“已经发送消息”或“已经执行活动”。
+执行后这条记忆会被标记为「停止召回」，后续对话不再引用它（注：这是停止检索召回，不会物理粉碎磁盘上的原始聊天日志文件，详见 [隐私与数据边界](https://nyairo.com/#privacy)）。
 
-### 建议的体验顺序
+### 随手备忘与独立推演 (/chiyo_note · /chiyo_consider)
 
-第一天测普通聊天、实际状态、文档保存读取和重试。第二天测新会话召回、纠正、删除后不复活。第三天及以后测话题变化、认知预算与报错、持续运行状态一致性。
+- **保存或读取备忘文稿（需启用文稿服务，桌面端已内置）**：
 
-跨会话测试时，提问不能重复答案，否则无法区分真正召回与读到了本次输入。重启和断线故障实验只针对自己的实例，先备份，再操作。
+```text
+/chiyo_note 周末书单 | 先把第三章读完，顺便记两页批注
+/chiyo_note read 文档编号
+```
 
-### 反馈问题
+桌面端用户也可以直接在左侧「记忆 / 文稿」页可视化查看、编辑并对比历史版本。
 
-记录发生时间与时区、版本、平台、触发步骤、期望和实际结果、相关模块状态、是否能重复触发。公开提交前删掉 token、模型密钥和无关私人聊天；不要上传整个个人目录。
+- **请她单独帮忙分析一件事（需开启认知推演，详见下一章）**：
 
-## 09 用户更新与 Hermes 升级
+```text
+/chiyo_consider 帮我权衡一下这两个数据库迁移方案各自的风险
+```
 
-从 rc6 开始，Linux 和 Windows 的 Ubuntu / WSL 可以使用统一更新入口。它更新整套 nyairo，包括发行版里经过适配的 Hermes；不会另外去拉 Hermes 的开发分支。
+适合把具体问题拎出来让她认真列清楚判断依据，而不打乱平时的日常闲聊节奏。
 
-### 已经装好 rc6：以后只输入这一条
+---
 
-先退出聊天，停止自己的消息网关和正在运行的 World、Supply 等附加服务。在平时使用 nyairo 的 **Ubuntu / Linux 终端**里输入：
+## 15 · 独立推演与底层服务
+
+在纯命令行或服务器环境下手动开启独立推演建议（/chiyo_consider）、只读世界位置服务与独立文稿工作区的方法。
+
+### 手动挂载轻量世界位置服务
+
+在 **Windows 桌面端** 中，街区寻路、室内房间走动与灯具控制已经自动配好（可视化改图教程见 [地图编辑器与世界包](https://nyairo.com/#world-editor)）。如果你使用的是**纯手动命令行安装**，只想单独跑一个轻量只读的位置与姿态服务，可以手动初始化并运行：
 
 ```bash
-~/.local/bin/nyairo update
+REL="$HOME/.local/share/nyairo/releases/v0.6.0"
+PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \
+  -m chiyo_bundle.world_read_service init --home "$HOME/.nyairo-world"
+PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \
+  -m chiyo_bundle.world_read_service run --home "$HOME/.nyairo-world"
 ```
 
-统一入口已经记住首次登记的个人目录。引导安装默认是 `$HOME/.nyairo`；手动教程使用 `$HOME/.chiyo-v1`。账号、模型、人设、聊天和记忆继续使用原来的数据，不需要重新创建。要明确选择另一套个人数据时，先运行 `export HERMES_HOME="你的个人目录完整路径"`。
+随后在 `~/.nyairo/chiyo/config.json` 中将 `world_body_socket` 填为对应的完整路径（如 `/home/你的用户名/.nyairo-world/run/read.sock`，不要填 `~` 缩写）。
 
-默认检查当前最新的公开体验候选。正式稳定版发布后，可以用 `~/.local/bin/nyairo update --channel stable` 只选择稳定版；目前可能提示该频道没有完整发行包。
+### 开启独立推演建议 (/chiyo_consider)
 
-成功时会显示“已更新到……”、配套 Hermes 版本和备份位置。没有新版本时，只显示当前与可用版本。之后用 `~/.local/bin/nyairo` 开始聊天，或用 `~/.local/bin/nyairo gateway run` 启动机器人。
+平时聊天她会顺着生活情境自然交流；但有时候你遇到了具体的技术难题或选择困难，希望她跳出闲聊、客观严谨地帮你分析利弊。这时可以启用认知推演（Shadow Cognition）功能：
 
-只想看看有没有更新，可以输入：
+1. 打开 `~/.nyairo/chiyo/config.json`，将 `"cognition_shadow"` 设为 `true`；
+
+2. 打开 `~/.nyairo/config.yaml`，确认 `plugins.entries.chiyo.llm.enabled` 为 `true`；
+
+3. 重启对话后，输入 `/chiyo_consider 你的问题` 即可收到带理由的完整分析。
+
+**边界说明**：这项功能只给出分析判断与建议（每次调用会额外消耗一次模型请求），不会擅自在后台修改你的代码或替你执行系统命令。
+
+### 独立文稿工作区服务 (Life Supply)
+
+桌面端已经帮你自动接好了本机文稿与共读服务。如果你是在 Linux 服务器上纯手动搭环境、想启用 `/chiyo_note` 独立文稿保存，它底层由 `scripts/supply_service.py` 提供支持，设计了「管理授权账号」与「日常服务账号」分离的权限机制：
+
+1. 为服务指定独立数据目录（`LIFE_SUPPLY_DATA_ROOT`）与本机 Socket 路径（`LIFE_SUPPLY_SOCKET`）；
+
+2. 通过管理接口创建个人工作区，并签发仅限该工作区的写入许可（`COMMIT_MANAGED_ARTIFACT`）；
+
+3. 把 Socket 路径、身份标识与许可编号填入 `~/.nyairo/chiyo/config.json` 的 `life_supply_socket`、`life_supply_subject` 与 `life_supply_artifact_grant` 中。
+
+### 多账号部署时的已知连接限制
+
+在 Linux 下手动分两个不同系统用户（UID）跑管理端与聊天端时，需要注意一个已知细节：`supply_service.py` 生成的本机 Socket 文件默认权限是 `0600`（仅创建该文件的 Linux 用户可连），另一个普通用户连接时会直接被操作系统拦下报 `PermissionError`。
+
+单人单账号本机使用（如桌面端默认形态）不受此问题影响；如果你在服务器上做多用户隔离部署，请通过专门的用户组目录权限规划来处理，**切勿图省事把 Socket 改成所有人可读写的 `0666`**。
+
+---
+
+## 16 · 版本升级与一键回滚
+
+升级只替换程序目录，不动你的聊天记录与人设；万一新版用着不顺手，一行命令就能退回上一版。
+
+### 升级前先检查与备份
+
+nyairo 把程序装在 `~/.local/share/nyairo`，把你的个人数据（`SOUL.md`、模型密钥、聊天数据库与记忆）单独放在 `~/.nyairo`。正常升级不会改写个人数据，但由于当前 `v0.5.1` 仍处于快速迭代的公开测试阶段，**升级前请先退出正在运行的聊天和网关进程，顺手打个备份包**：
 
 ```bash
-~/.local/bin/nyairo update --check
+tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo
 ```
 
-若 `nyairo` 已在你的命令搜索路径里，后续也可以直接写 `nyairo update`。
+### 一行命令升级 (nyairo update)
 
-### 现在还在使用 rc5：接入一次，以后就方便了
+- **Windows 桌面端用户**：下载新版 `setup.exe` 直接覆盖安装即可，首次打开会自动检测并同步 WSL 内的运行包。
 
-rc5 没有这个入口。先退出聊天并停止自己的服务，确认原来的个人目录还在。不要重跑创建个人设置的脚本。
-
-下面以旧程序在 `$HOME/apps/chiyo-v0.1`、个人数据在 `$HOME/.chiyo-v1` 为例。在 **Ubuntu / Linux 终端**输入：
+- **Linux / WSL 终端用户**：先看看有没有新版本：
 
 ```bash
-export HERMES_HOME="$HOME/.chiyo-v1"
-git clone --branch v0.4.0 --depth 1 https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-rc9"
-cd "$HOME/apps/nyairo-rc9"
-bash scripts/update.sh --migrate-from "$HOME/apps/chiyo-v0.1"
+nyairo update --check
 ```
 
-新目录必须尚不存在。最后一条命令会检查两份程序、安装新依赖、备份个人目录、更新标准插件副本并切换入口。原来的程序目录保留，可用于回退。ZIP 用户也可以把 **Release 附件中的** `nyairo-v0.4.0.zip` 校验后解压到新目录，再执行同一条迁移命令。
-
-如果用旧的引导安装器装过 rc5，个人目录改用 `$HOME/.nyairo`，旧程序路径改用 `$HOME/.local/share/nyairo/releases/v0.1.0-rc5`。迁移时明确使用这两个实际路径，别再创建第二份个人设置。
-
-旧源码必须能通过其发行清单校验；测试缓存和自己的源码修改都会使严格校验拒绝迁移。不要为了通过校验删除个人数据。有源码修改时先保留自己的整个程序目录，再使用手动升级方式核对改动。
-
-rc4 和更早版本还涉及隐私授权调整，没有自动迁移承诺，请先按 [隐私修复说明](PRIVACY_REVIEW.md) 升级到 rc5，或使用手动升级方式。macOS 与原生 Windows 尚未完成统一更新验证，继续按原来的手动方式操作。
-
-### 更新过程中会保留什么
-
-- 新版放到独立目录，依赖安装和离线插件检查成功后才切换。Git 下载与 ZIP 下载的用户以后使用同一个更新入口。
-- 切换前备份当前个人目录，以及这个账号下已登记、带有标准 nyairo 插件的 Hermes 命名个人目录。备份包括 `SOUL.md`、配置、密钥、聊天数据库、记忆与账本，保存在只有当前账号可访问的更新目录中。
-- 更新只替换标准的 `plugins/chiyo` 副本，不重建个人设置，不改写人设，不重置账号绑定或权限。其他插件不更新。这个插件若有自己的修改，会拒绝覆盖。
-- 检测到程序还在运行，会提示先停止；不会猜测并停止机器上其他人的服务。通过统一入口启动的程序还会持有运行锁，避免切换时又启动聊天。
-- 下载损坏、清单不完整、依赖失败或数据格式不兼容，会停止更新。插件切换失败会恢复旧副本；断电等中断会留下记录，恢复前统一入口拒绝启动。
-
-World / Supply 独立服务目录、个人目录里链接到外部的文件，以及自定义的外部数据根，不包含在这份备份中。它们的程序和数据也不会被这条命令替换；请按各自章节停机、单独备份和升级。这条命令不负责安装后台服务或自动重启它们。
-
-备份会占用空间；旧程序、已下载的候选目录和备份不会自动删除。确认新版工作正常后，再自行整理不需要的旧版本。
-
-### 出问题时退回上一版
-
-先停止新程序和自己的附加服务，再输入：
+确认要升级时（公开测试版频道需指定版本号，例如 `v0.5.1`），运行：
 
 ```bash
-~/.local/bin/nyairo update --rollback
+nyairo update --version v0.5.1
 ```
 
-它会退回上一版程序和相应的标准插件，**保留现在的数据**。升级后新增的聊天不会被旧备份覆盖。若以后某个版本改变了数据格式，更新器会拒绝直接回退，并要求按该版本的专门迁移说明处理。
+程序会自动下载官方压缩包、核对 SHA256 与文件清单、配好新版环境并切换入口。
 
-若提示上次更新中断，先输入：
+### 一键回滚与中断恢复
+
+- **退回上一版**：如果升完发现某个新改动不合心意，退出程序后运行下面这行，就能切回升级前的旧版程序——而且**你在新版里刚聊过的记录和新攒下的记忆都会保留**，不会倒档清零：
 
 ```bash
-~/.local/bin/nyairo update --recover
+nyairo update --rollback
 ```
 
-这条只恢复中断的插件切换，不下载新版、不恢复旧聊天数据库。
+- **断网或意外关机恢复**：万一升级到一半断网或关了终端，下次打开运行 `nyairo update --recover` 就能自动清理半成品状态并恢复可用。
 
-需要指定一个已发布且带有完整附件的版本时，使用 `~/.local/bin/nyairo update --version v0.5.1`；要固定旧版可写 `--version v0.4.0` 或 `--version v0.2.0-rc3`。
+---
 
-### 已经设置了开机启动
+## 17 · 数据目录、备份与卸载
 
-只进入新目录，不会改变原来的后台服务。接入统一入口后，把自己服务里的 `ExecStart` 改为固定入口，例如：
+搞清楚每个文件夹里装的是什么、怎么停机打一份完整备份、换新电脑怎么迁数据，以及怎样按需干净卸载。
 
-```ini
-Environment=HERMES_HOME=/home/你的账号/.chiyo-v1
-ExecStart=/home/你的账号/.local/bin/nyairo gateway run
-```
+### 各个文件夹分别存什么
 
-把“你的账号”换成实际账号，保留自己原来的服务用户和其他设置。`WorkingDirectory` 使用一个一直存在的目录，例如 `/home/你的账号`；删除旧的、指向某个版本源码目录的 `PYTHONPATH` 设置，统一入口会设置正确路径。
-
-修改完成后，按你的服务是用户服务还是系统服务运行相应的 `systemctl daemon-reload` 或 `sudo systemctl daemon-reload`。每次更新前停止这项服务，更新成功后再启动同一项服务。独立 World / Supply 服务仍使用自己的固定路径。
-
-### Hermes 为什么不能另外更新
-
-rc9 的内置 Hermes 仍是 **0.21.0**，固定提交 `67807e64a66044db9e0a641d98c68a35c1760589`，加上 nyairo 的接线与修复。这里修好的是整包更新机制，并没有把新版 Hermes 的兼容性当成已经完成。
-
-已检查上游公开标签 `v2026.9.24`（Hermes 0.21.5）的源码差异。旧有补丁中有多处冲突、部分测试文件被移除，因此这个版本尚未进入 nyairo 发行。对它的检查是源码比较，不是运行验收。
-
-直接运行内置 `hermes update` 时，rc9 会提示使用整包更新入口并留下拒绝记录，不再按上游安装方式覆盖宿主。普通的独立 Hermes 安装仍使用上游原有更新方式。
-
-今后适配新版 Hermes 时，需要在隔离副本重做补丁、检查真实插件与命令、个人权限、Memory / Life / World / Supply、普通账号安装和升级，再发布新的 nyairo 版本。**你更新 nyairo 时，就会一起收到那一版配套 Hermes，不需要自己替换宿主。**
-
-下载的 SHA256 和清单用于检查传输和内容完整性；更新器信任这个 GitHub 仓库的发行者，它们不是独立的发布签名。
-
-## 10 数据保存、备份与恢复
-
-### 哪些目录分别保存什么
-
-| 位置 | 内容 | 更新时怎么处理 |
+| 路径 | 里面存的是什么 | 备份建议 |
 | --- | --- | --- |
-| nyairo 源码目录 | Hermes、插件源文件、组件、脚本、虚拟环境 | 新版本另建目录；虚拟环境可重建 |
-| HERMES_HOME | 模型和平台配置、人格、会话、日志、个人插件 | 完整备份并继续使用正确目录 |
-| HERMES_HOME/chiyo | 个人绑定、记忆、控制账本、Life 状态与请求回执 | 必须整体保留，不能只拷一个数据库 |
-| World/Body home | 独立世界与身体状态、数据库与审计 | 单独备份其完整数据根 |
-| Life Supply data root | Governance、Workspace、资源文档数据库 | 单独备份其完整数据根 |
+| `~/.nyairo` | 人设 `SOUL.md`、模型与平台配置、聊天会话、长期记忆 SQLite 库、生活状态与回执 | **核心个人数据，必须整目录备份** |
+| `~/.local/share/nyairo` | 各版本只读程序源码、配套 Hermes 与 Python 虚拟环境 | 无需备份，重装或升级可随时重建 |
+| `~/.local/state/nyairo` | 当前激活版本号与安装状态记录（`install.json`） | 重装时自动生成，可选备份 |
+| `%LOCALAPPDATA%\Programs\nyairo` | Windows 原生桌面客户端界面程序（仅 Windows） | 无需备份，重装安装包即可 |
+| `%LOCALAPPDATA%\nyairo` | Windows 桌面端本地指向配置（`config.json`）与界面运行日志（`desktop.log`） | 重装时保留可自动认回原实例 |
 
-服务地址、授权、身份属于自己的配置，不随公共源码发布。确认路径时不要输出全部 `.env` 来排错，以免把凭据贴到日志或公开 issue。
+注意：`~/.nyairo` 里包含你的 API Key、平台绑定凭证与全部私人对话，打出来的备份压缩包请妥善保存在你自己的私人硬盘里，不要上传到公开网盘或代码仓库。
 
-### 一份可执行的停机备份例子
+### 正确的停机备份方法
 
-引导安装用户先退出聊天和网关，再运行 `tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo`。下面的 `.chiyo-v1` 例子用于手动安装。
+因为底层使用的是 SQLite 数据库，**备份前请先关掉正在运行的聊天窗口、桌面端后台网关或 systemd 服务**。如果在程序还在持续往数据库写东西的时候直接单拷一个 `.db` 文件，很容易漏掉还没合并进主库的临时日志（WAL），导致恢复出来缺数据甚至损坏。
 
-先停止自己的进程或 systemd 服务，确认没有同目录写入者。以下只备份手册中的基础个人目录；如果还启用了 World 与 Supply，也必须分别备份它们的真实目录。
+确认没有后台进程在跑之后，执行整目录打包并锁紧文件权限：
 
 ```bash
-export HERMES_HOME="$HOME/.chiyo-v1"
-mkdir -p "$HOME/chiyo-backups"
-chmod 700 "$HOME/chiyo-backups"
-backup_file="$HOME/chiyo-backups/profile-$(date +%Y%m%d-%H%M%S).tar.gz"
-tar -czf "$backup_file" -C "$HOME" .chiyo-v1
-chmod 600 "$backup_file"
-tar -tzf "$backup_file" >/dev/null
+mkdir -p "$HOME/nyairo-backups"
+chmod 700 "$HOME/nyairo-backups"
+bkp="$HOME/nyairo-backups/nyairo-data-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf "$bkp" -C "$HOME" .nyairo
+chmod 600 "$bkp"
+tar -tzf "$bkp" >/dev/null && echo "备份包完整性检查通过：$bkp"
 ```
 
-备份中可能含密钥和私人聊天，存放在私有位置。归档能读不代表已经完成业务恢复验收；最好在独立恢复目录测试，不让恢复副本连接原机器人 token 或成为第二个写入者。
+### 现阶段换新电脑怎么迁数据
 
-不要在 SQLite 服务持续写入时只复制 `.db` 文件，可能漏掉未合并的日志或其他控制文件。基础方案采用停机后完整目录备份；在线备份需要专门的一致性方案，当前不提供未经验证的在线备份命令。
+「图形化一键无损搬家」还在我们的 `v1.0` 规划里（尚未实现）。现阶段如果你换了新电脑，按下面四步手动迁过去最稳妥：
 
-### 更换电脑
+1. 在**旧电脑**上彻底退出 nyairo 和网关进程，按上面的命令把 `~/.nyairo` 打包成 `.tar.gz`；
 
-在新设备重新安装同一或明确支持迁移的 nyairo 版本。旧设备停机后备份完整个人与服务目录，把备份私下转移到新设备。恢复到正确账号，重新核对绝对路径、文件权限、socket、Linux UID、模型配置和平台绑定，再启动一个接收进程。
+2. 在**新电脑**上先装好相同版本（`v0.5.1`）的 nyairo，先不要启动网关；
 
-Linux UID 和本机 socket 不会因为拷贝目录就自动适配。电脑间迁移不是只拷源码 ZIP，也不是把旧虚拟环境整目录复制过去。
+3. 通过 U 盘或局域网把备份包传到新电脑（WSL 环境），解压覆盖到新电脑的 `~/.nyairo`；
 
-## 11 遇到问题怎么办
+4. **检查路径差异**：如果新旧电脑的 Linux 用户名不一样（比如旧电脑叫 `alice`、新电脑叫 `bob`），打开 `~/.nyairo/chiyo/config.json` 和 `~/.nyairo/config.yaml` 看一眼，把里面写死了旧用户名绝对路径（如 `/home/alice/...`）的地方改成新用户名路径，最后再启动程序（千万不要两台电脑同时挂着同一个 Telegram Token 在线）。
 
-### 提示 Unknown command：命令没认出来
+### 如何干净卸载（保留记忆 vs 彻底清除）
 
-先确认自己找的是哪个机器人、使用哪个版本。试试按 [日常命令](https://nyairo.com/#cli-reference) 的格式输入；nyairo 的命令使用 `/chiyo_*` 名称。
+不想用了或者想重装排错时，可以根据「留不留回忆」分两种方式处理：
 
-旧 R16 版本存在下划线命令无法正确转交给插件的问题，R17 已修复；它不是用户输入错误。其他情况下，也可能是插件没加载、启动了另一个数据文件夹，或后台仍在运行旧版本。
+- **情况一：只卸载客户端程序，保留全部记忆与人设（推荐重装时用）**
+  
+    **Windows 桌面端**：直接在系统「设置 → 应用 → 已安装的应用」里卸载 **nyairo**（或运行 `%LOCALAPPDATA%\Programs\nyairo\unins000.exe`）。卸载器会自动清掉开机自启注册表项（避免开机报错）、停掉 WSL 里的网关并清掉窗口缓存，但**不会碰** WSL 里的个人数据目录，以后重装还能无缝接回。
 
-核对启动命令中的程序位置和 `HERMES_HOME`。后台运行时，还要核对后台服务使用的路径。仅把新文件下载到电脑，并不表示正在运行的程序已经换成新版本。
+    - **Linux / WSL 命令行**：停掉网关后，只删掉程序与命令入口即可：`rm -rf ~/.local/share/nyairo ~/.local/state/nyairo ~/.local/bin/nyairo`。
 
-### 提示没有绑定个人实例
+  
 
-说明它认出了命令，但还不知道这个私聊是不是你自己的。按 [Telegram 第二步](https://nyairo.com/#telegram) 核对个人绑定、所用数据文件夹和真实 ID，再重新启动连接程序。
+</li>
+<li><strong>情况二：连程序带所有聊天记忆、配置彻底清空（不可恢复，请先确认无需备份）</strong>
+  
 
-不要把允许用户改成“所有人”来绕过个人记忆绑定。连接机器人和允许使用私人记忆，是两步不同的设置。
+    1. 若装了 Windows 桌面端，先按上面步骤在系统应用列表里卸载桌面客户端，再删掉本地配置目录（PowerShell 执行 `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\nyairo"`）；
 
-### 感觉它没有记住
+    2. 若配过 Linux `systemd` 常驻服务，先执行 `sudo systemctl disable --now nyairo-gateway.service` 并删掉对应 unit 文件；
 
-先用 `/chiyo_status` 看记忆是否为 READY。测试时，先由你发一条文字事实，换新会话再问；不要在问题里把答案一起说出来。
+    3. 在 Linux / WSL 终端里删除程序与个人数据目录：
 
-确认两次启动使用同一个 `HERMES_HOME`，否则可能正在读另一套数据。当前图片、语音等多模态消息不会按这条文字入口形成长期记忆。
+  
 
-旧 rc4 不带参数输入 `/chiyo_memory` 时，可能给出错误的 `/memory` 帮助提示；rc5 已修复。在 Hermes 和机器人中，查看、纠正和删除这里的记忆，请使用 [日常命令](https://nyairo.com/#cli-reference) 中的 `/chiyo_memory`。
+</li>
+</ul>
 
-### 世界或资源文档显示不可用
+```bash
+rm -rf "$HOME/.nyairo" "$HOME/.local/share/nyairo" "$HOME/.local/state/nyairo" "$HOME/.local/bin/nyairo"
+```
 
-先确认额外服务还在运行，配置里填的是连接文件的完整位置。世界服务与聊天程序要由同一个 Linux 账号启动；资源文档还需要单独批准权限。
+---
 
-资源服务报 PermissionError 时，查看 [额外功能里的已知连接问题](https://nyairo.com/#modules)。保存请求没有确认成功时，可用相同标题与正文重试，再按返回的文档 ID 读取核对。聊天里说“保存好了”，还不能代替实际读取结果。
+## 18 · 常见问题排查
 
-### 模型 401 或 Telegram 409
+整理了平时装环境和日常聊天最容易碰到的几个小状况，按症状对号入座就能解决。
 
-**401** 通常表示模型账号认证失败。核对密钥、服务地址和模型名称，并检查自己的账号是否还能使用。
+### 敲 nyairo 提示找不到命令 / WSL 打不开
 
-**Telegram 409** 先检查同一个 token 是否被另一个 Hermes、nyairo 或 Native 程序同时使用。一个机器人同一时间只交给一个收消息的程序。
+- **刚装完敲 `nyairo` 提示 `command not found`**：刚写入环境变量时当前终端窗口还没刷新。关掉终端重开一个窗口，或者执行一句 `export PATH="$HOME/.local/bin:$PATH"` 就有了。
 
-记录具体错误再排查。普通聊天无法回复，和额外功能没开启，处理方式不同。
+- **Windows 桌面端提示未检测到 WSL 2**：以管理员身份打开 PowerShell 运行 `wsl --install -d Ubuntu`，重启电脑后先从开始菜单点开一次 **Ubuntu** 设好账号密码，再重开桌面端即可。
 
-### 怎样让机器人一直在线
+### 发消息报 401 / 连接超时无法回复
 
-先用前台窗口把聊天和机器人跑通。想长期在线，需要让系统帮你启动和看管程序；电脑关机、断网或睡眠时，它仍然会离线。
+- **报 401 Unauthorized**：说明 API Key 没填对或已经失效。检查复制时前后是不是多带了空格、服务商选没选错（比如拿 DeepSeek 的 Key 填进了 OpenAI 官方地址），以及账户里还有没有余额。在桌面端「设置」页或终端运行 `nyairo setup model` 重填一次即可。
 
-Linux 通常可以用 **systemd**，它是系统自带的后台程序管理工具。下面给管理员一份参考配置；第一版没有跨所有电脑的一键常驻安装器。
+- **一直转圈超时**：如果你选的是境外模型接口（如 OpenAI / Claude），确认你所在的网络环境（含 WSL 内部）能够正常访问对应接口地址。
 
-### Linux 后台运行参考
+### 觉得她没记住之前聊过的事
 
-把下面模板中的账号、程序文件夹和数据文件夹换成自己的。模板是给自己的新服务用的；不要直接覆盖服务器上别人的服务：
+1. 先在对话里发一句 `/chiyo_status`，看看 **Memory** 一栏是不是 `READY`；
+
+2. 再发一句 `/chiyo_memory list`，看看刚才聊的事实有没有沉淀进列表里（随口寒暄不会每句都存，明确的个人偏好、经历与约定才会入库）；
+
+3. 如果你用的是桌面端且刚刚点了「新对话」：注意开启全新会话若距离上次说话已超过 15 分钟，未封存的旧经历段默认不会自动注入新会话（详见 [桌面端记忆召回窗口说明](https://nyairo.com/#dg-memory-boundary)），平时建议顺着同一个会话继续聊。
+
+### Telegram 报 409 / QQ 不回话 / 怎么挂后台常驻
+
+- **Telegram 报 `409 Conflict: terminated by other getUpdates request`**：说明同一个机器人 Token 被两个网关进程同时连上了（比如桌面端后台跑着一个，你又在终端敲了一次 `nyairo gateway run`）。停掉多余的那个窗口立刻恢复正常。
+
+- **QQ 机器人显示已连接，但发私聊没反应**：检查两点——一是配置文件里的键名必须叫 `qqbot`（写成 `qq` 会被忽略）；二是必须在桌面端「谁可以跟 TA 说话」或 `chiyo/config.json` 的 `gateway_bindings.qqbot` 里勾选放行你的私聊会话（详见 [QQ 接入避坑点](https://nyairo.com/#qqbot-setup)）。若仍无法定位，可在桌面端「设置 → 环境与诊断」一键导出已脱敏的诊断包排查。
+
+- **在 Linux 服务器上开机自启常驻**：如果你把 nyairo 部署在常开的 Linux 主机上，可以写一个 `systemd` 服务文件 `/etc/systemd/system/nyairo-gateway.service`（把里面的 `你的用户名` 换成实际 Linux 账号名）：
 
 ```ini
 [Unit]
-Description=CHIYO Hermes gateway
+Description=nyairo messaging gateway
 After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=simple
-User=你的Linux运行账号
-WorkingDirectory=/home/你的账号/apps/chiyo-v0.1
-Environment=HERMES_HOME=/home/你的账号/.chiyo-v1
-ExecStart=/home/你的账号/.local/bin/nyairo gateway run
+User=你的用户名
+WorkingDirectory=/home/你的用户名
+Environment=HERMES_HOME=/home/你的用户名/.nyairo
+ExecStart=/home/你的用户名/.local/bin/nyairo gateway run
 Restart=on-failure
 RestartSec=5
 
@@ -1013,196 +1076,274 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-保存为 `/etc/systemd/system/nyairo-gateway.service`。Ubuntu / Debian 可以用 `sudo nano /etc/systemd/system/nyairo-gateway.service` 打开编辑器。核对路径、运行账号和私有配置的读取权限后，执行：
+保存后执行 `sudo systemctl daemon-reload && sudo systemctl enable --now nyairo-gateway.service` 就能常驻后台运行了。
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now nyairo-gateway.service
-sudo systemctl status nyairo-gateway.service
-```
+---
 
-最后一行查看程序是否正在运行。启用了世界或资源服务，还需要分别设置它们的启动和先后顺序，单个网关模板不会自动完成所有服务的配置。
+## 19 · 已完成与未完成清单
 
-升级程序后，后台配置里的启动位置也要改成新版本。Windows 中的 Ubuntu 是否支持并开启 systemd，取决于自己的 WSL 设置；即使 Linux 服务能自启，也不代表 Windows 登录后已经会自动启动 Ubuntu。这份模板没有在每一种系统上完成安装验收。
+不画饼、不掺水：一页看清当前 v0.5.1 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。
 
-### 关闭所有附加功能后，忘记刚才的话
+### 已经跑通、直接可用的功能（v0.5.1）
 
-旧 rc4 有一个已复现的问题，rc5 已修复：记忆、生活与世界身体都关闭时，仍可能使用 nyairo 的专用上下文处理，只把当前问题交给模型，漏掉前几轮短期对话。原始聊天记录没有因此删除；本文推荐的 `--memory --life --allow-local-owner` 配置未触发这次复现。
+- **本地长期记忆闭环**：跨会话自动沉淀重要事实进本机 SQLite，支持 `/chiyo_memory list` 查看、`correct` 纠错与 `delete` 停止召回。
 
-如果你确实只使用 Hermes 普通聊天，先备份个人设置，并确认这些附加功能全部关闭。然后在个人 `config.yaml` 的 `context` 下面删掉 `engine: chiyo` 这一行，保留其他设置，再重新启动自己的程序。
+- **连续出行与室内空间**：支持多段路网寻路、真实步行计时、半路暂停与断点续走；可在住居房间（卧室、客厅、厨房等）点选走动并开关灯具。
 
-如果启用了记忆，或者记忆服务出了故障，就按上面的记忆排错步骤处理；不要用这个办法绕过纠正、删除记忆后的保护。rc5 会在全部附加模块关闭时恢复 Hermes 的普通上下文；上述临时处理仅供旧版排错。
+- **默认示例世界与离线编辑器**：随包内置「凪浦」示例世界，提供早晚街景变化与路边风物阅读，自带浏览器离线地图编辑器可改房间和家具。
 
+- **身体基础节律**：包含睡眠休息与饮水、简餐补给的时间节律反馈。
 
-## 12 文档站、验收与公开发布
+- **相册、双人共读与文稿对比**：支持旅途相册查看、导入读物同步记录页码批注，以及文稿多版本历史快照与差异比对。
 
-### 文档站需要的数据
+- **多端入口**：提供免管理员 Windows 原生桌面端（`nyairo-0.6.0-setup.exe`）、Linux / WSL 命令行，支持手机微信扫码直连与 Telegram 机器人绑定。
 
-公开文档需要版本、功能及状态、安装步骤、配置示例、命令、测试结果、已知问题、升级和备份方法。它不需要模型密钥、机器人 token、私人聊天或真实数据库。
+- **平滑升级与回滚**：支持 `nyairo update` 整包更新与 `--rollback` 保留新聊天记录回退。
 
-本网站为已公开的静态文档站，内容文件是 `docs-data.js`。搜索在浏览器本地完成，主题偏好存放在访问者浏览器中；没有账号系统或后端数据库。Markdown 手册与网页正文应同步维护，更新后重新发布网页文件即可。
+### 需要手动开启或配置的功能
 
-### 当前验收证据怎么理解
+- **大模型 API 密钥**：框架不捆绑售卖算力，需填入你自己的模型 API Key 才能对话。
 
-R16 的完整运行数字目前无法独立核验：旧证据条目复制了 R17 的数量、耗时和日志摘要，已撤下重复数字。现有历史记录与本次复测分开列出，不把一条记录算成两次通过。
+- **后台无人值守自主活动**：默认关闭（避免后台悄悄跑流量费），需要体验「你不找她时她自己散步写随笔」可在设置或命令行加上显式开关并设好预算上限（见 [共读、文稿、相册与节律](https://nyairo.com/#daily-companions)）。
 
-真实体验暴露命令路由遗漏后，R17 增加真实入口回归与旧代码负对照，完整默认 Python 套件为 3,718 文件、45,071 通过、0 失败、440 条件跳过，关闭自动重试。千代双 Python 组件与 36 项宿主边界检查通过；17 段 Bash 示例语法检查通过，会话 key 示例实际执行通过。四个命令使用真实插件发现和完整网关消息路径检查，并验证未绑定个人 DM 被拒绝。独立体验网关的进程内加载与 Telegram 轮询就绪已核对；作者已确认修复后的自然 Telegram status 回复正常；几天持续使用仍单独待验收。
+- **本地相机拍照生图**：需用户自行在本机启动 Stable Diffusion WebUI（`127.0.0.1:7860`）与本地提示词转换服务（`127.0.0.1:18190`），未启动时如实提示不可用。
 
-长期自然使用、QQ/微信/飞书真实账号、macOS、Windows 原生、Docker、桌面端与 JavaScript 全套仍单独列为待覆盖。
+- **`/chiyo_consider` 独立推演**：默认关闭，按 [独立推演与底层服务](https://nyairo.com/#modules) 修改两行配置即可开启。
 
-### 公开后仍需验证什么
+- **QQ 官方机器人私聊**：除填写 AppID / AppSecret 外，需在会话白名单中放行对应的 `qqbot` 私聊标识（见 [QQ 接入说明](https://nyairo.com/#qqbot-setup)）。
 
-公开仓库为 https://github.com/L1AN929/nyairo ，当前公开发行标签 `v0.5.1`（更早的 v0.4.0、v0.3.0、v0.2.0-rc3 / rc9 / rc8 / rc7 / rc6 仍可下载）；源码与下载以仓库及 Releases 页面为准。作者于 2026-10-04 确认 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；Hermes 及第三方继续保留原许可证。公开不等于所有平台已验收；另一台电脑的完整安装、长期自然使用及尚未覆盖的平台仍需独立验证。
+- **官网「Web 体验」按钮**：顶栏右上角的在线体验站是独立的公共演示环境，跟你自己电脑本地装的实例完全隔离、互不通数据。
 
-暂未完成的安装方式、自主活动或自助授权向导，应作为待办写入路线，而不是写成已有功能。本次网站维护同步了本页列出的定向复核结果；没有重新执行运行时全量测试，不把历史验收数字作为本次网站检查结果。
+### 尚未实现的功能与当前限制
 
+- **随机生成专属虚拟世界（尚未实现）**：目前默认仍是固定的示例小镇模板；按随机种子生成千人千面的街区路网与住居格局正在规划中（见 [未来规划](https://nyairo.com/#roadmap)）。
 
-### 2026-10-04 公开候选复核
+- **到点主动发消息 / 打电话（尚未实现）**：目前还不会在约定的现实钟点主动给你发微信或响铃提醒。
 
-本轮从公开 `v0.1.0-rc4` 标签和 Release ZIP 分别完成普通账号依赖安装、独立 profile 创建、Hermes 版本与帮助入口检查；两者的 12,275 个清单文件均匹配。环境为 Windows 下的 WSL Ubuntu、Python 3.12.3；这不是 Windows 原生或所有 Linux 发行版的安装认证。
+- **完整的饥饿、营养与复杂情绪系统（尚未实现）**：当前的休息与补给只是轻量日常节律，不是生存养成数值游戏。
 
-本轮选定的组件、宿主边界与上下文检查合计为 517 通过、1 失败、1 条件跳过。Supply 失败项使用固定 UID 65534，恰好与本轮测试账号相同；换不同 UID 只复跑该项后通过，归因于测试夹具身份碰撞。首轮 `scripts/test.py` 退出 1，不能写成全部通过。Life 装配与 Alpha 检查单独记录。
+- **跨设备一键图形化搬家（尚未实现）**：换电脑目前仍需手动打包拷贝 `~/.nyairo` 目录。
 
-复核同时确认了关闭全部模块时的上下文问题、记忆帮助命令前缀错误和 Supply 默认双身份 socket 连接问题，使用与排错章节已说明。前两项已在 rc5 修复，Supply 连接安排仍需单独配置；已声明延期的自主活动等不计作本版缺陷。本轮没有重跑 45,071 项完整宿主套件，也没有重新验证真实模型质量、平台收发或多日自然使用。
+- **记忆物理粉碎**：`/chiyo_memory delete` 的作用是停止后续检索召回，原始会话日志与历史备份仍保留在你的本机磁盘上。
 
-GitHub Pages 已有网站构建与部署记录；功能 CI 模板仍放在 `ci/templates/`，尚未启用。网站部署成功不代表运行时功能测试通过。旧候选包中的安装与测试说明若仍写“仓库未公开”或“功能 CI 已运行”，请以本站和实际仓库状态为准；已发布标签与 ZIP 保留原字节。
+- **macOS 与 Docker 整包方案**：尚未完成独立打包与全流程验证。
 
-## 13 隐私与数据管理
+### 发行包来源与验证说明
 
-### 哪些数据在自己的机器上
+当前公开测试版源码与校验压缩包均发布在 [GitHub Releases v0.5.1](https://github.com/L1AN929/nyairo/releases/tag/v0.5.1)，Windows 桌面安装器由官网同源分发并附 SHA256 校验文件。历史版本（`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 等）保留原样供对比或回退。各版本具体跑过哪些测试、没跑哪些测试，详见 [测试范围与发行说明](https://nyairo.com/#testing)。
 
-个人 profile 中可能有模型密钥、平台 token、聊天会话、记忆证据、理解与召回索引、纠正与停止召回记录、生活审计以及运行日志。World 与 Life Supply 使用各自的数据目录；资源文档不在记忆删除命令的管理范围里。
+---
 
-第一版没有自带数据库加密或登录式管理后台。文件访问取决于操作系统账号、目录权限及 Hermes 工具权限；本地管理员、获得同账号访问权的人和有文件能力的工具可能读取这些文件。身份绑定限制个人模块的写入来源，不是整个电脑的安全沙箱。
+## 20 · 未来规划：我们在做与想做的事
 
-### 哪些内容会离开自己的机器
+当前公开测试版已推进至 v0.5.1（附带默认示例世界与原生 Windows 桌面端）。这里如实写清接下来想做的方向——特别是为每个人随机生成不同的专属世界与跨设备无损搬家。
 
-使用远程模型时，当前问题、组装后的历史与被召回的记忆，以及启用模块提供的上下文，会按实际 Hermes 配置发送给所选模型服务。启用 Shadow 认知后，提交的候选及所需上下文也可能触发额外模型调用。平台消息由 Telegram 等平台处理；用户主动启用的 Hermes 工具、MCP、技能和网络功能还可能访问相应服务。
+### 做这个项目的初衷
 
-“自部署”不等于“聊天永远不会出本机”。需要全部留在本机时，应另行验证本地模型、关闭外部平台及网络工具，并检查实际配置；当前体验号使用联网聊天链路。
+市面上不缺聪明的问答框，缺的是一个关掉窗口之后时间还在走、能长久住下来的地方。我们做 nyairo，一直守着几条很朴素的原则：
 
-文档网站不接入聊天数据库、模型或机器人。本站不加入统计脚本和外部字体请求，搜索在浏览器中完成；主题偏好仅保存于访问者的 localStorage。公开托管服务仍可能记录普通访问日志，不能把静态网站解释为绝对没有任何网络记录。
+- **时间真的在流逝**：你忙工作半天没找她，她那边的昼夜也在正常交替，也有自己的零碎小事。
 
-### 停止召回和彻底擦除
+- **空间真的有距离**：出门去书店要在路上走几分钟，半路问起来就老老实实说还在路上，不搞一秒瞬移。
 
-本版的记忆 forget 是停止后续召回，并排除受影响的旧聊天上下文；原始聊天与审计证据仍保留。correct 使用新内容替代旧事实供后续使用。两者都不是磁盘安全擦除，不会删除资源文档、备份、模型供应商或消息平台保存的数据。
+- **世界不该千篇一律**：每个人的性格与喜好都不一样，她生活的舞台也不该永远死定成同一张默认地图。
 
-如需停用整个个人实例，可停止该实例全部写入进程，确认个人与服务目录的绝对路径，私下保存需要的备份，再由管理员处理这些目录及其他备份。当前没有承诺“一条命令彻底抹除全部副本”的工具；共享服务和其他实例不能一起删除。
+- **记忆留在自己手里**：所有聊天与长期记忆都存在你自己电脑的本地数据库里，不绑死任何一家商业云平台。
 
-### 发布代码和反馈问题
+### 规划方向 · 随机生成专属世界（尚未实现）
 
-公开仓库只包含程序、模板、文档、测试和必要的上游源码，不上传生产 profile、机器人 token、数据库、运行日志、SSH 私钥或整份服务器备份。环境变量名和示例是假数据；真实值只在个人私有配置中填写。
+> **当前状态：规划中，尚未实现**
+> 目前公开测试版（`v0.5.1`）默认随包附带一份固定示例世界（「凪浦」街区与住居平面），支持通过离线地图编辑器手动改墙面、门窗和家具；**随机生成虚拟世界尚未实现**，以下是接下来的设计方向。
 
-提交 issue 时只提供版本、操作系统、命令和脱敏错误。不要直接附完整 .env、profile、日志或私人对话。截图也要检查用户名、聊天 ID、密钥、网址参数及二维码。
+我们觉得虚拟世界没必要死定一个模板——既然每个人都是独一无二的，第一次相遇时推门看到的那片街区，也应该是专属于你们的：
 
-`.gitignore` 不能删除已经提交到 Git 历史中的秘密。第一版发布准备采用从白名单源码创建的新历史，避免继承开发目录的历史；若凭据曾公开，应先在供应商处撤销或轮换，不能只删一个文件。参见 [GitHub 敏感数据处理说明](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)。
+- **按随机种子生成不同世界**：后续计划支持在初始化时随机生成不同的地理风貌、街道连通关系、街角店铺组合以及住居房间格局，不再让所有人住进一模一样的预设小镇。
 
-## 14 开源发行与维护
+- **保持真实的空间与时间规则**：哪怕地图是随机生成的，房间门户衔接、真实步行耗时、早晚光景变化和店铺营业作息依然严格按路网运转，不会退化成纯文字脑补。
 
-### 公开仓库应该包含什么
+- **既能重随，也能亲手改造**：随机生成出来之后，如果不合眼缘可以重新生成；住进去之后，照样能用编辑器随时添一张书桌、改一扇门，让这片天地慢慢长出生活痕迹。
 
-根目录给出 README、LICENSE、NOTICE、安装教程、功能与已知问题；vendor/hermes 保留上游许可证和固定版本；patches 保存宿主改动与可核对的前后哈希；组件、插件及测试各自可定位。公开源码不依赖作者机器上的生产目录。
+### 远期构想 · 跨设备无损搬家（v1.0，尚未实现）
 
-建议把完整教程网站放在 website/，保留独立 Markdown 手册。文档站不需要部署聊天服务，源码与文档可以在同一仓库维护，静态网站可以单独托管。
+当每个人都有了独一份的世界和攒了很久的回忆之后，换设备绝不该意味着「格式化重来」：
 
-### 版本、下载与兼容性
+- **连人带世界一键打包**：以后换新电脑、换操作系统，可以把你那份随机生成的世界地图、房间布置、长期记忆、相册明信片与共读批注一键导出，到新机器上原样安家。
 
-发行记录应同时写明 nyairo 版本、验收修订号、Hermes 版本和固定提交、Python 版本、安装方式、数据库迁移说明、SHA-256，以及已知问题。标签固定发行源码；开发分支不作为普通用户直接升级渠道。
+- **底层大模型自由换代**：记忆、世界状态与说话分寸独立于具体模型之外；明年出了更聪明的大模型，换上新引擎，她依然是记得过往点滴的那个她。
 
-公开发行准备历经 R18 许可证与教程、R19 文档定稿和 R20 发布权限说明；运行与测试源码沿用已验收的 R17。历史完整默认 Python 套件为 45,071 通过、0 失败、440 条件跳过，最终 ZIP 冷安装和隐私检查另有发行证据。R20 将 CI 模板保存在 `ci/templates/`，未启用自动 Actions，不能据此宣称 GitHub CI 已通过。这也不是“所有平台都支持”的稳定性承诺。后续更新应发布整套匹配的 nyairo 与 Hermes；不要先追上游最新版本、再假设插件会自动兼容。
+### 走过的路 · 本地记忆底座 (v0.1)
 
-### 许可证与署名
+项目起步的第一版（`v0.1.0-rc4` 至 `rc9`），先把最底层的地基打牢：
 
-Hermes 自身继续保留 MIT；候选包保留 nyairo 已有 Apache-2.0 根许可证。作者于 2026-10-04 确认其有权授权的 nyairo 新增代码（包括 Life Supply）使用 Apache-2.0；历史自研 MIT 文本继续保留作来源记录，第三方仍适用各自许可。公开仓库并不自动等于具备完整开源授权，参见 [GitHub 仓库许可证说明](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)。
+- 把长期记忆存进本机 SQLite，支持随时查看、纠错和停止召回；
 
-模型服务、消息平台、第三方依赖和角色素材分别有自己的条款或来源；源码许可证不等于赠送这些服务的账号、token、商标或私人关系数据。
+- 把程序目录与个人数据分离，做到关机重启不断线、命令升级不丢数据。
 
-### 发布操作的顺序
+### 走过的路 · 空间雏形与真实步行 (v0.2)
 
-1. 确认新增代码及组件的许可证与来源，保留上游文本和修改说明。
-2. 从已验收白名单导出源码，检查文件、隐私和依赖；从干净历史开始。
-3. 把教程网站与贡献、问题反馈说明放到公开目录，扫描文档和图片中的私人信息。
-4. 用最终版本执行安装、完整宿主测试、组件及真实网关入口回归；核对实际运行文件与测试输入。
-5. 创建仓库、提交发行标签、上传可校验的源码与安装包；填上真实下载和仓库链接。
-6. 对公开地址再做一次克隆安装、链接检查与文档站发布检查，记录实际结果。
+在 `v0.2` 阶段，第一次给她搭起了能走动的房间与街道：
 
-公开下载以 https://github.com/L1AN929/nyairo/releases 为准；已发布 `v0.1.0-rc4` 标签与资产保持原样。R18–R20 的许可证、教程与发布材料修订不代表重新运行了 R17 全量测试；公开地址克隆安装、CI 和长期自然使用的结果必须分别记录。
+- 随包放入单机离线地图编辑器与多套示例模板；
 
-### 怎样更新这个教程网站
+- 接通按路网距离计时的移动工具，并打通手机微信私聊。
 
-这个网站是几份网页文件，内容更新后交给 GitHub Pages 发布。它只展示公开教程，不连接聊天数据库，也不公开私人机器人。
+### 走过的路 · 连续日常与桌面端 (v0.3 – v0.5.1)
 
-1. 在 `main` 分支的 `website/` 文件夹修改网站。正文放在 `docs-data.js`，Markdown 手册也同步修改。
-2. 把更新后的网页文件放到 `gh-pages` 分支的最外层；不要再套一层 `website` 文件夹。**只改 main，线上网站不会自动跟着更新。**
-3. 保留 `index.html`、`docs-data.js`、`app.js`、`style.css`、`.nojekyll` 和 `CNAME`。CNAME 里面只写域名 `nyairo.com`，写成别的域名会让线上站点失效；发布分支的 LICENSE 也保留。
-4. 改了正文、脚本或样式，同时更新 index.html 里资源地址的 `?v=` 版本号，让浏览器重新取到新文件。
-5. 提交发布分支后，在 GitHub 的 Actions 页面等 **pages build and deployment** 完成。成功后打开 [文档网站](https://nyairo.com/)，实际检查首页、搜索、复制按钮和文档链接；手机上也检查导航。
+从 `v0.3.0` 到现在的 `v0.5.1`，一步步把空间动作补成了连贯的起居日常：
 
-这叫“发布教程网站”。让聊天机器人长期开机，是另一个设置，按 [遇到问题怎么办](https://nyairo.com/#troubleshooting) 中的后台运行说明处理。更多网站托管细节见 [GitHub Pages 官方说明](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site)。
+- 实现多段连贯寻路、半路暂停续走、多任务挂起恢复与跨天街区见闻；
 
+- 补上休息与饮水饮食节律、街区早晚变化、相册共读与文稿版本对比；
 
-## 15 贡献、反馈与测试规则
+- 带来免管理员一键部署的原生 Windows 桌面客户端。还没做完的部分（随机世界、主动提醒、完整营养曲线与一键搬家），我们会做好一件再如实勾选一件。
 
-### 普通功能问题怎么报告
+---
 
-报告 nyairo 修订号、Hermes 版本、操作系统、Python、安装方式、所选入口，以及可重复的最短步骤。写明实际结果和预期结果，附脱敏的错误行。机器人显示名不能区分实例，应在私下确认正确入口后报告版本；不要在公共 issue 暴露自己的私人聊天 ID。
+## 21 · 隐私与数据边界
 
-### 安全问题怎么报告
+坦诚说明哪些数据留在你的电脑上、哪些内容在对话时会发给模型接口，以及「删除记忆」到底做了什么。
 
-涉及凭据泄漏、越权读取、跨身份记忆写入或私人数据披露的问题，先停止继续公开相关信息。正式仓库建立后应启用并公布私下报告渠道；当前尚没有公开的安全邮箱或已启用的 GitHub 私密漏洞报告入口，不编造联系方式。若某个凭据已泄漏，由持有人在对应平台撤销，再单独修复代码或公开历史。
+### 哪些数据留在你自己的电脑里
 
-### 如何贡献代码
+你的模型 API Key、微信 / Telegram 绑定凭证、完整聊天记录、SQLite 长期记忆库、生活状态账本以及相册文稿，全部存放在你本机的个人目录（默认为 `~/.nyairo`）下。nyairo 官方没有集中式云端后台，不会也无法收集你的私人聊天数据库。
 
-先阅读对应目录的 AGENTS.md 与组件说明。将改动限制在明确的功能或缺陷，保持 owner 边界；通用 Hermes 扩展使用通用钩子，不把个人身份硬编码进上游核心。新的示例和测试只用假身份、独立临时目录及隔离存储。
+**本机权限提醒**：当前版本没有对本地数据库做透明磁盘加密，数据安全依赖你电脑自身的操作系统账号权限。拥有同一台电脑管理员（root）权限的人或能读取你用户目录的本地软件，理论上都能读到这些文件，请保管好自己的设备与备份压缩包。
 
-提交 PR 时说明具体触发条件、修复后的行为、实际测试与剩余限制。不同平台的测试必须分别报告，不能因为 Linux 通过便把 Windows 原生或 macOS 标成已支持。
+### 哪些内容会经过网络发送出去
 
-### 这次命令缺陷如何防止复发
+「本地部署」不等于「完全不联网」。日常使用中会产生网络通信的环节只有你主动配好的这几处：
 
-R16 的直接 handler 与组件测试没有验证 Telegram 命令解析和插件名称匹配。R17 同时覆盖精确下划线名称、旧连字符别名回退、名称冲突优先级、真实插件注册、完整网关消息路径和未绑定个人 DM 的拒绝；用户重发 status 已确认自然入口可用。
+- **你选择的大模型服务商**：每次对话（或触发后台活动、`/chiyo_consider` 分析）时，当前输入、近期对话上下文以及被检索出来的相关记忆片段，会发往你填写的模型 API 地址用来生成回复。如果你需要数据 100% 不出本机，需要自行配置本机离线推理模型并关闭外部聊天平台。
 
-以后新增用户入口，测试应从 MessageEvent 或真实平台消息进入，经过实际路由到最终 handler，验证响应与副作用；直接调函数仅是其中一层。回归测试还应在旧行为下失败，才能说明它真的能挡住同一个缺陷。
+- **消息平台（可选）**：如果你接入了微信或 Telegram，你和她收发的消息自然会经过对应平台的通信链路。
 
-### 自动化结果与长时间使用
+- **本教程网站（nyairo.com）**：纯静态网页，搜索在浏览器本地运行，亮暗主题偏好只存在浏览器 `localStorage` 里，不连接你的本地实例。
 
-随包 CI 模板覆盖双 Python 千代组件及完整宿主选择，保存在 ci/templates。功能 CI 模板尚未启用；已有 GitHub Pages 网站部署运行，不能把它记作组件或宿主功能 CI 通过。维护者取得 workflow 授权并审查模板后，才可复制到 .github/workflows 启用；还应增加普通账号冷安装、最终包清单与隐私检查作业，记录首次实际运行结果。
+### 「停止召回」与彻底清理的区别
 
-长期体验关注跨会话记忆、纠正与 forget、重启连续性、文档保存、Shadow 费用及超时、平台断线重连、重复入站与错误恢复。遇到异常保留脱敏时间和步骤；不要用一次 status READY 代替几天业务体验。
+- **`/chiyo_memory delete` 做了什么**：它把指定记忆标记为停用，并在组装后续对话上下文时过滤掉相关旧片段，让模型以后不再提起这件事；同时默认限制了模型直接调命令行翻读历史日志文件的权限。
 
-## 16 第一版功能与已知问题
+- **它没做什么**：它**不是磁盘粉碎机**——为了排错与回溯，原始会话记录、审计回执以及你之前手动打过的备份包里仍然留有当时的文字，模型服务商或微信 / Telegram 端侧的历史消息也不会被这条命令远程撤回。
 
-### 当前可以使用
+- **如何彻底清空整套本地数据**：先停掉所有正在运行的 nyairo 与网关进程，确认不需要任何回忆后，手动删除 `~/.nyairo` 目录及你自己保存过的备份归档即可。
 
-Hermes 命令行和 Telegram 个人入口；千代长期记忆查看、纠正与停止召回；生活事件及状态连续性；只读世界身体观察；正式授权的 Workspace 资源保存；显式触发的 Shadow 判断。独立体验号由管理员完整装配，普通自部署仍需要按模块章节配置额外服务。
+### 反馈问题时如何保护个人隐私
 
-### 当前需要管理员装配
+在 GitHub 提交 Issue 或在社区群里贴报错截图前，请先扫一眼有没有带出敏感信息：
 
-World/Body 的同账号 socket、Life Supply 的 operator/service 权限与有限授权，以及跨服务运行目录、启动顺序和持久化。通用安装脚本安装依赖，不会自动替用户创建所有权限和服务；全模块自助安装向导还未交付。
+- 不要直接贴完整的 `.env`、`config.yaml` 或整包 `~/.nyairo` 文件；
 
-### 当前没有交付
+- 截掉或打码 API Key、Telegram Bot Token、个人数字 Chat ID、微信绑定二维码以及你的真实系统用户名。万一不慎把密钥发到了公开页面，第一时间去对应平台后台**吊销并换新密钥**，光删帖子是没用的。
 
-自主执行生活活动、主动 Contact、N8 正式撤销接口、Open Inquiry 正式准入、网页聊天、原生 Windows 安装器、官方完整容器镜像和 macOS 全流程验收。认知调用数为 0 可以只是尚未提交考虑请求，Shadow 判断也不会驱动真实动作。
+---
 
-### 第一版质量核查
+## 22 · 测试范围与发行说明
 
-第一版重点核查已经交付的安装、命令、记忆与状态行为。2026-10-04 已确认的上下文、命令提示与 Supply 连接问题，详见“常见故障与持续运行”和模块章节；普通账号公开标签与 ZIP 安装、选定测试结果，详见“文档站、验收与公开发布”。
+说明每个公开版本发布前做过哪些真实检查、哪些场景还没有测过，不拿单元测试数量冒充全场景稳定性保证。
 
-本次网站修订更新使用说明和已知问题，未修改运行时代码；有意延期的功能不作为第一版缺陷。
+### 为什么专门写这一页
 
+很多开源项目喜欢在首页挂一个漂亮的测试通过徽章，让读者误以为所有系统、所有极端情况都已经万无一失。nyairo 目前处于 `v0.x` 公开测试阶段，我们更愿意把「测了什么」和「没测什么」摊开来讲清楚，方便你决定怎么用它。
 
-## 15 rc5 隐私修复与自定义
+### 目前已覆盖的自动化与实机检查
 
-首次安装请选 rc5。旧 rc4 标签和 ZIP 保持原样，不会因为网站更新而自动获得修复。
+- **核心机制与组件测试**：记忆读写与纠错边界、多段路网寻路、暂停恢复不重走、请求预算上限、世界早晚变化与身体节律、源码内部地址脱敏等核心模块均有对应的离线自动化回归测试（如 `v0.4` 世界套件 263 项全过、`v0.5.1` 分段验证与新增脱敏测试全过）。
 
-新建实例使用中性人设，不带作者的私人身份、关系或历史。打开自己数据目录中的 `SOUL.md`，写入你希望的名字、说话方式和边界；程序不会替换已有的人设。
+- **发行包完整性校验**：每次发布的 GitHub Release ZIP 均附带 `MANIFEST.json` 清单与 `.sha256` 哈希校验，确保安装落盘的每一个脚本与组件字节与打包时完全一致。
 
-安装命令里的 `--allow-local-owner` 是你主动允许当前 Linux 账号使用个人模块；不加它，本地入口也不会自动获得权限。Telegram 还需要按教程绑定自己的私聊，不能用平台名称代替授权。
+- **Windows 桌面端与官网实机核验**：`nyairo-0.6.0-setup.exe` 安装包、桌面端各功能视图（总览、流式对话、地图、文稿版本对比）及官网桌面/移动端交互均在本机环境实测核对通过。
 
-启用记忆时，模型工具按能力授权：联网检索和待办、追问这类无副作用工具可用，终端、读文件、浏览器、委派等能读取本地状态或执行代码的工具仍被拦截，避免读回已经停止召回的聊天。`/chiyo_*` 命令和普通聊天仍保留。若你明确需要完整 Hermes 工具，可以在自己 `chiyo/config.json` 中设置 `"memory_tool_policy": "unrestricted"` 并重启；这样就不能再承诺工具不会读回原始历史。忘记不是擦除备份，也不是隔离本地管理员。
+### 明确尚未覆盖的范围
 
-已有用户先备份自己的数据目录，安装新程序后更新插件与授权设置，不要删除原目录或重建人设。具体步骤、Native HTTP 的访问口令、本次测试与尚存限制见 [隐私修复与升级](https://github.com/L1AN929/nyairo/blob/v0.2.0-rc3/PRIVACY_REVIEW.md)。
+- **未做 `v0.5.1` 连续 24 小时以上真实大模型挂机长测**：自动化测试主要使用确定性替身与受控时钟来验证逻辑正确性，不能代替真实商业大模型跑上好几天后的自然表现验收。
 
+- **未启用云端自动 GitHub Actions 功能门禁**：仓库 `ci/templates/` 下存放的是供参考的测试工作流模板，尚未在 GitHub 云端开启每次提交自动跑全量测试，因此我们不挂虚假的 CI Passing 徽章。
 
-## 当前版本说明补充（2026-10-13）
+- **跨平台覆盖有限**：主要验证环境集中在 Ubuntu / Debian Linux 与 Windows 10/11（WSL 2 Ubuntu）；macOS、其他小众 Linux 发行版、Docker 容器化部署以及 QQ / 飞书真实账号长连均未完成完整验收。
 
-v0.2 新增世界生成器、编辑器与有界自主生活。基础安装只默认启用记忆和生活状态；世界、资源和自主 resident 需单独配置，自主开关默认关闭。用户聊天记忆可纠正，原生生活经历暂不支持直接纠正。/chiyo_consider 是 Shadow 分析入口，判断不会自动执行动作。连接外部模型时，参与回复的上下文会发送到所配置的服务。main 已包含 v0.2 源码；发行安装以固定 Release 标签和 ZIP 为准。
+---
+
+## 23 · 开源许可与站点维护
+
+关于 Apache-2.0 与上游 MIT 许可证边界、发行包打包原则，以及本教程网站本身的日常更新方式。
+
+### 开源许可证与第三方说明
+
+nyairo 项目新增的自研代码（含记忆账本、虚拟世界与身体节律、生活连续性引擎、Life Supply 文稿服务、Windows 桌面客户端及官网文档）均采用 **Apache-2.0** 开源许可证发布。
+
+仓库 `vendor/hermes` 目录下集成的上游宿主代码保留其原有的 **MIT** 许可证及版权声明；其余第三方 Python 与前端依赖各自遵循其原有开源许可。
+
+### 公开仓库与发行包原则
+
+- 公开仓库地址为 [github.com/L1AN929/nyairo](https://github.com/L1AN929/nyairo)，只收录程序源码、中性模板、测试与文档，绝不包含任何个人聊天库、私钥或内部服务器地址。
+
+- 普通用户安装与升级始终以固定的 **GitHub Release 标签**（当前为 `v0.5.1`）及校验包为准，不直接拉取开发中的分支，以免装到半成品。
+
+### 许可证署名细节
+
+根目录提供完整的 `LICENSE` 与 `NOTICE` 文件。需要留意的是：开源许可证仅授权代码与文档本身的使用与修改，不包含任何商业大模型 API 额度、第三方消息平台账号凭证或作者私人的角色设定数据。
+
+### 发版核对顺序
+
+1. 在干净白名单树上跑通本版目标测试与敏感信息扫描（确保内部测试域名、本机用户名路径全部脱敏）；
+
+2. 生成匹配的 `MANIFEST.json`，打出版本压缩包与 `.sha256` 校验文件，并在隔离账号下验证解包与自检命令；
+
+3. 同步更新官网安装入口、更新日志与已知边界说明，保留所有已发布的历史版本包原字节不动。
+
+### 怎样维护与更新本官网
+
+本官网是一套零框架依赖的静态网页，源码位于仓库 `website/` 目录（核心文件为 `index.html`、`style.css`、`app.js`、`docs-data.js` 与同步生成的 `USER_GUIDE.zh-CN.md`）：
+
+1. 修改样式、脚本或文档数据后，记得同步刷新 `index.html` 里引用 `style.css?v=...`、`app.js?v=...`、`docs-data.js?v=...` 的版本号参数，确保 CDN 与访客浏览器立刻拉到最新内容；
+
+2. 部署到源站 Nginx（`/var/www/nyairo`）前，先把线上旧文件完整备份到公开 Web 目录**之外**的私有目录（如 `/var/backups/`），切勿在 `/var/www/nyairo` 内堆放 `.bak` 备份文件；
+
+3. 上线后实际打开桌面端与手机宽度页面，检查导航跳转、下载链接、搜索框（`Ctrl + K`）与复制按钮均正常可用。
+
+---
+
+## 24 · 问题反馈与参与贡献
+
+遇到 Bug 怎么提才好复现、发现安全隐患怎么处理，以及给项目提交代码时的基本约定。
+
+### 遇到 Bug 怎么反馈最有效
+
+提 Issue 或在交流群提问时，带上这几样信息能帮我们最快定位问题：
+
+- **环境与版本**：用的是 Windows 桌面端还是 Linux 终端、系统版本（如 Ubuntu 24.04 / WSL2）、`~/.local/state/nyairo/install.json` 里的版本号；
+
+- **怎么触发的**：你敲了什么命令或点了哪个按钮、本来预期发生什么、实际报了什么错；
+
+- **脱敏后的报错片段**：贴终端关键报错行即可，记得先把自己的 API Key、Token 和私人聊天内容删掉。
+
+### 发现安全或隐私漏洞怎么办
+
+如果你发现了可能导致密钥泄露、跨账号读到别人私人记忆、或者绕过权限边界的问题，**请先不要在公开 Issue 里贴出完整利用步骤**。可以先在仓库或官方交流入口联系维护者说明有安全问题待私下沟通；如果涉及你自己手头已经泄露的密钥，第一时间先去服务商后台吊销更换。
+
+### 提交代码 (PR) 的基本约定
+
+- **改动聚焦**：一个 PR 只解决一个明确的问题或小功能，顺手看一眼对应目录下的说明文档，不要把不相关的格式化混在一起；
+
+- **测试隔离**：新增测试一律使用临时目录（`tmp_path`）和虚构测试身份，绝不读写开发者本机真实的 `~/.nyairo` 目录，也不要把个人人设写死进通用代码里；
+
+- **诚实标注验证范围**：PR 描述里写清楚你在哪个系统上跑过了哪些测试，没测过的平台如实注明即可。
+
+### 编写回归测试的小建议
+
+如果修的是聊天命令或消息路由相关的 Bug（比如某个斜杠命令在终端能用、到了微信或 Telegram 里却没反应），写测试时尽量从外层消息入口一路测到最终处理函数，并确认这段测试在修改前的旧代码上确实会失败——这样以后重构时才能真正防住老毛病复发。
+
+### 日常长期体验反馈
+
+除了硬报错，我们也特别欢迎你分享用上几天之后的真实感受：比如哪条记忆召回得不够自然、街区走路节奏哪里觉得别扭、或者桌面端哪个按钮不够顺手。这些日常细节正是让 nyairo 慢慢变得更好用的关键。
+
+---
+
+## 25 · 致谢
+
+感谢无数个深夜里在屏幕两端并肩推演世界的所有伙伴，以及无论何时都守在身旁的你。
+
+> 感谢无数个深夜里在屏幕两端并肩推演世界的所有伙伴，以及无论何时都守在身旁的你。
+
+---
+

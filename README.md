@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.5.1"><img src="https://img.shields.io/badge/release-v0.5.1-1f2937.svg" alt="Release" /></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.6.0"><img src="https://img.shields.io/badge/release-v0.6.0-1f2937.svg" alt="Release" /></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -13,23 +13,23 @@
   <img src="https://img.shields.io/badge/license-Apache--2.0-1f2937.svg" alt="License" />
 </p>
 
-> **离开聊天窗口后，它的时间不会静止。**
+> **离开聊天窗口后，她的时间不会静止。**
 >
-> nyairo 是一个开源的数字个体框架，让 AI 拥有本地长期记忆、可编辑的虚拟小房间，以及按真实时间流动的日常。你们的每一次对话，不再是一次性客套的问答，而是发生在一个看得见房间、走得出门的日常场景里。
+> nyairo 是一个开源的数字个体框架，让 AI 拥有本地长期记忆、可自由编辑的房间与生活街区，以及按真实时间流动的日常。你们的每一次对话，不再是一次性客套的问答，而是发生在一个看得见房间、走得出门的日常场景里。
 >
-> **当前版本：v0.5.1（GitHub prerelease 预发布）** — 身体与街区日常版：身体需求与休息/补给、街区早晚与物件阅读、手机日记/相册/相机入口，以及作品续作与挂起换事的接线。这还不是稳定版，未重跑当前整树完整套件，未对现有实例做生产升级，也没有真实模型跑满一天或 24h 长测；旧的 v0.4.0、v0.3.0、v0.2.0-rc3 安装包与标签保持原样，升级前请先备份个人目录。
+> **当前版本：v0.6.0（GitHub prerelease 公开测试版）** — 提供免管理员一键部署的原生 Windows 桌面客户端，以及身体起居节律、街区早晚风貌、双人共读批注、未来问题与聊天动作回执。当前仍为公开测试版，升级前请先备份 `~/.nyairo` 目录。
 >
-> 在 Linux 或 Windows 的 WSL 终端里，输入这一行就能装好：
-> `curl -fsSL https://nyairo.com/install.sh | bash`
+> - **Windows 10 / 11 桌面端下载**：[https://nyairo.com/downloads/nyairo-0.6.0-setup.exe](https://nyairo.com/downloads/nyairo-0.6.0-setup.exe)
+> - **Linux / WSL 一行命令安装**：`curl -fsSL https://nyairo.com/install.sh | bash`
 ---
 
 ## 核心特性
 
-- **出门真的在走路（拒绝瞬间瞬移）**：告别聊天指令下像末影人一样的瞬间瞬移。出门去便利店走 5 分钟、去公园走 9 分钟；在路上问它走到哪了，它会如实说还在路上，只有时间真正走完了才进店；中转路线会自动接力走完。
-- **关掉窗口也有自己的生活**：哪怕你没有发消息找它，它在后台也会按节律自己醒来看看风景、散步或者写日记。我们在真实服务器上连续测了 58 小时，它在后台自发写出了一篇千字随笔。这项功能默认关闭，可以按需开启。
-- **世界可以自己画**：包里自带单机轻量地图编辑器，双击就能在本地浏览器打开。可以在房间里画墙、装门、摆桌椅，也能直接套用做好的小城镇模板。
-- **本地长期记忆**：聊天记录和记忆保存在本地 SQLite 数据库，跨越会话也能自然聊起；说错了随时用命令修改，不上传云端，数据在你自己手里。
-- **日常相处，随时深度协作**：平时能够自然交流对话，遇到复杂的编程或系统问题时，敲句命令就能切成 Agent 帮你查代码、推演方案。
+- **出门需要花真实时间走路**：出门去便利店或书店按路网距离真实计时；半路问她走到哪了，她会照实说还在路上，走完路程才进店，长途出行自动分段接力完成。
+- **关掉窗口也有自己的起居节奏**：即使没有发消息找她，开启后台自主活动后，她也会按节律自己散步、休息或写随笔（默认关闭，可按需开启）。
+- **世界不必千篇一律**：随包自带默认示例小镇与单机可视化地图编辑器，可在浏览器里画墙、装门、摆家具；按随机种子生成千人千面专属世界正在规划中（尚未实现）。
+- **本地长期记忆**：聊天记录和记忆保存在本机 SQLite 数据库，跨会话自然想起；记错了随时用命令纠正，不上传外部云端。
+- **多端同源协同**：桌面端看地图、翻相册、双人共读或比对文稿修订，出门用手机微信或 Telegram 扫码接着聊，连向同一个她。
 ---
 
 ## 架构概览
@@ -79,7 +79,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 | --- | --- | --- |
 | `nyairo` | 启动终端聊天 | 日常对话与交互 |
 | `nyairo setup model` | 重新选择模型或更新 Key | 更换供应商或新模型 |
-| `nyairo setup messaging` | 配置并绑定消息平台 | 连接 Telegram 机器人 |
+| `nyairo gateway setup` | 配置并绑定消息平台 | 扫码连微信或绑定 Telegram 机器人 |
 | `nyairo update` | 一键整包升级程序 | 升级到最新发布版本 |
 | `nyairo update --rollback` | 一键回滚到上一版本 | 出现兼容问题时无损回退 |
 | `nano "$HOME/.nyairo/SOUL.md"` | 编辑人设与个性定义 | 自定义性格、语气与称呼 |
