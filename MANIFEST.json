@@ -833,7 +833,7 @@
     "components/worldgen/validator.py": "60f826929831088204bbcf5ba8113ee310248940d9888881ac4be83b1f0d6569",
     "config/model.env.example": "a498f3f28e6407dc825f7519adfba8f1523c891e9affc0c6a6f92fec869e66dc",
     "config/nginx-nyairo.conf": "4a63ace5b0f9d9e84eb64544b17bc369eed7df64268bcf5342edce78a14c126b",
-    "config/public-scan-exceptions.json": "17f05bd2d8d3597847eca409b403da51c7477f172da71790d0b0f35a064478a6",
+    "config/public-scan-exceptions.json": "2de9d0f65e516c6b41d60e812a4e590ff350ffecf0324d7c5c087069de8b0e4f",
     "docs/DAY_START.zh-CN.md": "cfb57317919ba09bbbfbee29c8699b2a9b986aea88c034ff70fb381de58d3d4e",
     "docs/USER_GUIDE.zh-CN.md": "d3456eb036d66ad7a3e815ba2d67ac1136a61ff831c213a54cfc365945ae3d18",
     "docs/WORLDGEN.zh-CN.md": "6e8dad7209bc25a74363e61cc9b81c0031be029079c6003dc83d9b98986b5fa3",
@@ -13642,7 +13642,7 @@
     "website/style.css": "b862dd0d2f85a716a040836b1be2df2b9d6e6c3e0a07f9743890eb8d4f748412",
     "website/title-lab.html": "2daba0a736677c469a631cdea8e1f73d9e92da9b8701cca474c19462c2cd287f"
   },
-  "tree_sha256": "1421882f64662dd299e3bde9422abc01db5dc8799e743fbc1016cfca0f4e14c3",
+  "tree_sha256": "adddf8e2b1b5e3c938d8b17f04bd408bfdbc501cf08418a2b2af60afee458ef7",
   "tree_recipe": "SHA256(sorted UTF-8 lines: sha256 + two spaces + POSIX relative path + LF); MANIFEST.json excluded",
   "release_gate": "Bounded backend milestone: 慢变量孵化与因果边动力学、反骚扰配额与慢信冷静期、attention 决策接线与处境指纹、WakeTicket 与日 token 预算接线、成年亲密共在与 S07 Affect owner",
   "project_name": "nyairo",

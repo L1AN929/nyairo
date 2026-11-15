@@ -954,6 +954,12 @@
       "pattern": "wsl_home",
       "match_sha256": "e23b0301d62034e1e7f4038e8e06d26a30ddfafade1766f23f26c8027201c43f",
       "reason": "Public upstream fixture/example or generic user tutorial path"
+    },
+    {
+      "path": "website/index.html",
+      "pattern": "redacted_infra_host",
+      "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",
+      "reason": "Official site footer friend link; maintainer approved making this host public (2026-11-15)"
     }
   ],
   "public_data_files": [
