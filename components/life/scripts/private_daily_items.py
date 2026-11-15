@@ -164,7 +164,7 @@ _METADATA_FIELDS: dict[str, tuple[str, ...]] = {
                               "obtained", "acquired_at", "available", "unavailable_reason",
                               "unavailable_at"),
     ITEM_READING_POSITION: ("source_id", "source_revision", "position", "acquisition_id",
-                            "set_at", "understanding"),
+                            "set_at", "understanding", "written_in_revision"),
     ITEM_UNCLEAR_MARKER: ("source_id", "source_revision", "position", "marked_at"),
     ITEM_INBOX: ("receipt_ref", "from_ref", "kind", "received_at", "state", "read_at",
                  "read_evidence_ref", "co_presence"),
@@ -390,6 +390,12 @@ def plan_page_read(
         "source_id": clean_source, "source_revision": clean_revision,
         "position": clean_position, "acquisition_id": acq_id, "set_at": stamp,
         "understanding": UNDERSTANDING_UNKNOWN,
+        #: 平局键（2026-11-15）：本次写入会落在的文档版本号。从**当前文档**的
+        #: owner_version_number 推导（head_number 参数实际无人传，恒 None——那会让每次
+        #: 写入都算成 1，失去单调性）。清单落盘按 item_id 字典序（encode_document
+        #: sort_keys），遍历顺序不是写入顺序；同一保存时刻（冻结时钟/同秒连写/混合时钟）
+        #: 下"最新停点"必须由这个单调版本号裁决，而不是遍历序号。
+        "written_in_revision": int(doc.get("owner_version_number") or head_number or 0) + 1,
     })
     if not doc.get("artifact_id"):
         doc["artifact_id"] = artifact_id

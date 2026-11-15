@@ -278,9 +278,14 @@ def read_reading_situation(
             continue
         if not acquisition.get("available", True):
             continue
-        valid.append((str(row.get("set_at") or ""), index, row))
-    valid.sort(key=lambda entry: (entry[0], entry[1]))
-    latest = valid[-1][2] if valid else None
+        valid.append((int(row.get("written_in_revision") or 0),
+                      str(row.get("set_at") or ""), index, row))
+    #: 排序键（2026-11-15）：**文档版本号优先**——written_in_revision 是写行时单调递增
+    #: 的 owner_version_number，是唯一跨时钟可信的写入顺序；set_at 在冻结时钟/时钟回拨
+    #: /同秒连写下会说谎。旧行没有该字段按 0 计；遍历序号不是顺序信号（清单按 item_id
+    #: 字典序落盘），只能做最终平局。
+    valid.sort(key=lambda entry: (entry[0], entry[1], entry[2]))
+    latest = valid[-1][3] if valid else None
 
     current_acquisitions = [row for row in acquisitions
                             if str(row.get("source_revision") or "") == revision]

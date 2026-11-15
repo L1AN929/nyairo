@@ -478,7 +478,13 @@ class PhoneReading:
             return None
         best: Optional[tuple[tuple[str, int], dict[str, Any]]] = None
         for index, row in enumerate(rows):
-            key = (str(row.get("set_at") or ""), index)
+            #: 排序键（2026-11-15）：**文档版本号优先**。written_in_revision 是写行时
+            #: 单调递增的 owner_version_number，是唯一跨时钟可信的写入顺序——set_at 在
+            #: 冻结时钟/时钟回拨/同秒连写下都会说谎（fixture 预置行用真实挂钟、测试
+            #: 驱动用冻结时钟时，"按保存时间"会把新写入判旧）。旧行没有该字段按 0 计；
+            #: 遍历序号不是顺序信号（清单按 item_id 字典序落盘），只能做最终平局。
+            key = (int(row.get("written_in_revision") or 0),
+                   str(row.get("set_at") or ""), index)
             if best is None or key >= best[0]:
                 best = (key, row)
         row = best[1]

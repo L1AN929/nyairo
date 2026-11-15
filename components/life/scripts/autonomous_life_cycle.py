@@ -6745,7 +6745,7 @@ class AutonomousLifeCycle:
         if capacity not in lbc.body_capacity.VALID_CAPACITY_STATES:
             capacity = lbc.CAPACITY_UNKNOWN
         freshness = str(context.get("freshness") or "unknown")
-        return {
+        dossier = {
             "available": True,
             "reason_code": str(context.get("reason_code") or "")[:64],
             # 能力档：owner 自己的词（AVAILABLE/LIMITED/...），越界一律 UNKNOWN。
@@ -6758,6 +6758,27 @@ class AutonomousLifeCycle:
             # 休息能力：owner 的 REST 判定；None 就是"没读"，不是"不能"。
             "rest_can_start": rest.get("can_start"),
         }
+        # 2026-11-15 规范化（19 章 §一.5）：整档若不含**任何**真实 owner 事实
+        #（能力 UNKNOWN、freshness unknown、无恢复会话、无休息判定）——不管上游把它
+        # 拼成 BODY_NOT_READ 还是 BODY_SITUATION_NOT_READ、"available" 写成什么——
+        # 对处境指纹而言都是同一个"身体没读"，统一收敛为唯一的 BODY_NOT_READ 拼法。
+        # 否则两种拼法会轮番改变处境指纹，"同一处境只考虑一次"的有界沉默（R 协议）
+        # 在第二轮就失效，同样的 NO_STEP 会被重复送进模型（test_day_life_continuity
+        # 实证：R1=BODY_NOT_READ / R2=BODY_SITUATION_NOT_READ → 指纹漂移）。任何真实
+        # owner 事实（LIMITED、会话 OPEN、休息判定、已知 freshness）都原样保留。
+        if (dossier["capacity"] == lbc.CAPACITY_UNKNOWN
+                and dossier["freshness"] == "unknown"
+                and dossier["recovery_session"] == lbc.RECOVERY_SESSION_UNKNOWN
+                and dossier["rest_can_start"] is None):
+            return {
+                "available": False,
+                "reason_code": "BODY_NOT_READ",
+                "capacity": lbc.CAPACITY_UNKNOWN,
+                "freshness": "unknown",
+                "recovery_session": lbc.RECOVERY_SESSION_UNKNOWN,
+                "rest_can_start": None,
+            }
+        return dossier
 
     def poll_local_contacts(self, *, limit: Optional[int] = None) -> dict[str, Any]:
         """One bounded local-contact pass -- the cycle's own entry to the resident's step.
