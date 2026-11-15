@@ -365,7 +365,8 @@ class AutonomousLifeResident:
                  clock: Any = None, sleeper: Any = None, monotonic: Any = None,
                  segment_request_cap: Optional[int] = None,
                  business_clock: Any = None, offline_scripted: bool = False,
-                 local_reply_client: Any = None, local_reply_requests: Any = None) -> None:
+                 local_reply_client: Any = None, local_reply_requests: Any = None,
+                 enable_v02_v03_bridge: Optional[bool] = None) -> None:
         """``segment_request_cap`` is *this process only*: at most that many more HTTP
         attempts than the persisted ledger had already spent when the segment started.
 
@@ -465,6 +466,8 @@ class AutonomousLifeResident:
         # 有界缓存只做加速；被淘汰的旅程/拒绝键在缓存未命中时回读既有 journal。
         self._projections = projection_counts.ProjectionCounter(
             history=self._journal_journey_history)
+        self.enable_v02_v03_bridge: Optional[bool] = enable_v02_v03_bridge
+        self.last_v02_v03_bridge: Optional[dict[str, Any]] = None
         self._stop = threading.Event()
         self._stop_reason: Optional[str] = None
 
@@ -1283,6 +1286,13 @@ class AutonomousLifeResident:
         # the decision window, and the decision window is not gated on the journey.
         settled = self.settle_journey()
 
+        pre_now_iso = (
+            self._business_iso()
+            if self._business_clock is not None
+            else _iso(self._clock())
+        )
+        pre_collected = self._prepare_v02_v03_pre_tick_candidates(now_iso=pre_now_iso)
+
         result = assembly.runner_tick(self.assembled, act=self.act)
         try:
             reconciled = self.assembled["runner"].reconcile_pending()
@@ -1305,6 +1315,11 @@ class AutonomousLifeResident:
         self.last_tick = record
         if stop_results:
             record["external_stop"] = stop_results
+        bridge_view = self._run_v02_v03_bridge_hook(
+            record, settled, pre_collected=pre_collected
+        )
+        if bridge_view is not None:
+            record["v02_v03_bridge"] = bridge_view
         self._journal(record)
         self._accumulate(record)
         # R: the heartbeat is written every tick, so a crash leaves a *measured* last instant
@@ -1312,6 +1327,196 @@ class AutonomousLifeResident:
         self._update_process_record()
         self._write_summary(self.summary())
         return record
+
+    def _resolve_v02_v03_day_root(self) -> Path:
+        import v02_v03_daily_loop_bridge as _vbridge
+
+        inst_root, _ = _vbridge.resolve_day_and_life_roots(self.state_root)
+        if (inst_root / "phone").is_dir():
+            return inst_root
+        wh = str((getattr(self, "env", None) or {}).get("CHIYO_WORLD_HOME") or "").strip()
+        if wh:
+            wh_parent = Path(wh).parent
+            if (wh_parent / "phone").is_dir():
+                return wh_parent
+        return inst_root
+
+    def _resolve_practice_service_for_feedback(self) -> Any:
+        direct = getattr(self, "practice_service", None)
+        if direct is not None and callable(getattr(direct, "create_method", None)):
+            return direct
+        assembled = self.assembled if isinstance(self.assembled, Mapping) else {}
+        for key in ("practice_service", "practice"):
+            cand = assembled.get(key)
+            if isinstance(cand, Mapping):
+                cand = cand.get("service")
+            if cand is not None and callable(getattr(cand, "create_method", None)):
+                return cand
+        cycle = assembled.get("cycle")
+        if cycle is not None:
+            for attr in ("practice_service", "practice_workspace", "_practice_workspace", "practice_seam"):
+                holder = getattr(cycle, attr, None)
+                if holder is None:
+                    continue
+                if callable(getattr(holder, "create_method", None)):
+                    return holder
+                inner = getattr(holder, "service", None) or getattr(holder, "workspace", None)
+                if inner is not None and callable(getattr(inner, "create_method", None)):
+                    return inner
+        return None
+
+    def _prepare_v02_v03_pre_tick_candidates(
+        self, *, now_iso: Optional[str] = None
+    ) -> Optional[dict[str, Any]]:
+        """Collect 0.2/0.3 loop candidates BEFORE runner_tick so AG-0/AG-1 sees them in this tick."""
+        flag = getattr(self, "enable_v02_v03_bridge", None)
+        assembled = self.assembled if isinstance(self.assembled, Mapping) else {}
+        cycle = assembled.get("cycle")
+        if flag is False:
+            if cycle is not None:
+                setattr(cycle, "_prepared_v02_v03_collected", None)
+            return None
+        try:
+            import v02_v03_daily_loop_bridge as _vbridge
+
+            day_root = self._resolve_v02_v03_day_root()
+            if cycle is not None:
+                setattr(cycle, "_v02_v03_day_root", day_root)
+            if flag is None and not _vbridge.has_v02_v03_active_state(day_root):
+                if cycle is not None:
+                    setattr(cycle, "_prepared_v02_v03_collected", None)
+                return None
+            collected = _vbridge.collect_v02_v03_loop_candidates(day_root, now_iso=now_iso)
+            if cycle is not None:
+                setattr(cycle, "_prepared_v02_v03_collected", collected)
+            return collected
+        except Exception as exc:
+            self.last_v02_v03_pre_tick_error = "%s: %s" % (type(exc).__name__, exc)
+            return None
+
+    def _run_v02_v03_bridge_hook(
+        self,
+        record: Mapping[str, Any],
+        settled_journey: Any,
+        *,
+        pre_collected: Optional[dict[str, Any]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Post-tick consequence settlement + exposure satiation & tentative method draft feedback."""
+        flag = getattr(self, "enable_v02_v03_bridge", None)
+        if flag is False:
+            return None
+        try:
+            import v02_agency_depth_engine as _vdepth
+            import v02_v03_daily_loop_bridge as _vbridge
+
+            day_root = self._resolve_v02_v03_day_root()
+            due_check = record.get("due") if isinstance(record.get("due"), Mapping) else {}
+            extra_check = due_check.get("extra") if isinstance(due_check.get("extra"), Mapping) else {}
+            has_post_feedback_signal = bool(
+                due_check.get("failure_review")
+                or extra_check.get("failure_review")
+                or due_check.get("acted") is True
+                or str(due_check.get("status") or "").strip().upper() in {
+                    "ACTED", "ACTION_FAILED", "STEP_FAILED", "STEP_REFUSED", "PROCESS_MISTAKE"
+                }
+            )
+            if (
+                flag is None
+                and pre_collected is None
+                and not _vbridge.has_v02_v03_active_state(day_root)
+                and not has_post_feedback_signal
+            ):
+                return None
+            now_iso = str(record.get("logical_at") or record.get("at") or "") or None
+            collected = (
+                pre_collected
+                if isinstance(pre_collected, Mapping)
+                else _vbridge.collect_v02_v03_loop_candidates(day_root, now_iso=now_iso)
+            )
+            settlements: list[dict[str, Any]] = []
+
+            if isinstance(settled_journey, Mapping):
+                arrived_place = str(
+                    settled_journey.get("arrived_place_id")
+                    or settled_journey.get("destination_place_id")
+                    or ""
+                ).strip()
+                jid = str(settled_journey.get("journey_id") or "").strip()
+                if (
+                    settled_journey.get("arrived") is True
+                    and arrived_place
+                    and arrived_place != "home"
+                    and jid
+                ):
+                    settlements.append(
+                        _vbridge.settle_v02_v03_round_consequences(
+                            day_root,
+                            {
+                                "actor_side": "life_resident",
+                                "effect_state": "APPLIED",
+                                "action_kind": "OUTING_VISIT",
+                                "place_id": arrived_place,
+                                "receipt_ref": f"journey:{jid}",
+                                "operation_key": f"resident_journey_{jid}",
+                            },
+                            now_iso=now_iso,
+                        )
+                    )
+
+            due = record.get("due")
+            if isinstance(due, Mapping):
+                extra = due.get("extra") if isinstance(due.get("extra"), Mapping) else {}
+                explicit_ev = due.get("v02_v03_round_event") or extra.get("v02_v03_round_event")
+                if isinstance(explicit_ev, Mapping):
+                    settlements.append(
+                        _vbridge.settle_v02_v03_round_consequences(
+                            day_root, explicit_ev, now_iso=now_iso
+                        )
+                    )
+                art_id = str(extra.get("artifact_id") or "").strip()
+                ver_id = str(extra.get("version_id") or "").strip()
+                if extra.get("owner_version_created") is True and art_id and ver_id:
+                    settlements.append(
+                        _vbridge.settle_v02_v03_round_consequences(
+                            day_root,
+                            {
+                                "actor_side": "life_resident",
+                                "effect_state": "APPLIED",
+                                "action_kind": "COMMIT_WORK_VERSION",
+                                "artifact_id": art_id,
+                                "version_id": ver_id,
+                                "receipt_ref": f"version:{ver_id}",
+                                "operation_key": f"resident_ver_{ver_id}",
+                            },
+                            now_iso=now_iso,
+                        )
+                    )
+
+            feedback = _vdepth.record_post_tick_execution_feedback(
+                day_root,
+                tick_record=record,
+                practice_service=self._resolve_practice_service_for_feedback(),
+                now_iso=now_iso,
+            )
+
+            assembled = self.assembled if isinstance(self.assembled, Mapping) else {}
+            cycle = assembled.get("cycle")
+            if cycle is not None:
+                setattr(cycle, "_prepared_v02_v03_collected", None)
+
+            out = {
+                "prepared_before_tick": pre_collected is not None,
+                "context": collected["resident_context_summary"],
+                "settlements": settlements,
+                "post_tick_feedback": feedback,
+                "llm_calls": 0,
+            }
+            self.last_v02_v03_bridge = out
+            return out
+        except Exception as exc:
+            err = {"error": "%s: %s" % (type(exc).__name__, exc), "llm_calls": 0}
+            self.last_v02_v03_bridge = err
+            return err
 
     def _operator_credential(self) -> tuple[Any, str]:
         """The *current* serve credential for this instance, or a named reason why not.
@@ -1922,6 +2127,8 @@ class AutonomousLifeResident:
             "reconciled_at_start": self.reconciled_at_start,
             "cold_recovery": self.cold_recovery,
             "last_error": self.last_error,
+            **({"v02_v03_bridge": self.last_v02_v03_bridge}
+               if getattr(self, "last_v02_v03_bridge", None) is not None else {}),
         }
 
 

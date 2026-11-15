@@ -1,7 +1,41 @@
 """Bounded owner read projections for chat and authenticated status commands."""
 import json
+import os
 import socket
 from pathlib import Path
+
+
+def _supply_socket_rpc(client, request, *, timeout=None):
+    refresher = getattr(client, '_refresh_callback', None)
+    if callable(refresher) and not os.path.exists(str(client.socket_path)):
+        try:
+            refresher()
+        except Exception:
+            pass
+    eff_timeout = client.timeout if timeout is None else timeout
+
+    def _send_once():
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(eff_timeout)
+            connection.connect(client.socket_path)
+            connection.sendall((json.dumps(request, ensure_ascii=False) + '\n').encode())
+            with connection.makefile('rb') as reader:
+                raw = reader.readline(1000001)
+        if len(raw) > 1000000:
+            raise ValueError('Oversized owner response')
+        return json.loads(raw)
+
+    try:
+        return _send_once()
+    except (FileNotFoundError, ConnectionRefusedError, OSError):
+        if callable(refresher):
+            try:
+                refreshed = bool(refresher(force=True))
+            except Exception:
+                refreshed = False
+            if refreshed:
+                return _send_once()
+        raise
 
 
 def _read_supply(client, subject, op, artifact_id=None):
@@ -9,15 +43,7 @@ def _read_supply(client, subject, op, artifact_id=None):
         raise ValueError('Not a declared read port')
     request={'op':op,'subject':subject}
     if op=='read_artifact':request['artifact_id']=artifact_id
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(client.timeout)
-        connection.connect(client.socket_path)
-        connection.sendall((json.dumps(request) + '\n').encode())
-        with connection.makefile('rb') as reader:
-            raw = reader.readline(1000001)
-        if len(raw) > 1000000:
-            raise ValueError('Oversized owner response')
-    return json.loads(raw)
+    return _supply_socket_rpc(client, request)
 
 
 def supply_view(svc):
@@ -145,12 +171,7 @@ def save_note(svc, grant_id, title, content):
     digest=hashlib.sha256(json.dumps([subject,title,content],ensure_ascii=False).encode()).hexdigest()
     key='hermes-note:'+digest
     def rpc(request):
-        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as connection:
-            connection.settimeout(max(3,client.timeout));connection.connect(client.socket_path)
-            connection.sendall((json.dumps(request,ensure_ascii=False)+'\n').encode())
-            with connection.makefile('rb') as reader:raw=reader.readline(1000001)
-        if len(raw)>1000000:raise ValueError('Oversized owner response')
-        return json.loads(raw)
+        return _supply_socket_rpc(client, request, timeout=max(3, client.timeout))
     prior=rpc({'op':'lookup_operation','owner':'ManagedArtifact','operation_id':key})
     if prior.get('status')=='KNOWN':
         creation=json.loads(prior['operation']['result_json'])

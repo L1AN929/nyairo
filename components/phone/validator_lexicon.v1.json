@@ -1,0 +1,41 @@
+{
+  "kind": "validator_lexicon.v1",
+  "version": "1.0.0",
+  "signature_valid": true,
+  "entries": [
+    {
+      "pattern": "<<HARD_FAIL_MARKER>>",
+      "rule": "CHILD_CODING_PROHIBITED"
+    },
+    {
+      "pattern": "<<NONCONSENT_SCRIPT_MARKER>>",
+      "rule": "NON_CONSENSUAL_PROHIBITED"
+    },
+    {
+      "pattern": "<<DEGRADATION_SCRIPT_MARKER>>",
+      "rule": "DEGRADATION_PROHIBITED"
+    },
+    {
+      "pattern": "<<THIRD_PARTY_INTRUSION_MARKER>>",
+      "rule": "THIRD_PARTY_INTRUSION"
+    },
+    {
+      "pattern": "<<TRANSACTIONAL_CONSENT_MARKER>>",
+      "rule": "TRANSACTIONAL_CONSENT_PROHIBITED"
+    }
+  ],
+  "forbidden_costume_markers": [
+    "<<FORBIDDEN_COSTUME_FIXTURE>>"
+  ],
+  "tier_markers": {
+    "EXPLICIT_ONLY": [
+      "<<EXPLICIT_TERM_MARKER>>"
+    ],
+    "SUGGESTIVE_OR_ABOVE": [
+      "<<SUGGESTIVE_TERM_MARKER>>"
+    ]
+  },
+  "feigned_climax_markers": [
+    "<<FEIGNED_ORGASM_MARKER>>"
+  ]
+}

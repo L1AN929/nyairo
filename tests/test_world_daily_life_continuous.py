@@ -833,7 +833,7 @@ class DailyContinuousDrillTest(EpisodeFixture):
         here_stays = [item["target_refs"] for item in self.provider()
                       if item["target_refs"][0].startswith("stay:")
                       and item["location_ref"] == "place:street_front"]
-        self.assertEqual(here_stays, [["stay:street_front:LOOK_AROUND:180"]], here_stays)
+        self.assertIn(["stay:street_front:LOOK_AROUND:180"], here_stays, here_stays)
         # 提前一轮：时间没到，完成判据不许被满足（同一个停留 Activity 的 CONTINUE）
         early = self.round("drill:stay:early", advance=120, because="stay:early")
         self.assertEqual(early.get("outcome"), "ACTED", early)

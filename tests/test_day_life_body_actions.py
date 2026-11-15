@@ -170,19 +170,21 @@ class BodyActionEncodingTests(unittest.TestCase):
                     "bodyact:pose:sitting:north",                 # 越界 pose
                     "bodyact:pose:seated:sideways",               # 越界朝向
                     "bodyact:rest:begin:rest",                    # 越界 state
-                    "bodyact:rest:start:sleep_like",              # 本轮不准入
-                    "bodyact:rest:stop:sleep_like"):              # 本轮不准入
+                    "bodyact:rest:start:nap",                     # 越界 mode
+                    "bodyact:rest:stop:sleep_like"):              # stop 不接受 sleep_like
             with self.subTest(ref=bad):
                 with self.assertRaises(body_actions.BodyActionTargetError):
                     body_actions.parse_body_action_target(bad)
         # 别的命名空间不是本模块的事：返回 None，而不是拒绝别人的 target。
         for foreign in ("place:home", "object:item-1", "stay:home:SIT:300", "", None):
             self.assertIsNone(body_actions.parse_body_action_target(foreign))
-        # 造不出 sleep_like 的编码，就不存在手写绕过的入口。
-        self.assertEqual(body_actions.REST_MODES, ("rest",))
+        # v0.7: start 允许 sleep_like，stop 仍然只允许 rest。
+        self.assertEqual(body_actions.REST_MODES, ("rest", "sleep_like"))
         self.assertIn("sleep_like", body_actions.OWNER_REST_MODES)
+        self.assertEqual(body_actions.encode_rest_target("start", "sleep_like"),
+                         "bodyact:rest:start:sleep_like")
         with self.assertRaises(body_actions.BodyActionTargetError):
-            body_actions.encode_rest_target("start", "sleep_like")
+            body_actions.encode_rest_target("stop", "sleep_like")
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +311,16 @@ class BodyActionOpportunityTests(unittest.TestCase):
                       "stop_blocked_reason": "NO_OPEN_RECOVERY"}),
             occurred_at=MOMENT, observed_at=MOMENT)
         self.assertEqual([item["target_refs"] for item in started],
+                         [["bodyact:rest:start:rest"], ["bodyact:rest:start:sleep_like"]])
+        rest_only = wmos.observed_body_action_opportunities(
+            _observation(),
+            available_actions=_owner_availability(
+                rest={"start_available": True, "stop_available": False,
+                      "sleep_like_available": False,
+                      "start_blocked_reason": None,
+                      "stop_blocked_reason": "NO_OPEN_RECOVERY"}),
+            occurred_at=MOMENT, observed_at=MOMENT)
+        self.assertEqual([item["target_refs"] for item in rest_only],
                          [["bodyact:rest:start:rest"]])
         self.assertEqual(started[0]["perception_ref"],
                          "percept:gateway-available-actions:home:r7")
@@ -399,7 +411,7 @@ class BodyActionContractTests(unittest.TestCase):
         with self.assertRaises(ar0.ContractViolationError):
             adapter.validate_prepare({}, {"verb": "REST", "target": "  "})
         with self.assertRaises(ar0.ContractViolationError):
-            adapter.validate_prepare({}, {"verb": "ARRANGE", "target": "bodyact:pose:seated:north"})
+            adapter.validate_prepare({}, {"verb": "TELEPORT", "target": "bodyact:pose:seated:north"})
         # 旧的单参数动词一个字没改，也没有给任何动词开一个自由 params 入口。
         self.assertEqual(wba.resolver_params("MOVE", "cafe"),
                          {"destination_location_id": "cafe"})
@@ -411,7 +423,7 @@ class BodyActionContractTests(unittest.TestCase):
         self.assertEqual(wba.resolver_params("REST", "bodyact:rest:start:rest"),
                          {"state": "start", "mode": "rest"})
         for verb, target in (("POSE", "seated"), ("REST", "bodyact:rest:start"),
-                             ("REST", "bodyact:rest:start:sleep_like")):
+                             ("REST", "bodyact:rest:stop:sleep_like")):
             with self.subTest(verb=verb, target=target):
                 with self.assertRaises(body_actions.BodyActionTargetError):
                     wba.resolver_params(verb, target)
@@ -441,7 +453,9 @@ class BodyActionContractTests(unittest.TestCase):
             self.assertEqual(submission["params"], {"state": state, "mode": "rest"})
 
         refused = (
-            ("sleep_like 不准入", {"state": "start", "mode": "sleep_like"},
+            ("stop 不带 sleep_like", {"state": "stop", "mode": "sleep_like"},
+             "only accepted with state=start"),
+            ("未知 mode 不准入", {"state": "start", "mode": "nap"},
              "not admitted here"),
             ("缺 mode", {"state": "start"}, "incomplete"),
             ("多字段", {"state": "start", "mode": "rest", "seconds": 60}, "unknown fields"),
@@ -458,11 +472,11 @@ class BodyActionContractTests(unittest.TestCase):
             intent("MOVE", {"destination_location_id": "cafe"}), fresh_snapshot=snapshot)
         self.assertEqual(moved["params"], {"destination_location_id": "cafe"})
         with self.assertRaises(ai.ActionIntentError) as caught:
-            ai.build_submission(intent("ARRANGE", {"object_id": "x"}),
+            ai.build_submission(intent("TELEPORT", {"object_id": "x"}),
                                 fresh_snapshot=snapshot)
         self.assertIn("production allowlist", str(caught.exception))
         self.assertEqual(ai.REST_STATES, ("start", "stop"))
-        self.assertEqual(ai.REST_MODES, ("rest",))
+        self.assertEqual(ai.REST_MODES, ("rest", "sleep_like"))
         self.assertIn("REST", ai.EXPOSED_VERBS)
 
 
@@ -603,7 +617,7 @@ class RealWorldBodyActionChainTests(unittest.TestCase):
         self.assertTrue(ai.__file__.replace("\\", "/").endswith(
             "components/world/service/bridge/action_intent.py"), ai.__file__)
         self.assertIn("REST", ai.ACTION_ALLOWLIST)
-        self.assertEqual(ai.REST_MODES, ("rest",))
+        self.assertEqual(ai.REST_MODES, ("rest", "sleep_like"))
 
         before = self.h.substrate()
         body_before = self._body_bytes()
@@ -737,11 +751,11 @@ class RealWorldBodyActionChainTests(unittest.TestCase):
         body_before = self._body_bytes()
         result = self.bridge.resolve_action(
             idempotency_key="bodyact-test-sleep-like", verb="REST",
-            target="bodyact:rest:start:sleep_like", expected_dependencies={})
+            target="bodyact:rest:stop:sleep_like", expected_dependencies={})
         self.assertEqual(result["status"], "rejected", result)
         self.assertEqual(result["code"], "BODY_ACTION_TARGET_INVALID", result)
         self.assertEqual(result["transport_result"], ar0.TRANSPORT_ERR_DEFINITE_PRE_SUBMIT)
-        self.assertIn("rest mode must be one of ['rest']", result["detail"])
+        self.assertIn("only accepted with state=start", result["detail"])
         # 没有 lifecycle 记录 = 没有 CREATED/AUTHORIZED/SUBMITTED，owner 没被联系。
         self.assertEqual(self._lifecycle(result["execution_id"]), [])
         self.assertEqual(self.h.substrate()["revision"], before["revision"])

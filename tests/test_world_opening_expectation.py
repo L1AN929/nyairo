@@ -49,7 +49,13 @@ posix_only = unittest.skipIf(
 PACKAGE = ROOT / "examples" / "worlds" / "daily_neighborhood_v1"
 #: 并行写集保留的唯一工作目录；不存在时退回系统临时目录。
 SANDBOX = Path("/tmp/nyaw05r.jdK3q")
+#: 19 章 §一.4：``location_availability`` / ``location_opening_expectation`` 不显式
+#: 给时区时的默认是共享业务日界（与预算同源的固定偏移 +08:00），本用例的本地时刻
+#: 一律按这个默认时区构造；内建汐见市自己声明的 IANA 时区（Asia/Tokyo）只进报告。
+import business_day_key as bdk  # noqa: E402
+
 TOKYO = ZoneInfo("Asia/Tokyo")
+LOCAL_TZ = bdk.DEFAULT_BUSINESS_TZ
 #: 内建汐见市世界（没有 CHIYO_WORLD_PACKAGE 时的活动世界）。
 BUILTIN_ENV: dict[str, str] = {}
 
@@ -60,7 +66,7 @@ def work_dir(prefix: str) -> Path:
 
 
 def at(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
-    return datetime(year, month, day, hour, minute, tzinfo=TOKYO)
+    return datetime(year, month, day, hour, minute, tzinfo=LOCAL_TZ)
 
 
 class _StubWorld:
@@ -137,8 +143,8 @@ class OpeningExpectationRuleTest(unittest.TestCase):
                 self.assertEqual(result["world_id"], wrd.SHIOMI_WORLD_ID)
                 self.assertEqual(result["location_id"], "park")
                 self.assertEqual(result["source"], wdr.RULE_SOURCE_BUILTIN)
-                self.assertEqual(result["timezone"], "Asia/Tokyo")
-                self.assertEqual(result["timezone_source"], "world")
+                self.assertEqual(result["timezone"], "+08:00")
+                self.assertEqual(result["timezone_source"], "business_day_key")
                 self.assertEqual(result["as_of"], now.isoformat())
         # 现在开着时 expected_open_at 就等于 as_of（可考虑的起点），窗口起点另给。
         open_now = self.expectation("park", at(2026, 10, 19, 12))
@@ -403,6 +409,13 @@ def instance_digest(root: Path) -> dict[str, str]:
 class OpeningExpectationCatalogTest(unittest.TestCase):
     """真实世界包的目录字段：只加“预计窗口”，不升级 NOW_ONLY、不写世界。"""
 
+    @staticmethod
+    def at(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
+        # 世界包路径始终用包自己声明的 IANA 时区（catalog 显式传
+        # ``timezone_name=world.timezone_name``），本用例时刻按包时区构造，
+        # 与 19 章 §一.4 的共享默认日界互不影响。
+        return datetime(year, month, day, hour, minute, tzinfo=TOKYO)
+
     def setUp(self) -> None:
         import world_daily_opportunities as wdo
         from components.worldgen import loader
@@ -427,7 +440,7 @@ class OpeningExpectationCatalogTest(unittest.TestCase):
 
     def test_catalog_entry_adds_window_without_upgrading_validity(self) -> None:
         before = instance_digest(self.home)
-        now = at(2026, 10, 19, 7, 30)  # 周一早上：咖啡店还没开
+        now = self.at(2026, 10, 19, 7, 30)  # 周一早上：咖啡店还没开
         catalog = self.catalog(now)
         after = instance_digest(self.home)
         self.assertEqual(before, after)  # 零世界写入
@@ -444,8 +457,8 @@ class OpeningExpectationCatalogTest(unittest.TestCase):
         self.assertEqual(expectation["status"], "available")
         self.assertEqual(expectation["window_state"], "opens_later")
         self.assertEqual(expectation["expected_open_at"],
-                         at(2026, 10, 19, 8).isoformat())
-        self.assertEqual(expectation["window_end"], at(2026, 10, 19, 18).isoformat())
+                         self.at(2026, 10, 19, 8).isoformat())
+        self.assertEqual(expectation["window_end"], self.at(2026, 10, 19, 18).isoformat())
         self.assertEqual(expectation["source"], "world_package_schedule")
         self.assertEqual(expectation["world_id"], self.package.world_id)
         self.assertEqual(expectation["rule"]["weekdays_only"], True)
@@ -469,7 +482,7 @@ class OpeningExpectationCatalogTest(unittest.TestCase):
             self.assertNotIn("opening_expectation", item)
 
     def test_weekend_closed_store_reports_next_weekday_window_in_catalog(self) -> None:
-        saturday = at(2026, 10, 17, 13)
+        saturday = self.at(2026, 10, 17, 13)
         catalog = self.catalog(saturday)
         cafe = self.entry(catalog, "cafe")
         self.assertEqual(cafe["availability"]["reason_code"], "WEEKEND_CLOSED")
@@ -477,8 +490,8 @@ class OpeningExpectationCatalogTest(unittest.TestCase):
         expectation = cafe["opening_expectation"]
         self.assertEqual(expectation["status"], "available")
         self.assertEqual(expectation["expected_open_at"],
-                         at(2026, 10, 19, 8).isoformat())
-        self.assertEqual(expectation["window_end"], at(2026, 10, 19, 18).isoformat())
+                         self.at(2026, 10, 19, 8).isoformat())
+        self.assertEqual(expectation["window_end"], self.at(2026, 10, 19, 18).isoformat())
         self.assertEqual(expectation["requires_recheck"], True)
 
 

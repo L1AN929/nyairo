@@ -1,5 +1,10 @@
 """General plugin: no global/core module monkey patching."""
 
+from chiyo_bundle.phone_tool import (
+    LIFE_UPDATE_PRIVATE_SURFACES,
+    LIFE_UPDATE_SURFACES,
+)
+
 #: Cache-safe system prompt section. Registered only when this profile actually
 #: has a World/Body service; it tells the model that an explicit request to go
 #: somewhere is an ACTION (call the tool), not a sentence to answer politely.
@@ -15,17 +20,22 @@ _WORLD_MOVE_GUIDANCE=(
 
 
 _PHONE_AND_WORLD_GUIDANCE=(
-    "【凪浦世界与随身手机：chiyo_phone / world_move 工具】\n"
-    "如果本次会话的可用工具里有 chiyo_phone，那么当用户让你去某个房间或街区地点、坐下/站起/"
-    "躺下休息、开关灯具、记随笔备忘、翻阅/保存共读书签或批注、购买/使用物品、写日记时，"
-    "这是需要真实执行的动作——请先调用 chiyo_phone 完成操作，再根据真实回执自然回话，不要只口头假装做过：\n"
-    "- 世界与房间动作：不确定目标 destination_location_id 或灯具/物品 object_id 时，先调 "
-    "chiyo_phone(action=\"world\") 查看可达地点与可用动作，再调 chiyo_phone(action=\"world_action\", "
-    "world_action=\"MOVE\"|\"POSE\"|\"REST\"|\"TOGGLE_FIXTURE\"|\"PICK_UP\"|\"PLACE\"|\"ARRANGE\", "
-    "params={...}, operation_key=\"...\")。注意：REST 小憩需先处于 seated/lying 姿态（sleep_like 需 lying）。\n"
-    "- 随笔/共读/商店/日记：可用 note_save、reading_material / reading_position / reading_annotate、"
-    "shop / store / purchase / store_purchase / use、diary_write（每次写操作给唯一 operation_key）。\n"
-    "- 所有位置、余额、灯光与物品变化一律以工具返回的 status（applied / rejected）为准，绝不编造结果。"
+    "【随身手机与世界：chiyo_phone / world_move】\n"
+    "若工具含 chiyo_phone，涉及出门移动、坐卧开关灯、随笔书签商店日记，或读写穿搭声景、拒绝锁、"
+    "话头心事、账本病休、院子手作、回忆与共同认知或亲密边界时，先调 chiyo_phone 拿回执再答，勿假装：\n"
+    "- 基础：chiyo_phone(action=\"world\") 看地点，world_action"
+    "（MOVE/POSE/REST/TOGGLE_FIXTURE/PICK_UP/PLACE/ARRANGE/TOILET，带 operation_key）；"
+    "另有 note_save、reading_material/reading_position/reading_annotate、shop/store_purchase/use、diary_write、work_context。\n"
+    "- 只读：desk_presence、desk_notes、home_window、home_keepsakes、"
+    "home_letters、home_workbench、home_curios、home_trio、home_reunion_anchor、home_recipes、"
+    "home_tentative_plans、wardrobe、pocket_lists、outing_bench_bookstore、outing_routes_market、"
+    "outing_gallery_blueprint、longterm_habits、longterm_gifts_lantern、longterm_resume_hub、"
+    "body_somatic、body_garment_window、body_care、body_sensory、character_pack、autonomy_rhythm、"
+    "emotional_tension、stance_containment、adult_intimacy、v03_clock、v03_ecology、v03_embodied_social、"
+    "v04_neighborhood、v04_builder_trylive、v04_elastic_play、v02_agency_depth、v02_crossmodal、"
+    "v02_runtime_migration、v02_recall_projection、v02_common_ground。\n"
+    "- 生活写：chiyo_phone(action=\"phone_life_update\", target_surface=\"<面板>\", "
+    "payload={\"action\": \"...\"}, operation_key=\"...\")，仅改自身侧，以 status（applied/rejected）为准。"
 )
 
 
@@ -34,11 +44,15 @@ def _world_move_guidance(session_info=None):
     try:
         import os
         from chiyo_bundle.hermes_plugin import configuration
+        from chiyo_bundle.live_endpoints import is_world_move_explicitly_disabled, resolve_live_endpoints
         _unused,settings=configuration()
         phone_cfg=settings.get('phone') if isinstance(settings,dict) else None
         if isinstance(phone_cfg,dict) and phone_cfg.get('enabled') is True:
             return _PHONE_AND_WORLD_GUIDANCE
-        if not (settings.get('world_body_socket') or os.environ.get('WORLD_BODY_SOCKET')):
+        if is_world_move_explicitly_disabled(settings):
+            return ''
+        resolved_world=resolve_live_endpoints(settings).get('world_socket') if isinstance(settings,dict) else None
+        if not (settings.get('world_body_socket') or resolved_world or os.environ.get('WORLD_BODY_SOCKET')):
             return ''
     except Exception:
         return ''
@@ -57,7 +71,7 @@ def register(ctx):
             # without the toolset enabled, so a platform that keeps chiyo_world
             # off still gets "say you cannot move", never a fabricated walk.
             ctx.register_system_prompt_section('chiyo.world-move',_world_move_guidance,
-                                               position='after_memory',max_chars=1200)
+                                               position='after_memory',max_chars=1800)
     except Exception:
         import logging
         logging.getLogger('chiyo.hermes').warning('chiyo.world_move.prompt_section.unavailable', exc_info=True)
@@ -78,8 +92,8 @@ def register(ctx):
         from chiyo_bundle.phone_tool import PHONE_TOOL_SCHEMA, phone_handler
         ctx.register_tool(name='chiyo_phone', toolset='chiyo_world',
                           schema=PHONE_TOOL_SCHEMA, handler=phone_handler,
-                          description='Open her own local virtual phone: wallet, notes, references, '
-                                      'reading, virtual store, owned items and explicit actions',
+                          description='Open own local virtual phone: world actions, notes, reading, store, '
+                                      '0.2/0.3 home & somatic & autonomy & ecology views, and phone_life_update',
                           emoji='📱')
     except Exception:
         import logging

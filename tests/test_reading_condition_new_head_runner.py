@@ -54,10 +54,10 @@ class ReadingConditionNewHeadRunnerTest(unittest.TestCase):
 
     def test_reading_paused_on_its_own_exhausted_revision(self) -> None:
         read = self.summary["read"]
-        self.assertEqual(read["state"], "EXHAUSTED", read)
+        self.assertEqual(read["state"], "WORK_NO_CHANGE_CONFIRMED", read)
         pause = self.summary["pause_a"]
         self.assertEqual(pause["decision"], "PAUSE", pause)
-        self.assertEqual(pause["offered_source"], "READING_MATERIAL_NEXT_VERSION", pause)
+        self.assertEqual(pause["offered_source"], "WORK_HEAD_AFTER_NO_CHANGE", pause)
         self.assertEqual(pause["condition_status"], "PENDING", pause)
 
     def test_another_work_runs_while_a_is_held(self) -> None:

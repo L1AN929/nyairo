@@ -93,7 +93,8 @@ Status: implemented
   `private_daily_items`（测试会拦）；④ 空页一律拒绝，B 必须自己区分"空页不调模型"和"模型失败"；
   ⑤ `no_change` 不写归属，所以"先 no_change 再拿同一把键写批注"不会被判成复用（依赖 B 的键按意图生成）；
   ⑥ 意图摘要把标题/正文都算进去，正文改一个字就是新意图——这是刻意的，但也意味着"润色同一条笔记"必须用新键。
-- 相邻既有决定：[阅读停点与私人笔记契约](./2026-10-22-rc1-reading-owner-phone-reading.md)、
+- 相邻既有决定：[阅读响应输出上限继承 client 配置](../bug-fix/2026-11-09-reading-response-token-cap-inheritance.md)、
+  [阅读停点与私人笔记契约](./2026-10-22-rc1-reading-owner-phone-reading.md)、
   [主体材料按当前版本续读](./2026-10-24-rc1-subject-materials-version-aware-reading.md)、
   [手机实例是主体 Life 的唯一 live 绑定来源](./2026-10-23-rc1-phone-life-subject-binding.md)、
   [单一写者隔离](../process/2026-10-16-single-writer-isolation.md)。

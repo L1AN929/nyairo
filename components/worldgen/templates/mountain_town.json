@@ -672,6 +672,64 @@
       "weekdays_only": false,
       "weight": 2,
       "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "READ_HERE",
+          "在书店读这本书",
+          {
+            "execution": {
+              "mechanism": "stay_at_place"
+            },
+            "suggested_seconds": 600,
+            "title": "在书店读一本书"
+          }
+        ]
+      ],
+      "close_hour": [
+        19,
+        20
+      ],
+      "descriptions": [
+        "开在汤街下坡的老书店，架上有登山志和旧温泉疗养记，炉边摆着一张矮桌。"
+      ],
+      "id": "bookstore",
+      "kind": "store",
+      "names": [
+        "{world_name}山书店",
+        "峰雪书房",
+        "汤坂书店"
+      ],
+      "open_hour": 10,
+      "reading": "《汤烟纪行》翻开一页：「山里入秋的第一场雾不是从谷底升起来的，是从汤屋的烟囱里被风吹散的。镇上的人说，看见雾顺着山道往下走，就该把晒在外头的被褥收进屋了——晚了，雾里的湿气能一路跟到夜里。」页脚有一行铅笔字：「雾走的路线，和我每天去汤屋的路是一样的。」",
+      "slot": "bookstore",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在店里看看日用杂货"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "卖锅碗、灯泡和登山小物的店，东西挤在两层木架上，柜台边挂着几只旧铝壶。"
+      ],
+      "id": "home_goods_store",
+      "kind": "store",
+      "names": [
+        "{world_name}杂货店",
+        "汤坂道具屋"
+      ],
+      "open_hour": 10,
+      "slot": "home_goods_store",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
     }
   ],
   "street_names": [

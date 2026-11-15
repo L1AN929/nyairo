@@ -541,6 +541,7 @@ def _m15_destination_verdict(
             return ("UNKNOWN_DESTINATION",
                     f"surface {surface_id} is not declared by the world")
         owner_catalog = substrate.surface_owner_catalog(surface_id)
+        owner_catalogs = set(substrate.surface_owner_catalog_items(surface_id))
         owner_instance = substrate.surface_owner_instance(surface_id)
         try:
             import world_body_binding as binding
@@ -551,31 +552,43 @@ def _m15_destination_verdict(
                 if isinstance(i, Mapping) and str(i.get("disposition")) == "OWNED"
             }
             owned_map = binding.owned_catalog_map(hermes_home)
+            store = substrate.SubstrateStore(substrate.substrate_path(hermes_home))
+            live = store.load()
         except Exception:  # pragma: no cover
             owned = set()
             owned_map = {}
+            live = None
         if owner_instance is not None:
             # v0.4 room-living: an instance surface (`desk_surface:<item>`) is
             # real only while *that* piece of owned furniture stands here.  Two
             # desks therefore never share one surface, and a surface whose desk
             # was moved away stops accepting placement instead of stranding it.
-            if owned_map.get(owner_instance) != owner_catalog:
+            if owned_map.get(owner_instance) not in owner_catalogs:
                 return ("UNKNOWN_DESTINATION",
                         f"surface {surface_id} has no present owner object")
-            try:
-                store = substrate.SubstrateStore(substrate.substrate_path(hermes_home))
-                live = store.load()
-                placement = (
-                    substrate.placement_of(live, owner_instance) if live else None
-                )
-            except Exception:  # pragma: no cover - unreadable substrate denies
-                placement = None
+            placement = substrate.placement_of(live, owner_instance) if live else None
             if placement is None or str(placement.get("location_id")) != str(location_id):
                 return ("UNKNOWN_DESTINATION",
                         f"surface {surface_id} has no present owner object")
         elif owner_catalog and owner_catalog not in owned:
-            return ("UNKNOWN_DESTINATION",
-                    f"surface {surface_id} has no present owner object")
+            # A bare legacy surface (`bed_surface`) is *not* a global allowance and is
+            # not made legal merely by being declared: it has to be really here.  The
+            # owner's own live projection (`surfaces_here` -- the same fact
+            # ``get_environment`` returns and REST already consumes) is that authority.
+            # Reading it here is what keeps PLACE from carrying a second, stricter
+            # surface truth: the generated default world really holds a bed in the
+            # substrate without an economy ``basic_bed`` instance, and the owner itself
+            # reports that surface present.  Not present -> the old denial stands; an
+            # instance surface never reaches this branch, so two desks still cannot
+            # share one global id.
+            try:
+                here = (substrate.surfaces_here(
+                    live, owned_map, location_id=str(location_id)) if live else [])
+            except Exception:  # pragma: no cover - unreadable substrate denies
+                here = []
+            if not any(str(item.get("surface_id")) == surface_id for item in here):
+                return ("UNKNOWN_DESTINATION",
+                        f"surface {surface_id} has no present owner object")
         return None, None
 
     if kind == "container":

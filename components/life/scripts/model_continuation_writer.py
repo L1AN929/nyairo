@@ -168,6 +168,11 @@ class ModelContinuationWriter:
         self.last_experience_ids: list[str] = []
         self.call_count = 0
         self.last_raw_output: Optional[str] = None
+        #: The typed document context this writer was *actually handed* by the caller (the
+        #: cycle's bounded research/practice/work/earlier-versions halves).  Recorded so a
+        #: reader can verify the real payload the prompt was built from instead of trusting a
+        #: separately fabricated dict; it is never sent anywhere on its own.
+        self.last_context: Optional[dict[str, Any]] = None
         self.last_kind: Optional[str] = None
         self.last_trimmed = False
         self.last_self_note: Optional[str] = None
@@ -355,6 +360,7 @@ class ModelContinuationWriter:
         current = point.content or ""
         self.last_trimmed = False
         self.last_self_note = None
+        self.last_context = dict(context) if isinstance(context, Mapping) else None
         try:
             result = self.client.complete(
                 system_prompt=SYSTEM_PROMPT,

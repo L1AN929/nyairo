@@ -214,6 +214,15 @@ def run_smoke(root=None) -> dict:
         })
         state_root = odl.life_state_root(instance)
         port = lap.LifeArtifactPort(str(services.supply_path), data["subject_id"])
+        created_a = port.create_artifact(
+            workspace_id=str(data["workspace_id"]),
+            title="作品 A（等待新版本的脚本夹具）",
+            content="作品 A 的第一句。\n",
+            grant_id=str(data["artifact_grant_id"]),
+            operation_key=lap.operation_key_for("reading-condition-same-head", "create-a", "a"))
+        _check(created_a.applied and bool(created_a.artifact_id),
+               "the owner did not create work A", created_a.to_dict())
+        reading_id = str(created_a.artifact_id)
         created_b = port.create_artifact(
             workspace_id=str(data["workspace_id"]),
             title="另一件作品（脚本夹具）",
@@ -246,7 +255,7 @@ def run_smoke(root=None) -> dict:
             cognition.policy = policy
             return cycle.evaluate_once(trigger_ref=trigger, observed_at=_iso(moment), act=True)
 
-        # 1. 正式 START 阅读 A，然后逐页 CONTINUE 到这一版真的读完
+        # 1. 正式 START 作品 A，随后在同一 head 上 CONTINUE 收到显式 no_change（真无步骤停点）
         first = _turn("start_reading", "evt:reading-same-head:1", base)
         state = _canonical(runtime)
         active = _active_ids(state)
@@ -254,35 +263,28 @@ def run_smoke(root=None) -> dict:
         activity_a = str(active[0])
         _assert_single_execution(runtime, activity_a, where="round1-start-reading")
         _check(first.get("adoption_status") == "APPLIED",
-               "the reading START was not adopted",
+               "the work A START was not adopted",
                {"outcome": first.get("outcome"), "decision": first.get("decision"),
                 "adoption_status": first.get("adoption_status"),
                 "detail": str(first.get("detail") or "")[:300]})
         head_a1 = str((port.read_head(reading_id) or {}).get("version_id") or "")
-        _check(bool(head_a1), "the reading material has no committed head", {})
+        _check(bool(head_a1), "work A has no committed head", {})
 
-        read_pages = 0
-        for page in (2, 3):
-            out = _turn("continue_reading", "evt:reading-same-head:read-%d" % page, base)
-            situation = cycle.private_material_situation(refresh=True) or {}
-            _check(out.get("outcome") in {"ACTED", "ALREADY_DONE"},
-                   "reading page %d was not acted" % page,
-                   {"outcome": out.get("outcome"), "decision": out.get("decision"),
-                    "detail": str(out.get("detail") or "")[:300],
-                    "state": situation.get("state")})
-            read_pages += 1
-        situation = cycle.private_material_situation(refresh=True) or {}
-        _check(str(situation.get("state") or "") == "EXHAUSTED",
-               "the material is not at its real stop point after the last page",
-               {"state": situation.get("state"),
-                "pages": situation.get("pages"),
-                "position": situation.get("position")})
+        writer.no_change_ids.add(new_head._bare_identity(reading_id))
+        no_change_round = _turn("continue_reading", "evt:reading-same-head:no-change", base)
+        _check(no_change_round.get("outcome") == "NO_ACTION"
+               and bool((no_change_round.get("work_no_change") or {}).get("recorded")),
+               "work A did not record an explicit no_change on its baseline head", no_change_round)
+        readiness_a = cycle.step_readiness(act=True)
+        _check(readiness_a.available is False
+               and readiness_a.reason_code == "WORK_NO_CHANGE_CONFIRMED",
+               "work A is not at its real no_change stop point", readiness_a.to_dict())
         versions_before = port.list_versions(reading_id)
         baseline_versions = int(versions_before.get("total_versions")
                                 or versions_before.get("count") or 0)
-        summary["read"] = {"pages_read": read_pages + 1,
-                           "state": situation.get("state"),
-                           "material_pages": situation.get("pages"),
+        summary["read"] = {"pages_read": 1,
+                           "state": readiness_a.reason_code,
+                           "material_pages": 1,
                            "baseline_head": head_a1,
                            "baseline_versions": baseline_versions}
 
@@ -445,7 +447,7 @@ def run_smoke(root=None) -> dict:
                                 "final_versions": after_count}
 
         summary["checks"] = {
-            "reading_reached_real_stop": str(situation.get("state")) == "EXHAUSTED",
+            "reading_reached_real_stop": readiness_a.reason_code == "WORK_NO_CHANGE_CONFIRMED",
             "pause_bound_pending_condition": (len(conditions) == 1
                                               and str(condition.get("status")) == "PENDING"),
             "pause_released_foreground": paused_a.get("foreground_released") is True,

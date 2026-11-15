@@ -96,6 +96,30 @@
           }
         ],
         [
+          "DESK_PAUSE",
+          "在书桌边坐一会儿（手边的东西原样放着）",
+          {
+            "title": "在书桌边坐一会儿",
+            "suggested_seconds": 300
+          }
+        ],
+        [
+          "WINDOW_PAUSE",
+          "在窗边待一会儿，听风从窗缝里过去",
+          {
+            "title": "在窗边待一会儿",
+            "suggested_seconds": 240
+          }
+        ],
+        [
+          "TEA_PAUSE",
+          "在茶桌边坐下歇一会儿（这里没有真的泡茶）",
+          {
+            "title": "在茶桌边坐一会儿",
+            "suggested_seconds": 300
+          }
+        ],
+        [
           "READ",
           "在这里阅读"
         ],
@@ -156,6 +180,157 @@
       "slot": "school",
       "weekdays_only": true,
       "zone": "education"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "沿着海岸散步道走一段",
+          {
+            "title": "沿海岸散步道走一段",
+            "suggested_seconds": 600
+          }
+        ],
+        [
+          "SIT",
+          "在沙滩边坐一会儿",
+          {
+            "title": "在沙滩边坐一会儿",
+            "suggested_seconds": 300
+          }
+        ],
+        [
+          "LOOK_AROUND",
+          "在这里看看周围"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "退潮时沙滩会变宽一倍，傍晚有附近的人来散步。"
+      ],
+      "id": "beach",
+      "kind": "beach",
+      "names": [
+        "{world_name}海滩",
+        "白浜沙滩",
+        "琴引滨"
+      ],
+      "open_hour": 5,
+      "slot": "beach",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "harbor"
+    },
+    {
+      "affordances": [
+        [
+          "SIT",
+          "在咖啡馆坐一会儿",
+          {
+            "title": "在咖啡馆坐一会儿",
+            "suggested_seconds": 300
+          }
+        ],
+        [
+          "READ",
+          "在这里阅读"
+        ]
+      ],
+      "close_hour": [
+        19,
+        21
+      ],
+      "descriptions": [
+        "老式喫茶店，热可可会给两块方糖，窗外就是街道。"
+      ],
+      "id": "cafe",
+      "kind": "cafe",
+      "names": [
+        "{prefix}喫茶",
+        "海鸥咖啡",
+        "渚咖啡店"
+      ],
+      "open_hour": [
+        9,
+        10
+      ],
+      "slot": "cafe",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "READ_HERE",
+          "在书店读这本书",
+          {
+            "title": "在书店读一本书",
+            "suggested_seconds": 600,
+            "execution": {
+              "mechanism": "stay_at_place"
+            }
+          }
+        ]
+      ],
+      "close_hour": [
+        19,
+        20
+      ],
+      "descriptions": [
+        "两层的旧书店，楼梯会响，店里养着一只不太理人的猫。"
+      ],
+      "id": "bookstore",
+      "kind": "store",
+      "names": [
+        "{world_name}书房",
+        "文浜堂书店",
+        "青卷书店"
+      ],
+      "open_hour": 10,
+      "reading": "《潮汐记》翻开第一页：「这个镇子的名字来自一次涨潮。那年冬天海水漫过堤坝，退下去以后留下一条新的沙脊，人们就在沙脊上盖起第一批房子——所以说，这地方从出生起就是海让出来的。」下面有一行很旧的手写批注：「让出来的地方，早晚要还。」",
+      "slot": "bookstore",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在花店看看今天的花",
+          {
+            "title": "看看今天的花",
+            "suggested_seconds": 180
+          }
+        ],
+        [
+          "LOOK_AROUND",
+          "在花店门口看看周围"
+        ]
+      ],
+      "close_hour": [
+        18,
+        19
+      ],
+      "descriptions": [
+        "门口摆着当季的切花和一小桶带露水的绿枝，店主在里屋扎花。"
+      ],
+      "id": "flower_shop",
+      "kind": "store",
+      "names": [
+        "{world_name}花店",
+        "浜花屋",
+        "潮见花房"
+      ],
+      "open_hour": [
+        9,
+        10
+      ],
+      "slot": "flower_shop",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "town"
     }
   ],
   "flavor_pool": {
@@ -466,38 +641,6 @@
       "affordances": [
         [
           "WALK",
-          "在沙滩上散步"
-        ],
-        [
-          "SIT",
-          "在这里坐一会儿"
-        ],
-        [
-          "LOOK_AROUND",
-          "在这里看看周围"
-        ]
-      ],
-      "close_hour": 21,
-      "descriptions": [
-        "退潮时沙滩会变宽一倍，傍晚有附近的人来散步。"
-      ],
-      "id": "beach",
-      "kind": "beach",
-      "names": [
-        "{world_name}海滩",
-        "白浜沙滩",
-        "琴引滨"
-      ],
-      "open_hour": 5,
-      "slot": "beach",
-      "weekdays_only": false,
-      "weight": 3,
-      "zone": "harbor"
-    },
-    {
-      "affordances": [
-        [
-          "WALK",
           "在堤坝上走走"
         ],
         [
@@ -576,75 +719,6 @@
       "weekdays_only": false,
       "weight": 2,
       "zone": "residential"
-    },
-    {
-      "affordances": [
-        [
-          "SIT",
-          "在店里坐下"
-        ],
-        [
-          "READ",
-          "在这里阅读"
-        ]
-      ],
-      "close_hour": [
-        19,
-        21
-      ],
-      "descriptions": [
-        "老式喫茶店，热可可会给两块方糖，窗外就是街道。"
-      ],
-      "id": "cafe",
-      "kind": "cafe",
-      "names": [
-        "{prefix}喫茶",
-        "海鸥咖啡",
-        "渚咖啡店"
-      ],
-      "open_hour": [
-        9,
-        10
-      ],
-      "slot": "cafe",
-      "weekdays_only": false,
-      "weight": 3,
-      "zone": "town"
-    },
-    {
-      "affordances": [
-        [
-          "READ_HERE",
-          "在书店读这本书",
-          {
-            "title": "在书店读一本书",
-            "suggested_seconds": 600,
-            "execution": {
-              "mechanism": "stay_at_place"
-            }
-          }
-        ]
-      ],
-      "close_hour": [
-        19,
-        20
-      ],
-      "descriptions": [
-        "两层的旧书店，楼梯会响，店里养着一只不太理人的猫。"
-      ],
-      "id": "bookstore",
-      "kind": "store",
-      "names": [
-        "{world_name}书房",
-        "文浜堂书店",
-        "青卷书店"
-      ],
-      "open_hour": 10,
-      "reading": "《潮汐记》翻开第一页：「这个镇子的名字来自一次涨潮。那年冬天海水漫过堤坝，退下去以后留下一条新的沙脊，人们就在沙脊上盖起第一批房子——所以说，这地方从出生起就是海让出来的。」下面有一行很旧的手写批注：「让出来的地方，早晚要还。」",
-      "slot": "bookstore",
-      "weekdays_only": false,
-      "weight": 2,
-      "zone": "town"
     },
     {
       "affordances": [

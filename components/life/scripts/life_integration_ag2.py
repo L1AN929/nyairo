@@ -333,6 +333,7 @@ from agency_decision_ag1 import (
     CAPACITY_LIMITED,
     CAPACITY_UNAVAILABLE,
     CAPACITY_UNKNOWN,
+    MAX_COGNITIVE_CANDIDATES,
     DECISION_ABANDON,
     DECISION_CONTINUE,
     DECISION_DEFER,
@@ -3257,6 +3258,11 @@ class DecisionAdoptionCoordinator:
         #: describing the one condition this round offered for a PAUSE.  ``None`` means this
         #: round offered none, so a Decision that names one is refused by name.
         pause_condition_spec: Any = None,
+        #: 0.7 B: the *reading-only* default condition for an unconditional model PAUSE.  The
+        #: cycle supplies it only while the PAUSE target really is the foreground reading
+        #: Activity and the material still has pages; it is ignored whenever the Decision
+        #: named a condition or the target is not reading.  No other Activity gets a default.
+        pause_default_condition_spec: Any = None,
         handoff_spec: Any = None,
         pause_mode_override: Optional[str] = None,
         occurred_at: Optional[str] = None,
@@ -3721,6 +3727,25 @@ class DecisionAdoptionCoordinator:
                 if not str(pause_spec.get("condition_kind") or "").strip():
                     raise AdoptionIllegalError(
                         "PAUSE_CONDITION_NOT_OFFERED: the pause condition spec has no condition_kind")
+            elif pause_default_condition_spec is not None:
+                # 0.7 B: a *reading-only* default.  The cycle hands this in only while the
+                # PAUSE target is the foreground reading Activity with pages left; it returns
+                # ``None`` for every other Activity.  The Decision itself named nothing, so
+                # there is no hint to match -- the spec is the whole binding.
+                try:
+                    _default_source = (pause_default_condition_spec(decision)
+                                       if callable(pause_default_condition_spec)
+                                       else pause_default_condition_spec)
+                except Exception as exc:
+                    raise AdoptionIllegalError(
+                        "PAUSE_DEFAULT_CONDITION_INVALID: the reading default spec could not be "
+                        "produced: %s" % (str(exc)[:200],)) from exc
+                if isinstance(_default_source, Mapping) and _default_source:
+                    pause_spec = dict(_default_source)
+                    if not str(pause_spec.get("condition_kind") or "").strip():
+                        raise AdoptionIllegalError(
+                            "PAUSE_DEFAULT_CONDITION_INVALID: the reading default spec has no "
+                            "condition_kind")
 
             if mode == INTERRUPTIBILITY_SAFE_BOUNDARY and not pause_binding_recovery:
                 if pause_spec is not None:
@@ -5209,6 +5234,9 @@ class LifeIntegrationCoordinator:
         #: bound to an already-PAUSED Activity when the Decision names the offered condition.
         #: ``None`` when this round offered no pause condition.
         pause_condition_spec: Any = None,
+        #: 0.7 B: the reading-only default condition for an unconditional model PAUSE (see
+        #: ``adopt_decision``).  ``None`` keeps every PAUSE exactly as before.
+        pause_default_condition_spec: Any = None,
         #: v0.4 B: a Mapping *or* a callable of the committed Decision, describing an explicit,
         #: bounded *foreground handoff* this adoption performs before it starts its Activity.
         handoff_spec: Any = None,
@@ -5357,6 +5385,7 @@ class LifeIntegrationCoordinator:
             adoption_spec=adoption_spec,
             waiting_spec=waiting_spec,
             pause_condition_spec=pause_condition_spec,
+            pause_default_condition_spec=pause_default_condition_spec,
             handoff_spec=handoff_spec,
             pause_mode_override=pause_mode_override,
             occurred_at=obs_iso,
@@ -6713,6 +6742,14 @@ class IsolatedLifeRuntimeHarness:
             self.candidate_registry,
             capability=self.candidate_capability,
             audit_journal=self.candidate_audit_journal,
+            # AG-0 already owns a bounded *global* candidate budget (the default 100 is far
+            # above what AG-1 can ever accept).  Bind it to AG-1's own hard limit instead of
+            # letting more than sixteen candidates reach it: with the practice/review seam
+            # really wired, a normal round (world supply + her own works + one review option)
+            # can otherwise cross AG-1's ceiling and fail the whole decision with
+            # CANDIDATE_EXPLOSION.  This reuses the existing cap (deterministic by candidate id,
+            # explicitly NOT a priority) -- it invents no new ranking and drops no assertion.
+            global_cap=MAX_COGNITIVE_CANDIDATES,
         )
         self.candidate_read = CandidateReadService(self.candidate_materializer)
 

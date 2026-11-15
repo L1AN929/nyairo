@@ -324,6 +324,12 @@ def _build_home(plan: _Plan, design: Optional[dict[str, Any]]) -> None:
     plan.furniture_at(kind="lamp", cell=(1, 9), label="落地灯", rotation=0, area="living", object_prefix="lamp")
     table_cell = plan.free_cell((3, 10, 8, 14))
     plan.furniture_at(kind="table", cell=table_cell, label="餐桌", rotation=0, area="living", object_prefix="table")
+    # 0.7 C: 家里有一件真正拿得起、放得下的自己的物件（worldgen 既有 book 端口：
+    # pick_up/place/read，portable=true）。不是靠标题冒充「整理」，拿起/放下会真的
+    # 改变 substrate 里的摆放。
+    plan.furniture_at(kind="book", cell=table_cell, label="桌上的笔记本",
+                      stack_on=table_cell, note="随手放在餐桌上的笔记本。",
+                      area="living", object_prefix="notes")
     for _ in range(rng.choice((1, 2))):
         chair_cell = plan.free_cell((max(1, table_cell[0] - 2), table_cell[1] - 1, min(9, table_cell[0] + 2), table_cell[1] + 1))
         plan.furniture_at(kind="chair", cell=chair_cell, label="椅子", rotation=rng.choice((0, 90, 180, 270)), area="living", object_prefix="chair")

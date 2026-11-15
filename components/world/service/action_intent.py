@@ -62,11 +62,44 @@ INTENT_STATUSES = (
 #: receipt, no nutrition), and it is registered here for the same reason: the
 #: Life core reaches the owner *only* through this chain, so a verb the Resolver
 #: commits but this list omits is unreachable from a real decision.
-EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME")
+EXPOSED_VERBS = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST",
+                 "ARRANGE", "TOGGLE_FIXTURE")
 
 #: M15 §19: the production allowlist is explicit.  A future verb does NOT gain
 #: permission by being added to the resolver; it must be added here on purpose.
-ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME")
+ACTION_ALLOWLIST = ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST",
+                    "ARRANGE", "TOGGLE_FIXTURE")
+
+#: The REST shape this seam admits, kept identical to the live bridge copy.
+#: ``sleep_like`` is admitted only with ``state=start`` -- the Resolver's own rule
+#: (``mode is only accepted with state=start``), enforced here before authorization.
+REST_VERB = "REST"
+REST_STATES = ("start", "stop")
+REST_MODES = ("rest", "sleep_like")
+REST_PARAMS = ("mode", "state")
+
+#: v0.4 room-living: the two existing furniture/fixture verbs join the allowlist on the
+#: same *narrow* terms as the live bridge copy.  Their owner contracts are wider than what
+#: this seam admits: ARRANGE may only be a room or an item-owned surface, and
+#: TOGGLE_FIXTURE is an **absolute** ``on``/``off`` (a case variant or a bool is refused
+#: here).  Nothing about the owner's OWNED / delivered / relocatable / in-area verdict is
+#: copied or relaxed here -- the Resolver still re-decides all of it.
+ARRANGE_VERB = "ARRANGE"
+ARRANGE_PARAMS = ("object_id", "target")
+ARRANGE_PLACEMENT_ROOM = "room"
+ARRANGE_PLACEMENT_SURFACE = "surface"
+ARRANGE_PLACEMENT_KINDS = (ARRANGE_PLACEMENT_ROOM, ARRANGE_PLACEMENT_SURFACE)
+_ARRANGE_ROOM_FIELDS = ("kind", "location_id", "area_id")
+_ARRANGE_SURFACE_FIELDS = ("kind", "location_id", "surface_id")
+
+TOGGLE_FIXTURE_VERB = "TOGGLE_FIXTURE"
+TOGGLE_FIXTURE_PARAMS = ("object_id", "state")
+#: Absolute powers only.  ``str`` equality, so ``"ON"`` and ``True`` are refused rather
+#: than folded onto ``on``: a blind or re-cased toggle must never be expressed here.
+TOGGLE_FIXTURE_STATES = ("on", "off")
+
+#: The longest identifier field this seam will pass on to the owner.
+MAX_ID = 128
 
 #: kept for compatibility with older callers/tests; M15 emptied it.
 BLOCKED_VERBS: tuple[str, ...] = ()
@@ -101,12 +134,103 @@ def _text(value: Any, label: str, *, maximum: int = MAX_TEXT) -> str:
     return text
 
 
+def _bounded_id(value: Any, label: str) -> str:
+    """One bounded identifier (no whitespace/control chars), for a placement field."""
+
+    if not isinstance(value, str):
+        raise ActionIntentError("%s must be a string (got %r)" % (label, value))
+    text = value.strip()
+    if not text or len(text) > MAX_ID:
+        raise ActionIntentError("%s must be bounded non-empty text" % label)
+    if any(character.isspace() or ord(character) < 32 for character in text):
+        raise ActionIntentError("%s must not contain whitespace or control characters" % label)
+    return text
+
+
+def _require_exact_keys(values: Mapping[str, Any], expected: Sequence[str], label: str) -> None:
+    """Exactly these keys, no extras -- a half-specified or widened parameter is refused."""
+
+    given = {str(key) for key in values}
+    missing = sorted(set(expected) - given)
+    unknown = sorted(given - set(expected))
+    if missing or unknown:
+        raise ActionIntentError(
+            "%s params must be exactly %s (missing %s, unknown %s)"
+            % (label, list(expected), missing, unknown))
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def validate_verb_params(verb: str, params: Any) -> dict[str, Any]:
+    """The per-verb parameter contract, checked at the one submission boundary.
+
+    ARRANGE and TOGGLE_FIXTURE are pinned to the same narrow shapes as the bridge copy;
+    every other admitted verb returns its parameters untouched, so nothing here opens a
+    free-form parameter channel.  A violation raises :class:`ActionIntentError`, which the
+    Intent Executor turns into ``REJECTED / INVALID`` *before* any authorization is minted.
+    """
+
+    if not isinstance(params, Mapping):
+        raise ActionIntentError("params must be an object for verb %s" % verb)
+    values = dict(params)
+    if verb == ARRANGE_VERB:
+        _require_exact_keys(values, ARRANGE_PARAMS, ARRANGE_VERB)
+        object_id = _bounded_id(values["object_id"], "ARRANGE object_id")
+        target = values["target"]
+        if not isinstance(target, Mapping):
+            raise ActionIntentError("ARRANGE target must be a placement object")
+        kind = target.get("kind")
+        if kind not in ARRANGE_PLACEMENT_KINDS:
+            raise ActionIntentError(
+                "ARRANGE target.kind must be one of %s (got %r): a piece of furniture is "
+                "arranged into a room or installed as its own surface"
+                % (list(ARRANGE_PLACEMENT_KINDS), kind))
+        fields = (_ARRANGE_ROOM_FIELDS if kind == ARRANGE_PLACEMENT_ROOM
+                  else _ARRANGE_SURFACE_FIELDS)
+        _require_exact_keys(target, fields, "ARRANGE target(%s)" % kind)
+        normalized = {"kind": kind,
+                      "location_id": _bounded_id(target["location_id"],
+                                                 "ARRANGE target.location_id")}
+        detail = ("area_id" if kind == ARRANGE_PLACEMENT_ROOM else "surface_id")
+        normalized[detail] = _bounded_id(target[detail], "ARRANGE target.%s" % detail)
+        return {"object_id": object_id, "target": normalized}
+    if verb == TOGGLE_FIXTURE_VERB:
+        _require_exact_keys(values, TOGGLE_FIXTURE_PARAMS, TOGGLE_FIXTURE_VERB)
+        object_id = _bounded_id(values["object_id"], "TOGGLE_FIXTURE object_id")
+        state = values["state"]
+        # ``isinstance(state, str)`` matters: ``True == 1`` and ``"ON"`` must both be
+        # refused, so this compares the literal strings and never folds case.
+        if not isinstance(state, str) or state not in TOGGLE_FIXTURE_STATES:
+            raise ActionIntentError(
+                "TOGGLE_FIXTURE state must be exactly one of %s (got %r); there is no "
+                "blind toggle and no case folding"
+                % (list(TOGGLE_FIXTURE_STATES), state))
+        return {"object_id": object_id, "state": state}
+    if verb == REST_VERB:
+        _require_exact_keys(values, REST_PARAMS, REST_VERB)
+        state = str(values["state"]).strip().lower()
+        if state not in REST_STATES:
+            raise ActionIntentError(
+                "REST state must be one of %s (got %r)"
+                % (list(REST_STATES), values["state"]))
+        mode = str(values["mode"]).strip().lower()
+        if mode not in REST_MODES:
+            raise ActionIntentError(
+                "REST mode %r is not admitted here: only %s"
+                % (values["mode"], list(REST_MODES)))
+        if state != "start" and mode != "rest":
+            raise ActionIntentError(
+                "REST mode %r is only accepted with state=start (got state=%r): the "
+                "owner's own contract refuses a mode on a stop"
+                % (values["mode"], values["state"]))
+        return values
+    return values
 
 
 # --------------------------------------------------------------------------
@@ -376,11 +500,16 @@ def build_submission(
         )
     execution_id = _text(intent.get("execution_id"), "intent.execution_id", maximum=256)
     # M15 §19: only explicitly allowed verbs may reach the Resolver.
-    if str(intent.get("verb")) not in ACTION_ALLOWLIST:
+    verb = str(intent.get("verb"))
+    if verb not in ACTION_ALLOWLIST:
         raise ActionIntentError(
             "verb %s is not in the production allowlist %s"
             % (intent.get("verb"), list(ACTION_ALLOWLIST))
         )
+    # An admitted verb still has to be a *complete, legal* request.  ARRANGE and
+    # TOGGLE_FIXTURE are pinned here rather than trusted from whoever built the intent;
+    # every other verb passes through untouched.
+    params = validate_verb_params(verb, intent.get("params") or {})
 
     location = (fresh_snapshot.get("location") or {})
     dependencies = {
@@ -400,7 +529,7 @@ def build_submission(
         "decision_ref": intent.get("decision_ref"),
         "action": intent.get("verb"),
         "execution_id": execution_id,
-        "params": dict(intent.get("params") or {}),
+        "params": params,
         "observed_dependencies": dependencies,
         "source_provenance": intent.get("source_provenance"),
         "authorization_ref": GATEWAY_AUTHORIZATION,

@@ -288,8 +288,9 @@ class LifeExperiencePort:
     @staticmethod
     def _readonly(path: Path | str) -> sqlite3.Connection:
         """An already existing SQLite file, opened ``mode=ro``: it can neither create nor migrate."""
-        connection = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True,
-                                    timeout=2)
+        resolved = Path(path).resolve()
+        query = "?mode=ro" if Path(f"{resolved}-wal").exists() else "?mode=ro&immutable=1"
+        connection = sqlite3.connect(resolved.as_uri() + query, uri=True, timeout=2)
         connection.row_factory = sqlite3.Row
         return connection
 

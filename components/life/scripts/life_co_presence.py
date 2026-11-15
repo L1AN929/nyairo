@@ -35,10 +35,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Mapping, Optional
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[assignment]
 
 HERE = Path(__file__).resolve().parent
 for _path in (str(HERE), str(HERE.parents[1]), str(HERE.parents[1] / "native"),
@@ -96,6 +101,30 @@ REQUIRED_INVITATION_FIELDS = ("invitation_id", "source_ref", "occurred_at", "sco
 #: therefore lives *inside* that namespace instead of inventing a new one.
 WAITING_REF_PREFIX = "wait_dep"
 
+# ---------------------------------------------------------------------------------
+# 36B §5.4 / ADR-047：CopresenceMode 封闭枚举。既有有限共同时间是 FINITE_CO_PRESENCE
+# （begin() 写的会话不带 mode 键，读作该缺省值）；本批按提议值新增 PRIVATE_INTIMATE
+# （成年亲密场景的共在模式）。单前台语义沿用既有判定：PRIVATE_INTIMATE 会话在
+# co_presence.json 的同一单槽位上记账，槽位 OPEN 时 ``consider`` 依旧
+# DEFER(REASON_ALREADY_OPEN)——不开第二前台；ATTENTION 不是 ATOMIC（36B §5.4），
+# 场景可被打断性与本模块的 ATOMIC 判定无关。停止优先规则不变：ADR-044:34 的
+# in-flight 闸只限制 PAUSE，停止/撤回不受它限制（36B §5.4 原文），本模块不新增对冲。
+# ---------------------------------------------------------------------------------
+CO_PRESENCE_MODE_FINITE_CO_PRESENCE = "FINITE_CO_PRESENCE"
+CO_PRESENCE_MODE_PRIVATE_INTIMATE = "PRIVATE_INTIMATE"
+CO_PRESENCE_MODES = (CO_PRESENCE_MODE_FINITE_CO_PRESENCE, CO_PRESENCE_MODE_PRIVATE_INTIMATE)
+
+#: PRIVATE_INTIMATE 会话自身的状态词（复用同一单槽位 co_presence.json）：
+#: OPEN（场景 ACTIVE）→ DEGRADED（permit 暂停/事后：会话降级保留，断点标记可恢复）
+#: → OPEN（恢复确认后重开）→ CLOSED（permit 终态）。
+PI_SESSION_OPEN = "OPEN"
+PI_SESSION_DEGRADED = "DEGRADED"
+PI_SESSION_CLOSED = "CLOSED"
+
+REASON_PRIVATE_SLOT_OCCUPIED = "PRIVATE_INTIMATE_SLOT_OCCUPIED"
+REASON_PRIVATE_SESSION_MISMATCH = "PRIVATE_INTIMATE_SESSION_MISMATCH"
+REASON_PRIVATE_SESSION_NOT_OPEN = "PRIVATE_INTIMATE_SESSION_NOT_OPEN"
+
 
 def session_ref(invitation_id: str) -> str:
     """The LR-4-legal waiting reference for one co-presence session."""
@@ -137,17 +166,53 @@ class _ConsentNotGiven(RuntimeError):
         self.detail = detail
 
 
+DEFAULT_BUSINESS_TZ = timezone(timedelta(hours=8))
+_TZ_OFFSET_RE = re.compile(r"^([+-])(\d{1,2})(?::?(\d{2}))?$")
+
+
+def _local_business_tz() -> tzinfo:
+    for env_key in ("CHIYO_BUSINESS_TZ", "CHIYO_BUDGET_TZ", "NYA02_BUSINESS_TZ"):
+        raw = str(os.environ.get(env_key) or "").strip()
+        if not raw:
+            continue
+        upper = raw.upper()
+        if upper in {"UTC", "Z", "+00:00", "-00:00", "GMT"}:
+            return timezone.utc
+        cleaned = raw[3:].strip() if upper.startswith("UTC") and len(raw) > 3 else raw
+        match = _TZ_OFFSET_RE.fullmatch(cleaned)
+        if match:
+            sign = -1 if match.group(1) == "-" else 1
+            return timezone(sign * timedelta(hours=int(match.group(2)), minutes=int(match.group(3) or "0")))
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(raw)
+            except Exception:
+                continue
+    return DEFAULT_BUSINESS_TZ
+
+
 def _iso(moment: Optional[datetime] = None) -> str:
-    return (moment or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(
-        timespec="seconds")
+    if moment is None:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=_local_business_tz())
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def _instant(value: Any) -> Optional[datetime]:
-    try:
-        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
+    if value is None:
         return None
-    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+    if isinstance(value, datetime):
+        moment = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        try:
+            moment = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=_local_business_tz())
 
 
 def _bounded_text(value: Any, limit: int = 200) -> str:
@@ -1359,6 +1424,185 @@ class FiniteCoPresence:
         except Exception as exc:
             return {"ok": False, "reason_code": "REQUEST_CLOSE_REFUSED",
                     "detail": "%s: %s" % (type(exc).__name__, exc)}
+
+
+# ---------------------------------------------------------------------------------
+# 36B-4 §9 / 36B §5.4：PRIVATE_INTIMATE 共在会话的 owner 侧公开登记 API。
+#
+# 边界与 ``begin``/``end`` 相同：本模块只持久化自己的会话记录（co_presence.json 单槽位），
+# 不写任何 Activity，也不是"第二套共在状态机"——生命周期的决定权在 permit 引擎（调用方），
+# 这里只负责把它的决定如实记到共在 owner 名下。permit 引擎按 36B-4 §9 以 fail-open 方式
+# 调用：登记失败只记录，绝不阻断亲密场景。
+# ---------------------------------------------------------------------------------
+
+
+def _read_session_slot(state_root: Path | str) -> dict[str, Any]:
+    try:
+        data = json.loads(Path(state_root).joinpath(SESSION_FILENAME).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"schema_version": SESSION_SCHEMA, "state": "NONE"}
+    except (OSError, ValueError) as exc:
+        return {"schema_version": SESSION_SCHEMA, "state": "UNREADABLE",
+                "detail": "%s: %s" % (type(exc).__name__, exc)}
+    if not isinstance(data, Mapping):
+        return {"schema_version": SESSION_SCHEMA, "state": "INVALID"}
+    return dict(data)
+
+
+def _is_private_session(session: Mapping[str, Any]) -> bool:
+    return str(session.get("mode") or CO_PRESENCE_MODE_FINITE_CO_PRESENCE) \
+        == CO_PRESENCE_MODE_PRIVATE_INTIMATE
+
+
+def register_private_intimate_session(
+    state_root: Path | str,
+    *,
+    session_id: str,
+    permit_ref: Any = None,
+    activity_ref: Any = None,
+    activity_saved_at: Any = None,
+    subject_id: Any = None,
+    home: Any = None,
+    started_at: Any = None,
+) -> dict[str, Any]:
+    """permit 进入 ACTIVE：把成年亲密场景登记为 PRIVATE_INTIMATE 共在会话。
+
+    单槽位语义：槽位已被一个 OPEN 会话占用（无论哪种模式）时拒绝
+    ``REASON_PRIVATE_SLOT_OCCUPIED``——单前台不开两个。同一 ``session_id`` 的
+    DEGRADED 会话重新登记视为恢复确认后的重开（36B §5.4 恢复路径）。断点字段
+    （``checkpoint.activity_ref``/``saved_at``）按 36A §11.1 如实登记：没有可保存的
+    活动引用就记 ``saved=False``（"未保存"），绝不虚构。
+    """
+    moment_iso = _iso(_instant(started_at) or datetime.now(timezone.utc))
+    slot = _read_session_slot(state_root)
+    slot_state = str(slot.get("state") or "NONE")
+    if slot_state == "OPEN":
+        if _is_private_session(slot) and str(slot.get("session_id")) == str(session_id):
+            return {"ok": True, "already_open": True, "state": PI_SESSION_OPEN,
+                    "session": dict(slot)}
+        return {"ok": False, "reason_code": REASON_PRIVATE_SLOT_OCCUPIED,
+                "occupant_mode": str(slot.get("mode") or CO_PRESENCE_MODE_FINITE_CO_PRESENCE),
+                "occupant_ref": (slot.get("session_id") or slot.get("invitation_id")),
+                "detail": "the single co-presence slot is OPEN; no second foreground may open"}
+    if slot_state == "DEGRADED" and not (_is_private_session(slot)
+                                         and str(slot.get("session_id")) == str(session_id)):
+        return {"ok": False, "reason_code": REASON_PRIVATE_SESSION_MISMATCH,
+                "detail": "a degraded PRIVATE_INTIMATE session of another id holds the slot"}
+    ref = _bounded_text(session_id, 200)
+    if not ref:
+        return {"ok": False, "reason_code": "PRIVATE_INTIMATE_SESSION_ID_REQUIRED"}
+    saved_ref = _bounded_text(activity_ref, 200) or None
+    record: dict[str, Any] = {
+        "schema_version": SESSION_SCHEMA,
+        "state": PI_SESSION_OPEN,
+        "mode": CO_PRESENCE_MODE_PRIVATE_INTIMATE,
+        "session_id": ref,
+        "permit_ref": (_bounded_text(permit_ref, 200) or None),
+        "subject_id": (_bounded_text(subject_id, 200) or None),
+        "home": (_bounded_text(home, 200) or None),
+        "opened_at": moment_iso,
+        "single_foreground": True,
+        "true_concurrency": "DEFERRED_BEYOND_CURRENT_CONTRACT",
+        "checkpoint": {
+            "activity_ref": saved_ref,
+            "saved_at": (_iso(_instant(activity_saved_at)) if saved_ref else None),
+            "saved": bool(saved_ref),
+            "resumable": False,
+        },
+    }
+    written = _write_session_dict(state_root, record)
+    return {"ok": True, "already_open": False, "state": PI_SESSION_OPEN, "session": written}
+
+
+def degrade_private_intimate_session(
+    state_root: Path | str,
+    *,
+    session_id: str,
+    at: Any = None,
+    reason_code: str = "",
+    checkpoint_resumable: bool = True,
+) -> dict[str, Any]:
+    """permit 到 PAUSED/AFTERCARE：共在会话降级保留，断点标记可恢复（36A §11.1）。
+
+    恢复执行不在本批：这里只把 ``checkpoint.resumable`` 如实置位，不排队、不重启任何活动。
+    """
+    moment_iso = _iso(_instant(at) or datetime.now(timezone.utc))
+    slot = _read_session_slot(state_root)
+    if not (_is_private_session(slot) and str(slot.get("session_id")) == str(session_id)):
+        return {"ok": False, "reason_code": REASON_PRIVATE_SESSION_MISMATCH,
+                "slot_state": str(slot.get("state") or "NONE"),
+                "detail": "no open PRIVATE_INTIMATE session under this id to degrade"}
+    if str(slot.get("state")) == PI_SESSION_CLOSED:
+        return {"ok": False, "reason_code": REASON_PRIVATE_SESSION_NOT_OPEN,
+                "detail": "the session is already closed; a closed session cannot degrade"}
+    record = dict(slot)
+    record.update({"state": PI_SESSION_DEGRADED,
+                   "degraded_at": moment_iso,
+                   "degraded_reason": (_bounded_text(reason_code, 120) or None)})
+    checkpoint = dict(record.get("checkpoint") or {})
+    checkpoint["resumable"] = bool(checkpoint_resumable)
+    record["checkpoint"] = checkpoint
+    written = _write_session_dict(state_root, record)
+    return {"ok": True, "state": PI_SESSION_DEGRADED, "session": written}
+
+
+def close_private_intimate_session(
+    state_root: Path | str,
+    *,
+    session_id: str,
+    at: Any = None,
+    reason_code: str = "",
+) -> dict[str, Any]:
+    """permit 到终态（STOPPED/ENDED/EXPIRED/...）：关闭共在会话（幂等重放）。
+
+    槽位上不是本会话（或没有会话）时按名字拒绝，绝不误关别人的共在时间。已经
+    CLOSED 的同一会话再次关闭是幂等重放，返回 ``already_closed``。
+    """
+    moment_iso = _iso(_instant(at) or datetime.now(timezone.utc))
+    slot = _read_session_slot(state_root)
+    slot_state = str(slot.get("state") or "NONE")
+    if _is_private_session(slot) and str(slot.get("session_id")) == str(session_id) \
+            and slot_state == PI_SESSION_CLOSED:
+        return {"ok": True, "already_closed": True, "state": PI_SESSION_CLOSED,
+                "session": dict(slot)}
+    if slot_state not in (PI_SESSION_OPEN, PI_SESSION_DEGRADED) \
+            or not (_is_private_session(slot) and str(slot.get("session_id")) == str(session_id)):
+        return {"ok": False, "reason_code": REASON_PRIVATE_SESSION_MISMATCH,
+                "slot_state": slot_state,
+                "detail": "no OPEN/DEGRADED PRIVATE_INTIMATE session under this id to close"}
+    record = dict(slot)
+    record.update({"state": PI_SESSION_CLOSED,
+                   "closed_at": moment_iso,
+                   "end_reason": (_bounded_text(reason_code, 120) or None)})
+    checkpoint = dict(record.get("checkpoint") or {})
+    # 36A §11.1：终态把入场断点标记为可恢复；activity_ref 为空（"未保存"）时
+    # 这个标记只表示"有断点字段可查"，恢复执行始终是 permit 引擎侧的后续决定。
+    checkpoint["resumable"] = True
+    record["checkpoint"] = checkpoint
+    written = _write_session_dict(state_root, record)
+    return {"ok": True, "already_closed": False, "state": PI_SESSION_CLOSED,
+            "session": written}
+
+
+def read_private_intimate_session(state_root: Path | str) -> dict[str, Any]:
+    """只读投影：槽位上是 PRIVATE_INTIMATE 会话就原样返回，否则报告 NONE。"""
+    slot = _read_session_slot(state_root)
+    if _is_private_session(slot):
+        return dict(slot)
+    return {"schema_version": SESSION_SCHEMA, "state": "NONE",
+            "mode": CO_PRESENCE_MODE_PRIVATE_INTIMATE}
+
+
+def _write_session_dict(state_root: Path | str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The module's own atomic session write, shared by the private-intimate API."""
+    root = Path(state_root)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / SESSION_FILENAME
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=1, sort_keys=True),
+                   encoding="utf-8")
+    os.replace(tmp, path)
+    return dict(payload)
 
 
 def operator_action(root: Path | str, *, raw: Optional[str] = None) -> dict[str, Any]:

@@ -314,7 +314,8 @@ class PrepareAuditTest(unittest.TestCase):
         prereg = g2._read_json(self.root / "experiment" / "g2-natural.json")
         self.assertEqual(prereg["run_id"], g2.RUN_ID)
         self.assertEqual(prereg["domain_id"], g2.DOMAIN_ID)
-        self.assertEqual(prereg["history"], {"used": 185, "total_cap": 300, "new_cap": 52})
+        self.assertEqual(prereg["history"],
+                         {"used": 185, "total_cap": 300, "new_cap": 52, "utc_day_cap": 300})
         self.assertEqual(prereg["caps"]["acquisition"], 8)
         self.assertEqual(prereg["caps"]["shadow"], 40)
         self.assertEqual(prereg["caps"]["continuation"], 4)

@@ -16,17 +16,30 @@ import json
 import os
 import re
 import tempfile
+import threading
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
-from zoneinfo import ZoneInfo
+
+import business_day_key as _bdk
 
 try:
     import fcntl
 except ImportError:  # pragma: no cover - production is POSIX
     fcntl = None
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None
+
+_WIN_LOCKS_GUARD = threading.Lock()
+_WIN_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _process_uid() -> int:
+    return os.getuid() if hasattr(os, "getuid") else 0
 
 
 FEATURE_ENV = "CHIYO_WORLD_PROPERTY_ECONOMY_ENABLED"
@@ -54,7 +67,8 @@ OWNER_FUNDING_TRANSACTION_KIND = "OWNER_FUNDING"
 OWNER_FUNDING_SOURCE = "owner"
 OWNER_FUNDING_INCOME_KIND = "owner_funding"
 BASELINE_MAX_CATCH_UP_PERIODS = 12
-WORLD_TIMEZONE = "Asia/Tokyo"
+#: 业务日界唯一权威（19 章 §一.4）：默认时区与预算同源（固定偏移 +08:00，可配置）。
+WORLD_TIMEZONE = _bdk.DEFAULT_BUSINESS_TZ_LABEL
 STORE_LOCATION_ID = "home_goods_store"
 HOME_ITEM_LOCATION = "home/bedroom"
 DELIVERY_PENDING_LOCATION = "in_transit/home/bedroom"
@@ -107,6 +121,13 @@ DISPOSITION_DISCARDED = "DISCARDED"
 VALID_DISPOSITIONS = frozenset(
     {DISPOSITION_OWNED, DISPOSITION_GIFTED_AWAY, DISPOSITION_DISCARDED}
 )
+#: 18 章 §二 Day2（「历史影响下一次选择」A/B 闭环）：货架/候选层对**已拥有同款**的
+#: 固定家具做抑制。证据只读读自本 owner 的持有事实（``items`` 且
+#: ``disposition == OWNED``）；被抑制的条目带本 reason_code，购买层据此不再生成
+#: 同款候选。可携带的消耗品（``capability.fixed != True``，如线上小店的虚拟小点心）
+#: **不抑制**：它被吃掉的证据在 Body substrate 的消耗回执里（另一个 owner），
+#: 经济账本永不记录消耗，按 OWNED 抑制会把「买-吃」循环永久杀死。
+ALREADY_OWNED_SUPPRESSED = "ALREADY_OWNED_SUPPRESSED"
 
 #: M15: canonical object capability declarations (vocabulary from M15F
 #: ``world_object_capability``).  Anything not declared here stays UNKNOWN,
@@ -161,6 +182,25 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "name": "地垫坐垫",
         "description": "一个放在地上的坐垫",
         "price": 700,
+        "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
+    },
+    # 0.7 第七阶段：两件新的、真正买得到也真的能用起来的家居。
+    # ``warm_floor_lamp`` 是被声明的可通电光源（world_room_environment 是唯一的光权威），
+    # ``window_side_table`` 提供实例级 ``desk_surface:<instance>``，能把小物件真的放上去。
+    {
+        "catalog_item_id": "warm_floor_lamp",
+        "name": "暖光落地灯",
+        "description": "一盏站在角落的落地灯，罩子是暖色的布",
+        "price": 1_200,
+        "capability": _CAPABILITY_FIXED,
+        "channels": (CHANNEL_HOME_GOODS_STORE,),
+    },
+    {
+        "catalog_item_id": "window_side_table",
+        "name": "窗边小桌",
+        "description": "一张靠窗的小桌，桌面能摆下随手的小东西",
+        "price": 1_600,
         "capability": _CAPABILITY_FIXED,
         "channels": (CHANNEL_HOME_GOODS_STORE,),
     },
@@ -225,6 +265,17 @@ _CATALOG_DECLARATIONS: dict[str, dict[str, Any]] = {
         "relocatable": True,
         "usable_kind": "FURNISH",
     },
+    "warm_floor_lamp": {
+        "surfaces": (),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+        "light_band": "moderate",
+    },
+    "window_side_table": {
+        "surfaces": ("desk_surface",),
+        "relocatable": True,
+        "usable_kind": "FURNISH",
+    },
     "virtual_snack_wafer": {
         "surfaces": (),
         "relocatable": False,
@@ -267,6 +318,31 @@ _STATE_KEYS = frozenset(
         "items",
         "baseline_support",
         "deliveries",
+        "v03_ecology_sync",
+    }
+)
+_V03_ECOLOGY_SYNC_KEYS = frozenset(
+    {
+        "ecology_revision",
+        "net_main_delta_jpy",
+        "self_earned_jpy",
+        "self_spent_jpy",
+        "gift_account_id",
+        "gift_balance_jpy",
+        "living_floor_jpy",
+        "archived_entry_count",
+        "recent_v03_entries",
+        "synced_at",
+    }
+)
+_V03_RECENT_ENTRY_KEYS = frozenset(
+    {
+        "entry_id",
+        "kind",
+        "account_id",
+        "direction",
+        "amount_jpy",
+        "recorded_at",
     }
 )
 _GRANT_KEYS = frozenset(
@@ -1014,6 +1090,90 @@ def _validate_delivery(value: Any) -> dict[str, Any]:
     }
 
 
+def _non_negative_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise PropertyEconomyError(f"{field} must be a non-negative integer")
+    return value
+
+
+def _signed_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PropertyEconomyError(f"{field} must be an integer")
+    return value
+
+
+def _validate_v03_ecology_sync(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise PropertyEconomyError("v03_ecology_sync must be an object")
+    _assert_exact_keys(value, _V03_ECOLOGY_SYNC_KEYS, "v03_ecology_sync")
+    ecology_revision = _non_negative_int(
+        value.get("ecology_revision", 0), "v03_ecology_sync.ecology_revision"
+    )
+    net_main_delta_jpy = _signed_int(
+        value.get("net_main_delta_jpy", 0), "v03_ecology_sync.net_main_delta_jpy"
+    )
+    self_earned_jpy = _non_negative_int(
+        value.get("self_earned_jpy", 0), "v03_ecology_sync.self_earned_jpy"
+    )
+    self_spent_jpy = _non_negative_int(
+        value.get("self_spent_jpy", 0), "v03_ecology_sync.self_spent_jpy"
+    )
+    if net_main_delta_jpy != self_earned_jpy - self_spent_jpy:
+        raise PropertyEconomyError("v03_ecology_sync net_main_delta_jpy mismatch")
+    gift_account_id = _id(
+        value.get("gift_account_id", f"gift:{OWNER}"),
+        "v03_ecology_sync.gift_account_id",
+    )
+    gift_balance_jpy = _non_negative_int(
+        value.get("gift_balance_jpy", 0), "v03_ecology_sync.gift_balance_jpy"
+    )
+    living_floor_jpy = _non_negative_int(
+        value.get("living_floor_jpy", 3_000), "v03_ecology_sync.living_floor_jpy"
+    )
+    archived_entry_count = _non_negative_int(
+        value.get("archived_entry_count", 0), "v03_ecology_sync.archived_entry_count"
+    )
+    raw_entries = value.get("recent_v03_entries", [])
+    if (
+        not isinstance(raw_entries, Sequence)
+        or isinstance(raw_entries, (str, bytes, bytearray))
+        or len(raw_entries) > MAX_RECENT_TRANSACTIONS
+    ):
+        raise PropertyEconomyError("v03_ecology_sync.recent_v03_entries is invalid")
+    recent_entries: list[dict[str, Any]] = []
+    for idx, entry in enumerate(raw_entries):
+        if not isinstance(entry, Mapping):
+            raise PropertyEconomyError("v03_ecology_sync entry must be an object")
+        _assert_exact_keys(
+            entry, _V03_RECENT_ENTRY_KEYS, f"v03_ecology_sync.recent_v03_entries[{idx}]"
+        )
+        direction = entry.get("direction")
+        if direction not in {"CREDIT", "DEBIT"}:
+            raise PropertyEconomyError("v03_ecology_sync entry direction is invalid")
+        recent_entries.append(
+            {
+                "entry_id": _id(entry.get("entry_id"), "v03_entry.entry_id"),
+                "kind": _id(entry.get("kind"), "v03_entry.kind"),
+                "account_id": _id(entry.get("account_id"), "v03_entry.account_id"),
+                "direction": direction,
+                "amount_jpy": _positive_int(entry.get("amount_jpy"), "v03_entry.amount_jpy"),
+                "recorded_at": _timestamp(entry.get("recorded_at"), "v03_entry.recorded_at"),
+            }
+        )
+    return {
+        "ecology_revision": ecology_revision,
+        "net_main_delta_jpy": net_main_delta_jpy,
+        "self_earned_jpy": self_earned_jpy,
+        "self_spent_jpy": self_spent_jpy,
+        "gift_account_id": gift_account_id,
+        "gift_balance_jpy": gift_balance_jpy,
+        "living_floor_jpy": living_floor_jpy,
+        "archived_entry_count": archived_entry_count,
+        "recent_v03_entries": recent_entries,
+        "synced_at": _timestamp(value.get("synced_at"), "v03_ecology_sync.synced_at"),
+    }
+
+
 def validate_state(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise PropertyEconomyError("economy state must be an object")
@@ -1029,6 +1189,11 @@ def validate_state(value: Any) -> dict[str, Any]:
     baseline_support = (
         _validate_baseline_support(value["baseline_support"])
         if "baseline_support" in value
+        else None
+    )
+    v03_ecology_sync = (
+        _validate_v03_ecology_sync(value["v03_ecology_sync"])
+        if "v03_ecology_sync" in value and value["v03_ecology_sync"] is not None
         else None
     )
     raw_transactions = value.get("transactions")
@@ -1153,7 +1318,8 @@ def validate_state(value: Any) -> dict[str, Any]:
                 raise PropertyEconomyError("income support start provenance mismatch")
     total_credits = sum(item["amount"] for item in credit_transactions)
     total_debits = sum(item["amount"] for item in debit_transactions)
-    if starting_grant["amount"] + total_credits - total_debits < 0:
+    v03_delta = int(v03_ecology_sync["net_main_delta_jpy"]) if v03_ecology_sync is not None else 0
+    if starting_grant["amount"] + total_credits - total_debits + v03_delta < 0:
         raise PropertyEconomyError("economy balance is negative")
     normalized = {
         "schema_version": SCHEMA_VERSION,
@@ -1169,6 +1335,8 @@ def validate_state(value: Any) -> dict[str, Any]:
         normalized["baseline_support"] = baseline_support
     if "deliveries" in value:
         normalized["deliveries"] = deliveries
+    if v03_ecology_sync is not None:
+        normalized["v03_ecology_sync"] = v03_ecology_sync
     return normalized
 
 
@@ -1188,7 +1356,54 @@ def load_state(hermes_home: Optional[Path | str] = None) -> Optional[dict[str, A
     return _load(state_path(hermes_home))
 
 
-def _save(path: Path, state: Mapping[str, Any]) -> dict[str, Any]:
+def _notify_v03_bridge_after_save(path: Path, normalized: Mapping[str, Any]) -> None:
+    """Lightweight world -> v03_economy_illness_bridge mirror notification.
+
+    Only updates ``phone/v03_ecology.json`` when it already exists on the same
+    instance/day root; never creates ``phone/`` in pure world-only homes and
+    never writes back to ``world_property_economy.json``.
+    """
+
+    try:
+        hermes_root = path.parent.parent if path.parent.name == "state" else path.parent
+        candidate_day_roots = [hermes_root]
+        if hermes_root.name in {"world", "world-home"}:
+            candidate_day_roots.insert(0, hermes_root.parent)
+        target_day_root = next(
+            (
+                root
+                for root in candidate_day_roots
+                if (root / "phone" / "v03_ecology.json").is_file()
+            ),
+            None,
+        )
+        if target_day_root is None:
+            return
+        import sys
+
+        scripts_dir = str(Path(__file__).resolve().parent)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import v03_economy_illness_bridge as v03_bridge
+
+        sync_fn = getattr(v03_bridge, "sync_from_world_property_economy", None)
+        if callable(sync_fn):
+            sync_fn(
+                target_day_root,
+                world_state=normalized,
+                world_state_path=path,
+                sync_back_to_world=False,
+            )
+    except Exception:
+        pass
+
+
+def _save(
+    path: Path,
+    state: Mapping[str, Any],
+    *,
+    notify_v03_bridge: bool = True,
+) -> dict[str, Any]:
     normalized = validate_state(state)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = (
@@ -1212,7 +1427,10 @@ def _save(path: Path, state: Mapping[str, Any]) -> dict[str, Any]:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         temporary = None
-        os.chmod(path, 0o600)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
         try:
             directory_fd = os.open(path.parent, os.O_RDONLY)
             try:
@@ -1229,20 +1447,49 @@ def _save(path: Path, state: Mapping[str, Any]) -> dict[str, Any]:
                 os.unlink(temporary)
             except OSError:
                 pass
+    if notify_v03_bridge:
+        _notify_v03_bridge_after_save(path, normalized)
     return normalized
 
 
 @contextmanager
 def _lock(path: Path) -> Iterator[None]:
-    if fcntl is None:
-        raise PropertyEconomyError("economy lock unavailable")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.with_name(path.name + ".lock").open("a+") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    if fcntl is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.with_name(path.name + ".lock").open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return
+    if msvcrt is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = path.with_name(path.name + ".lock")
+        lock_key = str(lock_file.resolve()) if lock_file.exists() else str(lock_file.absolute())
+        with _WIN_LOCKS_GUARD:
+            proc_lock = _WIN_LOCKS.get(lock_key)
+            if proc_lock is None:
+                proc_lock = threading.RLock()
+                _WIN_LOCKS[lock_key] = proc_lock
+        with proc_lock:
+            with lock_file.open("a+b") as handle:
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"\x00")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
+        return
+    raise PropertyEconomyError("economy lock unavailable")
 
 
 def _empty_state(created_at: Any = None) -> dict[str, Any]:
@@ -1311,7 +1558,8 @@ def initialize_genesis(
 def _world_local_period(now: Any = None) -> str:
     observed_at = _timestamp(now, "now")
     instant = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
-    return instant.astimezone(ZoneInfo(WORLD_TIMEZONE)).strftime("%Y-%m")
+    # 业务日界共享解析（19 章 §一.4）：默认已是与预算同源的 +08:00。
+    return instant.astimezone(_bdk.resolve_zone(WORLD_TIMEZONE)).strftime("%Y-%m")
 
 
 def _iter_periods(start: str, end: str) -> Iterator[str]:
@@ -1411,7 +1659,8 @@ def _realize_baseline_support(
         return verified["transactions"][-len(realized) :]
 
 
-def _balance(state: Mapping[str, Any]) -> int:
+def world_core_balance(state: Mapping[str, Any]) -> int:
+    """Balance from world_property_economy's own grant and transactions (excluding v03 mirror delta)."""
     grant = int(state["starting_grant"]["amount"])
     return grant + sum(
         int(item["amount"])
@@ -1421,6 +1670,37 @@ def _balance(state: Mapping[str, Any]) -> int:
         else int(item["amount"])
         for item in state["transactions"]
     )
+
+
+def _balance(state: Mapping[str, Any]) -> int:
+    core = world_core_balance(state)
+    sync_block = state.get("v03_ecology_sync")
+    v03_delta = (
+        int(sync_block.get("net_main_delta_jpy", 0))
+        if isinstance(sync_block, Mapping)
+        else 0
+    )
+    return core + v03_delta
+
+
+def owned_counts_by_catalog_item(state: Mapping[str, Any]) -> dict[str, int]:
+    """18 章 §二 Day2：按目录 id 统计当前**持有**（OWNED）的实例数（只读）。
+
+    这是货架/候选层做「已购抑制」的唯一证据来源：不读别的 owner、不写盘、
+    不猜——GIFTED_AWAY / DISCARDED 的实例不算持有。
+    """
+
+    counts: dict[str, int] = {}
+    items = state.get("items") if isinstance(state, Mapping) else None
+    for item in items or []:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("disposition") != DISPOSITION_OWNED:
+            continue
+        catalog_item_id = str(item.get("catalog_item_id") or "").strip()
+        if catalog_item_id:
+            counts[catalog_item_id] = counts.get(catalog_item_id, 0) + 1
+    return counts
 
 
 def _transaction_projection(transaction: Mapping[str, Any]) -> dict[str, Any]:
@@ -1732,17 +2012,23 @@ def wallet_projection(
                     )
                 except Exception:
                     pass
+    current_bal = _balance(state)
+    core_bal = world_core_balance(state)
     result = {
         "kind": WALLET_KIND,
         "status": "available",
         "owner": OWNER,
         "currency": CURRENCY,
         "starting_grant": state["starting_grant"]["amount"],
+        "starting_grant_jpy": state["starting_grant"]["amount"],
         "grant_provenance": {
             "source": state["starting_grant"]["source"],
             "kind": state["starting_grant"]["kind"],
         },
-        "current_balance": _balance(state),
+        "current_balance": current_bal,
+        "balance_jpy": current_bal,
+        "current_balance_jpy": current_bal,
+        "world_core_balance_jpy": core_bal,
         "recent_transactions": [
             _transaction_projection(item)
             for item in list(reversed(state["transactions"]))[:MAX_RECENT_TRANSACTIONS]
@@ -1750,6 +2036,11 @@ def wallet_projection(
     }
     if baseline_income_enabled(environment) and state.get("baseline_support") is not None:
         result["baseline_support"] = dict(state["baseline_support"])
+    if isinstance(state.get("v03_ecology_sync"), Mapping):
+        sync_copy = _copy_json(state["v03_ecology_sync"])
+        result["v03_ecology_sync"] = sync_copy
+        result["gift_account_id"] = sync_copy.get("gift_account_id", f"gift:{OWNER}")
+        result["gift_balance_jpy"] = int(sync_copy.get("gift_balance_jpy", 0))
     return result
 
 
@@ -1846,10 +2137,12 @@ def _store_check(
             sys.path.insert(0, scripts_dir)
         import world_daily_rhythm
 
+        # 19 章 §一.4：不再写死 Asia/Tokyo，用本模块共享的同一业务时区。
         availability = world_daily_rhythm.location_availability(
             STORE_LOCATION_ID,
             now,
-            timezone_name="Asia/Tokyo",
+            timezone_name=WORLD_TIMEZONE,
+            environment=env,
         )
     except Exception:
         return {"status": "unavailable", "reason_code": "DAILY_RHYTHM_UNAVAILABLE"}
@@ -2202,7 +2495,7 @@ def validate_local_owner(
     uid = local_owner.get("uid")
     if isinstance(uid, bool) or not isinstance(uid, int) or uid < 0:
         return {"ok": False, "reason_code": "LOCAL_OWNER_CONTEXT_INVALID", "context": None}
-    if uid != os.getuid():
+    if uid != _process_uid():
         return {"ok": False, "reason_code": "LOCAL_OWNER_UID_MISMATCH", "context": None}
     if local_owner.get("subject") != OWNER:
         return {"ok": False, "reason_code": "LOCAL_OWNER_SUBJECT_MISMATCH", "context": None}
@@ -3365,8 +3658,20 @@ def store_shop_projection(
     balance = _balance(state)
     block["balance"] = balance
     block["owner"] = OWNER
+    # 18 章 §二 Day2：货架对已拥有同款的**固定家具**做抑制标注（过滤发生在
+    # 候选层；货架只带 owner 自己的持有事实与 reason_code）。消耗品（可携带、
+    # 非 fixed）不抑制——吃掉的证据在 Body substrate，经济账本永不记录消耗。
+    owned_counts = owned_counts_by_catalog_item(state)
     for entry in block["catalog"]:
         entry["affordable"] = balance >= int(entry["price"])
+        owned = owned_counts.get(str(entry["catalog_item_id"] or ""), 0)
+        entry["owned_same_item_count"] = owned
+        capability = entry.get("capability")
+        is_fixed = (isinstance(capability, Mapping)
+                    and capability.get("fixed") is True)
+        if owned > 0 and is_fixed:
+            entry["already_owned"] = True
+            entry["suppress_reason_code"] = ALREADY_OWNED_SUPPRESSED
     capacity = (
         len(state["transactions"]) < MAX_TRANSACTIONS
         and len(state["items"]) < MAX_ITEMS
@@ -3862,6 +4167,159 @@ def declared_home_areas(
         }
     except Exception:
         return set()
+def sync_v03_ecology_mirror(
+    *,
+    hermes_home: Optional[Path | str] = None,
+    ecology_revision: int = 0,
+    self_earned_jpy: int = 0,
+    self_spent_jpy: int = 0,
+    gift_account_id: str = f"gift:{OWNER}",
+    gift_balance_jpy: int = 0,
+    living_floor_jpy: int = 3_000,
+    archived_entry_count: int = 0,
+    recent_v03_entries: Optional[Sequence[Mapping[str, Any]]] = None,
+    synced_at: Any = None,
+) -> dict[str, Any]:
+    """Synchronize lightweight v0.3 ecology main/gift ledger mirror into world_property_economy.json.
+
+    Never initializes genesis on its own; when genesis exists, updates ``v03_ecology_sync``
+    atomically while keeping ``gift:<owner>`` strictly isolated from ``main`` (GAP-05).
+    """
+
+    try:
+        path = state_path(hermes_home)
+    except PropertyEconomyError as exc:
+        return {
+            "status": "rejected",
+            "reason_code": "INVALID_HERMES_HOME",
+            "error_type": type(exc).__name__,
+        }
+    if not path.is_file():
+        return {"status": "skipped", "reason_code": "GENESIS_NOT_INITIALIZED"}
+    observed_at = _timestamp(synced_at, "synced_at")
+    normalized_recent: list[dict[str, Any]] = []
+    for raw_entry in list(recent_v03_entries or [])[-MAX_RECENT_TRANSACTIONS:]:
+        if not isinstance(raw_entry, Mapping):
+            continue
+        amt = raw_entry.get("amount_jpy", raw_entry.get("amount_cents", 0))
+        if isinstance(amt, bool) or not isinstance(amt, int) or amt <= 0:
+            continue
+        direction = str(raw_entry.get("direction") or "CREDIT").upper()
+        if direction not in {"CREDIT", "DEBIT"}:
+            continue
+        try:
+            normalized_recent.append(
+                {
+                    "entry_id": _id(raw_entry.get("entry_id", "v03-entry"), "entry_id"),
+                    "kind": _id(raw_entry.get("kind", "v03_ledger"), "kind"),
+                    "account_id": _id(raw_entry.get("account_id", "main"), "account_id"),
+                    "direction": direction,
+                    "amount_jpy": amt,
+                    "recorded_at": _timestamp(
+                        raw_entry.get("recorded_at", observed_at), "recorded_at"
+                    ),
+                }
+            )
+        except PropertyEconomyError:
+            continue
+    sync_payload = {
+        "ecology_revision": int(ecology_revision),
+        "net_main_delta_jpy": int(self_earned_jpy) - int(self_spent_jpy),
+        "self_earned_jpy": int(self_earned_jpy),
+        "self_spent_jpy": int(self_spent_jpy),
+        "gift_account_id": str(gift_account_id or f"gift:{OWNER}"),
+        "gift_balance_jpy": int(gift_balance_jpy),
+        "living_floor_jpy": int(living_floor_jpy),
+        "archived_entry_count": int(archived_entry_count),
+        "recent_v03_entries": normalized_recent,
+        "synced_at": observed_at,
+    }
+    try:
+        validated_sync = _validate_v03_ecology_sync(sync_payload)
+        with _lock(path):
+            state = _load(path)
+            if state is None:
+                return {"status": "skipped", "reason_code": "GENESIS_NOT_INITIALIZED"}
+            existing_sync = state.get("v03_ecology_sync")
+            if isinstance(existing_sync, Mapping):
+                comparable_old = {k: v for k, v in existing_sync.items() if k != "synced_at"}
+                comparable_new = {k: v for k, v in validated_sync.items() if k != "synced_at"}
+                if comparable_old == comparable_new:
+                    return {
+                        "status": "noop",
+                        "revision": state["revision"],
+                        "world_core_balance_jpy": world_core_balance(state),
+                        "current_balance": _balance(state),
+                        "balance_jpy": _balance(state),
+                        "gift_balance_jpy": validated_sync["gift_balance_jpy"],
+                    }
+            updated = dict(state)
+            updated["revision"] = state["revision"] + 1
+            updated["updated_at"] = observed_at
+            updated["v03_ecology_sync"] = validated_sync
+            saved = _save(path, updated, notify_v03_bridge=False)
+            verified = _load(path)
+            if verified != saved:
+                raise PropertyEconomyError("v03_ecology_sync postcondition failed")
+            return {
+                "status": "applied",
+                "revision": verified["revision"],
+                "world_core_balance_jpy": world_core_balance(verified),
+                "current_balance": _balance(verified),
+                "balance_jpy": _balance(verified),
+                "gift_account_id": validated_sync["gift_account_id"],
+                "gift_balance_jpy": validated_sync["gift_balance_jpy"],
+            }
+    except PropertyEconomyError as exc:
+        return {
+            "status": "rejected",
+            "reason_code": "ECONOMY_SYNC_REJECTED",
+            "detail": str(exc),
+            "error_type": type(exc).__name__,
+        }
+
+
+def read_v03_bridge_sync_snapshot(
+    *,
+    hermes_home: Optional[Path | str] = None,
+) -> dict[str, Any]:
+    """Pure zero-write snapshot of world_property_economy + v03_ecology_sync."""
+
+    try:
+        state = load_state(hermes_home)
+    except PropertyEconomyError:
+        return {"status": "unavailable", "reason_code": "ECONOMY_STATE_ERROR"}
+    if state is None:
+        return {"status": "unavailable", "reason_code": "GENESIS_NOT_INITIALIZED"}
+    sync_block = state.get("v03_ecology_sync")
+    core_bal = world_core_balance(state)
+    unified_bal = _balance(state)
+    return {
+        "status": "available",
+        "owner": OWNER,
+        "currency": CURRENCY,
+        "revision": state["revision"],
+        "world_core_balance_jpy": core_bal,
+        "current_balance": unified_bal,
+        "balance_jpy": unified_bal,
+        "gift_account_id": (
+            sync_block.get("gift_account_id", f"gift:{OWNER}")
+            if isinstance(sync_block, Mapping)
+            else f"gift:{OWNER}"
+        ),
+        "gift_balance_jpy": (
+            int(sync_block.get("gift_balance_jpy", 0))
+            if isinstance(sync_block, Mapping)
+            else 0
+        ),
+        "v03_ecology_sync": _copy_json(sync_block) if isinstance(sync_block, Mapping) else None,
+        "recent_world_transactions": [
+            _transaction_projection(item)
+            for item in list(reversed(state["transactions"]))[:MAX_RECENT_TRANSACTIONS]
+        ],
+    }
+
+
 __all__ = [
     "CATALOG",
     "CURRENCY",
@@ -3878,6 +4336,8 @@ __all__ = [
     "DISPOSITION_DISCARDED",
     "DISPOSITION_GIFTED_AWAY",
     "DISPOSITION_OWNED",
+    "ALREADY_OWNED_SUPPRESSED",
+    "owned_counts_by_catalog_item",
     "FEATURE_ENV",
     "GENESIS_KIND",
     "GENESIS_SOURCE",
@@ -3911,10 +4371,13 @@ __all__ = [
     "initialize_genesis",
     "load_state",
     "purchase_item",
+    "read_v03_bridge_sync_snapshot",
     "shop_projection",
     "state_path",
+    "sync_v03_ecology_mirror",
     "validate_state",
     "wallet_projection",
+    "world_core_balance",
     "STORE_PURCHASE_KIND",
     "STORE_PURCHASE_SOURCE",
     "STORE_DELIVERY_PROVENANCE",

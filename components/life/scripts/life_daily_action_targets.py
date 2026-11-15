@@ -22,6 +22,9 @@ and only that:
     dailyact:pick_up:<slot_id>:<object_id>
     dailyact:place:room:<location_id>:<area_id>:<object_id>
     dailyact:place:surface:<location_id>:<surface_id>:<object_id>
+    dailyact:arrange:room:<location_id>:<area_id>:<object_id>
+    dailyact:arrange:surface:<location_id>:<surface_id>:<object_id>
+    dailyact:toggle_fixture:<state>:<object_id>
 
 Every plain field is percent-encoded (``urllib.parse.quote(value, safe="")``), because
 a real surface id is ``desk_surface:<item_instance_id>`` and therefore contains the
@@ -95,12 +98,21 @@ DAILY_ACTION_REF_PREFIX = "dailyact:"
 
 PICK_UP_VERB = "PICK_UP"
 PLACE_VERB = "PLACE"
+#: v0.4 room-living: the two furniture/fixture owner verbs.  Both are *instant* owner
+#: mutations whose whole parameter set is one encoded target, so they join this same
+#: ``dailyact:`` namespace instead of inventing a second spelling (the bridge decodes
+#: every ``dailyact:`` target with this module's parser).
+ARRANGE_VERB = "ARRANGE"
+TOGGLE_FIXTURE_VERB = "TOGGLE_FIXTURE"
 #: The verbs this encoding can express completely.
-DAILY_ACTION_VERBS = (PICK_UP_VERB, PLACE_VERB)
+DAILY_ACTION_VERBS = (PICK_UP_VERB, PLACE_VERB, ARRANGE_VERB, TOGGLE_FIXTURE_VERB)
 
 PICK_UP_ACTION = "pick_up"
 PLACE_ACTION = "place"
-DAILY_ACTION_ACTIONS = (PICK_UP_ACTION, PLACE_ACTION)
+ARRANGE_ACTION = "arrange"
+TOGGLE_FIXTURE_ACTION = "toggle_fixture"
+DAILY_ACTION_ACTIONS = (PICK_UP_ACTION, PLACE_ACTION, ARRANGE_ACTION,
+                        TOGGLE_FIXTURE_ACTION)
 
 #: Owner hand-slot vocabulary (copied, see the module docstring).
 HAND_SLOTS = ("left_hand", "right_hand")
@@ -115,6 +127,12 @@ _SURFACE_DESTINATION_FIELDS = ("kind", "location_id", "surface_id")
 #: The owner's own parameter names, taken from the Resolver itself.
 PICK_UP_PARAMS = ("object_id", "slot_id")
 PLACE_PARAMS = ("object_id", "target")
+ARRANGE_PARAMS = ("object_id", "target")
+TOGGLE_FIXTURE_PARAMS = ("object_id", "state")
+
+#: Owner absolute fixture-power vocabulary (``world_body_substrate.FIXTURE_POWERS``, copied).
+#: A blind toggle is not expressible: only these two literals are encoded.
+FIXTURE_POWERS = ("on", "off")
 
 #: Bounded field length: the Resolver's own ``_text`` ceilings are the same order.
 MAX_FIELD = 120
@@ -129,9 +147,19 @@ HAND_FACT = FACT_PREFIX + "%s:hand:%s"
 ROOM_FACT = FACT_PREFIX + "%s:room:%s:%s"
 SURFACE_FACT = FACT_PREFIX + "%s:surface:%s"
 
+#: v0.4 room-living: an absolute fixture power is a different fact from a placement.
+#: Same ``world_fact:`` namespace, one new key so a TOGGLE completion can only be
+#: satisfied by the owner's own recorded ``on``/``off`` for exactly this instance.
+FACT_KEY_DAILY_FIXTURE = "world_daily_fixture_ref"
+FIXTURE_FACT_PREFIX = "world_fact:fixture:"
+FIXTURE_FACT = FIXTURE_FACT_PREFIX + "%s:%s"
+
 #: Where the fact is really read from.  Named in the evidence so a report can say which
 #: owner surface answered.
 SOURCE_SNAPSHOT = "world_gateway.get_snapshot"
+#: Where a room-living fact is really read from: the owner publishes current placements
+#: and recorded fixture powers through its own availability read.
+SOURCE_AVAILABLE_ACTIONS = "world_gateway.get_available_actions"
 
 #: The two placement kinds the canonical snapshot can name without inventing a field.
 _KIND_HAND = "hand"
@@ -143,6 +171,8 @@ _KIND_CONTAINER = "container"
 #: facts: the World fact is the one ``fact_key``/``expected_value`` names.
 EFFECT_PICKED_UP = "world_object_picked_up"
 EFFECT_PLACED = "world_object_placed"
+EFFECT_ARRANGED = "world_furniture_arranged"
+EFFECT_FIXTURE_TOGGLED = "world_fixture_toggled"
 
 #: Caveats that travel with an observation so "read" is never mistaken for "proved".
 UNKNOWN_ROOM_LOCATION = "room_placement_location_from_snapshot_location"
@@ -227,32 +257,48 @@ def encode_daily_action_target(verb: Any, params: Any) -> str:
         return "%s%s:%s:%s" % (DAILY_ACTION_REF_PREFIX, PICK_UP_ACTION,
                                quote(slot, safe=""), quote(object_id, safe=""))
 
-    _require_exact(params, PLACE_PARAMS, PLACE_VERB)
+    if verb_text == TOGGLE_FIXTURE_VERB:
+        _require_exact(params, TOGGLE_FIXTURE_PARAMS, TOGGLE_FIXTURE_VERB)
+        state = params.get("state")
+        if not isinstance(state, str) or state not in FIXTURE_POWERS:
+            raise DailyActionTargetError(
+                "TOGGLE_FIXTURE state must be exactly one of %s (got %r); there is no "
+                "blind toggle and no case folding" % (list(FIXTURE_POWERS), state))
+        object_id = _field(params.get("object_id"), "object_id")
+        return "%s%s:%s:%s" % (DAILY_ACTION_REF_PREFIX, TOGGLE_FIXTURE_ACTION,
+                               quote(state, safe=""), quote(object_id, safe=""))
+
+    # PLACE and ARRANGE carry exactly the same placement-target shape; only the action
+    # field (and so the owner verb the bridge submits) differs.
+    action = ARRANGE_ACTION if verb_text == ARRANGE_VERB else PLACE_ACTION
+    params_spec = ARRANGE_PARAMS if verb_text == ARRANGE_VERB else PLACE_PARAMS
+    _require_exact(params, params_spec, verb_text)
     object_id = _field(params.get("object_id"), "object_id")
     target = params.get("target")
     if not isinstance(target, Mapping):
-        raise DailyActionTargetError("PLACE target must be a placement object")
+        raise DailyActionTargetError("%s target must be a placement object" % verb_text)
     kind = str(target.get("kind") or "").strip().lower()
     if kind == PLACEMENT_ROOM:
-        _require_exact(target, _ROOM_DESTINATION_FIELDS, "PLACE target(room)")
+        _require_exact(target, _ROOM_DESTINATION_FIELDS, "%s target(room)" % verb_text)
         location = _field(target.get("location_id"), "placement.location_id")
         area = _field(target.get("area_id"), "placement.area_id")
         return "%s%s:%s:%s:%s:%s" % (
-            DAILY_ACTION_REF_PREFIX, PLACE_ACTION, PLACEMENT_ROOM,
+            DAILY_ACTION_REF_PREFIX, action, PLACEMENT_ROOM,
             quote(location, safe=""), quote(area, safe=""),
             quote(object_id, safe=""))
     if kind == PLACEMENT_SURFACE:
-        _require_exact(target, _SURFACE_DESTINATION_FIELDS, "PLACE target(surface)")
+        _require_exact(target, _SURFACE_DESTINATION_FIELDS,
+                       "%s target(surface)" % verb_text)
         location = _field(target.get("location_id"), "placement.location_id")
         surface = _field(target.get("surface_id"), "placement.surface_id")
         return "%s%s:%s:%s:%s:%s" % (
-            DAILY_ACTION_REF_PREFIX, PLACE_ACTION, PLACEMENT_SURFACE,
+            DAILY_ACTION_REF_PREFIX, action, PLACEMENT_SURFACE,
             quote(location, safe=""), _encode_surface_field(surface),
             quote(object_id, safe=""))
     raise DailyActionTargetError(
-        "PLACE target kind %r cannot be expressed: this encoding carries %s "
-        "(the owner refuses container/in_transit destinations for V1 PLACE)"
-        % (kind, list(PLACEMENT_DESTINATION_KINDS)))
+        "%s target kind %r cannot be expressed: this encoding carries %s "
+        "(the owner refuses container/in_transit destinations for V1)"
+        % (verb_text, kind, list(PLACEMENT_DESTINATION_KINDS)))
 
 
 def _unquote_field(raw: str, label: str) -> str:
@@ -409,18 +455,37 @@ def parse_daily_action_target(target: Any) -> Optional[dict[str, Any]]:
             "object_id": object_id,
         }
 
+    if action == TOGGLE_FIXTURE_ACTION:
+        if len(fields) != 4:
+            raise DailyActionTargetError(
+                "%r must have exactly 4 colon-separated fields "
+                "(dailyact:toggle_fixture:<state>:<object_id>), got %d"
+                % (text, len(fields)))
+        state = _unquote_field(fields[2], "state")
+        if state not in FIXTURE_POWERS:
+            raise DailyActionTargetError(
+                "%r: state must be exactly one of %s" % (text, list(FIXTURE_POWERS)))
+        object_id = _unquote_field(fields[3], "object_id")
+        return {
+            "verb": TOGGLE_FIXTURE_VERB,
+            "params": {"object_id": object_id, "state": state},
+            "target_ref": text,
+            "object_id": object_id,
+        }
+
+    verb_name = ARRANGE_VERB if action == ARRANGE_ACTION else PLACE_VERB
     if len(fields) != 6:
         raise DailyActionTargetError(
             "%r must have exactly 6 colon-separated fields "
-            "(dailyact:place:<kind>:<destination>:<detail>:<object_id>), got %d"
-            % (text, len(fields)))
+            "(dailyact:%s:<kind>:<destination>:<detail>:<object_id>), got %d"
+            % (text, action, len(fields)))
     kind = fields[2]
     if kind == PLACEMENT_ROOM:
         location = _unquote_field(fields[3], "placement.location_id")
         area = _unquote_field(fields[4], "placement.area_id")
         object_id = _unquote_field(fields[5], "object_id")
         return {
-            "verb": PLACE_VERB,
+            "verb": verb_name,
             "params": {"object_id": object_id,
                        "target": {"kind": PLACEMENT_ROOM, "location_id": location,
                                   "area_id": area}},
@@ -432,7 +497,7 @@ def parse_daily_action_target(target: Any) -> Optional[dict[str, Any]]:
         surface = _decode_surface_field(fields[4], "placement.surface_id")
         object_id = _unquote_field(fields[5], "object_id")
         return {
-            "verb": PLACE_VERB,
+            "verb": verb_name,
             "params": {"object_id": object_id,
                        "target": {"kind": PLACEMENT_SURFACE, "location_id": location,
                                   "surface_id": surface}},
@@ -452,7 +517,14 @@ def parse_daily_action_target(target: Any) -> Optional[dict[str, Any]]:
 def daily_action_effect_predicates(parsed: Mapping[str, Any]) -> list[str]:
     """The AG-2 effect label for one parsed daily action."""
 
-    return [EFFECT_PICKED_UP if parsed["verb"] == PICK_UP_VERB else EFFECT_PLACED]
+    verb = str(parsed["verb"])
+    if verb == PICK_UP_VERB:
+        return [EFFECT_PICKED_UP]
+    if verb == ARRANGE_VERB:
+        return [EFFECT_ARRANGED]
+    if verb == TOGGLE_FIXTURE_VERB:
+        return [EFFECT_FIXTURE_TOGGLED]
+    return [EFFECT_PLACED]
 
 
 def build_daily_action_step(
@@ -524,14 +596,25 @@ def _expected_placement_fact(parsed: Mapping[str, Any]) -> str:
                         str(destination["area_id"]))
 
 
+def _expected_fact(parsed: Mapping[str, Any]) -> tuple[str, str]:
+    """``(fact_key, expected_value)`` for one parsed action, in LR-5's vocabulary."""
+
+    if str(parsed["verb"]) == TOGGLE_FIXTURE_VERB:
+        params = parsed.get("params") or {}
+        return (FACT_KEY_DAILY_FIXTURE,
+                FIXTURE_FACT % (str(parsed["object_id"]), str(params["state"])))
+    return FACT_KEY_DAILY_PLACEMENT, _expected_placement_fact(parsed)
+
+
 def daily_action_completion(target: Any) -> dict[str, Any]:
     """The ``{fact_key, expected_value}`` an LR-5 completion contract names.
 
-    The value is a placement fact in the ``world_fact:`` namespace LR-5 already owns:
+    The value is a state fact in the ``world_fact:`` namespace LR-5 already owns:
 
     * ``PICK_UP`` -> ``world_fact:placement:<object>:hand:<slot>``
-    * ``PLACE`` room -> ``world_fact:placement:<object>:room:<location>:<area>``
-    * ``PLACE`` surface -> ``world_fact:placement:<object>:surface:<surface>``
+    * ``PLACE`` / ``ARRANGE`` room -> ``world_fact:placement:<object>:room:<location>:<area>``
+    * ``PLACE`` / ``ARRANGE`` surface -> ``world_fact:placement:<object>:surface:<surface>``
+    * ``TOGGLE_FIXTURE`` -> ``world_fact:fixture:<object>:<on|off>``
 
     It is *only* a state assertion.  It never proves which execution produced the
     state; that stays with AR-0's receipt and the World's own execution record.
@@ -540,10 +623,8 @@ def daily_action_completion(target: Any) -> dict[str, Any]:
     parsed = parse_daily_action_target(target)
     if parsed is None:
         raise DailyActionTargetError("%r is not a daily action target" % (target,))
-    return {
-        "fact_key": FACT_KEY_DAILY_PLACEMENT,
-        "expected_value": _expected_placement_fact(parsed),
-    }
+    fact_key, expected = _expected_fact(parsed)
+    return {"fact_key": fact_key, "expected_value": expected}
 
 
 def _snapshot_placement(snapshot: Mapping[str, Any],
@@ -568,23 +649,64 @@ def _held_slot(snapshot: Mapping[str, Any], object_id: str) -> Optional[str]:
     return None
 
 
+def _availability_entry(available_actions: Any, verb: str) -> Optional[Mapping[str, Any]]:
+    """The owner's own ``get_available_actions`` entry for one verb, or ``None``."""
+
+    if not isinstance(available_actions, Mapping):
+        return None
+    for entry in available_actions.get("actions") or []:
+        if isinstance(entry, Mapping) and str(entry.get("verb")) == verb:
+            return entry
+    return None
+
+
+def _availability_candidate(entry: Optional[Mapping[str, Any]],
+                            object_id: str) -> Optional[dict[str, Any]]:
+    """The owner's own offered candidate for one object, or ``None``."""
+
+    for offered in (entry or {}).get("candidates") or []:
+        if isinstance(offered, Mapping) and str(offered.get("object_id")) == object_id:
+            return dict(offered)
+    return None
+
+
+def _observed_result(fact_key: str, expected: str, value: Optional[str],
+                     source: str, observed: dict[str, Any],
+                     unknowns: list[str]) -> dict[str, Any]:
+    return {
+        "fact_key": fact_key,
+        "expected_value": expected,
+        "value": value,
+        "satisfied": bool(value is not None and value == expected),
+        "source": source,
+        "observed": observed,
+        "unknowns": unknowns,
+    }
+
+
 def daily_action_observed_fact(
     parsed: Any,
     snapshot: Any,
+    *,
+    available_actions: Any = None,
 ) -> dict[str, Any]:
-    """What a *fresh* canonical World snapshot says about this exact placement.
+    """What a *fresh* owner read says about this exact state fact.
 
     ``parsed`` is what :func:`parse_daily_action_target` returned (a target string is
-    accepted too).  ``snapshot`` is the gateway's own ``get_snapshot`` payload, which is
-    the only bounded read that exposes hands and the object's placement kind.
+    accepted too).  For a hand placement the read is the gateway's own ``get_snapshot``
+    payload.  For the two room-living verbs the precise read is the gateway's own
+    ``get_available_actions`` payload, which is where the owner publishes the *current*
+    placement of every arrangeable instance and the recorded power of every fixture it
+    would offer a TOGGLE for -- so an ARRANGE completion reads the real room/area the
+    furniture is in now, and a TOGGLE completion reads the real recorded power, not the
+    body's location.
 
     The result is what an LR-5 ``WORLD_FACT_MATCH`` contract needs, and nothing more:
-    ``value`` is ``None`` whenever the owner cannot answer, so an unreadable snapshot can
+    ``value`` is ``None`` whenever the owner cannot answer, so an unreadable read can
     never satisfy a criterion, and ``satisfied`` is true only when the read value is
     *exactly* the expected one.  ``unknowns`` names every place where the read is weaker
-    than the fact -- a room placement's *place* is inferred from the body's own current
-    location (that is the owner's destination rule), and it is labelled as such instead
-    of being presented as a direct reading.
+    than the fact -- a room placement read from the body's own current location is
+    labelled as such instead of being presented as a direct placement field.
     """
 
     if isinstance(parsed, str) or not isinstance(parsed, Mapping):
@@ -594,23 +716,61 @@ def daily_action_observed_fact(
             "daily_action_observed_fact needs a parsed daily action target")
 
     object_id = str(parsed["object_id"])
-    expected = _expected_placement_fact(parsed)
+    verb = str(parsed["verb"])
+    fact_key, expected = _expected_fact(parsed)
     unknowns: list[str] = []
     value: Optional[str] = None
     observed: dict[str, Any] = {"object_id": object_id, "hands": None,
                                "placement": None}
     source = SOURCE_SNAPSHOT
 
+    # -- absolute fixture power, from the owner's own availability -------------- #
+    if verb == TOGGLE_FIXTURE_VERB:
+        candidate = _availability_candidate(
+            _availability_entry(available_actions, TOGGLE_FIXTURE_VERB), object_id)
+        if candidate is None:
+            unknowns.append("fixture_not_offered_here")
+        else:
+            power = candidate.get("power")
+            observed["fixture"] = {"power": power}
+            if isinstance(power, str) and power.strip().lower() in FIXTURE_POWERS:
+                value = FIXTURE_FACT % (object_id, power.strip().lower())
+                source = SOURCE_AVAILABLE_ACTIONS
+            else:
+                # An unknown power is never folded into "off".
+                unknowns.append("FIXTURE_POWER_UNKNOWN")
+        return _observed_result(fact_key, expected, value, source, observed, unknowns)
+
+    # -- furniture arrangement, from the owner's own availability --------------- #
+    if verb == ARRANGE_VERB:
+        candidate = _availability_candidate(
+            _availability_entry(available_actions, ARRANGE_VERB), object_id)
+        if candidate is not None:
+            placement = candidate.get("placement") or {}
+            observed["placement"] = dict(placement)
+            kind = str(placement.get("kind") or "")
+            if kind == PLACEMENT_SURFACE and placement.get("surface_id"):
+                value = SURFACE_FACT % (object_id, str(placement["surface_id"]))
+            elif kind == PLACEMENT_ROOM and str(placement.get("location_id") or "").strip():
+                location_id = str(placement["location_id"]).strip()
+                area_id = str(placement.get("area_id") or "").strip()
+                if area_id:
+                    value = ROOM_FACT % (object_id, location_id, area_id)
+                else:
+                    unknowns.append("placement_area_unavailable")
+            elif kind == _KIND_HAND:
+                value = HAND_FACT % (object_id, str(placement.get("slot_id") or ""))
+                unknowns.append(UNKNOWN_STILL_HELD)
+            else:
+                unknowns.append("placement_kind_unreadable")
+            return _observed_result(fact_key, expected, value,
+                                    SOURCE_AVAILABLE_ACTIONS, observed, unknowns)
+        # No ARRANGE entry at all (an older owner): fall through to the snapshot read
+        # below, which is what a plain placement uses.  It stays labelled as weaker.
+
     if not isinstance(snapshot, Mapping):
-        return {
-            "fact_key": FACT_KEY_DAILY_PLACEMENT,
-            "expected_value": expected,
-            "value": None,
-            "satisfied": False,
-            "source": source,
-            "observed": observed,
-            "unknowns": ["snapshot_unavailable"],
-        }
+        return _observed_result(fact_key, expected, None, source, observed,
+                                ["snapshot_unavailable"])
 
     hands = snapshot.get("hands") if isinstance(snapshot.get("hands"), Mapping) else {}
     observed["hands"] = dict(hands)
@@ -625,7 +785,7 @@ def daily_action_observed_fact(
             "in_hand": bool(placement.get("in_hand")),
         }
 
-    if str(parsed["verb"]) == PICK_UP_VERB:
+    if verb == PICK_UP_VERB:
         if held_slot is not None:
             value = HAND_FACT % (object_id, held_slot)
         elif placement is not None and not placement.get("in_hand"):
@@ -670,26 +830,27 @@ def daily_action_observed_fact(
             else:
                 unknowns.append("placement_kind_unreadable")
 
-    return {
-        "fact_key": FACT_KEY_DAILY_PLACEMENT,
-        "expected_value": expected,
-        "value": value,
-        "satisfied": bool(value is not None and value == expected),
-        "source": source,
-        "observed": observed,
-        "unknowns": unknowns,
-    }
+    return _observed_result(fact_key, expected, value, source, observed, unknowns)
 
 
 __all__ = [
+    "ARRANGE_ACTION",
+    "ARRANGE_PARAMS",
+    "ARRANGE_VERB",
     "DAILY_ACTION_ACTIONS",
     "DAILY_ACTION_REF_PREFIX",
     "DAILY_ACTION_VERBS",
     "DailyActionTargetError",
+    "EFFECT_ARRANGED",
+    "EFFECT_FIXTURE_TOGGLED",
     "EFFECT_PICKED_UP",
     "EFFECT_PLACED",
+    "FACT_KEY_DAILY_FIXTURE",
     "FACT_KEY_DAILY_PLACEMENT",
     "FACT_PREFIX",
+    "FIXTURE_FACT",
+    "FIXTURE_FACT_PREFIX",
+    "FIXTURE_POWERS",
     "HAND_FACT",
     "HAND_SLOTS",
     "MAX_FIELD",
@@ -703,8 +864,12 @@ __all__ = [
     "PLACE_PARAMS",
     "PLACE_VERB",
     "ROOM_FACT",
+    "SOURCE_AVAILABLE_ACTIONS",
     "SOURCE_SNAPSHOT",
     "SURFACE_FACT",
+    "TOGGLE_FIXTURE_ACTION",
+    "TOGGLE_FIXTURE_PARAMS",
+    "TOGGLE_FIXTURE_VERB",
     "UNKNOWN_NOT_IN_HAND",
     "UNKNOWN_OBJECT_NOT_VISIBLE",
     "UNKNOWN_ROOM_LOCATION",

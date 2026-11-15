@@ -49,15 +49,16 @@ They are used only to refuse a malformed or incomplete encoding *before* submiss
 owner stays the only authority over what may commit, and a vocabulary the owner extends
 must be extended here in the same change.
 
-Rest modes: narrow admission
-----------------------------
-The World owner can execute two rest modes (``world_action_resolver.REST_MODES``:
-``rest`` and ``sleep_like``).  **This round admits ``rest`` only.**  The encoding, the
-parser and the step builder all refuse ``sleep_like``, and the World bridge decodes
-through the parser -- so an executable ``sleep_like`` rest cannot be smuggled in by
-hand-writing a target, and "the opportunity emitter happens not to offer it" is not the
-only thing keeping it out.  Widening this is a separate, explicit change that must also
-justify the lying-pose + declared-surface preconditions the owner already enforces.
+Rest modes: the owner's contract, encoded exactly
+------------------------------------------------
+The World owner executes two rest modes (``world_action_resolver.REST_MODES``: ``rest``
+and ``sleep_like``) and accepts a mode **only with ``state=start``**.  This encoding
+mirrors that contract: ``start`` may carry either mode, ``stop`` only ``rest`` --
+``encode_rest_target``, ``parse_body_action_target`` and the World bridge's
+``validate_verb_params`` all refuse a ``stop`` that spells ``sleep_like``, and the
+parser/step builder refuse it too, so the refusal happens before any authorization is
+minted.  The owner still enforces the *physical* preconditions (lying pose, a declared
+rest surface really placed here); this module never decides that she should sleep.
 """
 
 from __future__ import annotations
@@ -85,13 +86,11 @@ BODY_ACTION_ACTIONS = (POSE_ACTION, REST_ACTION, TOILET_ACTION)
 POSES = ("standing", "seated", "lying", "transitioning")
 ORIENTATIONS = ("north", "south", "east", "west", "up", "down")
 REST_STATES = ("start", "stop")
-#: The owner's *full* rest-mode vocabulary (``world_action_resolver.REST_MODES``), kept
-#: here as the documented fact it is -- and deliberately **not** the admission set.
+#: The owner's *full* rest-mode vocabulary (``world_action_resolver.REST_MODES``).
 OWNER_REST_MODES = ("rest", "sleep_like")
-#: The modes this encoding admits.  ``rest`` only, this round: ``sleep_like`` is refused
-#: by ``encode_rest_target``, ``parse_body_action_target`` and therefore by
-#: ``build_body_action_step`` and the World bridge, which decode through the parser.
-REST_MODES = ("rest",)
+#: The modes this encoding admits.  Both are the owner's own words; ``stop`` may only
+#: carry ``rest`` because the Resolver accepts ``mode`` **only** with ``state=start``.
+REST_MODES = ("rest", "sleep_like")
 
 #: LR-5 observed-fact keys.  Same ``world_fact:`` namespace LR-5 already owns
 #: (``activity_progress_completion_lr5.POLICY_WORLD_FACT_V1``); no new policy version.
@@ -156,10 +155,11 @@ def encode_pose_target(pose: str, orientation: str) -> str:
 
 
 def encode_rest_target(state: str, mode: str = "rest") -> str:
-    """``bodyact:rest:<start|stop>:rest`` -- both parameters, always both.
+    """``bodyact:rest:<start|stop>:<rest|sleep_like>`` -- both parameters, always both.
 
-    ``sleep_like`` is refused: the owner can execute it, but this round does not admit it,
-    and an encoding that cannot be built cannot be submitted by hand either.
+    ``sleep_like`` is admitted with ``start`` only: the Resolver itself refuses a mode
+    with any other state (``mode is only accepted with state=start``), so a ``stop``
+    that spells ``sleep_like`` is refused here rather than sent and rejected later.
     """
 
     state_text = str(state or "").strip().lower()
@@ -170,6 +170,10 @@ def encode_rest_target(state: str, mode: str = "rest") -> str:
     if mode_text not in REST_MODES:
         raise BodyActionTargetError(
             "rest mode must be one of %s (got %r)" % (list(REST_MODES), mode_text))
+    if state_text == "stop" and mode_text != "rest":
+        raise BodyActionTargetError(
+            "rest mode %r is only accepted with state=start (got state=%r)"
+            % (mode_text, state_text))
     return "%s%s:%s:%s" % (BODY_ACTION_REF_PREFIX, REST_ACTION, state_text, mode_text)
 
 
@@ -252,6 +256,10 @@ def parse_body_action_target(ref: Any) -> Optional[dict[str, Any]]:
     if second not in REST_MODES:
         raise BodyActionTargetError(
             "%r: rest mode must be one of %s" % (text, list(REST_MODES)))
+    if first == "stop" and second != "rest":
+        raise BodyActionTargetError(
+            "%r: rest mode %r is only accepted with state=start"
+            % (text, second))
     return {
         "verb": REST_VERB,
         "target": text,
@@ -355,6 +363,19 @@ def _recovery_state(rest_availability: Any) -> Optional[str]:
     return text or None
 
 
+def _recovery_mode(rest_availability: Any) -> Optional[str]:
+    """The Body's own recovery session *mode* (``rest``/``sleep_like``), when exposed."""
+
+    if not isinstance(rest_availability, Mapping):
+        return None
+    current = rest_availability.get("current")
+    if not isinstance(current, Mapping):
+        return None
+    mode = current.get("recovery_mode")
+    text = str(mode or "").strip().lower()
+    return text or None
+
+
 def body_action_observed_fact(
     parsed: Mapping[str, Any],
     snapshot: Any,
@@ -395,14 +416,24 @@ def body_action_observed_fact(
         source = SOURCE_SNAPSHOT
     elif verb == REST_VERB:
         state = _recovery_state(rest_availability)
-        observed = {"recovery_state": state}
+        mode = _recovery_mode(rest_availability)
+        requested_mode = str(((parsed.get("params") or {}).get("mode")) or "rest").lower()
+        observed = {"recovery_state": state, "recovery_mode": mode}
         # v0.4 A (pacing): the *session* fact is "open" vs "not open".  The owner spells the
         # closed side ``inactive`` / ``completed`` / ``interrupted`` (a stop normally answers
         # ``completed``), and all three mean the same thing: no recovery session is open.  The
         # owner's own word is echoed in ``observed``; the fact value is the session token the
         # completion contract names.  Any other/unread word stays ``None`` (unknown), so a failed
         # read can never satisfy the criterion.
-        if state == RECOVERY_STATE_ACTIVE:
+        #
+        # A ``sleep_like`` start is stricter: an active *plain rest* session is a different
+        # fact from the night sleep the target asked for, so it does not satisfy this
+        # criterion.  The mode must come from the owner's own report; a missing mode is
+        # unknown, never assumed to be ``sleep_like``.
+        if requested_mode == "sleep_like" and state == RECOVERY_STATE_ACTIVE:
+            if mode == "sleep_like":
+                value = RECOVERY_FACT % RECOVERY_STATE_ACTIVE
+        elif state == RECOVERY_STATE_ACTIVE:
             value = RECOVERY_FACT % RECOVERY_STATE_ACTIVE
         elif state in RECOVERY_STATES_CLOSED:
             value = RECOVERY_FACT % RECOVERY_STATE_INACTIVE

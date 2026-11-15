@@ -221,7 +221,7 @@ def main() -> int:
         wake = runner._record(
             runner_module.WAKE_KIND_CHECK_WINDOW, "check-window", status, status_class,
             NOW, trigger_ref="evt:autonomous:check",
-            trigger_kind=alc.TRIGGER_IDLE_WINDOW,
+            trigger_kind=alc.TRIGGER_EXPLICIT_REEVALUATION,
             llm_calls=1 if status == "ACTED" else 0, outcome=outcome or None,
             extra=({"decision_route": "MODEL"} if status == "ACTED" else None))
         wake_dict = wake.to_dict()

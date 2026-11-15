@@ -651,7 +651,8 @@ class DayLifeContinuityTest(unittest.TestCase):
         self.assertEqual(refused["outcome"], alc.OUTCOME_STEP_UNSETTLED, refused)
         self.assertIs(refused["body_action"]["satisfied"], False, refused["body_action"])
         self.assertEqual(refused["body_action"]["observed"],
-                         {"recovery_state": "inactive"}, refused["body_action"])
+                         {"recovery_state": "inactive", "recovery_mode": None},
+                         refused["body_action"])
 
         # The owner's own session state says the session really opened.
         rest_entry["current"]["recovery_state"] = "active"

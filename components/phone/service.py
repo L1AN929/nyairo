@@ -35,6 +35,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -267,25 +268,44 @@ def today_iso(value: Any) -> Optional[str]:
     return moment.isoformat(timespec="seconds") if moment is not None else None
 
 
+def _int_or_none(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return int(value)
+
+
 def today_business_day(state_root: Path | str) -> dict[str, Any]:
     """今天这个「业务日」由什么时钟决定——答案自带来源，读不到时钟不静默混钟。
 
-    业务时钟（``fastday/fastday_clock.json``）是压缩日里唯一的时间权威；它不存在（普通实例
-    从未开过压缩日）或损坏时，才退回系统时钟，并保留具名原因。两种情况都不写任何文件。
+    业务时钟（``fastday/fastday_clock.json``）是压缩日里唯一的时间权威；兼容嵌套
+    ``<day_root>/one-day/life/state`` 与顶层 ``<day_root>/fastday/fastday_clock.json``。
+    它不存在或损坏时，才退回系统时钟，并保留具名原因。两种情况都不写任何文件。
     """
 
-    path = Path(str(state_root)) / BUSINESS_CLOCK_DIRNAME / BUSINESS_CLOCK_FILENAME
+    p = Path(str(state_root))
+    candidates = [p / BUSINESS_CLOCK_DIRNAME / BUSINESS_CLOCK_FILENAME]
+    if p.name == "state" and p.parent.name == "life" and p.parent.parent.name == "one-day":
+        candidates.append(p.parents[2] / BUSINESS_CLOCK_DIRNAME / BUSINESS_CLOCK_FILENAME)
     reason: Optional[str] = None
     payload: Any = None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        reason = "BUSINESS_CLOCK_ABSENT"
-    except (OSError, ValueError):
-        reason = "BUSINESS_CLOCK_UNREADABLE"
+    for idx, path in enumerate(candidates):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            reason = None
+            break
+        except FileNotFoundError:
+            if idx == len(candidates) - 1 and reason is None:
+                reason = "BUSINESS_CLOCK_ABSENT"
+        except (OSError, ValueError):
+            reason = "BUSINESS_CLOCK_UNREADABLE"
+            break
     if isinstance(payload, Mapping):
         moment = (today_moment(payload.get("logical_checkpoint"))
-                  or today_moment(payload.get("logical_anchor")))
+                  or today_moment(payload.get("logical_anchor"))
+                  or today_moment(payload.get("logical_at"))
+                  or today_moment(payload.get("now_iso"))
+                  or today_moment(payload.get("current_iso"))
+                  or today_moment(payload.get("now")))
         if moment is not None:
             return {"source": "business_clock", "reason_code": None,
                     "logical_at": moment.isoformat(timespec="seconds"),
@@ -492,6 +512,10 @@ class PhoneService:
         #: return a timezone-aware ``datetime``.  This is the same moment the World child was
         #: started with, so the phone and the owner cannot disagree about opening hours.
         world_clock: Optional[Any] = None,
+        #: The subject C's own World/economy facades verify.  It defaults to the Supply subject
+        #: (production has one identity); an isolated fixture whose World owner was initialized
+        #: under its own subject can name it here without changing the private-items subject.
+        world_subject: Optional[str] = None,
         shopping: Optional[Any] = None,
         world: Optional[Any] = None,
         #: Injected reading workbench (B's ``ReadingWorkspaceService``); ``None`` = build it here
@@ -525,6 +549,9 @@ class PhoneService:
         self.instance = dict(instance)
         self.root = Path(str(self.instance["root"]))
         self.subject = str(self.instance["subject"])
+        #: World/economy owner identity.  Only the C facades use it; the Supply/private-items
+        #: subject above stays exactly as given.
+        self.world_subject = str(world_subject or self.subject)
         self.world_home = Path(str(self.instance["world_home"]))
         self.supply_socket = str(self.instance["supply_socket"])
         self.private_items_artifact_id = str(self.instance["private_items_artifact_id"])
@@ -1087,7 +1114,7 @@ class PhoneService:
             self.world_home,
             self.environment,
             local_owner_uid=os.getuid(),
-            subject=self.subject,
+            subject=self.world_subject,
             gateway_socket=self.world_body_socket,
             clock=self._world_clock,
         )
@@ -1165,7 +1192,7 @@ class PhoneService:
             self.world_home,
             self.environment,
             local_owner_uid=os.getuid(),
-            subject=self.subject,
+            subject=self.world_subject,
             gateway_socket=self.world_body_socket,
             clock=self._world_clock,
         )
@@ -1822,6 +1849,4702 @@ class PhoneService:
             service=self, state_root=state_root, subject_id=self.subject, clock=clock,
             subject_view=bool(subject_view), world_home=Path(self.world_home),
             world_clock_injected=self._world_clock is not None)
+
+    def day_story(self, *, day: Optional[str] = None) -> dict[str, Any]:
+        """``GET /api/phone/today/story``：统一因果生活故事线（100% 零写入纯读，零大模型调用）。"""
+
+        from . import day_story_view
+
+        return day_story_view.read_today_story_zero_write(self.root, day=day)
+
+    # -- 双人书桌：四态木牌 / 未发短笺 / 明日便签（只读聚合 + 一个显式写口） ---------------
+
+    def _desk_state_root(self) -> Optional[Path]:
+        """The same nested Life root the 'today' reads use; ``None`` means unbound, not idle."""
+
+        return self._today_state_root()
+
+    def _canonical_activity_doc(self) -> tuple[Optional[dict[str, Any]], str]:
+        """Read-only canonical Activity document.  Never written, never guessed."""
+
+        root = self._desk_state_root()
+        if root is None:
+            return None, "LIFE_STATE_UNBOUND"
+        path = Path(root) / CANONICAL_ACTIVITY_FILENAME
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None, "CANONICAL_STATE_ABSENT"
+        except (OSError, ValueError):
+            return None, "CANONICAL_STATE_UNREADABLE"
+        if not isinstance(payload, dict) or not isinstance(payload.get("activities"), dict):
+            return None, "CANONICAL_STATE_MALFORMED"
+        return payload, ""
+
+    def _desk_foreground(self, doc: Optional[Mapping[str, Any]],
+                         reason: str) -> dict[str, Any]:
+        """The one canonical foreground pointer, as the owner records it."""
+
+        if doc is None:
+            return {"available": False, "reason_code": reason, "foreground": None}
+        ref = doc.get("foreground_activity_ref")
+        if not ref:
+            return {"available": True, "reason_code": None, "foreground": None}
+        activity = (doc.get("activities") or {}).get(str(ref))
+        if not isinstance(activity, Mapping):
+            return {"available": False, "reason_code": "FOREGROUND_REF_MISSING_ACTIVITY",
+                    "foreground": None}
+        return {
+            "available": True,
+            "reason_code": None,
+            "foreground": {
+                "ref": str(ref),
+                "status": str(activity.get("status") or ""),
+                "kind": str(activity.get("activity_kind") or ""),
+                "interruptibility": str(activity.get("interruptibility") or "") or None,
+            },
+            #: The raw owner record, so the current-work projection can read the same
+            #: single-valued target binding the Life cycle reads.  Never sent as-is.
+            "activity": dict(activity),
+        }
+
+    def _desk_current_work(self, canonical: Mapping[str, Any]
+                           ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+        """The work the **canonical foreground** is provably on -- not the start-up binding.
+
+        ``instance.work_artifact_id`` only records what the instance started with; after a
+        new work is opened the foreground Activity is the authority.  The target comes from the
+        Activity's own single-valued binding (``origin_ref``/``checkpoint_ref``/``target_ref``)
+        or one unambiguous artifact among its refs -- never the first ``subject_refs`` item.
+        Reading material, the private-items document, non-text artifacts and share drafts are
+        not "the work on the desk".  When nothing is provable the answer is a named
+        unavailable, and the start-up binding is reported separately as ``bound_work`` with
+        ``is_current=false``.
+        """
+
+        from . import desk_presence_view as desk
+
+        bound_work: Optional[dict[str, Any]] = None
+        bound_id = str(self.instance.get("work_artifact_id") or "").strip()
+        if bound_id:
+            bound_work = {
+                "artifact_id": bound_id,
+                "available": True,
+                "is_current": False,
+                "source": "instance.work_artifact_id",
+                "note": "启动绑定；不是当前前台作品，current_work 只认 canonical 前台的具名 target",
+            }
+
+        def not_current(reason: str, artifact_id: Optional[str] = None, **extra: Any
+                        ) -> dict[str, Any]:
+            answer: dict[str, Any] = {"available": False, "reason_code": reason,
+                                      "artifact_id": artifact_id}
+            answer.update(extra)
+            return answer
+
+        if not canonical.get("available"):
+            return not_current(str(canonical.get("reason_code")
+                                   or "CANONICAL_STATE_UNAVAILABLE")), bound_work
+        foreground = canonical.get("foreground") \
+            if isinstance(canonical.get("foreground"), Mapping) else None
+        if foreground is None:
+            return not_current("NO_FOREGROUND_ACTIVITY"), bound_work
+        if str(foreground.get("status") or "") != "ACTIVE":
+            return not_current("FOREGROUND_NOT_ACTIVE"), bound_work
+        activity = canonical.get("activity") if isinstance(canonical.get("activity"),
+                                                           Mapping) else {}
+        identity, reason = desk.foreground_work_identity(activity)
+        if identity is None:
+            return not_current(str(reason or "FOREGROUND_TARGET_UNKNOWN")), bound_work
+
+        # The reading material and the private-items document are artifacts but not works.
+        excluded: set[str] = set()
+        try:
+            from life_step_readiness import canonical_target_ref
+
+            for value in (self.reading_artifact_id, self.private_items_artifact_id):
+                canonical_ref = canonical_target_ref(value) if value else None
+                if canonical_ref:
+                    excluded.add(canonical_ref)
+        except Exception:
+            pass
+        if identity in excluded:
+            return not_current("FOREGROUND_TARGET_NOT_A_WORK", identity), bound_work
+
+        try:
+            project = self.project(identity)
+        except Exception:
+            return not_current("WORK_NOT_READABLE", identity), bound_work
+        if not project.get("ok"):
+            return not_current(str(project.get("reason_code") or "WORK_NOT_READABLE"),
+                               identity), bound_work
+        row = project.get("project") if isinstance(project.get("project"), Mapping) else {}
+        if row.get("continuable") is False:
+            return not_current("FOREGROUND_TARGET_NOT_TEXT_WORK", identity,
+                               artifact_type=row.get("artifact_type")), bound_work
+        title = str(row.get("title") or "")
+        try:
+            from life_sharing_service import is_share_title
+
+            if title and is_share_title(title):
+                return not_current("FOREGROUND_TARGET_IS_SHARE_DRAFT", identity), bound_work
+        except Exception:
+            pass
+        return desk.work_block(project), bound_work
+
+    def desk_presence(self) -> dict[str, Any]:
+        """``GET /api/phone/desk/presence``: door sign + desk objects + comm availability.
+
+        Pure read: World snapshot, canonical Activity, the reading workbench and one project
+        head are all read-only.  It starts no service, calls no model and writes no file.  An
+        unreadable source is named instead of being turned into "at home, open".
+        """
+
+        from . import desk_presence_view as desk
+
+        world_result = self.world()
+        world_ok = bool(world_result.get("ok"))
+        payload = world_result.get("data") if isinstance(world_result.get("data"),
+                                                        Mapping) else {}
+        location = payload.get("location") if isinstance(payload.get("location"),
+                                                          Mapping) else {}
+        body = payload.get("body") if isinstance(payload.get("body"), Mapping) else {}
+
+        doc, reason = self._canonical_activity_doc()
+        canonical = self._desk_foreground(doc, reason)
+        door = desk.classify_door(location=location, world_ok=world_ok,
+                                  world_reason=str(world_result.get("reason_code") or ""),
+                                  canonical=canonical, body=body)
+        comm = desk.communication_block(door=door, canonical=canonical)
+
+        try:
+            reading = desk.reading_block(self.reading_material())
+        except Exception:
+            reading = {"available": False, "reason_code": "READING_MATERIAL_UNAVAILABLE"}
+
+        work, bound_work = self._desk_current_work(canonical)
+
+        return envelope(True, STATUS_OK, {
+            "schema": desk.PRESENCE_SCHEMA,
+            "read_only": True,
+            "door_sign": door["door_sign"],
+            "door_status": door["door_status"],
+            "door_reason_code": door["door_reason_code"],
+            "evidence": door["evidence"],
+            "desk": {"current_work": work, "bound_work": bound_work, "reading": reading},
+            "interruptibility": comm["interruptibility"],
+            "communication_availability": comm["communication_availability"],
+            # 没有真实伴侣在场的依据：不把用户在线/刚 GET 过/共同书桌当成有人在。
+            "partner_presence": {
+                "value": None,
+                "status": "NOT_RECORDED",
+                "reason_code": "NO_PARTNER_EVIDENCE",
+                "note": "没有真实伴侣在场的记录；桌面名称与请求本身不算在场",
+            },
+            "private_text_included": False,
+            "local_only": True,
+        })
+
+    def desk_notes(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/desk/notes``: retained short notes + next-day items.
+
+        Default (partner/operator) view keeps every body/title withheld.  ``subject_view`` is
+        only reached after this serve's local capability matched; it then returns the bounded
+        draft text and the tomorrow item titles that already exist.  A wrong credential must
+        fail before this method is called.
+        """
+
+        from . import desk_presence_view as desk
+
+        listing = self.shares(states=list(desk.RETAINED_SHARE_STATES), limit=None)
+        rows, share_counts = desk.retained_share_rows(listing)
+        share_reason = None if listing.get("ok") else str(listing.get("reason_code") or "")
+        if subject_view:
+            for row in rows:
+                share_id = str(row.get("share_id") or "")
+                detail = self.share(share_id) if share_id else {}
+                if detail.get("ok"):
+                    row.update(desk.share_detail_private(detail))
+                    row["body_withheld"] = False
+                    row["text_withheld"] = not bool(row.get("text"))
+                else:
+                    row["detail_reason_code"] = str(detail.get("reason_code") or "")
+
+        root = self._desk_state_root()
+        clock = today_business_day(root) if root is not None else {
+            "source": "system_clock", "reason_code": "LIFE_STATE_UNBOUND",
+            "logical_at": datetime.now(tz=TODAY_TZ).replace(microsecond=0).isoformat(),
+            "day": datetime.now(tz=TODAY_TZ).date().isoformat(),
+            "run_id": None, "domain_id": None,
+        }
+        next_day = desk.next_business_day(clock)
+        tomorrow: dict[str, Any] = {
+            "items": [], "count": 0, "local_day": next_day["local_day"],
+            "clock": clock, "basis": next_day["basis"],
+            "timezone_offset": next_day["timezone_offset"],
+        }
+        if root is None:
+            tomorrow.update({"available": False, "reason_code": "LIFE_STATE_UNBOUND"})
+        else:
+            try:
+                from life_future_items import FutureItemError, FutureItems
+
+                store = FutureItems(root, subject_id=self.subject)
+                due = [item.to_dict() for item in store.open_items()
+                       if desk.falls_on_local_day(item.due_at,
+                                                  local_day=next_day["local_day"],
+                                                  offset=next_day["timezone_offset"])]
+                due.sort(key=lambda item: (str(item.get("due_at") or ""),
+                                           str(item.get("item_ref") or "")))
+                tomorrow.update({
+                    "available": True,
+                    "items": [desk.tomorrow_row(item, with_title=bool(subject_view))
+                              for item in due[:20]],
+                    "count": len(due),
+                })
+            except FutureItemError as exc:
+                tomorrow.update({"available": False, "reason_code": exc.reason_code})
+            except Exception:
+                tomorrow.update({"available": False, "reason_code": "FUTURE_ITEMS_UNAVAILABLE"})
+
+        text_included = bool(subject_view and (
+            any(row.get("text") for row in rows)
+            or any("title" in item for item in tomorrow["items"])))
+        return envelope(True, STATUS_OK, {
+            "schema": desk.NOTES_SCHEMA,
+            "read_only": True,
+            "view": "subject" if subject_view else "partner_default",
+            "shares": {
+                "retained": rows,
+                "counts": share_counts["counts"],
+                "retained_count": share_counts["retained_count"],
+                "truncated": share_counts["truncated"],
+                "source": "LifeSharingService",
+                "unavailable_reason_code": share_reason or None,
+            },
+            "tomorrow": tomorrow,
+            # 没有现成的「允许伴侣读未发正文」授权机制；默认不宣称支持。
+            "partner_preview_available": False,
+            "partner_preview_reason_code": desk.PARTNER_PREVIEW_REASON,
+            "private_text_included": text_included,
+            "local_only": True,
+            "note": "未发短笺/明日便签正文默认不公开；只有本次 serve 的本地 capability 有效时"
+                    "才返回自己视角的明文。已投递分享只在原 inbox 按既有引用呈现。",
+        })
+
+    def desk_tomorrow_write(self, *, action: str, title: Optional[str] = None,
+                            item_ref: Optional[str] = None, due_at: Optional[str] = None,
+                            due_in_minutes: Optional[int] = None,
+                            reason: Optional[str] = None) -> dict[str, Any]:
+        """One explicit operator/subject write on the existing ``FutureItems`` owner.
+
+        No new store, no timer, no automatic reschedule/completion/send.  The caller (the phone
+        server) has already required CSRF and this serve's local capability; this method only
+        forwards the explicit intent and re-reads the same object afterwards.
+        """
+
+        root = self._desk_state_root()
+        if root is None:
+            return unavailable("LIFE_STATE_UNBOUND")
+        from life_future_items import FutureItemError, FutureItems
+
+        try:
+            store = FutureItems(root, subject_id=self.subject)
+            if action == "propose":
+                outcome = store.propose(title=title, due_at=due_at,
+                                        in_minutes=due_in_minutes)
+                item = outcome.get("item") or {}
+                read_back = store.get(item.get("item_ref")) if item.get("item_ref") else None
+                record = read_back.to_dict() if read_back is not None else item
+                return envelope(True, STATUS_OK if outcome.get("created")
+                                else STATUS_ALREADY,
+                                {"action": "propose", "item_ref": record.get("item_ref"),
+                                 "created": bool(outcome.get("created")), "item": record,
+                                 "read_back": read_back is not None})
+            if action == "cancel":
+                store.cancel(item_ref, reason=(reason or "CANCELLED_BY_SUBJECT"))
+            elif action == "reschedule":
+                store.reschedule(item_ref, due_at=due_at, in_minutes=due_in_minutes,
+                                 reason=(reason or "RESCHEDULED"))
+            else:
+                return rejected("DESK_ACTION_UNSUPPORTED", action=action)
+            read_back = store.get(item_ref)
+            if read_back is None:
+                return rejected("FUTURE_ITEM_NOT_FOUND", item_ref=item_ref)
+            return envelope(True, STATUS_OK, {
+                "action": action, "item_ref": read_back.item_ref,
+                "item": read_back.to_dict(), "read_back": True,
+            })
+        except FutureItemError as exc:
+            return rejected(exc.reason_code, detail=exc.detail)
+        except Exception as exc:
+            return rejected("DESK_FUTURE_WRITE_FAILED", error_type=type(exc).__name__)
+
+    # -- 窗边景致 / 冰箱贴与自选锁屏 / 分日慢写的信 ---------------------------------------
+
+    def _keepsake_state_path(self) -> Path:
+        from . import window_keepsake_view as view
+
+        return view.state_path(self.root)
+
+    def _keepsake_state(self) -> tuple[dict[str, Any], Optional[str]]:
+        from . import window_keepsake_view as view
+
+        return view.read_state(self.root)
+
+    def _keepsake_now_iso(self) -> str:
+        """The explicit-selection clock: the same business clock the rest of the phone uses."""
+
+        root = self._desk_state_root()
+        clock = today_business_day(root) if root is not None else None
+        moment = today_moment((clock or {}).get("logical_at")) if clock else None
+        if moment is None:
+            moment = datetime.now(tz=timezone.utc)
+        return moment.isoformat(timespec="seconds")
+
+    def _home_soundscape(self, world_result: Mapping[str, Any]) -> dict[str, Any]:
+        """Today's home ambient **template** events; no weather authority is invented."""
+
+        from . import window_keepsake_view as view
+
+        try:
+            import world_ambient_events as ambient
+        except Exception:
+            return view.soundscape_unavailable("AMBIENT_MODULE_UNAVAILABLE")
+        if not ambient.feature_enabled(self.environment):
+            return view.soundscape_unavailable("FEATURE_DISABLED")
+        data = world_result.get("data") if isinstance(world_result.get("data"), Mapping) else {}
+        location = data.get("location") if isinstance(data.get("location"), Mapping) else {}
+        if not world_result.get("ok"):
+            return view.soundscape_unavailable(
+                str(world_result.get("reason_code") or "WORLD_UNAVAILABLE"))
+        if location.get("status") != "available":
+            return view.soundscape_unavailable(
+                str(location.get("reason_code") or "LOCATION_UNAVAILABLE"))
+        if str(location.get("place_id") or "") != "home":
+            return view.soundscape_unavailable(view.NOT_AT_HOME, at_home=False)
+        world = data.get("world") if isinstance(data.get("world"), Mapping) else {}
+        day_text = world.get("local_date")
+        local_time = world.get("local_time")
+        day = view.parse_instant(day_text)
+        now = view.parse_instant(local_time)
+        if day is None or now is None:
+            return view.soundscape_unavailable("WORLD_LOCAL_CLOCK_UNAVAILABLE")
+        try:
+            events = ambient.active_ambient_events(
+                day.date(), now, relevant_location_ids={"home"},
+                environment=self.environment)
+        except Exception as exc:
+            return view.soundscape_unavailable("AMBIENT_EVENTS_UNAVAILABLE",
+                                               error_type=type(exc).__name__)
+        return view.soundscape_available(
+            events, local_date=day_text, local_time=local_time,
+            clock_source=("injected_world_clock" if self._world_clock is not None
+                          else "world_snapshot"))
+
+    def home_window(self) -> dict[str, Any]:
+        """``GET /api/phone/home/window``: plants / light / personal space / soundscape."""
+
+        from . import window_keepsake_view as view
+
+        world_result = self.world()
+        try:
+            from world_home_space import observe_home
+
+            observation = observe_home(hermes_home=self.world_home, world_state=None,
+                                       environment=self.environment)
+        except Exception as exc:
+            observation = {"status": "unavailable",
+                           "reason_code": "HOME_SPACE_UNAVAILABLE",
+                           "error_type": type(exc).__name__}
+        return envelope(True, STATUS_OK, view.window_block(
+            world_result=world_result, home_observation=observation,
+            soundscape=self._home_soundscape(world_result)))
+
+    def _lockscreen_status(self, album_artifact_id: str,
+                           *, subject_view: bool) -> dict[str, Any]:
+        detail = self.album_detail(album_artifact_id)
+        if not detail.get("ok"):
+            return {"status": "withheld", "reason_code": str(
+                detail.get("reason_code") or "LOCKSCREEN_IMAGE_UNAVAILABLE"),
+                "album_artifact_id": album_artifact_id}
+        row = detail.get("image") if isinstance(detail.get("image"), Mapping) else {}
+        out: dict[str, Any] = {
+            "status": "available",
+            "reason_code": None,
+            "album_artifact_id": album_artifact_id,
+            "content_type": row.get("content_type"),
+        }
+        if subject_view:
+            out["caption"] = row.get("caption")
+        return out
+
+    def _verify_lockscreen_image(self, album_artifact_id: str) -> dict[str, Any]:
+        """Only a real, currently readable picture from *her* album may be the lockscreen."""
+
+        detail = self.album_detail(album_artifact_id)
+        if not detail.get("ok"):
+            return {"ok": False, "reason_code": str(
+                detail.get("reason_code") or "LOCKSCREEN_IMAGE_UNAVAILABLE")}
+        row = detail.get("image") if isinstance(detail.get("image"), Mapping) else {}
+        if row.get("content_type") not in ("image/png", "image/jpeg") or not row.get("media"):
+            return {"ok": False, "reason_code": "LOCKSCREEN_IMAGE_INVALID"}
+        # The owner's byte read verifies size + SHA-256 on the real media path.  The bytes are
+        # dropped immediately: only the reference is stored.
+        image = self.album_image(album_artifact_id)
+        if not image.get("ok"):
+            return {"ok": False, "reason_code": str(
+                image.get("reason_code") or "LOCKSCREEN_IMAGE_BYTES_UNAVAILABLE")}
+        return {"ok": True}
+
+    def _verify_pin_share(self, share_id: str) -> dict[str, Any]:
+        """Fridge magnets are only delivered local shares with a readable current source."""
+
+        detail = self.share(share_id)
+        if not detail.get("ok"):
+            return {"ok": False, "reason_code": str(
+                detail.get("reason_code") or "PINNED_SHARE_NOT_FOUND")}
+        data = detail.get("data") if isinstance(detail.get("data"), Mapping) else {}
+        share = data.get("share") if isinstance(data.get("share"), Mapping) else {}
+        receipt = data.get("receipt") if isinstance(data.get("receipt"), Mapping) else {}
+        if str(share.get("state") or "") != "LOCAL_DELIVERED" \
+                or not data.get("delivered") or not receipt:
+            return {"ok": False, "reason_code": "PINNED_SHARE_NOT_DELIVERED"}
+        if receipt.get("local_only") is False or receipt.get("external_channel_sent") is True:
+            return {"ok": False, "reason_code": "PINNED_SHARE_NOT_LOCAL"}
+        if receipt.get("audience") not in (None, "", "local:owner") \
+                or receipt.get("channel") not in (None, "", "local_inbox"):
+            return {"ok": False, "reason_code": "PINNED_SHARE_NOT_LOCAL"}
+        if not data.get("source_readable") or share.get("text_withheld"):
+            return {"ok": False, "reason_code": "PINNED_SHARE_SOURCE_NOT_READABLE"}
+        return {"ok": True}
+
+    def _pinned_share_status(self, share_id: str, pinned_at: Any) -> dict[str, Any]:
+        detail = self.share(share_id)
+        base = {"share_id": share_id, "pinned_at": pinned_at,
+                "status": "withheld", "text_withheld": True}
+        if not detail.get("ok"):
+            base["reason_code"] = str(detail.get("reason_code") or "PINNED_SHARE_NOT_FOUND")
+            return base
+        data = detail.get("data") if isinstance(detail.get("data"), Mapping) else {}
+        share = data.get("share") if isinstance(data.get("share"), Mapping) else {}
+        receipt = data.get("receipt") if isinstance(data.get("receipt"), Mapping) else {}
+        base["state"] = share.get("state")
+        base["delivered_at"] = receipt.get("delivered_at") or share.get("updated_at")
+        if str(share.get("state") or "") != "LOCAL_DELIVERED" or not data.get("delivered") \
+                or not receipt:
+            base["reason_code"] = "PINNED_SHARE_NOT_DELIVERED"
+            return base
+        if receipt.get("local_only") is False or receipt.get("external_channel_sent") is True:
+            base["reason_code"] = "PINNED_SHARE_NOT_LOCAL"
+            return base
+        if not data.get("source_readable") or share.get("text_withheld"):
+            base["reason_code"] = "PINNED_SHARE_SOURCE_NOT_READABLE"
+            return base
+        base.update({
+            "status": "available",
+            "reason_code": None,
+            "text": share.get("text") or "",
+            "text_chars": share.get("text_chars"),
+            "text_withheld": False,
+        })
+        return base
+
+    def home_keepsakes(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/home/keepsakes``: the explicit lockscreen + fridge pins, re-read."""
+
+        from . import window_keepsake_view as view
+
+        state, state_reason = self._keepsake_state()
+        lockscreen_ref = str(((state.get("lockscreen") or {}).get("album_artifact_id")) or "")
+        lockscreen = self._lockscreen_status(lockscreen_ref, subject_view=subject_view) \
+            if lockscreen_ref else None
+        pins = [self._pinned_share_status(str(row.get("share_id") or ""), row.get("pinned_at"))
+                for row in (state.get("pins") or []) if row.get("share_id")]
+        return envelope(True, STATUS_OK, view.keepsakes_block(
+            state=state, state_reason=state_reason, lockscreen=lockscreen, pins=pins,
+            subject_view=bool(subject_view)))
+
+    def home_keepsake_action(self, *, action: str,
+                             album_artifact_id: Optional[str] = None,
+                             share_id: Optional[str] = None) -> dict[str, Any]:
+        """One explicit select / clear / pin / unpin.  Same intent never bumps revision."""
+
+        from . import window_keepsake_view as view
+
+        if action not in ("select_lockscreen", "clear_lockscreen", "pin_share", "unpin_share"):
+            return rejected("KEEPSAKE_ACTION_UNSUPPORTED", action=action)
+        state, state_reason = self._keepsake_state()
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._keepsake_now_iso()
+        reference: Optional[str] = None
+        if action == "select_lockscreen":
+            if not album_artifact_id:
+                return rejected("LOCKSCREEN_IMAGE_REQUIRED")
+            checked = self._verify_lockscreen_image(album_artifact_id)
+            if not checked.get("ok"):
+                return rejected(str(checked.get("reason_code") or "LOCKSCREEN_IMAGE_INVALID"))
+            reference = album_artifact_id
+            new_state, changed = view.select_lockscreen(state, album_artifact_id, now_iso)
+        elif action == "clear_lockscreen":
+            new_state, changed = view.clear_lockscreen(state, now_iso)
+        elif action == "pin_share":
+            if not share_id:
+                return rejected("SHARE_ID_REQUIRED")
+            checked = self._verify_pin_share(share_id)
+            if not checked.get("ok"):
+                return rejected(str(checked.get("reason_code") or "PINNED_SHARE_NOT_DELIVERED"))
+            reference = share_id
+            new_state, changed = view.pin_share(state, share_id, now_iso)
+        else:
+            if not share_id:
+                return rejected("SHARE_ID_REQUIRED")
+            reference = share_id
+            new_state, changed = view.unpin_share(state, share_id, now_iso)
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at")})
+        written = view.write_state(self.root, new_state)
+        data = {"action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at")}
+        if action == "select_lockscreen":
+            data["album_artifact_id"] = reference
+        elif action in ("pin_share", "unpin_share"):
+            data["share_id"] = reference
+        return envelope(True, STATUS_OK, data)
+
+    def _letters_clock(self) -> dict[str, Any]:
+        root = self._desk_state_root()
+        if root is not None:
+            return today_business_day(root)
+        moment = datetime.now(tz=TODAY_TZ).replace(microsecond=0)
+        return {"source": "system_clock", "reason_code": "LIFE_STATE_UNBOUND",
+                "logical_at": moment.isoformat(timespec="seconds"),
+                "day": moment.date().isoformat(), "run_id": None, "domain_id": None}
+
+    def home_letters(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/home/letters``: a cross-day share/source-version projection.
+
+        There is no letter store: each row is one existing share whose pinned source version's
+        own version history spans at least two owner-timestamp local days.  Versions newer than
+        the pinned version are excluded, and the postmark says plainly that an owner wall-clock
+        timestamp is not a provable compressed-business-day stamp.
+        """
+
+        from . import window_keepsake_view as view
+
+        listing = self.shares(limit=view.MAX_SHARE_SCAN)
+        if not listing.get("ok"):
+            return unavailable(str(listing.get("reason_code") or "SHARES_UNAVAILABLE"))
+        data = listing.get("data") if isinstance(listing.get("data"), Mapping) else {}
+        shares = [row for row in (data.get("shares") or []) if isinstance(row, Mapping)]
+        clock = self._letters_clock()
+        offset = view.clock_offset(clock)
+        rows: list[dict[str, Any]] = []
+        unprovable = 0
+        try:
+            projects = self._projects_service()
+        except Exception:
+            projects = None
+        for row in shares:
+            state = str(row.get("state") or "")
+            if state not in view.LETTER_SHARE_STATES:
+                continue
+            source = row.get("source") if isinstance(row.get("source"), Mapping) else {}
+            source_id = str(source.get("artifact_id") or "")
+            version_id = str(source.get("version_id") or "")
+            if not source_id or not version_id:
+                continue
+            history: dict[str, Any] = {}
+            if projects is not None:
+                try:
+                    history = projects.read_project_history(source_id, limit=view.MAX_HISTORY)
+                except Exception:
+                    history = {}
+            entries = [item for item in (history.get("entries") or [])
+                       if isinstance(item, Mapping)]
+            bound_number = next(
+                (_int_or_none(item.get("version_number")) for item in entries
+                 if str(item.get("version_id") or "") == version_id
+                 and _int_or_none(item.get("version_number")) is not None), None)
+            if bound_number is None:
+                bound = self.project_version(source_id, version_id)
+                bound_row = bound.get("version") if isinstance(bound.get("version"), Mapping) else {}
+                bound_number = _int_or_none(bound_row.get("version_number"))
+            if bound_number is None or not history:
+                rows.append(view.letter_row(
+                    share_row=row,
+                    timeline={"date_basis": "owner_timestamp_localized",
+                              "timezone_offset": offset, "writing_days": 0,
+                              "versions_considered": 0,
+                              "versions_after_cutoff_excluded": 0,
+                              "undated_versions": 0, "unbounded_versions": 0},
+                    history_complete=False,
+                    history_reason=str(history.get("reason_code") or "SOURCE_VERSION_UNBOUNDED"),
+                    text=None, delivered_at=None, status="unknown",
+                    reason_code="SOURCE_VERSION_UNBOUNDED"))
+                continue
+            timeline = view.writing_days(entries, cutoff_version_number=bound_number,
+                                         offset=offset)
+            if timeline.get("writing_days", 0) < 2:
+                if timeline.get("undated_versions") or timeline.get("unbounded_versions"):
+                    # 可能是跨日作品，但时间戳/版本界不可证明：计数，不冒充「不是信」。
+                    unprovable += 1
+                continue
+            text: Optional[str] = None
+            delivered_at = None
+            reason_code = None
+            status = "delivered" if state == view.LOCAL_DELIVERED else state.lower()
+            if row.get("text_withheld") is True:
+                reason_code = str(row.get("source_reason_code") or "SOURCE_NOT_READABLE")
+            if state == view.LOCAL_DELIVERED or subject_view:
+                detail = self.share(str(row.get("share_id") or ""))
+                if detail.get("ok"):
+                    detail_data = detail.get("data") if isinstance(detail.get("data"),
+                                                                   Mapping) else {}
+                    share = detail_data.get("share") if isinstance(detail_data.get("share"),
+                                                                  Mapping) else {}
+                    receipt = detail_data.get("receipt") if isinstance(
+                        detail_data.get("receipt"), Mapping) else {}
+                    delivered_at = receipt.get("delivered_at")
+                    if not detail_data.get("source_readable") or share.get("text_withheld"):
+                        reason_code = str(detail_data.get("withheld_reason_code")
+                                          or "SOURCE_NOT_READABLE")
+                    elif isinstance(share.get("text"), str):
+                        text = share.get("text")
+                else:
+                    reason_code = str(detail.get("reason_code") or "SHARE_DETAIL_UNAVAILABLE")
+            if reason_code:
+                status = "withheld" if text is None else status
+            rows.append(view.letter_row(
+                share_row=row, timeline=timeline,
+                history_complete=bool(history.get("complete")),
+                history_reason=str(history.get("reason_code") or ""),
+                text=text, delivered_at=delivered_at, status=status,
+                reason_code=reason_code))
+        return envelope(True, STATUS_OK, view.letters_block(
+            rows=rows, offset=offset, clock=clock, subject_view=bool(subject_view),
+            scanned=len(shares), truncated=bool(data.get("truncated")),
+            unprovable=unprovable))
+
+    # -- 创作托盘 / 小物履历 / 三样喜欢之物 -----------------------------------------------
+
+    def _workbench_state(self) -> tuple[dict[str, Any], Optional[str]]:
+        from . import workbench_curio_view as view
+
+        return view.read_tray_state(self.root)
+
+    def _trio_state(self) -> tuple[dict[str, Any], Optional[str]]:
+        from . import workbench_curio_view as view
+
+        return view.read_trio_state(self.root)
+
+    def _tray_image_status(self, album_artifact_id: str) -> dict[str, Any]:
+        detail = self.album_detail(album_artifact_id)
+        if not detail.get("ok"):
+            return {"status": "withheld", "reason_code": str(
+                detail.get("reason_code") or "TRAY_IMAGE_UNAVAILABLE"), "caption": None,
+                "content_type": None}
+        row = detail.get("image") if isinstance(detail.get("image"), Mapping) else {}
+        if row.get("content_type") not in ("image/png", "image/jpeg") or not row.get("media"):
+            return {"status": "withheld", "reason_code": "TRAY_IMAGE_INVALID",
+                    "caption": None, "content_type": row.get("content_type")}
+        return {"status": "available", "reason_code": None,
+                "caption": row.get("caption"), "content_type": row.get("content_type")}
+
+    def _tray_material_status(self, artifact_id: str,
+                              baseline_source_revision: Any) -> dict[str, Any]:
+        answer = self.material(artifact_id)
+        row = {"artifact_id": artifact_id,
+               "baseline_source_revision": baseline_source_revision,
+               "current_source_revision": None, "title": None}
+        if not answer.get("ok"):
+            row.update({"status": "UNAVAILABLE",
+                        "reason_code": str(answer.get("reason_code") or "MATERIAL_UNAVAILABLE")})
+            return row
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        material = data.get("material") if isinstance(data.get("material"), Mapping) else {}
+        row["title"] = material.get("title")
+        current = str(material.get("source_revision") or "")
+        row["current_source_revision"] = current or None
+        if str(material.get("availability") or "") != "AVAILABLE":
+            row.update({"status": "UNAVAILABLE",
+                        "reason_code": "MATERIAL_" + str(material.get("availability")
+                                                         or "UNAVAILABLE")})
+            return row
+        row.update({"status": "CURRENT" if current == str(baseline_source_revision or "")
+                    else "STALE", "reason_code": None if current == str(
+                        baseline_source_revision or "") else "MATERIAL_SOURCE_CHANGED"})
+        return row
+
+    def _tray_work_status(self, artifact_id: str, baseline_version_id: Any,
+                          baseline_version_number: Any) -> dict[str, Any]:
+        from . import workbench_curio_view as view
+
+        answer = self.project(artifact_id)
+        row = {"artifact_id": artifact_id,
+               "baseline_version_id": baseline_version_id,
+               "baseline_version_number": baseline_version_number,
+               "current_head_version_id": None, "current_version_number": None,
+               "head_advanced": "unknown", "title": None}
+        if not answer.get("ok"):
+            row.update({"status": "withheld",
+                        "reason_code": str(answer.get("reason_code") or "WORK_UNAVAILABLE")})
+            return row
+        project = answer.get("project") if isinstance(answer.get("project"), Mapping) else {}
+        row["title"] = project.get("title")
+        if project.get("artifact_type") != "project":
+            row.update({"status": "withheld", "reason_code": "NOT_A_PRIVATE_WORK"})
+            return row
+        title = str(project.get("title") or "")
+        try:
+            from life_sharing_service import is_share_title
+
+            if title and is_share_title(title):
+                row.update({"status": "withheld", "reason_code": "WORK_IS_SHARE_ENVELOPE"})
+                return row
+        except Exception:
+            pass
+        head = str(project.get("head_version_id") or "")
+        number = project.get("version_number")
+        row.update({"status": "available", "reason_code": None,
+                    "current_head_version_id": head or None,
+                    "current_version_number": number,
+                    "head_advanced": view.head_advanced(
+                        baseline_version_id=baseline_version_id,
+                        baseline_version_number=baseline_version_number,
+                        head_version_id=head, head_version_number=number,
+                        history_entries=self._work_history_entries(artifact_id),
+                        history_complete=False)})
+        return row
+
+    def _work_history_entries(self, artifact_id: str) -> list[Mapping[str, Any]]:
+        from . import workbench_curio_view as view
+
+        history = self.project_versions(artifact_id, limit=view.MAX_HISTORY)
+        if not history.get("ok"):
+            return []
+        block = history.get("history") if isinstance(history.get("history"), Mapping) else {}
+        return [row for row in (block.get("entries") or []) if isinstance(row, Mapping)]
+
+    def home_workbench(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/home/workbench``: the explicit tray, re-read from real owners."""
+
+        from . import workbench_curio_view as view
+
+        state, state_reason = self._workbench_state()
+        tray = state.get("tray") if isinstance(state.get("tray"), Mapping) else {}
+        images = []
+        for row in tray.get("images") or []:
+            ref = str(row.get("album_artifact_id") or "")
+            if not ref:
+                continue
+            status = self._tray_image_status(ref)
+            images.append({"album_artifact_id": ref, "added_at": row.get("added_at"), **status})
+        materials = []
+        for row in tray.get("materials") or []:
+            ref = str(row.get("artifact_id") or "")
+            if not ref:
+                continue
+            status = self._tray_material_status(ref, row.get("baseline_source_revision"))
+            materials.append({"added_at": row.get("added_at"), **status})
+        work = None
+        stored_work = tray.get("work") if isinstance(tray.get("work"), Mapping) else None
+        if stored_work and stored_work.get("artifact_id"):
+            work = self._tray_work_status(
+                str(stored_work.get("artifact_id")),
+                stored_work.get("baseline_version_id"),
+                stored_work.get("baseline_version_number"))
+            work["added_at"] = stored_work.get("added_at")
+        return envelope(True, STATUS_OK, view.workbench_block(
+            state=state, state_reason=state_reason, subject_view=bool(subject_view),
+            images=images, materials=materials, work=work))
+
+    def _verify_tray_image(self, album_artifact_id: str) -> dict[str, Any]:
+        return self._verify_lockscreen_image(album_artifact_id)
+
+    def _verify_tray_material(self, artifact_id: str) -> dict[str, Any]:
+        answer = self.material(artifact_id)
+        if not answer.get("ok"):
+            return {"ok": False, "reason_code": str(
+                answer.get("reason_code") or "MATERIAL_UNAVAILABLE")}
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        material = data.get("material") if isinstance(data.get("material"), Mapping) else {}
+        if str(material.get("availability") or "") != "AVAILABLE":
+            return {"ok": False, "reason_code": "MATERIAL_NOT_AVAILABLE"}
+        revision = str(material.get("source_revision") or "")
+        if not revision:
+            return {"ok": False, "reason_code": "MATERIAL_REVISION_UNAVAILABLE"}
+        return {"ok": True, "baseline_source_revision": revision}
+
+    def _verify_tray_work(self, artifact_id: str) -> dict[str, Any]:
+        answer = self.project(artifact_id)
+        if not answer.get("ok"):
+            return {"ok": False, "reason_code": str(
+                answer.get("reason_code") or "WORK_UNAVAILABLE")}
+        project = answer.get("project") if isinstance(answer.get("project"), Mapping) else {}
+        if project.get("artifact_type") != "project":
+            return {"ok": False, "reason_code": "NOT_A_PRIVATE_WORK"}
+        title = str(project.get("title") or "")
+        try:
+            from life_sharing_service import is_share_title
+
+            if title and is_share_title(title):
+                return {"ok": False, "reason_code": "WORK_IS_SHARE_ENVELOPE"}
+        except Exception:
+            pass
+        head = str(project.get("head_version_id") or "")
+        if not head:
+            return {"ok": False, "reason_code": "WORK_VERSION_UNAVAILABLE"}
+        return {"ok": True, "baseline_version_id": head,
+                "baseline_version_number": project.get("version_number")}
+
+    def home_workbench_action(self, *, action: str,
+                              album_artifact_ids: Optional[list[Any]] = None,
+                              material_ids: Optional[list[Any]] = None,
+                              work_artifact_id: Optional[str] = None,
+                              note: Optional[str] = None) -> dict[str, Any]:
+        """One explicit ``set_tray`` / ``clear_tray``.  Invalid refs mean zero writes."""
+
+        from . import workbench_curio_view as view
+
+        if action not in ("set_tray", "clear_tray"):
+            return rejected("TRAY_ACTION_UNSUPPORTED", action=action)
+        state, state_reason = self._workbench_state()
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._keepsake_now_iso()
+        if action == "clear_tray":
+            new_state, changed = view.clear_tray(state, now_iso)
+            return self._tray_write_result(state, new_state, changed, "clear_tray")
+
+        images = self._tray_id_list(album_artifact_ids, view.MAX_TRAY_IMAGES,
+                                    "TRAY_IMAGES_INVALID")
+        materials = self._tray_id_list(material_ids, view.MAX_TRAY_MATERIALS,
+                                       "TRAY_MATERIALS_INVALID")
+        work_id = None
+        if work_artifact_id not in (None, ""):
+            if not isinstance(work_artifact_id, str) or not work_artifact_id.strip():
+                return rejected("TRAY_WORK_INVALID")
+            work_id = work_artifact_id.strip()
+        if note is not None and not isinstance(note, str):
+            return rejected("TRAY_NOTE_INVALID")
+        clean_note = note.strip() if isinstance(note, str) else None
+        if clean_note is not None and (len(clean_note) > view.MAX_TRAY_NOTE
+                                       or "\x00" in clean_note or "\r" in clean_note):
+            return rejected("TRAY_NOTE_INVALID")
+        if not clean_note:
+            clean_note = None
+        if images is None:
+            return rejected("TRAY_IMAGES_INVALID")
+        if materials is None:
+            return rejected("TRAY_MATERIALS_INVALID")
+
+        tray = state.get("tray") if isinstance(state.get("tray"), Mapping) else {}
+        stored_images = {str(row.get("album_artifact_id")): dict(row)
+                         for row in (tray.get("images") or [])
+                         if row.get("album_artifact_id")}
+        stored_materials = {str(row.get("artifact_id")): dict(row)
+                            for row in (tray.get("materials") or [])
+                            if row.get("artifact_id")}
+        stored_work = dict(tray["work"]) if isinstance(tray.get("work"), Mapping) else None
+
+        # Same intent never bumps revision and never re-baselines a work that moved on.
+        if (tuple(images) == tuple(stored_images)
+                and tuple(materials) == tuple(stored_materials)
+                and work_id == (stored_work or {}).get("artifact_id")
+                and clean_note == tray.get("note")):
+            return envelope(True, STATUS_ALREADY, {
+                "action": "set_tray", "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at")})
+
+        image_rows = []
+        for ref in images:
+            if ref in stored_images:
+                image_rows.append(stored_images[ref])
+                continue
+            checked = self._verify_tray_image(ref)
+            if not checked.get("ok"):
+                return rejected(str(checked.get("reason_code") or "TRAY_IMAGE_INVALID"),
+                                artifact_id=ref)
+            image_rows.append({"album_artifact_id": ref, "added_at": now_iso})
+        material_rows = []
+        for ref in materials:
+            if ref in stored_materials:
+                material_rows.append(stored_materials[ref])
+                continue
+            checked = self._verify_tray_material(ref)
+            if not checked.get("ok"):
+                return rejected(str(checked.get("reason_code") or "TRAY_MATERIAL_INVALID"),
+                                artifact_id=ref)
+            material_rows.append({"artifact_id": ref,
+                                  "baseline_source_revision":
+                                      checked.get("baseline_source_revision"),
+                                  "added_at": now_iso})
+        if work_id is None:
+            work_row = None
+        elif stored_work and stored_work.get("artifact_id") == work_id:
+            work_row = stored_work
+        else:
+            checked = self._verify_tray_work(work_id)
+            if not checked.get("ok"):
+                return rejected(str(checked.get("reason_code") or "TRAY_WORK_INVALID"),
+                                artifact_id=work_id)
+            work_row = {"artifact_id": work_id,
+                        "baseline_version_id": checked.get("baseline_version_id"),
+                        "baseline_version_number": checked.get("baseline_version_number"),
+                        "added_at": now_iso}
+        target = {"images": image_rows, "materials": material_rows,
+                  "work": work_row, "note": clean_note}
+        new_state, changed = view.set_tray(state, target, now_iso)
+        return self._tray_write_result(state, new_state, changed, "set_tray")
+
+    def _tray_write_result(self, state: Mapping[str, Any], new_state: Mapping[str, Any],
+                           changed: bool, action: str) -> dict[str, Any]:
+        from . import workbench_curio_view as view
+
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at")})
+        written = view.write_tray_state(self.root, new_state)
+        tray = written.get("tray") or {}
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"), "updated_at": written.get("updated_at"),
+            "counts": {"images": len(tray.get("images") or []),
+                       "materials": len(tray.get("materials") or []),
+                       "works": 1 if tray.get("work") else 0}})
+
+    @staticmethod
+    def _tray_id_list(value: Any, maximum: int,
+                      reason: str) -> Optional[list[str]]:
+        if value is None:
+            return []
+        if not isinstance(value, list) or len(value) > maximum:
+            return None
+        out: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                return None
+            ref = item.strip()
+            if ref in out:
+                return None
+            out.append(ref)
+        return out
+
+    def home_curios(self) -> dict[str, Any]:
+        """``GET /api/phone/home/curios``: owned instances joined to their real positions.
+
+        Pure read: the economy document and the substrate are loaded read-only.  This method
+        never ticks, materializes, ensures or migrates anything.
+        """
+
+        from . import workbench_curio_view as view
+
+        try:
+            import world_body_substrate as substrate
+            import world_property_economy as economy
+        except Exception:
+            return unavailable("CURIOS_OWNER_UNAVAILABLE")
+        try:
+            state = economy.load_state(self.world_home)
+        except Exception:
+            return unavailable("ECONOMY_STATE_ERROR")
+        if state is None:
+            return envelope(True, STATUS_OK, view.curios_block(
+                items=[], reason_code="GENESIS_NOT_INITIALIZED",
+                source_note="World 产权 economy 尚未初始化；不造任何物件。"))
+        live: Any = None
+        substrate_unavailable = False
+        try:
+            live = substrate.SubstrateStore(
+                substrate.substrate_path(self.world_home)).load()
+        except Exception:
+            live = None
+            substrate_unavailable = True
+        placements = (live.get("placements") if isinstance(live, Mapping) else None) or {}
+        deliveries = {str(row.get("item_instance_id")): dict(row)
+                      for row in (state.get("deliveries") or [])
+                      if isinstance(row, Mapping) and row.get("item_instance_id")}
+        catalog = {entry["catalog_item_id"]: entry.get("name") for entry in economy.CATALOG}
+        rows = []
+        for item in state.get("items") or []:
+            if not isinstance(item, Mapping):
+                continue
+            item_id = str(item.get("item_instance_id") or "")
+            if not item_id:
+                continue
+            rows.append(view.curio_row(
+                item=item, name=catalog.get(item.get("catalog_item_id")),
+                placement=placements.get(item_id), delivery=deliveries.get(item_id),
+                substrate_unavailable=substrate_unavailable))
+        return envelope(True, STATUS_OK, view.curios_block(
+            items=rows,
+            source_note=("SUBSTRATE_UNAVAILABLE" if substrate_unavailable else None)))
+
+    @staticmethod
+    def _trio_reason(code: Any) -> Optional[str]:
+        return {
+            "PINNED_SHARE_NOT_DELIVERED": "SHARE_NOT_DELIVERED",
+            "PINNED_SHARE_NOT_LOCAL": "SHARE_NOT_LOCAL",
+            "PINNED_SHARE_SOURCE_NOT_READABLE": "SHARE_SOURCE_NOT_READABLE",
+            "PINNED_SHARE_NOT_FOUND": "SHARE_NOT_FOUND",
+        }.get(str(code or ""), str(code) if code else None)
+
+    def home_trio_exchange(self) -> dict[str, Any]:
+        """``GET /api/phone/home/trio-exchange``: her delivered picks + partner short cards."""
+
+        from . import workbench_curio_view as view
+
+        state, state_reason = self._trio_state()
+        her_rows = []
+        for row in state.get("her_picks") or []:
+            share_id = str(row.get("share_id") or "")
+            if not share_id:
+                continue
+            base = self._pinned_share_status(share_id, row.get("picked_at"))
+            her_rows.append(view.her_pick_row(
+                share_id=share_id, picked_at=row.get("picked_at"),
+                status=str(base.get("status") or "withheld"),
+                reason_code=self._trio_reason(base.get("reason_code")),
+                text=base.get("text"), text_chars=base.get("text_chars"),
+                delivered_at=base.get("delivered_at"), state=base.get("state")))
+        partner_rows = [view.partner_pick_row(row) for row in state.get("partner_picks") or []]
+        return envelope(True, STATUS_OK, view.trio_block(
+            state=state, state_reason=state_reason, her_rows=her_rows,
+            partner_rows=partner_rows))
+
+    def home_trio_exchange_action(self, *, action: str,
+                                  her_picks: Optional[list[Any]] = None,
+                                  partner_picks: Optional[list[Any]] = None) -> dict[str, Any]:
+        """One explicit ``set_her_picks`` / ``set_partner_picks``.
+
+        Her picks must be real ``LOCAL_DELIVERED`` shares with a readable current source; no
+        validation of a partner card touches Memory / Belief / experience / cognition.
+        """
+
+        from . import workbench_curio_view as view
+
+        if action not in ("set_her_picks", "set_partner_picks"):
+            return rejected("TRIO_ACTION_UNSUPPORTED", action=action)
+        state, state_reason = self._trio_state()
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._keepsake_now_iso()
+        if action == "set_her_picks":
+            ids: list[str] = []
+            if her_picks is not None:
+                if not isinstance(her_picks, list) or len(her_picks) > view.MAX_TRIO_HER:
+                    return rejected("TRIO_HER_PICKS_INVALID")
+                for item in her_picks:
+                    if not isinstance(item, str) or not item.strip():
+                        return rejected("TRIO_HER_PICKS_INVALID")
+                    ref = item.strip()
+                    if ref in ids:
+                        return rejected("TRIO_HER_PICKS_INVALID")
+                    ids.append(ref)
+            stored_picked = {str(row.get("share_id")): row.get("picked_at")
+                             for row in (state.get("her_picks") or [])}
+            picks = []
+            for ref in ids:
+                checked = self._verify_pin_share(ref)
+                if not checked.get("ok"):
+                    return rejected(self._trio_reason(checked.get("reason_code"))
+                                    or "SHARE_NOT_DELIVERED", share_id=ref)
+                picks.append({"share_id": ref,
+                              "picked_at": stored_picked.get(ref) or now_iso})
+            new_state, changed = view.set_her_picks(state, picks, now_iso)
+            return self._trio_write_result(state, new_state, changed, action)
+
+        items = partner_picks if partner_picks is not None else []
+        if not isinstance(items, list) or len(items) > view.MAX_TRIO_PARTNER:
+            return rejected("TRIO_PARTNER_PICKS_INVALID")
+        stored_added = {(str(row.get("title") or ""), str(row.get("description") or "")):
+                        row.get("added_at")
+                        for row in (state.get("partner_picks") or [])}
+        rows = []
+        for item in items:
+            if not isinstance(item, Mapping) or set(item) != {"title", "description"}:
+                return rejected("TRIO_PARTNER_PICKS_INVALID")
+            title = item.get("title")
+            description = item.get("description")
+            if not isinstance(title, str) or not title.strip() \
+                    or len(title.strip()) > view.MAX_PARTNER_TITLE:
+                return rejected("TRIO_PARTNER_TITLE_INVALID")
+            if not isinstance(description, str) \
+                    or len(description.strip()) > view.MAX_PARTNER_DESCRIPTION:
+                return rejected("TRIO_PARTNER_DESCRIPTION_INVALID")
+            key = (title.strip(), description.strip())
+            rows.append({"title": key[0], "description": key[1],
+                         "partner_contributed": True,
+                         "added_at": stored_added.get(key) or now_iso})
+        new_state, changed = view.set_partner_picks(state, rows, now_iso)
+        return self._trio_write_result(state, new_state, changed, action)
+
+    def _trio_write_result(self, state: Mapping[str, Any], new_state: Mapping[str, Any],
+                           changed: bool, action: str) -> dict[str, Any]:
+        from . import workbench_curio_view as view
+
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at")})
+        written = view.write_trio_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"), "updated_at": written.get("updated_at"),
+            "her_picks": len(written.get("her_picks") or []),
+            "partner_picks": len(written.get("partner_picks") or []),
+            "partner_contributed": bool(written.get("partner_picks"))})
+
+    # -- 衣柜梳妆 / 歌单收藏想试小列表 / 作品旧版安全并排 -----------------------------------
+
+    def _wardrobe_economy(self) -> tuple[Optional[Mapping[str, Any]], Optional[str]]:
+        """The real economy document, read-only; missing is named, never filled in."""
+
+        from . import wardrobe_pocket_view as view
+
+        try:
+            import world_property_economy as economy
+        except Exception:
+            return None, view.ECONOMY_UNAVAILABLE
+        try:
+            return economy.load_state(self.world_home), None
+        except Exception:
+            return None, view.ECONOMY_STATE_ERROR
+
+    def home_wardrobe(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/home/wardrobe``: explicit styling choices + real ownership checks."""
+
+        from . import wardrobe_pocket_view as view
+
+        state, state_reason = view.read_wardrobe_state(self.root)
+        economy_state, economy_reason = self._wardrobe_economy()
+        checks: dict[str, dict[str, Any]] = {}
+        for slot in view.SLOT_NAMES:
+            item_id = str(((state.get("selection") or {}).get(slot) or {})
+                          .get("item_instance_id") or "")
+            if not item_id:
+                continue
+            if economy_reason is not None:
+                checks[slot] = {"status": "unavailable", "reason_code": economy_reason,
+                                "slot": slot, "catalog_item_id": None,
+                                "item_instance_id": item_id}
+                continue
+            checks[slot] = view.owned_item_check(
+                economy_state, subject=self.world_subject, slot=slot,
+                item_instance_id=item_id)
+        if economy_reason is not None:
+            related = {"status": "unavailable", "reason_code": economy_reason,
+                       "items": [], "count": 0}
+        else:
+            related = view.related_owned_items(economy_state, subject=self.world_subject)
+        return envelope(True, STATUS_OK, view.wardrobe_block(
+            state=state, state_reason=state_reason, checks=checks, related=related,
+            subject_view=bool(subject_view)))
+
+    def home_wardrobe_action(self, *, action: str, values: Optional[Mapping[str, Any]] = None,
+                             fields: Optional[list[Any]] = None) -> dict[str, Any]:
+        """One explicit ``set`` / ``clear`` of the local styling selection."""
+
+        from . import wardrobe_pocket_view as view
+
+        state, state_reason = view.read_wardrobe_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._keepsake_now_iso()
+        if action == "set":
+            chosen = dict(values or {})
+            if not chosen:
+                return rejected("WARDROBE_FIELDS_REQUIRED")
+            economy_state, economy_reason = self._wardrobe_economy()
+            for field in view.SLOT_FIELDS:
+                if not field.endswith("_item_instance_id") or field not in chosen:
+                    continue
+                slot = field[: -len("_item_instance_id")]
+                if economy_reason is not None:
+                    return rejected(economy_reason)
+                checked = view.owned_item_check(
+                    economy_state, subject=self.world_subject, slot=slot,
+                    item_instance_id=str(chosen[field]))
+                if checked.get("status") != "verified":
+                    return rejected(str(checked.get("reason_code") or "ITEM_NOT_OWNED"),
+                                    slot=slot)
+            try:
+                new_state, changed = view.apply_wardrobe_set(state, chosen, now_iso)
+            except view.PocketStateError as exc:
+                return rejected(exc.reason_code)
+        elif action == "clear":
+            try:
+                new_state, changed = view.apply_wardrobe_clear(state, list(fields or []),
+                                                               now_iso)
+            except view.PocketStateError as exc:
+                return rejected(exc.reason_code)
+        else:
+            return rejected("WARDROBE_ACTION_UNSUPPORTED", action=action)
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at")})
+        written = view.write_wardrobe_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at")})
+
+    def pocket_lists(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/pocket/lists``: shared-by-default cards + partner suggestions."""
+
+        from . import wardrobe_pocket_view as view
+
+        state, state_reason = view.read_pocket_state(self.root)
+        return envelope(True, STATUS_OK, view.pocket_block(
+            state=state, state_reason=state_reason, subject_view=bool(subject_view)))
+
+    def pocket_lists_action(self, *, action: str, kind: Optional[str] = None,
+                            entry_id: Optional[str] = None,
+                            values: Optional[Mapping[str, Any]] = None,
+                            status: Optional[str] = None, shared: Optional[bool] = None,
+                            operation_key: Optional[str] = None,
+                            suggestions: Optional[list[Any]] = None) -> dict[str, Any]:
+        """One explicit add / update / remove / partner suggestion replacement."""
+
+        from . import wardrobe_pocket_view as view
+
+        state, state_reason = view.read_pocket_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._keepsake_now_iso()
+        chosen = dict(values or {})
+        title = chosen.pop("title", None)
+        try:
+            if action == "add":
+                if kind not in view.LIST_KINDS:
+                    return rejected("POCKET_LIST_INVALID")
+                if not isinstance(operation_key, str) or not operation_key:
+                    return rejected("POCKET_OPERATION_KEY_REQUIRED")
+                new_state, changed = view.pocket_add(
+                    state, kind=kind, entry_id=view.new_entry_id(kind), title=title,
+                    values=chosen, status=status, shared=shared,
+                    operation_key=operation_key, now_iso=now_iso)
+            elif action == "update":
+                if kind not in view.LIST_KINDS:
+                    return rejected("POCKET_LIST_INVALID")
+                if not isinstance(entry_id, str) or not entry_id:
+                    return rejected("POCKET_ENTRY_ID_REQUIRED")
+                new_state, changed = view.pocket_update(
+                    state, kind=kind, entry_id=entry_id, values=chosen, status=status,
+                    shared=shared, now_iso=now_iso)
+            elif action == "remove":
+                if kind not in view.LIST_KINDS:
+                    return rejected("POCKET_LIST_INVALID")
+                if not isinstance(entry_id, str) or not entry_id:
+                    return rejected("POCKET_ENTRY_ID_REQUIRED")
+                new_state, changed = view.pocket_remove(
+                    state, kind=kind, entry_id=entry_id, now_iso=now_iso)
+            elif action == "set_partner_suggestions":
+                new_state, changed = view.pocket_set_partner_suggestions(
+                    state, list(suggestions or []), now_iso)
+            else:
+                return rejected("POCKET_ACTION_UNSUPPORTED", action=action)
+        except view.PocketStateError as exc:
+            return rejected(exc.reason_code)
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at")})
+        written = view.write_pocket_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            "counts": {name: len(rows) for name, rows in written["lists"].items()},
+            "partner_suggestion_count": len(written["partner_suggestions"])})
+
+    def _pocket_delivered_share_for_version(self, artifact_id: str,
+                                            version_id: str) -> dict[str, Any]:
+        """The one *exactly* version-bound local delivery, re-verified at read time."""
+
+        from . import wardrobe_pocket_view as view
+
+        listing = self.shares(limit=view.MAX_SHARE_SCAN)
+        if not listing.get("ok"):
+            return {"ok": False,
+                    "reason_code": str(listing.get("reason_code")
+                                       or view.SHARES_UNAVAILABLE)}
+        data = listing.get("data") if isinstance(listing.get("data"), Mapping) else {}
+        for row in data.get("shares") or ():
+            if not isinstance(row, Mapping):
+                continue
+            if str(row.get("state") or "") != "LOCAL_DELIVERED" or not row.get("delivered"):
+                continue
+            source = row.get("source") if isinstance(row.get("source"), Mapping) else {}
+            if str(source.get("artifact_id") or "") != artifact_id \
+                    or str(source.get("version_id") or "") != version_id:
+                # A delivery of another version never stands in for this one.
+                continue
+            share_id = str(row.get("share_id") or "")
+            detail = self.share(share_id) if share_id else {}
+            if not detail.get("ok"):
+                continue
+            body = detail.get("data") if isinstance(detail.get("data"), Mapping) else {}
+            share = body.get("share") if isinstance(body.get("share"), Mapping) else {}
+            receipt = body.get("receipt") if isinstance(body.get("receipt"), Mapping) else {}
+            if not body.get("delivered") or not receipt:
+                continue
+            if receipt.get("local_only") is False \
+                    or receipt.get("external_channel_sent") is True:
+                continue
+            if receipt.get("audience") not in (None, "", "local:owner") \
+                    or receipt.get("channel") not in (None, "", "local_inbox"):
+                continue
+            if not body.get("source_readable") or share.get("text_withheld"):
+                continue
+            text = share.get("text")
+            if not isinstance(text, str):
+                continue
+            return {"ok": True, "share_id": share_id, "text": text,
+                    "delivered_at": receipt.get("delivered_at") or share.get("updated_at")}
+        return {"ok": False, "reason_code": view.VERSION_NOT_DELIVERED}
+
+    def pocket_work_revisit(self, *, artifact_id: str, left_version_id: str,
+                            right_version_id: str, subject_view: bool = False
+                            ) -> dict[str, Any]:
+        """``GET /api/phone/pocket/work-revisit``: two real versions, safe bounded summaries."""
+
+        from . import wardrobe_pocket_view as view
+
+        if left_version_id == right_version_id:
+            return rejected("VERSIONS_NOT_DISTINCT")
+        project_answer = self.project(artifact_id)
+        if not project_answer.get("ok"):
+            return _project_failure(project_answer, "PROJECT_UNAVAILABLE")
+        project = project_answer.get("project") \
+            if isinstance(project_answer.get("project"), Mapping) else {}
+        if str(project.get("artifact_type") or "") != "project":
+            return rejected(view.NOT_A_PROJECT, artifact_id=artifact_id)
+        try:
+            from life_sharing_service import is_share_title
+        except Exception:
+            return unavailable("SHARE_GUARD_UNAVAILABLE")
+        if is_share_title(project.get("title")):
+            # A share envelope is a derived delivery, not a work to compare; reading it through
+            # this surface would bypass the share disclosure boundary.
+            return rejected("SHARE_ENVELOPE_NOT_A_PROJECT", artifact_id=artifact_id)
+        lifecycle = str(project.get("lifecycle") or "")
+        basis = view.OWNER_EXCERPT_BASIS if subject_view else view.DELIVERED_SHARE_BASIS
+
+        versions: dict[str, dict[str, Any]] = {}
+        withheld_content: dict[str, bool] = {}
+        for side, wanted in (("left", left_version_id), ("right", right_version_id)):
+            read = self.project_version(artifact_id, wanted)
+            if not read.get("ok"):
+                reason = str(read.get("reason_code") or "PROJECT_VERSION_UNAVAILABLE")
+                if reason == view.VERSION_NOT_IN_ARTIFACT:
+                    return rejected(reason, artifact_id=artifact_id)
+                return _project_failure(read, "PROJECT_VERSION_UNAVAILABLE")
+            version = read.get("version") if isinstance(read.get("version"), Mapping) else {}
+            if str(version.get("version_id") or "") != wanted \
+                    or str(read.get("artifact_id") or "") != artifact_id:
+                return rejected(view.VERSION_NOT_IN_ARTIFACT, artifact_id=artifact_id)
+            versions[side] = dict(version)
+            withheld_content[side] = bool(
+                read.get("content_withheld") or version.get("derived_text_withheld"))
+
+        if lifecycle != "ACTIVE":
+            sides = {side: view.withheld_side(
+                version_id=wanted, version_number=versions[side].get("version_number"),
+                reason_code=view.ARCHIVED_SOURCE, excerpt_basis=basis)
+                for side, wanted in (("left", left_version_id),
+                                     ("right", right_version_id))}
+            return envelope(True, STATUS_OK, view.work_revisit_block(
+                artifact_id=artifact_id, subject_view=bool(subject_view),
+                left=sides["left"], right=sides["right"],
+                artifact_status="withheld", artifact_reason=view.ARCHIVED_SOURCE))
+
+        sides: dict[str, dict[str, Any]] = {}
+        for side, wanted in (("left", left_version_id), ("right", right_version_id)):
+            version = versions[side]
+            number = version.get("version_number")
+            if subject_view:
+                if str(version.get("lifecycle") or "ACTIVE") != "ACTIVE":
+                    sides[side] = view.withheld_side(
+                        version_id=wanted, version_number=number,
+                        reason_code=view.ARCHIVED_SOURCE, excerpt_basis=basis)
+                elif withheld_content.get(side):
+                    sides[side] = view.withheld_side(
+                        version_id=wanted, version_number=number,
+                        reason_code=view.SOURCE_NOT_READABLE, excerpt_basis=basis)
+                else:
+                    sides[side] = view.owner_version_side(
+                        version=version, version_id=wanted,
+                        lifecycle=str(version.get("lifecycle") or "ACTIVE"))
+            else:
+                delivered = self._pocket_delivered_share_for_version(artifact_id, wanted)
+                if delivered.get("ok"):
+                    sides[side] = view.delivered_share_side(
+                        version_id=wanted, version_number=number,
+                        share_id=str(delivered.get("share_id") or ""),
+                        text=str(delivered.get("text") or ""),
+                        delivered_at=delivered.get("delivered_at"))
+                else:
+                    sides[side] = view.withheld_side(
+                        version_id=wanted, version_number=number,
+                        reason_code=str(delivered.get("reason_code")
+                                        or view.VERSION_NOT_DELIVERED),
+                        excerpt_basis=basis)
+        return envelope(True, STATUS_OK, view.work_revisit_block(
+            artifact_id=artifact_id, subject_view=bool(subject_view),
+            left=sides["left"], right=sides["right"]))
+
+    # -- 居家收官：重逢锚点 / 夜茶菜谱 / 待定小约定 ---------------------------------------
+
+    def _home_clock(self) -> dict[str, Any]:
+        """The same business clock the rest of the phone uses; unreadable is named, not guessed."""
+
+        root = self._desk_state_root()
+        if root is not None:
+            return today_business_day(root)
+        moment = datetime.now(tz=TODAY_TZ).replace(microsecond=0)
+        return {"source": "system_clock", "reason_code": "LIFE_STATE_UNBOUND",
+                "logical_at": moment.isoformat(timespec="seconds"),
+                "day": moment.date().isoformat(), "run_id": None, "domain_id": None}
+
+    @staticmethod
+    def _clock_offset(clock: Mapping[str, Any]) -> Optional[str]:
+        value = clock.get("logical_at") if isinstance(clock, Mapping) else None
+        try:
+            moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.isoformat(timespec="seconds")[-6:]
+
+    def _reunion_location(self, world_result: Mapping[str, Any]) -> dict[str, Any]:
+        data = world_result.get("data") if isinstance(world_result.get("data"), Mapping) else {}
+        location = data.get("location") if isinstance(data.get("location"), Mapping) else {}
+        if not world_result.get("ok"):
+            return {"status": "unavailable",
+                    "reason_code": str(world_result.get("reason_code") or "WORLD_UNAVAILABLE")}
+        if location.get("status") != "available":
+            return {"status": str(location.get("status") or "unavailable"),
+                    "reason_code": str(location.get("reason_code") or "LOCATION_UNAVAILABLE")}
+        place = str(location.get("place_id") or "")
+        return {"status": "available", "place_id": place or None,
+                "area_id": location.get("area_id") or None,
+                "home": bool(location.get("home") or place == "home"),
+                "reason_code": None}
+
+    def _reunion_reading(self) -> dict[str, Any]:
+        """The bounded reading identity + a *saved* stop; no body and no page note."""
+
+        answer = self.reading_material()
+        if not answer.get("ok"):
+            return {"status": "unavailable",
+                    "reason_code": str(answer.get("reason_code") or "READING_UNAVAILABLE")}
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        bookmark = data.get("bookmark") if isinstance(data.get("bookmark"), Mapping) else None
+        page: Optional[int] = None
+        page_reason: Optional[str] = None
+        if isinstance(bookmark, Mapping):
+            raw_page = bookmark.get("page")
+            if isinstance(raw_page, int) and not isinstance(raw_page, bool) and raw_page > 0:
+                if not bookmark.get("needs_reread"):
+                    page = raw_page
+                else:
+                    page_reason = "READING_POSITION_STALE"
+            else:
+                page_reason = "READING_POSITION_UNKNOWN"
+        else:
+            page_reason = "READING_POSITION_UNKNOWN"
+        return {"status": "available",
+                "artifact_id": data.get("artifact_id"),
+                "source_revision": data.get("source_revision"),
+                "version_number": data.get("version_number"),
+                "page": page,
+                "pages": data.get("pages"),
+                "reason_code": page_reason}
+
+    def _reunion_delivered(self) -> dict[str, Any]:
+        """Only real ``LOCAL_DELIVERED`` shares enter the stable set; drafts never do."""
+
+        from . import home_hearth_view as view
+
+        listing = self.shares(limit=view.MAX_ANCHOR_SHARES)
+        if not listing.get("ok"):
+            return {"status": "unavailable",
+                    "reason_code": str(listing.get("reason_code") or "SHARES_UNAVAILABLE")}
+        data = listing.get("data") if isinstance(listing.get("data"), Mapping) else {}
+        rows = [row for row in (data.get("shares") or []) if isinstance(row, Mapping)]
+        ids = []
+        for row in rows:
+            if str(row.get("state") or "") != "LOCAL_DELIVERED":
+                continue
+            share_id = str(row.get("share_id") or "")
+            if share_id and share_id not in ids:
+                ids.append(share_id)
+        return {"status": "available",
+                "share_ids": ids[:view.MAX_ANCHOR_SHARES],
+                "count": len(ids),
+                "truncated": bool(data.get("truncated")
+                                  or len(rows) >= view.MAX_ANCHOR_SHARES),
+                "reason_code": None}
+
+    def _reunion_items(self) -> dict[str, Any]:
+        """Owned instances joined to their real position; buying is not delivery/placement."""
+
+        from . import home_hearth_view as view
+
+        curios = self.home_curios()
+        if not curios.get("ok"):
+            return {"status": "unavailable",
+                    "reason_code": str(curios.get("reason_code") or "ITEMS_UNAVAILABLE")}
+        data = curios.get("data") if isinstance(curios.get("data"), Mapping) else {}
+        if data.get("reason_code"):
+            # Genesis-not-initialised is a missing source, not "she owns zero things".
+            return {"status": "unavailable",
+                    "reason_code": str(data.get("reason_code"))}
+        rows = []
+        for row in (data.get("items") or []):
+            if not isinstance(row, Mapping):
+                continue
+            item_id = str(row.get("item_instance_id") or "")
+            if not item_id:
+                continue
+            rows.append({"item_instance_id": item_id,
+                         "name": row.get("name"),
+                         "placement": row.get("position") or {}})
+        return {"status": "available",
+                "items": rows[:view.MAX_ANCHOR_ITEMS],
+                "count": len(rows),
+                "truncated": len(rows) > view.MAX_ANCHOR_ITEMS,
+                "reason_code": None}
+
+    def _reunion_snapshot(self) -> dict[str, Any]:
+        clock = self._home_clock()
+        location = self._reunion_location(self.world())
+        reading = self._reunion_reading()
+        delivered = self._reunion_delivered()
+        items = self._reunion_items()
+        complete = all(block.get("status") == "available"
+                       for block in (location, reading, delivered, items))
+        return {"clock": clock, "clock_offset": self._clock_offset(clock),
+                "location": location, "reading": reading,
+                "delivered": delivered, "items": items, "complete": bool(complete)}
+
+    @staticmethod
+    def _home_now_iso(clock: Mapping[str, Any]) -> str:
+        value = clock.get("logical_at") if isinstance(clock, Mapping) else None
+        return str(value) if isinstance(value, str) and value.strip() else \
+            datetime.now(tz=TODAY_TZ).replace(microsecond=0).isoformat(timespec="seconds")
+
+    def home_reunion_anchor(self) -> dict[str, Any]:
+        """``GET /api/phone/home/reunion-anchor``: the stored safe snapshot vs real owners."""
+
+        from . import home_hearth_view as view
+
+        state, state_reason = view.read_reunion_state(self.root)
+        snapshot = self._reunion_snapshot()
+        return envelope(True, STATUS_OK, view.reunion_block(
+            state=state, state_reason=state_reason, snapshot=snapshot,
+            now_iso=self._home_now_iso(snapshot["clock"])))
+
+    def home_reunion_capture(self) -> dict[str, Any]:
+        """``POST /api/phone/home/reunion-anchor``: one explicit safe capture.
+
+        The client supplies nothing but ``action``: the snapshot is read here from the real
+        owners.  Re-capturing the same disclosed state never bumps the revision.
+        """
+
+        from . import home_hearth_view as view
+
+        state, state_reason = view.read_reunion_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        snapshot = self._reunion_snapshot()
+        now_iso = self._home_now_iso(snapshot["clock"])
+        new_state, changed = view.capture_anchor(state, snapshot, now_iso)
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": "capture", "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                "has_anchor": bool(state.get("anchor"))})
+        written = view.write_reunion_state(self.root, new_state)
+        anchor = written.get("anchor") or {}
+        return envelope(True, STATUS_OK, {
+            "action": "capture", "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            "has_anchor": True,
+            "captured_at_local": anchor.get("captured_at_local"),
+            "complete": bool(anchor.get("complete"))})
+
+    def _recipe_references(self) -> dict[str, Any]:
+        """A bounded read of real purchases/consumptions; never evidence of cooking."""
+
+        from . import home_hearth_view as view
+
+        try:
+            import world_property_economy as economy
+
+            consumable_ids = {str(entry.get("catalog_item_id") or "")
+                              for entry in economy.phone_catalog_entries()}
+        except Exception:
+            consumable_ids = set()
+        if not consumable_ids:
+            return {"status": "unavailable",
+                    "reason_code": "CONSUMABLE_CATALOG_UNAVAILABLE",
+                    "items": [], "count": 0}
+        answer = self.inventory()
+        if not answer.get("ok"):
+            return {"status": "unavailable",
+                    "reason_code": str(answer.get("reason_code") or "INVENTORY_UNAVAILABLE"),
+                    "items": [], "count": 0}
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        rows = []
+        matched = 0
+        for entry in (data.get("items") or []):
+            if not isinstance(entry, Mapping):
+                continue
+            catalog_id = str(entry.get("catalog_item_id") or "")
+            if catalog_id not in consumable_ids:
+                continue
+            matched += 1
+            consumed = bool(entry.get("consumed"))
+            rows.append({
+                "item_instance_id": entry.get("item_instance_id"),
+                "name": entry.get("name"),
+                "catalog_item_id": catalog_id,
+                "purchase": {
+                    "status": "available",
+                    "delivery_status": entry.get("delivery_status"),
+                    "materialization": entry.get("materialization"),
+                    "location": entry.get("location"),
+                },
+                "consumption": (
+                    {"status": "consumed", "receipt_id": entry.get("receipt_id")}
+                    if consumed else
+                    {"status": "not_consumed", "receipt_id": None}),
+                "source": "world_phone_shopping.inventory",
+            })
+        return {
+            "status": "available", "reason_code": None,
+            "items": rows[:view.MAX_RECIPE_REFERENCE],
+            "count": matched,
+            "truncated": matched > view.MAX_RECIPE_REFERENCE,
+            "consumption_read_surface": "world_phone_shopping.inventory",
+            "not_evidence_of_cooking": view.NOT_EVIDENCE_OF_COOKING,
+            "consumption_claimed": view.CONSUMPTION_CLAIMED,
+        }
+
+    def home_recipes(self) -> dict[str, Any]:
+        """``GET /api/phone/home/recipes``: explicit shared recipe cards + real references."""
+
+        from . import home_hearth_view as view
+
+        state, state_reason = view.read_recipes_state(self.root)
+        return envelope(True, STATUS_OK, view.recipes_block(
+            state=state, state_reason=state_reason,
+            references=self._recipe_references()))
+
+    def home_recipe_upsert(self, *, recipe_id: Optional[str], title: Any, memo: Any,
+                           author_side: str) -> dict[str, Any]:
+        """One explicit create/update of a shared recipe card; the author side is immutable."""
+
+        from . import home_hearth_view as view
+
+        state, state_reason = view.read_recipes_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._home_now_iso(self._home_clock())
+        new_state, changed, card, error = view.upsert_recipe(
+            state, recipe_id=recipe_id, title=title, memo=memo,
+            author_side=author_side, now_iso=now_iso)
+        if error:
+            return rejected(error)
+        target_id = str((card or {}).get("recipe_id") or recipe_id or "")
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": "upsert", "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                "recipe_id": target_id,
+                "recipe": card})
+        written = view.write_recipes_state(self.root, new_state)
+        updated = next((row for row in written.get("recipes") or []
+                        if row.get("recipe_id") == target_id), None)
+        return envelope(True, STATUS_OK, {
+            "action": "upsert", "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            "recipe_id": target_id, "recipe": updated})
+
+    def _arrangements_summary(self, subject_view: bool) -> dict[str, Any]:
+        """Safe arrangement facts only: counts/status/day by default, titles with her capability."""
+
+        answer = self.today_arrangements()
+        if not answer.get("ok"):
+            # An unreadable arrangement source is a named unknown, never "nothing today".
+            return {"status": "unknown",
+                    "reason_code": str(answer.get("reason_code") or "ARRANGEMENTS_UNAVAILABLE"),
+                    "day": None, "plan_count": None, "obligation_count": None,
+                    "execution_status": None, "truncated": None}
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        plan = data.get("plan") if isinstance(data.get("plan"), Mapping) else {}
+        obligations = data.get("obligations") if isinstance(data.get("obligations"),
+                                                              Mapping) else {}
+        sources = data.get("sources") if isinstance(data.get("sources"), Mapping) else {}
+        execution = sources.get("execution") if isinstance(sources.get("execution"),
+                                                            Mapping) else {}
+        summary: dict[str, Any] = {
+            "status": "available", "reason_code": None,
+            "day": data.get("day"),
+            "plan_count": _int_or_none(plan.get("count")),
+            "obligation_count": _int_or_none(obligations.get("count")),
+            "execution_status": execution.get("state"),
+            "truncated": bool(obligations.get("truncated")),
+        }
+        if subject_view:
+            entries = [row for row in (plan.get("entries") or [])
+                       if isinstance(row, Mapping)]
+            summary["plans_detail"] = [
+                {"title": row.get("title"), "date": row.get("date"),
+                 "execution": (row.get("execution") or {}).get("status")
+                 if isinstance(row.get("execution"), Mapping) else None}
+                for row in entries[:10]]
+            summary["plan_titles"] = [str(row.get("title")) for row in entries[:10]
+                                      if row.get("title")]
+        return summary
+
+    def home_tentative_plans(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/home/tentative-plans``: today's safe summary + local tentative list."""
+
+        from . import home_hearth_view as view
+
+        state, state_reason = view.read_plans_state(self.root)
+        return envelope(True, STATUS_OK, view.plans_block(
+            state=state, state_reason=state_reason,
+            arrangements=self._arrangements_summary(bool(subject_view)),
+            subject_view=bool(subject_view)))
+
+    def home_tentative_plan_action(self, *, action: str, actor_is_her: bool,
+                                   plan_id: Optional[str] = None, title: Any = None,
+                                   window_note: Any = None,
+                                   proposer: Optional[str] = None) -> dict[str, Any]:
+        """One explicit propose/reschedule/drop; nothing here reaches core arrangements."""
+
+        from . import home_hearth_view as view
+
+        if action not in ("propose", "reschedule", "drop"):
+            return rejected("PLAN_ACTION_UNSUPPORTED", action=action)
+        state, state_reason = view.read_plans_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._home_now_iso(self._home_clock())
+        if action == "propose":
+            if proposer not in view.PLAN_PROPOSERS:
+                return rejected("PLAN_PROPOSER_INVALID")
+            if proposer == "her" and not actor_is_her:
+                return rejected("PLAN_PROPOSER_FORBIDDEN")
+            new_state, changed, card, error = view.propose_plan(
+                state, plan_id=plan_id, title=title, window_note=window_note,
+                proposer=proposer, now_iso=now_iso)
+        else:
+            existing = view.find_plan(state, plan_id or "") if plan_id else None
+            if existing is None:
+                return rejected("PLAN_NOT_FOUND")
+            if existing.get("proposer") == "her" and not actor_is_her:
+                return rejected("PLAN_FORBIDDEN")
+            if action == "reschedule":
+                new_state, changed, card, error = view.reschedule_plan(
+                    state, plan_id=plan_id or "", window_note=window_note, now_iso=now_iso)
+            else:
+                new_state, changed, card, error = view.drop_plan(
+                    state, plan_id=plan_id or "", now_iso=now_iso)
+        if error:
+            return rejected(error)
+        target_id = str((card or {}).get("plan_id") or plan_id or "")
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                "plan_id": target_id,
+                "plan": view.plan_row(card) if isinstance(card, Mapping) else None})
+        written = view.write_plans_state(self.root, new_state)
+        updated = next((row for row in written.get("plans") or []
+                        if row.get("plan_id") == target_id), None)
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            "plan_id": target_id,
+            "plan": view.plan_row(updated) if isinstance(updated, Mapping) else None})
+
+    # -- 房间外日常：长椅书店 / 散步路线节日集市 / 可重访作品展与共同新地点草图 ------------
+
+    def _outing_world_context(self) -> dict[str, Any]:
+        """Pure read of real World outdoor places and local business date (zero write/tick)."""
+
+        from . import outing_places_view as view
+
+        clock = self._home_clock()
+        now_iso = self._home_now_iso(clock)
+        fallback_date = str(clock.get("day")
+                            or datetime.now(tz=TODAY_TZ).date().isoformat())
+
+        world_result = self.world()
+        world_ok = bool(world_result.get("ok"))
+        data = world_result.get("data") if isinstance(world_result.get("data"), Mapping) else {}
+        world_meta = data.get("world") if isinstance(data.get("world"), Mapping) else {}
+        raw_local_date = world_meta.get("local_date")
+        if (world_ok and isinstance(raw_local_date, str)
+                and re.match(r"^\d{4}-\d{2}-\d{2}$", raw_local_date.strip())):
+            local_date = raw_local_date.strip()
+        else:
+            local_date = fallback_date
+
+        if not world_ok or str(world_meta.get("status") or "") != "available":
+            reason = str(world_result.get("reason_code")
+                         or world_meta.get("reason_code")
+                         or "WORLD_UNAVAILABLE")
+            return {
+                "available": False,
+                "reason_code": reason,
+                "local_date": local_date,
+                "now_iso": now_iso,
+                "places": view.classify_world_places(()),
+            }
+
+        raw_places: list[dict[str, Any]] = []
+        seen_ids: dict[str, dict[str, Any]] = {}
+        home_place_id = "home"
+
+        location_block = data.get("location") \
+            if isinstance(data.get("location"), Mapping) else {}
+        current_pid = str(location_block.get("place_id") or "").strip()
+        if current_pid and not bool(location_block.get("home")):
+            entry = {
+                "place_id": current_pid,
+                "name": location_block.get("place_name") or current_pid,
+                "kind": str(location_block.get("kind") or ""),
+            }
+            raw_places.append(entry)
+            seen_ids[current_pid] = entry
+
+        destinations = data.get("destinations") \
+            if isinstance(data.get("destinations"), Mapping) else {}
+        for item in (destinations.get("places") or ()):
+            if not isinstance(item, Mapping):
+                continue
+            pid = str(item.get("place_id") or item.get("location_id") or "").strip()
+            if not pid or pid in seen_ids:
+                continue
+            entry = dict(item)
+            entry["place_id"] = pid
+            raw_places.append(entry)
+            seen_ids[pid] = entry
+
+        try:
+            import world_runtime_data as wrd
+
+            wdata = wrd.active_world(self.environment)
+            home_place_id = str(getattr(wdata, "home_location_id", None) or "home")
+            locations = getattr(wdata, "locations", None)
+            if isinstance(locations, Mapping):
+                for loc_id, loc_meta in locations.items():
+                    if not isinstance(loc_meta, Mapping):
+                        continue
+                    pid = str(loc_meta.get("location_id") or loc_id or "").strip()
+                    if not pid:
+                        continue
+                    if pid in seen_ids:
+                        seen_ids[pid].setdefault("kind", loc_meta.get("kind") or "")
+                        seen_ids[pid].setdefault("zone_id", loc_meta.get("zone_id") or "")
+                        seen_ids[pid].setdefault("description",
+                                                 loc_meta.get("description") or "")
+                        if not seen_ids[pid].get("name") or seen_ids[pid]["name"] == pid:
+                            seen_ids[pid]["name"] = loc_meta.get("name") or pid
+                    else:
+                        entry = dict(loc_meta)
+                        entry["place_id"] = pid
+                        raw_places.append(entry)
+                        seen_ids[pid] = entry
+        except Exception:
+            pass
+
+        return {
+            "available": True,
+            "reason_code": None,
+            "local_date": local_date,
+            "now_iso": now_iso,
+            "places": view.classify_world_places(raw_places, home_place_id=home_place_id),
+        }
+
+    def _outing_wallet_summary(self) -> dict[str, Any]:
+        """Pure read of real virtual-currency balance from `world_property_economy.load_state`."""
+
+        from . import outing_places_view as view
+
+        try:
+            import world_property_economy as economy
+        except Exception:
+            return {"wallet_status": "unavailable", "balance_jpy": None,
+                    "reason_code": view.ECONOMY_UNAVAILABLE}
+        try:
+            doc = economy.load_state(self.world_home)
+        except Exception as exc:
+            code = getattr(exc, "reason_code", None) or view.ECONOMY_STATE_ERROR
+            return {"wallet_status": "unavailable", "balance_jpy": None,
+                    "reason_code": str(code)}
+        if doc is None:
+            return {"wallet_status": "unavailable", "balance_jpy": None,
+                    "reason_code": view.GENESIS_NOT_INITIALIZED}
+        try:
+            balance = int(economy._balance(doc))
+        except Exception:
+            return {"wallet_status": "unavailable", "balance_jpy": None,
+                    "reason_code": view.ECONOMY_STATE_ERROR}
+        return {"wallet_status": "available", "balance_jpy": balance, "reason_code": None}
+
+    def outing_bench_bookstore(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/outing/bench-bookstore``: riverside bench trace + bookstore window."""
+
+        from . import outing_places_view as view
+
+        state, state_reason = view.read_bench_bookstore_state(self.root)
+        world_ctx = self._outing_world_context()
+        return envelope(True, STATUS_OK, view.bench_bookstore_block(
+            state=state, state_reason=state_reason,
+            world_places=world_ctx["places"],
+            world_available=bool(world_ctx["available"]),
+            world_reason=world_ctx["reason_code"],
+            local_date=world_ctx["local_date"],
+            subject_view=bool(subject_view)))
+
+    def outing_bench_bookstore_action(
+        self,
+        *,
+        action: str,
+        place_id: Optional[str] = None,
+        note: Optional[str] = None,
+        note_supplied: bool = False,
+        shared: Optional[bool] = None,
+        operation_key: Optional[str] = None,
+        visit_id: Optional[str] = None,
+        slot_index: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/outing/bench-bookstore``: explicit bench/window mutations."""
+
+        from . import outing_places_view as view
+
+        state, state_reason = view.read_bench_bookstore_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        world_ctx = self._outing_world_context()
+        now_iso = world_ctx["now_iso"]
+        local_date = world_ctx["local_date"]
+
+        try:
+            if action == "log_bench_visit":
+                if not world_ctx["available"]:
+                    return unavailable(str(world_ctx["reason_code"] or "WORLD_UNAVAILABLE"))
+                valid_ids = set((world_ctx["places"].get("places_by_id") or {}).keys())
+                new_state, item, changed = view.apply_log_bench_visit(
+                    state, place_id=str(place_id or ""), valid_place_ids=valid_ids,
+                    operation_key=str(operation_key or ""), note=note, shared=shared,
+                    now_iso=now_iso)
+                detail: dict[str, Any] = {"visit_id": item["visit_id"], "visit": item}
+            elif action == "set_bench_visibility":
+                new_state, item, changed = view.apply_set_bench_visibility(
+                    state, visit_id=str(visit_id or ""), shared=bool(shared), now_iso=now_iso)
+                detail = {"visit_id": item["visit_id"], "shared": item["shared"]}
+            elif action == "bookmark_window_book":
+                new_state, item, changed = view.apply_bookmark_window_book(
+                    state, slot_index=int(slot_index) if slot_index is not None else -1,
+                    local_date=local_date, shared=shared, note=note,
+                    note_supplied=bool(note_supplied), now_iso=now_iso)
+                detail = {"bookmark_id": item["bookmark_id"], "bookmark": item}
+            elif action == "set_partner_window_note":
+                new_state, item, changed = view.apply_set_partner_window_note(
+                    state, slot_index=int(slot_index) if slot_index is not None else -1,
+                    local_date=local_date, note=str(note or ""), now_iso=now_iso)
+                detail = {"partner_window_note": item}
+            elif action == "clear_partner_window_note":
+                new_state, changed = view.apply_clear_partner_window_note(
+                    state, now_iso=now_iso)
+                detail = {"partner_window_note": None}
+            else:
+                return rejected("BENCH_BOOKSTORE_ACTION_UNSUPPORTED", action=action)
+        except view.OutingStateError as exc:
+            return rejected(exc.reason_code)
+
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                **detail,
+            })
+        written = view.write_bench_bookstore_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            **detail,
+        })
+
+    def outing_routes_market(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/outing/routes-market``: walk routes/photos + virtual festival market."""
+
+        from . import outing_places_view as view
+
+        state, state_reason = view.read_routes_market_state(self.root)
+        world_ctx = self._outing_world_context()
+        album_readability: dict[str, bool] = {}
+        for route in state.get("routes") or ():
+            if not isinstance(route, Mapping):
+                continue
+            if not subject_view and not route.get("shared"):
+                continue
+            album_id = route.get("album_artifact_id")
+            if isinstance(album_id, str) and album_id and album_id not in album_readability:
+                detail = self.album_detail(album_id)
+                image = detail.get("image") if isinstance(detail.get("image"), Mapping) else {}
+                album_readability[album_id] = bool(
+                    detail.get("ok") and str(image.get("lifecycle") or "ACTIVE") == "ACTIVE")
+        wallet = self._outing_wallet_summary()
+        return envelope(True, STATUS_OK, view.routes_market_block(
+            state=state, state_reason=state_reason,
+            world_places=world_ctx["places"],
+            world_available=bool(world_ctx["available"]),
+            world_reason=world_ctx["reason_code"],
+            album_readability=album_readability,
+            wallet=wallet,
+            local_date=world_ctx["local_date"],
+            subject_view=bool(subject_view)))
+
+    def outing_routes_market_action(
+        self,
+        *,
+        action: str,
+        route_id: Optional[str] = None,
+        title: Optional[str] = None,
+        place_ids: Optional[list[Any]] = None,
+        album_artifact_id: Optional[str] = None,
+        album_supplied: bool = False,
+        caption: Optional[str] = None,
+        caption_supplied: bool = False,
+        shared: Optional[bool] = None,
+        stall_code: Optional[str] = None,
+        memo: Optional[str] = None,
+        budget_cap_jpy: Optional[int] = None,
+        budget_supplied: bool = False,
+        tip: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/outing/routes-market``: explicit route/market-memo mutations."""
+
+        from . import outing_places_view as view
+
+        state, state_reason = view.read_routes_market_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        world_ctx = self._outing_world_context()
+        now_iso = world_ctx["now_iso"]
+
+        try:
+            if action == "save_walk_route":
+                if not world_ctx["available"]:
+                    return unavailable(str(world_ctx["reason_code"] or "WORLD_UNAVAILABLE"))
+                if album_artifact_id is not None:
+                    detail_check = self.album_detail(album_artifact_id)
+                    image = (detail_check.get("image")
+                             if isinstance(detail_check.get("image"), Mapping) else {})
+                    if not detail_check.get("ok"):
+                        if str(detail_check.get("reason_code") or "") == "SUPPLY_UNAVAILABLE":
+                            return unavailable("SUPPLY_UNAVAILABLE")
+                        return rejected("ALBUM_IMAGE_NOT_FOUND",
+                                        album_artifact_id=album_artifact_id)
+                    if str(image.get("lifecycle") or "ACTIVE") != "ACTIVE":
+                        return rejected("ALBUM_IMAGE_NOT_FOUND",
+                                        album_artifact_id=album_artifact_id)
+                valid_ids = set((world_ctx["places"].get("places_by_id") or {}).keys())
+                new_state, item, changed = view.apply_save_walk_route(
+                    state, route_id=route_id, title=str(title or ""),
+                    place_ids=place_ids if isinstance(place_ids, list) else [],
+                    valid_place_ids=valid_ids,
+                    album_artifact_id=album_artifact_id, album_supplied=bool(album_supplied),
+                    caption=caption, caption_supplied=bool(caption_supplied),
+                    shared=shared, now_iso=now_iso)
+                detail = {"route_id": item["route_id"], "route": item}
+            elif action == "remove_walk_route":
+                new_state, changed = view.apply_remove_walk_route(
+                    state, route_id=str(route_id or ""), now_iso=now_iso)
+                detail = {"route_id": str(route_id or "")}
+            elif action == "note_market_wish":
+                new_state, item, changed = view.apply_note_market_wish(
+                    state, stall_code=str(stall_code or ""), memo=str(memo or ""),
+                    budget_cap_jpy=budget_cap_jpy, budget_supplied=bool(budget_supplied),
+                    shared=shared, now_iso=now_iso)
+                detail = {"wish_id": item["wish_id"], "wish": item}
+            elif action == "set_partner_market_tip":
+                new_state, item, changed = view.apply_set_partner_market_tip(
+                    state, stall_code=str(stall_code or ""), tip=str(tip or ""),
+                    now_iso=now_iso)
+                detail = {"partner_market_tip": item}
+            elif action == "clear_partner_market_tip":
+                new_state, changed = view.apply_clear_partner_market_tip(
+                    state, now_iso=now_iso)
+                detail = {"partner_market_tip": None}
+            else:
+                return rejected("ROUTES_MARKET_ACTION_UNSUPPORTED", action=action)
+        except view.OutingStateError as exc:
+            return rejected(exc.reason_code)
+
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                **detail,
+            })
+        written = view.write_routes_market_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            **detail,
+        })
+
+    def _outing_project_exhibit(self, exhibit: Mapping[str, Any], *,
+                                subject_view: bool) -> dict[str, Any]:
+        """Re-verify one stored gallery exhibit against `PrivateProjectService` & share inbox."""
+
+        from . import outing_places_view as view
+
+        artifact_id = str(exhibit.get("artifact_id") or "")
+        version_id = str(exhibit.get("version_id") or "")
+
+        project_answer = self.project(artifact_id)
+        if not project_answer.get("ok"):
+            reason = str(project_answer.get("reason_code") or view.SOURCE_NOT_READABLE)
+            if reason.startswith("PROJECT_IS_"):
+                reason = view.NOT_A_PROJECT
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code=reason)
+
+        project = project_answer.get("project") \
+            if isinstance(project_answer.get("project"), Mapping) else {}
+        if str(project.get("artifact_type") or "") != "project":
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code=view.NOT_A_PROJECT)
+
+        try:
+            from life_sharing_service import is_share_title
+        except Exception:
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code="SHARE_GUARD_UNAVAILABLE")
+        if is_share_title(project.get("title")):
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code=view.SHARE_ENVELOPE_NOT_A_PROJECT)
+
+        ver_read = self.project_version(artifact_id, version_id)
+        version = ver_read.get("version") \
+            if (ver_read.get("ok") and isinstance(ver_read.get("version"), Mapping)) else {}
+        version_number = version.get("version_number")
+
+        if str(project.get("lifecycle") or "") != "ACTIVE":
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code=view.ARCHIVED_SOURCE, version_number=version_number)
+
+        if not ver_read.get("ok"):
+            reason = str(ver_read.get("reason_code") or view.VERSION_UNREADABLE)
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code=reason)
+        if (str(version.get("version_id") or "") != version_id
+                or str(ver_read.get("artifact_id") or "") != artifact_id):
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code=view.VERSION_NOT_IN_ARTIFACT)
+        if str(version.get("lifecycle") or "ACTIVE") != "ACTIVE":
+            return view.format_exhibit_projection(
+                exhibit, subject_view=subject_view, source_status="withheld",
+                reason_code=view.ARCHIVED_SOURCE, version_number=version_number)
+
+        if subject_view:
+            if ver_read.get("content_withheld") or version.get("derived_text_withheld"):
+                return view.format_exhibit_projection(
+                    exhibit, subject_view=True, source_status="withheld",
+                    reason_code=view.SOURCE_NOT_READABLE, version_number=version_number)
+            return view.format_exhibit_projection(
+                exhibit, subject_view=True, source_status="available",
+                title=str(project.get("title") or ""),
+                version_number=version_number,
+                owner_content=str(version.get("content") or ""))
+
+        delivered = self._pocket_delivered_share_for_version(artifact_id, version_id)
+        if not delivered.get("ok"):
+            return view.format_exhibit_projection(
+                exhibit, subject_view=False, source_status="withheld",
+                reason_code=str(delivered.get("reason_code") or view.VERSION_NOT_DELIVERED),
+                version_number=version_number)
+        return view.format_exhibit_projection(
+            exhibit, subject_view=False, source_status="available",
+            title=str(project.get("title") or ""),
+            version_number=version_number,
+            delivered_share_id=str(delivered.get("share_id") or ""),
+            delivered_text=str(delivered.get("text") or ""),
+            delivered_at=delivered.get("delivered_at"))
+
+    def outing_gallery_blueprint(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/outing/gallery-blueprint``: mini exhibition + co-drawn blueprints."""
+
+        from . import outing_places_view as view
+
+        state, state_reason = view.read_gallery_blueprint_state(self.root)
+        projected = [self._outing_project_exhibit(item, subject_view=bool(subject_view))
+                     for item in (state.get("exhibits") or ()) if isinstance(item, Mapping)]
+        return envelope(True, STATUS_OK, view.gallery_blueprint_block(
+            state=state, state_reason=state_reason,
+            exhibits_projected=projected,
+            subject_view=bool(subject_view)))
+
+    def outing_gallery_blueprint_action(
+        self,
+        *,
+        action: str,
+        artifact_id: Optional[str] = None,
+        version_id: Optional[str] = None,
+        wall_caption: Optional[str] = None,
+        caption_supplied: bool = False,
+        exhibit_id: Optional[str] = None,
+        blueprint_id: Optional[str] = None,
+        title: Optional[str] = None,
+        sketch_note: Optional[str] = None,
+        intended_use: Optional[str] = None,
+        author_side: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/outing/gallery-blueprint``: curate exhibit / co-draw blueprint."""
+
+        from . import outing_places_view as view
+
+        state, state_reason = view.read_gallery_blueprint_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._home_now_iso(self._home_clock())
+
+        try:
+            if action == "curate_exhibit":
+                target_artifact = str(artifact_id or "")
+                target_version = str(version_id or "")
+                project_answer = self.project(target_artifact)
+                if not project_answer.get("ok"):
+                    reason = str(project_answer.get("reason_code") or "")
+                    if (project_answer.get("status") == STATUS_UNAVAILABLE
+                            and not reason.startswith("PROJECT_IS_")):
+                        return _project_failure(project_answer, "PROJECT_UNAVAILABLE")
+                    return rejected(view.NOT_A_PROJECT, artifact_id=target_artifact)
+                project = project_answer.get("project") \
+                    if isinstance(project_answer.get("project"), Mapping) else {}
+                if str(project.get("artifact_type") or "") != "project":
+                    return rejected(view.NOT_A_PROJECT, artifact_id=target_artifact)
+                try:
+                    from life_sharing_service import is_share_title
+                except Exception:
+                    return unavailable("SHARE_GUARD_UNAVAILABLE")
+                if is_share_title(project.get("title")):
+                    return rejected(view.SHARE_ENVELOPE_NOT_A_PROJECT,
+                                    artifact_id=target_artifact)
+                if str(project.get("lifecycle") or "") != "ACTIVE":
+                    return rejected(view.ARCHIVED_SOURCE, artifact_id=target_artifact)
+
+                ver_read = self.project_version(target_artifact, target_version)
+                if not ver_read.get("ok"):
+                    reason = str(ver_read.get("reason_code") or "PROJECT_VERSION_UNAVAILABLE")
+                    if (reason in (view.VERSION_NOT_IN_ARTIFACT, "VERSION_NOT_FOUND")
+                            or ver_read.get("status") == STATUS_NOT_FOUND):
+                        return rejected(view.VERSION_NOT_IN_ARTIFACT,
+                                        artifact_id=target_artifact)
+                    return _project_failure(ver_read, "PROJECT_VERSION_UNAVAILABLE")
+                version = ver_read.get("version") \
+                    if isinstance(ver_read.get("version"), Mapping) else {}
+                if (str(version.get("version_id") or "") != target_version
+                        or str(ver_read.get("artifact_id") or "") != target_artifact):
+                    return rejected(view.VERSION_NOT_IN_ARTIFACT, artifact_id=target_artifact)
+                if str(version.get("lifecycle") or "ACTIVE") != "ACTIVE":
+                    return rejected(view.ARCHIVED_SOURCE, artifact_id=target_artifact)
+
+                new_state, item, changed = view.apply_curate_exhibit(
+                    state, artifact_id=target_artifact, version_id=target_version,
+                    wall_caption=wall_caption, caption_supplied=bool(caption_supplied),
+                    now_iso=now_iso)
+                detail: dict[str, Any] = {"exhibit_id": item["exhibit_id"], "exhibit": item}
+            elif action == "remove_exhibit":
+                new_state, changed = view.apply_remove_exhibit(
+                    state, exhibit_id=str(exhibit_id or ""), now_iso=now_iso)
+                detail = {"exhibit_id": str(exhibit_id or "")}
+            elif action == "upsert_blueprint":
+                new_state, item, changed = view.apply_upsert_blueprint(
+                    state, blueprint_id=blueprint_id, title=str(title or ""),
+                    sketch_note=str(sketch_note or ""), intended_use=str(intended_use or ""),
+                    author_side=str(author_side or ""), now_iso=now_iso)
+                detail = {"blueprint_id": item["blueprint_id"], "blueprint": item}
+            elif action == "archive_blueprint":
+                new_state, item, changed = view.apply_archive_blueprint(
+                    state, blueprint_id=str(blueprint_id or ""),
+                    author_side=str(author_side or ""), now_iso=now_iso)
+                detail = {"blueprint_id": item["blueprint_id"], "blueprint": item}
+            else:
+                return rejected("GALLERY_BLUEPRINT_ACTION_UNSUPPORTED", action=action)
+        except view.OutingStateError as exc:
+            return rejected(exc.reason_code)
+
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                **detail,
+            })
+        written = view.write_gallery_blueprint_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action, "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            **detail,
+        })
+
+    # -- 长程陪伴六项日常细节：首日房间/盆栽手账/共同习惯册/礼物轨迹/双层灯光/一键续接 --------
+
+    def _longterm_home_room_context(self) -> dict[str, Any]:
+        """Gather live room snapshot facts and real home potted plants (pure zero-write)."""
+
+        plants_by_id: dict[str, dict[str, Any]] = {}
+        furniture_count = 0
+
+        hw = self.home_window()
+        hw_data = hw.get("data") if (hw.get("ok") and isinstance(hw.get("data"), Mapping)) else {}
+        plants_raw = hw_data.get("plants")
+        plant_rows: list[Any] = []
+        if isinstance(plants_raw, list):
+            plant_rows.extend(plants_raw)
+        elif isinstance(plants_raw, Mapping) and isinstance(plants_raw.get("items"), list):
+            plant_rows.extend(plants_raw["items"])
+        for row in plant_rows:
+            if not isinstance(row, Mapping):
+                continue
+            pid = str(row.get("object_id") or row.get("plant_id") or "").strip()
+            if not pid:
+                continue
+            plants_by_id[pid] = {
+                "plant_id": pid,
+                "name": str(row.get("name") or pid),
+                "area_id": row.get("area_id"),
+            }
+
+        try:
+            from world_runtime_data import active_world
+
+            pkg_dir = Path(active_world(self.environment).package_dir)
+            home_ids = {"home"}
+            loc_path = pkg_dir / "locations.json"
+            if loc_path.is_file():
+                loc_doc = json.loads(loc_path.read_text(encoding="utf-8"))
+                for loc in (loc_doc.get("locations") or ()):
+                    if isinstance(loc, Mapping) and loc.get("home") is True:
+                        lid = str(loc.get("location_id") or "").strip()
+                        if lid:
+                            home_ids.add(lid)
+            obj_path = pkg_dir / "objects.json"
+            if obj_path.is_file():
+                obj_doc = json.loads(obj_path.read_text(encoding="utf-8"))
+                for obj in (obj_doc.get("objects") or ()):
+                    if not isinstance(obj, Mapping):
+                        continue
+                    if str(obj.get("location_id") or "") not in home_ids:
+                        continue
+                    oid = str(obj.get("object_id") or "").strip()
+                    kind = str(obj.get("kind") or "").strip().lower()
+                    if kind == "plant":
+                        if oid and oid not in plants_by_id:
+                            plants_by_id[oid] = {
+                                "plant_id": oid,
+                                "name": str(obj.get("name") or oid),
+                                "area_id": obj.get("area_id"),
+                            }
+                    else:
+                        furniture_count += 1
+        except Exception:
+            pass
+
+        loc_block = self._reunion_location(self.world())
+        location = (
+            str(loc_block.get("place_id") or "home")
+            if loc_block.get("status") == "available" else "home"
+        )
+
+        items_block = self._reunion_items()
+        item_rows = items_block.get("items") if items_block.get("status") == "available" else ()
+        item_count = (
+            int(items_block.get("count") or 0)
+            if items_block.get("status") == "available" else 0
+        )
+        item_names: list[str] = []
+        for row in (item_rows or ()):
+            if isinstance(row, Mapping):
+                nm = str(row.get("name") or "").strip()
+                if nm and nm not in item_names:
+                    item_names.append(nm)
+
+        plant_names: list[str] = []
+        for pinfo in plants_by_id.values():
+            pnm = str(pinfo.get("name") or "").strip()
+            if pnm and pnm not in plant_names:
+                plant_names.append(pnm)
+
+        reading_block = self._reunion_reading()
+        raw_page = reading_block.get("page") if reading_block.get("status") == "available" else None
+        reading_page = raw_page if (isinstance(raw_page, int) and not isinstance(raw_page, bool)) else None
+
+        delivered_block = self._reunion_delivered()
+        delivered_count = (
+            int(delivered_block.get("count") or 0)
+            if delivered_block.get("status") == "available" else 0
+        )
+
+        return {
+            "snapshot": {
+                "location": location,
+                "furniture_count": furniture_count,
+                "item_count": item_count,
+                "item_names": item_names,
+                "plant_names": plant_names,
+                "reading_page": reading_page,
+                "delivered_share_count": delivered_count,
+            },
+            "plants_by_id": plants_by_id,
+        }
+
+    def _longterm_album_is_active(self, album_id: str) -> bool:
+        detail = self.album_detail(album_id)
+        image = detail.get("image") if isinstance(detail.get("image"), Mapping) else {}
+        return bool(detail.get("ok") and str(image.get("lifecycle") or "ACTIVE") == "ACTIVE")
+
+    def _longterm_delivered_project_ids(self) -> set[str]:
+        listing = self.shares(limit=50)
+        if not listing.get("ok"):
+            return set()
+        data = listing.get("data") if isinstance(listing.get("data"), Mapping) else {}
+        delivered_ids: set[str] = set()
+        for row in (data.get("shares") or ()):
+            if not isinstance(row, Mapping) or str(row.get("state") or "") != "LOCAL_DELIVERED":
+                continue
+            source = row.get("source") if isinstance(row.get("source"), Mapping) else {}
+            aid = str(source.get("artifact_id") or "").strip()
+            if aid:
+                delivered_ids.add(aid)
+        return delivered_ids
+
+    def _longterm_inspect_project_version(
+        self,
+        artifact_id: str,
+        version_id: str,
+        *,
+        include_owner_text: bool,
+    ) -> dict[str, Any]:
+        from . import long_companionship_view as view
+
+        project_answer = self.project(artifact_id)
+        if not project_answer.get("ok"):
+            return {
+                "readable": False,
+                "lifecycle": None,
+                "reason_code": str(project_answer.get("reason_code") or view.SOURCE_NOT_READABLE),
+            }
+        project = (
+            project_answer.get("project")
+            if isinstance(project_answer.get("project"), Mapping) else {}
+        )
+        if str(project.get("artifact_type") or "") != "project":
+            return {
+                "readable": False,
+                "lifecycle": str(project.get("lifecycle") or ""),
+                "reason_code": "NOT_A_PROJECT",
+            }
+        try:
+            from life_sharing_service import is_share_title
+            if is_share_title(project.get("title")):
+                return {
+                    "readable": False,
+                    "lifecycle": str(project.get("lifecycle") or ""),
+                    "reason_code": "SHARE_ENVELOPE_NOT_A_PROJECT",
+                }
+        except Exception:
+            return {
+                "readable": False,
+                "lifecycle": None,
+                "reason_code": "SHARE_GUARD_UNAVAILABLE",
+            }
+
+        lifecycle = str(project.get("lifecycle") or "")
+        if lifecycle != "ACTIVE":
+            return {
+                "readable": False,
+                "lifecycle": lifecycle or "ARCHIVED",
+                "reason_code": view.ARCHIVED_SOURCE,
+            }
+
+        ver_read = self.project_version(artifact_id, version_id)
+        if not ver_read.get("ok"):
+            reason = str(ver_read.get("reason_code") or view.VERSION_UNREADABLE)
+            if reason == "VERSION_NOT_FOUND" or ver_read.get("status") == STATUS_NOT_FOUND:
+                reason = view.VERSION_NOT_IN_ARTIFACT
+            return {
+                "readable": False,
+                "lifecycle": lifecycle,
+                "reason_code": reason,
+            }
+        version = ver_read.get("version") if isinstance(ver_read.get("version"), Mapping) else {}
+        if (str(version.get("version_id") or "") != version_id
+                or str(ver_read.get("artifact_id") or "") != artifact_id):
+            return {
+                "readable": False,
+                "lifecycle": lifecycle,
+                "reason_code": view.VERSION_NOT_IN_ARTIFACT,
+            }
+        if str(version.get("lifecycle") or "ACTIVE") != "ACTIVE":
+            return {
+                "readable": False,
+                "lifecycle": "ARCHIVED",
+                "reason_code": view.ARCHIVED_SOURCE,
+            }
+
+        delivered_res = self._pocket_delivered_share_for_version(artifact_id, version_id)
+        delivered = bool(delivered_res.get("ok"))
+        owner_excerpt = ""
+        if include_owner_text and not ver_read.get("content_withheld"):
+            owner_excerpt = str(version.get("content") or "")
+
+        return {
+            "readable": True,
+            "lifecycle": "ACTIVE",
+            "reason_code": None,
+            "title": str(project.get("title") or ""),
+            "version_number": version.get("version_number"),
+            "version_created_at": version.get("created_at") or project.get("updated_at"),
+            "owner_excerpt": owner_excerpt,
+            "delivered": delivered,
+            "share_id": delivered_res.get("share_id") if delivered else None,
+            "delivered_title": delivered_res.get("title") if delivered else None,
+            "delivered_excerpt": str(delivered_res.get("text") or "") if delivered else None,
+            "delivered_at": delivered_res.get("delivered_at") if delivered else None,
+        }
+
+    def _longterm_scan_derived_lineage(self) -> list[dict[str, Any]]:
+        """Scan `PrivateProjectService` for real `derived` works with v1 provenance markers."""
+
+        out: list[dict[str, Any]] = []
+        try:
+            from life_sharing_service import is_share_title
+            projects = self._projects_service()
+            listing = projects.list_projects(include_archived=True)
+        except Exception:
+            return out
+        if not isinstance(listing, Mapping) or not listing.get("ok"):
+            return out
+
+        for row in (listing.get("projects") or ()):
+            if not isinstance(row, Mapping):
+                continue
+            art_id = str(row.get("artifact_id") or "").strip()
+            head_ver = str(row.get("head_version_id") or "").strip()
+            if not art_id or not head_ver:
+                continue
+            if is_share_title(row.get("title")):
+                continue
+            try:
+                prov_res = projects.read_project_provenance(art_id)
+            except Exception:
+                continue
+            if not isinstance(prov_res, Mapping) or not prov_res.get("ok"):
+                continue
+            prov = prov_res.get("provenance")
+            if not isinstance(prov, Mapping):
+                continue
+            src_art = str(prov.get("source_artifact_id") or "").strip()
+            src_ver = str(prov.get("source_version_id") or "").strip()
+            if not src_art or not src_ver:
+                continue
+            out.append({
+                "derived_artifact_id": art_id,
+                "derived_version_id": head_ver,
+                "derived_lifecycle": str(row.get("lifecycle") or ""),
+                "source_artifact_id": src_art,
+                "source_version_id": src_ver,
+                "purpose": prov.get("purpose"),
+                "taken_at": prov.get("taken_at") or row.get("created_at"),
+                "provenance_note": None if prov.get("note_withheld") else prov.get("note"),
+            })
+        return out
+
+    def longterm_first_room_habits(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/longterm/first-room-habits``: Day-1 room delta + plant sketch + habits."""
+
+        from . import long_companionship_view as view
+
+        state, state_reason = view.read_room_habits_state(self.root)
+        room_ctx = self._longterm_home_room_context()
+
+        album_readability: dict[str, bool] = {}
+        first_room = state.get("first_room")
+        if isinstance(first_room, Mapping):
+            aid = first_room.get("album_artifact_id")
+            if isinstance(aid, str) and aid:
+                album_readability[aid] = self._longterm_album_is_active(aid)
+
+        delivered_project_ids = self._longterm_delivered_project_ids()
+        project_targets: dict[str, dict[str, Any]] = {}
+        for link in (state.get("plant_sketch_links") or ()):
+            if not isinstance(link, Mapping):
+                continue
+            if not subject_view and not link.get("shared"):
+                continue
+            tkind = str(link.get("target_kind") or "")
+            tid = str(link.get("target_artifact_id") or "")
+            if not tid:
+                continue
+            if tkind == "album":
+                if tid not in album_readability:
+                    album_readability[tid] = self._longterm_album_is_active(tid)
+            elif tkind == "project" and tid not in project_targets:
+                proj_ans = self.project(tid)
+                proj = proj_ans.get("project") if isinstance(proj_ans.get("project"), Mapping) else {}
+                active_proj = bool(
+                    proj_ans.get("ok")
+                    and str(proj.get("artifact_type") or "") == "project"
+                    and str(proj.get("lifecycle") or "") == "ACTIVE"
+                )
+                project_targets[tid] = {
+                    "active": active_proj,
+                    "delivered": active_proj and (tid in delivered_project_ids),
+                }
+
+        return envelope(True, STATUS_OK, view.first_room_habits_block(
+            state=state,
+            state_reason=state_reason,
+            live_room=room_ctx["snapshot"],
+            home_plants_by_id=room_ctx["plants_by_id"],
+            album_readability=album_readability,
+            project_targets=project_targets,
+            subject_view=bool(subject_view),
+        ))
+
+    def longterm_first_room_habits_action(
+        self,
+        *,
+        action: str,
+        album_artifact_id: Optional[str] = None,
+        note: Optional[str] = None,
+        plant_id: Optional[str] = None,
+        target_kind: Optional[str] = None,
+        target_artifact_id: Optional[str] = None,
+        observation_note: Optional[str] = None,
+        shared: Optional[bool] = None,
+        link_id: Optional[str] = None,
+        habit_id: Optional[str] = None,
+        title: Optional[str] = None,
+        habit_text: Optional[str] = None,
+        revised_reason: Optional[str] = None,
+        retired_reason: Optional[str] = None,
+        author_side: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/longterm/first-room-habits``: explicit mutations."""
+
+        from . import long_companionship_view as view
+
+        state, state_reason = view.read_room_habits_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._home_now_iso(self._home_clock())
+
+        try:
+            if action == "capture_first_room":
+                existing_first = state.get("first_room")
+                already_captured = (
+                    isinstance(existing_first, Mapping) and existing_first.get("captured") is True
+                )
+                if not already_captured and album_artifact_id is not None:
+                    if not self._longterm_album_is_active(album_artifact_id):
+                        return rejected("FIRST_ROOM_ALBUM_NOT_FOUND",
+                                        album_artifact_id=album_artifact_id)
+                room_ctx = self._longterm_home_room_context()
+                new_state, item, changed = view.apply_capture_first_room(
+                    state,
+                    snapshot=room_ctx["snapshot"],
+                    album_artifact_id=album_artifact_id,
+                    note=note,
+                    now_iso=now_iso,
+                )
+                detail: dict[str, Any] = {"first_room": item}
+            elif action == "link_plant_sketch":
+                room_ctx = self._longterm_home_room_context()
+                plants_by_id = room_ctx["plants_by_id"]
+                clean_pid = str(plant_id or "").strip()
+                if clean_pid not in plants_by_id:
+                    return rejected("PLANT_NOT_IN_HOME", plant_id=clean_pid)
+                clean_kind = str(target_kind or "").strip()
+                clean_target = str(target_artifact_id or "").strip()
+                if clean_kind == "album":
+                    if not self._longterm_album_is_active(clean_target):
+                        return rejected("SKETCH_TARGET_NOT_FOUND",
+                                        target_artifact_id=clean_target)
+                elif clean_kind == "project":
+                    proj_ans = self.project(clean_target)
+                    proj = (
+                        proj_ans.get("project")
+                        if isinstance(proj_ans.get("project"), Mapping) else {}
+                    )
+                    try:
+                        from life_sharing_service import is_share_title
+                        share_titled = is_share_title(proj.get("title"))
+                    except Exception:
+                        return unavailable("SHARE_GUARD_UNAVAILABLE")
+                    if (not proj_ans.get("ok")
+                            or share_titled
+                            or str(proj.get("artifact_type") or "") != "project"
+                            or str(proj.get("lifecycle") or "") != "ACTIVE"):
+                        return rejected("SKETCH_TARGET_NOT_FOUND",
+                                        target_artifact_id=clean_target)
+                else:
+                    return rejected("SKETCH_TARGET_KIND_INVALID")
+
+                new_state, item, changed = view.apply_link_plant_sketch(
+                    state,
+                    plant_id=clean_pid,
+                    plant_name=str(plants_by_id[clean_pid].get("name") or clean_pid),
+                    valid_plant_ids=set(plants_by_id.keys()),
+                    target_kind=clean_kind,
+                    target_artifact_id=clean_target,
+                    observation_note=str(observation_note or ""),
+                    shared=False if shared is None else bool(shared),
+                    now_iso=now_iso,
+                )
+                detail = {"link_id": item["link_id"], "link": item}
+            elif action == "remove_plant_sketch":
+                new_state, changed = view.apply_remove_plant_sketch(
+                    state, link_id=str(link_id or ""), now_iso=now_iso)
+                detail = {"link_id": str(link_id or "")}
+            elif action == "upsert_habit":
+                new_state, item, changed = view.apply_upsert_habit(
+                    state,
+                    habit_id=habit_id,
+                    title=str(title or ""),
+                    habit_text=str(habit_text or ""),
+                    revised_reason=revised_reason,
+                    author_side=str(author_side or ""),
+                    now_iso=now_iso,
+                )
+                detail = {"habit_id": item["habit_id"], "habit": item}
+            elif action == "retire_habit":
+                new_state, item, changed = view.apply_retire_habit(
+                    state,
+                    habit_id=str(habit_id or ""),
+                    retired_reason=retired_reason,
+                    author_side=str(author_side or ""),
+                    now_iso=now_iso,
+                )
+                detail = {"habit_id": item["habit_id"], "habit": item}
+            else:
+                return rejected("FIRST_ROOM_HABITS_ACTION_UNSUPPORTED", action=action)
+        except view.LongtermStateError as exc:
+            return rejected(exc.reason_code)
+
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action,
+                "changed": False,
+                "already_applied": True,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                **detail,
+            })
+        written = view.write_room_habits_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action,
+            "changed": True,
+            "already_applied": False,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            **detail,
+        })
+
+    def longterm_gifts_lantern(
+        self,
+        *,
+        layer: str = "then_only",
+        subject_view: bool = False,
+    ) -> dict[str, Any]:
+        """``GET /api/phone/longterm/gifts-lantern``: shared gifts + dual-layer memory lantern."""
+
+        from . import long_companionship_view as view
+
+        state, state_reason = view.read_gifts_lantern_state(self.root)
+        derived_lineage = self._longterm_scan_derived_lineage()
+
+        pairs_to_inspect: set[tuple[str, str]] = set()
+        for gift in (state.get("shared_gifts") or ()):
+            if not isinstance(gift, Mapping):
+                continue
+            if not subject_view and gift.get("author_side") == "her" and gift.get("stage") != "gifted":
+                continue
+            aid = gift.get("artifact_id")
+            vid = gift.get("version_id")
+            if isinstance(aid, str) and aid and isinstance(vid, str) and vid:
+                pairs_to_inspect.add((aid, vid))
+
+        for remake in derived_lineage:
+            s_aid = str(remake.get("source_artifact_id") or "")
+            s_vid = str(remake.get("source_version_id") or "")
+            if s_aid and s_vid:
+                pairs_to_inspect.add((s_aid, s_vid))
+            if layer == "with_later_context":
+                d_aid = str(remake.get("derived_artifact_id") or "")
+                d_vid = str(remake.get("derived_version_id") or "")
+                if d_aid and d_vid:
+                    pairs_to_inspect.add((d_aid, d_vid))
+
+        for refl in (state.get("later_reflections") or ()):
+            if not isinstance(refl, Mapping):
+                continue
+            if not subject_view and not refl.get("shared"):
+                continue
+            s_aid = str(refl.get("source_artifact_id") or "")
+            s_vid = str(refl.get("source_version_id") or "")
+            if s_aid and s_vid:
+                pairs_to_inspect.add((s_aid, s_vid))
+
+        inspections: dict[tuple[str, str], dict[str, Any]] = {}
+        for aid, vid in pairs_to_inspect:
+            inspections[(aid, vid)] = self._longterm_inspect_project_version(
+                aid, vid, include_owner_text=bool(subject_view))
+
+        return envelope(True, STATUS_OK, view.gifts_lantern_block(
+            state=state,
+            state_reason=state_reason,
+            layer=layer,
+            version_inspections=inspections,
+            derived_lineage=derived_lineage,
+            subject_view=bool(subject_view),
+        ))
+
+    def longterm_gifts_lantern_action(
+        self,
+        *,
+        action: str,
+        gift_id: Optional[str] = None,
+        author_side: Optional[str] = None,
+        stage: Optional[str] = None,
+        title: Optional[str] = None,
+        draft_seed_note: Optional[str] = None,
+        finished_note: Optional[str] = None,
+        finished_note_supplied: bool = False,
+        artifact_id: Optional[str] = None,
+        version_id: Optional[str] = None,
+        link_supplied: bool = False,
+        source_artifact_id: Optional[str] = None,
+        source_version_id: Optional[str] = None,
+        reflection_note: Optional[str] = None,
+        shared: Optional[bool] = None,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/longterm/gifts-lantern``: explicit gift & reflection mutations."""
+
+        from . import long_companionship_view as view
+
+        state, state_reason = view.read_gifts_lantern_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._home_now_iso(self._home_clock())
+
+        try:
+            if action == "upsert_gift":
+                if str(author_side or "") == "her" and artifact_id is not None and version_id is not None:
+                    insp = self._longterm_inspect_project_version(
+                        artifact_id, version_id, include_owner_text=False)
+                    if not insp.get("readable"):
+                        return rejected(str(insp.get("reason_code") or "GIFT_WORK_NOT_FOUND"),
+                                        artifact_id=artifact_id)
+                new_state, item, changed = view.apply_upsert_gift(
+                    state,
+                    gift_id=gift_id,
+                    author_side=str(author_side or ""),
+                    stage=str(stage or ""),
+                    title=str(title or ""),
+                    draft_seed_note=str(draft_seed_note or ""),
+                    finished_note=finished_note,
+                    artifact_id=artifact_id,
+                    version_id=version_id,
+                    finished_note_supplied=bool(finished_note_supplied),
+                    link_supplied=bool(link_supplied),
+                    now_iso=now_iso,
+                )
+                detail: dict[str, Any] = {"gift_id": item["gift_id"], "gift": item}
+            elif action == "send_gift":
+                new_state, item, changed = view.apply_send_gift(
+                    state,
+                    gift_id=str(gift_id or ""),
+                    author_side=str(author_side or ""),
+                    finished_note=finished_note,
+                    now_iso=now_iso,
+                )
+                detail = {"gift_id": item["gift_id"], "gift": item}
+            elif action == "record_later_reflection":
+                src_art = str(source_artifact_id or "")
+                src_ver = str(source_version_id or "")
+                insp = self._longterm_inspect_project_version(
+                    src_art, src_ver, include_owner_text=False)
+                if not insp.get("readable"):
+                    return rejected(str(insp.get("reason_code") or "SOURCE_WORK_NOT_FOUND"),
+                                    source_artifact_id=src_art)
+                new_state, item, changed = view.apply_record_later_reflection(
+                    state,
+                    source_artifact_id=src_art,
+                    source_version_id=src_ver,
+                    reflection_note=str(reflection_note or ""),
+                    shared=False if shared is None else bool(shared),
+                    now_iso=now_iso,
+                )
+                detail = {"reflection_id": item["reflection_id"], "reflection": item}
+            else:
+                return rejected("GIFTS_LANTERN_ACTION_UNSUPPORTED", action=action)
+        except view.LongtermStateError as exc:
+            return rejected(exc.reason_code)
+
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action,
+                "changed": False,
+                "already_applied": True,
+                "revision": state.get("revision"),
+                "updated_at": state.get("updated_at"),
+                **detail,
+            })
+        written = view.write_gifts_lantern_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action,
+            "changed": True,
+            "already_applied": False,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            **detail,
+        })
+
+    def runtime_recovery_review(self) -> dict[str, Any]:
+        """Pure zero-write read of `runtime_recovery_review.review(...)`, or safe fallback if unbound."""
+
+        candidates = [self.root / "one-day", self.root]
+        one_day_root: Optional[Path] = None
+        for cand in candidates:
+            inst_file = cand / "instance.json"
+            if not inst_file.is_file() or inst_file.is_symlink():
+                continue
+            try:
+                doc = json.loads(inst_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(doc, Mapping) and doc.get("schema") == "life.one_day.v1":
+                one_day_root = cand
+                break
+
+        if one_day_root is None:
+            return {
+                "status": "UNBOUND",
+                "recovery_class": None,
+                "backup_restore_status": "ONE_DAY_UNBOUND",
+                "forget_barrier_status": "ENFORCED_NO_RAW_EXPORT",
+                "reason_code": "ONE_DAY_INSTANCE_UNBOUND",
+                "read_only": True,
+            }
+
+        try:
+            import runtime_recovery_review as rrr
+
+            sock = self.supply_socket if Path(self.supply_socket).exists() else None
+            report = rrr.review(one_day_root, supply_socket=sock, subject=self.subject)
+        except Exception:
+            return {
+                "status": "UNAVAILABLE",
+                "recovery_class": None,
+                "backup_restore_status": "REVIEW_UNAVAILABLE",
+                "forget_barrier_status": "UNKNOWN",
+                "reason_code": "RECOVERY_REVIEW_FAILED",
+                "read_only": True,
+            }
+
+        gates = report.get("gates") if isinstance(report.get("gates"), Mapping) else {}
+        backup_gate = gates.get("backup_restore") if isinstance(gates.get("backup_restore"), Mapping) else {}
+        forget_gate = gates.get("forget_barrier") if isinstance(gates.get("forget_barrier"), Mapping) else {}
+        backup_status = str(backup_gate.get("status") or "UNKNOWN")
+        forget_status = str(
+            forget_gate.get("status")
+            or ("ENFORCED_BY_BACKUP_GATE" if backup_status == "PASS" else "NOT_RECORDED")
+        )
+        rec_class = str(report.get("class") or "UNKNOWN")
+        return {
+            "status": "OK" if report.get("ok") else rec_class,
+            "recovery_class": rec_class,
+            "backup_restore_status": backup_status,
+            "forget_barrier_status": forget_status,
+            "reason_code": None,
+            "read_only": True,
+        }
+
+    def longterm_resume_hub(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/longterm/resume-hub``: pure zero-write resume & closed/recovery overview."""
+
+        from . import long_companionship_view as view
+
+        active_projects: list[dict[str, Any]] = []
+        archived_projects: list[dict[str, Any]] = []
+        try:
+            from life_sharing_service import is_share_title
+            projects_svc = self._projects_service()
+            listing = projects_svc.list_projects(include_archived=True)
+            if isinstance(listing, Mapping) and listing.get("ok"):
+                for row in (listing.get("projects") or ()):
+                    if not isinstance(row, Mapping):
+                        continue
+                    if is_share_title(row.get("title")):
+                        continue
+                    aid = str(row.get("artifact_id") or "").strip()
+                    if not aid:
+                        continue
+                    # Verify project artifact_type (exclude research/material artifacts)
+                    p_detail = self.project(aid)
+                    p_obj = (
+                        p_detail.get("project")
+                        if (p_detail.get("ok") and isinstance(p_detail.get("project"), Mapping))
+                        else row
+                    )
+                    if p_detail.get("ok") and str(p_obj.get("artifact_type") or "") != "project":
+                        continue
+                    lifecycle = str(row.get("lifecycle") or "")
+                    normalized = {
+                        "artifact_id": aid,
+                        "title": str(row.get("title") or ""),
+                        "head_version_id": row.get("head_version_id"),
+                        "updated_at": row.get("updated_at") or row.get("created_at"),
+                    }
+                    if lifecycle == "ACTIVE":
+                        active_projects.append(normalized)
+                    elif lifecycle == "ARCHIVED":
+                        archived_projects.append(normalized)
+        except Exception:
+            pass
+
+        active_projects.sort(key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+        archived_projects.sort(key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+        active_id_set = {r["artifact_id"] for r in active_projects}
+
+        latest_topic_share: Optional[dict[str, Any]] = None
+        latest_delivered_project_share: Optional[dict[str, Any]] = None
+        shares_ans = self.shares(limit=50)
+        if shares_ans.get("ok"):
+            sdata = shares_ans.get("data") if isinstance(shares_ans.get("data"), Mapping) else {}
+            delivered_rows = [
+                row for row in (sdata.get("shares") or ())
+                if isinstance(row, Mapping) and str(row.get("state") or "") == "LOCAL_DELIVERED"
+            ]
+            delivered_rows.sort(
+                key=lambda r: str(r.get("delivered_at") or r.get("updated_at") or ""),
+                reverse=True,
+            )
+            for row in delivered_rows:
+                sid = str(row.get("share_id") or "")
+                if not sid:
+                    continue
+                detail = self.share(sid)
+                ddata = detail.get("data") if isinstance(detail.get("data"), Mapping) else {}
+                sh = ddata.get("share") if isinstance(ddata.get("share"), Mapping) else row
+                stitle = str(sh.get("title") or row.get("title") or "").strip() or None
+                updated = sh.get("delivered_at") or row.get("updated_at") or row.get("created_at")
+                if latest_topic_share is None:
+                    latest_topic_share = {
+                        "share_id": sid,
+                        "title": stitle,
+                        "updated_at": updated,
+                    }
+                src = row.get("source") if isinstance(row.get("source"), Mapping) else {}
+                src_aid = str(src.get("artifact_id") or "").strip()
+                src_vid = str(src.get("version_id") or "").strip()
+                if (latest_delivered_project_share is None
+                        and src_aid
+                        and src_aid in active_id_set):
+                    latest_delivered_project_share = {
+                        "share_id": sid,
+                        "title": stitle,
+                        "artifact_id": src_aid,
+                        "version_id": src_vid or None,
+                        "delivered_at": updated,
+                    }
+                if latest_topic_share is not None and latest_delivered_project_share is not None:
+                    break
+
+        reading_ans = self.reading_material()
+        rdata = (
+            reading_ans.get("data")
+            if (reading_ans.get("ok") and isinstance(reading_ans.get("data"), Mapping)) else {}
+        )
+        total_pages = rdata.get("pages")
+        has_book = bool(
+            reading_ans.get("ok")
+            and isinstance(total_pages, int)
+            and not isinstance(total_pages, bool)
+            and total_pages > 0
+        )
+        bmark = rdata.get("bookmark") if isinstance(rdata.get("bookmark"), Mapping) else {}
+        cur_page = bmark.get("page")
+        if not isinstance(cur_page, int) or isinstance(cur_page, bool) or cur_page <= 0:
+            cur_page = 1 if has_book else None
+        reading_title: Optional[str] = None
+        if subject_view and has_book:
+            page_text = rdata.get("page_text")
+            if not isinstance(page_text, str) or not page_text.strip():
+                p1 = self.reading_material(page=1)
+                p1_data = p1.get("data") if isinstance(p1.get("data"), Mapping) else {}
+                page_text = p1_data.get("page_text")
+            if isinstance(page_text, str) and page_text.strip():
+                first_line = page_text.strip().splitlines()[0].strip()
+                reading_title = first_line[:60] if first_line else None
+
+        reading_bookmark = {
+            "has_book": has_book,
+            "current_page": cur_page,
+            "total_pages": total_pages if has_book else None,
+            "updated_at": bmark.get("updated_at") or rdata.get("updated_at"),
+            "title": reading_title,
+        }
+
+        recovery_summary = self.runtime_recovery_review()
+        return envelope(True, STATUS_OK, view.resume_hub_block(
+            active_projects=active_projects,
+            archived_projects=archived_projects,
+            latest_delivered_project_share=latest_delivered_project_share,
+            reading_bookmark=reading_bookmark,
+            latest_topic_share=latest_topic_share,
+            recovery_summary=recovery_summary,
+            subject_view=bool(subject_view),
+        ))
+
+    # -- 开源角色包与可组合身体 / 多通道感官场与文字声景卡 ---------------------------------
+
+    @staticmethod
+    def _already(data: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        """Standard idempotent replay envelope (``status == 'already_applied'``)."""
+
+        return envelope(True, STATUS_ALREADY, data)
+
+    @staticmethod
+    def _bad_request(reason_code: str, **data: Any) -> dict[str, Any]:
+        out = rejected(reason_code, **data)
+        out["http_status"] = 400
+        return out
+
+    def character_pack(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/character/pack``: pure zero-write character pack & body summary."""
+
+        from . import sensory_character_view as view
+
+        state, state_reason = view.read_character_pack_state(self.root)
+        return envelope(
+            True,
+            STATUS_OK,
+            view.project_character_pack(
+                state,
+                state_reason=state_reason,
+                subject_view=bool(subject_view),
+            ),
+        )
+
+    def character_pack_action(
+        self,
+        *,
+        action: str,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/character/pack``: explicit preset / custom pack / identity / physiology / export / attest."""
+
+        from . import sensory_character_view as view
+
+        body = dict(payload or {})
+        state, state_reason = view.read_character_pack_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._somatic_now_iso()
+
+        try:
+            if action == "export_pack":
+                inc_seed = body.get("include_sexual_seed", True)
+                if not isinstance(inc_seed, bool):
+                    return self._bad_request("INCLUDE_SEXUAL_SEED_INVALID")
+                exported = view.apply_export_pack(state, include_sexual_seed=inc_seed)
+                return envelope(True, STATUS_OK, exported)
+            if action == "select_preset":
+                if "preset_id" not in body:
+                    return self._bad_request("PRESET_ID_REQUIRED")
+                new_state = view.apply_select_preset(
+                    state, preset_id=body.get("preset_id"), now_iso=now_iso
+                )
+            elif action == "apply_custom_pack":
+                if "pack" not in body:
+                    return self._bad_request("PACK_REQUIRED")
+                new_state = view.apply_custom_pack(
+                    state, pack=body.get("pack"), now_iso=now_iso
+                )
+            elif action == "import_pack_json":
+                if "pack_json" in body:
+                    raw_pj = body.get("pack_json")
+                    if isinstance(raw_pj, str):
+                        if not raw_pj.strip():
+                            return self._bad_request("PACK_JSON_REQUIRED")
+                        try:
+                            parsed_pack = json.loads(raw_pj)
+                        except ValueError:
+                            return self._bad_request("PACK_JSON_INVALID")
+                    elif isinstance(raw_pj, Mapping):
+                        parsed_pack = raw_pj
+                    else:
+                        return self._bad_request("PACK_JSON_INVALID")
+                elif "pack" in body:
+                    parsed_pack = body.get("pack")
+                else:
+                    return self._bad_request("PACK_JSON_REQUIRED")
+                new_state = view.apply_custom_pack(
+                    state, pack=parsed_pack, now_iso=now_iso
+                )
+            elif action == "attest_character_pack":
+                if "adult_confirmed" in body and body.get("adult_confirmed") is not True:
+                    return self._bad_request("ADULT_CONFIRMED_REQUIRED")
+                if "fictional_confirmed" in body and body.get("fictional_confirmed") is not True:
+                    return self._bad_request("FICTIONAL_CONFIRMED_REQUIRED")
+                active_doc = state.get("pack_doc") if isinstance(state.get("pack_doc"), Mapping) else {}
+                if body.get("pack_id") is not None:
+                    if not isinstance(body.get("pack_id"), str) or body["pack_id"].strip() != str(active_doc.get("pack_id") or ""):
+                        return self._bad_request("PACK_ID_MISMATCH")
+                if body.get("version") is not None:
+                    v_raw = body.get("version")
+                    if isinstance(v_raw, bool) or not isinstance(v_raw, (int, str)) or str(v_raw).strip() != str(active_doc.get("version") or ""):
+                        return self._bad_request("PACK_VERSION_MISMATCH")
+                if body.get("life_stage") is not None:
+                    if body.get("life_stage") not in ("adult", "university_student", "working_adult", "adult_unspecified", "independent_adult"):
+                        return self._bad_request("ADULT_LIFE_STAGE_REQUIRED")
+                if body.get("declared_age") is not None:
+                    age_val = body.get("declared_age")
+                    if isinstance(age_val, bool) or not isinstance(age_val, int) or age_val < 18:
+                        return self._bad_request("DECLARED_AGE_MUST_BE_ADULT")
+                if body.get("note") is not None:
+                    if not isinstance(body.get("note"), str) or not body["note"].strip() or len(body["note"].strip()) > 240:
+                        return self._bad_request("NOTE_INVALID")
+                new_state = view.apply_attest_character_pack(
+                    state,
+                    now_iso=now_iso,
+                    attested_by=body.get("attested_by", "deployer"),
+                    pack_sha256=body.get("pack_sha256"),
+                )
+                if isinstance(body.get("note"), str) and body["note"].strip() and isinstance(new_state.get("attestation"), dict):
+                    new_state["attestation"]["note"] = body["note"].strip()
+            elif action == "update_identity":
+                new_state = view.apply_update_identity(
+                    state, fields_present=body, now_iso=now_iso
+                )
+            elif action == "set_optional_physiology":
+                if "optional_processes" not in body:
+                    return self._bad_request("OPTIONAL_PROCESS_INVALID")
+                new_state = view.apply_set_optional_physiology(
+                    state,
+                    optional_processes=body.get("optional_processes"),
+                    now_iso=now_iso,
+                )
+            else:
+                return self._bad_request("CHARACTER_PACK_ACTION_INVALID", action=action)
+        except view.CharacterPackValidationError as exc:
+            return self._bad_request(exc.reason_code)
+
+        try:
+            written = view.write_character_pack_state(self.root, new_state)
+        except ValueError as exc:
+            return rejected(str(exc) or "CHARACTER_PACK_WRITE_FAILED")
+
+        projected = view.project_character_pack(
+            written, state_reason=None, subject_view=bool(subject_view)
+        )
+        res_data: dict[str, Any] = {
+            "action": action,
+            "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            "active_pack": projected["active_pack"],
+            "exportable_pack": projected.get("exportable_pack"),
+            "attestation": projected.get("attestation"),
+            "adult_gate_preview": projected["adult_gate_preview"],
+            "boundaries": projected["boundaries"],
+        }
+        att = written.get("attestation")
+        if action == "attest_character_pack" and isinstance(att, Mapping):
+            res_data["pack_sha256"] = att.get("pack_sha256")
+            res_data["pack_ref"] = att.get("pack_ref")
+            res_data["attested_by"] = att.get("attested_by")
+            res_data["attested_at"] = att.get("attested_at")
+        return envelope(True, STATUS_OK, res_data)
+
+    def _sensory_projection(self, *, subject_view: bool = False) -> tuple[
+        dict[str, Any], dict[str, Any], Optional[str]
+    ]:
+        from . import sensory_character_view as view
+
+        world_result = self.world()
+        body_view = self._body_from_world(world_result)
+        somatic_state, somatic_reason = self._somatic_state()
+        character_state, _char_reason = view.read_character_pack_state(self.root)
+        cards_state, cards_reason = view.read_sensory_cards_state(self.root)
+        now_iso = self._somatic_now_iso()
+        projected = view.derive_sensory_field(
+            world_result=world_result,
+            body_view=body_view,
+            somatic_state=somatic_state,
+            somatic_reason=somatic_reason,
+            character_state=character_state,
+            cards_state=cards_state,
+            cards_reason=cards_reason,
+            now_iso=now_iso,
+            subject_view=bool(subject_view),
+            environment=self.environment,
+        )
+        return projected, cards_state, cards_reason
+
+    def body_sensory(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/body/sensory``: pure zero-write 5-channel sensory field & cards."""
+
+        projected, _cards_state, _cards_reason = self._sensory_projection(
+            subject_view=bool(subject_view)
+        )
+        return envelope(True, STATUS_OK, projected)
+
+    def body_sensory_action(
+        self,
+        *,
+        action: str,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/body/sensory``: sound cards & partner sensory notes."""
+
+        from . import sensory_character_view as view
+
+        body = dict(payload or {})
+        cards_state, cards_reason = view.read_sensory_cards_state(self.root)
+        if cards_reason:
+            return rejected(cards_reason)
+        now_iso = self._somatic_now_iso()
+
+        try:
+            if action == "capture_sound_card":
+                if "shared" in body and not isinstance(body.get("shared"), bool):
+                    return self._bad_request("SHARED_FLAG_INVALID")
+                if "title" in body and body.get("title") is None:
+                    return self._bad_request("CARD_TITLE_INVALID")
+                if "impression_note" in body and body.get("impression_note") is None:
+                    return self._bad_request("IMPRESSION_NOTE_INVALID")
+                if "operation_key" in body and body.get("operation_key") is None:
+                    return self._bad_request("OPERATION_KEY_INVALID")
+                projected, _cs, _cr = self._sensory_projection(subject_view=True)
+                new_state, card, already_applied, conflict = view.apply_capture_sound_card(
+                    cards_state,
+                    sensory_projection=projected,
+                    title=body.get("title") if "title" in body else None,
+                    impression_note=(
+                        body.get("impression_note") if "impression_note" in body else None
+                    ),
+                    shared=body.get("shared", False),
+                    operation_key=(
+                        body.get("operation_key") if "operation_key" in body else None
+                    ),
+                    now_iso=now_iso,
+                )
+                if conflict:
+                    return rejected(conflict)
+                if already_applied:
+                    return self._already({
+                        "action": action,
+                        "changed": False,
+                        "replayed": True,
+                        "revision": cards_state.get("revision"),
+                        "updated_at": cards_state.get("updated_at"),
+                        "sound_card": card,
+                    })
+                written = view.write_sensory_cards_state(self.root, new_state)
+                return envelope(True, STATUS_OK, {
+                    "action": action,
+                    "changed": True,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at"),
+                    "sound_card": card,
+                })
+
+            if action == "set_sound_card_share":
+                if "card_id" not in body:
+                    return self._bad_request("CARD_ID_INVALID")
+                if "shared" not in body or not isinstance(body.get("shared"), bool):
+                    return self._bad_request("SHARED_FLAG_INVALID")
+                new_state, card, changed = view.apply_set_sound_card_share(
+                    cards_state,
+                    card_id=body.get("card_id"),
+                    shared=body.get("shared"),
+                    now_iso=now_iso,
+                )
+                if card is None:
+                    return envelope(False, STATUS_NOT_FOUND, {}, "SOUND_CARD_NOT_FOUND")
+                if not changed:
+                    return self._already({
+                        "action": action,
+                        "changed": False,
+                        "revision": cards_state.get("revision"),
+                        "updated_at": cards_state.get("updated_at"),
+                        "sound_card": card,
+                    })
+                written = view.write_sensory_cards_state(self.root, new_state)
+                return envelope(True, STATUS_OK, {
+                    "action": action,
+                    "changed": True,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at"),
+                    "sound_card": card,
+                })
+
+            if action == "remove_sound_card":
+                if "card_id" not in body:
+                    return self._bad_request("CARD_ID_INVALID")
+                new_state, removed = view.apply_remove_sound_card(
+                    cards_state, card_id=body.get("card_id"), now_iso=now_iso
+                )
+                if removed is None:
+                    return envelope(False, STATUS_NOT_FOUND, {}, "SOUND_CARD_NOT_FOUND")
+                written = view.write_sensory_cards_state(self.root, new_state)
+                return envelope(True, STATUS_OK, {
+                    "action": action,
+                    "changed": True,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at"),
+                    "removed_card_id": removed.get("card_id"),
+                })
+
+            if action == "leave_sensory_note":
+                if "text" not in body:
+                    return self._bad_request("SENSORY_NOTE_TEXT_INVALID")
+                new_state, note, conflict = view.apply_leave_sensory_note(
+                    cards_state, text=body.get("text"), now_iso=now_iso
+                )
+                if conflict:
+                    return rejected(conflict)
+                written = view.write_sensory_cards_state(self.root, new_state)
+                return envelope(True, STATUS_OK, {
+                    "action": action,
+                    "changed": True,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at"),
+                    "note": note,
+                })
+
+            if action == "remove_sensory_note":
+                if "note_id" not in body:
+                    return self._bad_request("SENSORY_NOTE_ID_INVALID")
+                new_state, removed_note = view.apply_remove_sensory_note(
+                    cards_state, note_id=body.get("note_id"), now_iso=now_iso
+                )
+                if removed_note is None:
+                    return envelope(False, STATUS_NOT_FOUND, {}, "SENSORY_NOTE_NOT_FOUND")
+                written = view.write_sensory_cards_state(self.root, new_state)
+                return envelope(True, STATUS_OK, {
+                    "action": action,
+                    "changed": True,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at"),
+                    "removed_note_id": removed_note.get("note_id"),
+                })
+
+            if action == "clear_sensory_notes":
+                new_state, cleared_count, changed = view.apply_clear_sensory_notes(
+                    cards_state, now_iso=now_iso
+                )
+                if not changed:
+                    return self._already({
+                        "action": action,
+                        "changed": False,
+                        "cleared_count": 0,
+                        "revision": cards_state.get("revision"),
+                        "updated_at": cards_state.get("updated_at"),
+                    })
+                written = view.write_sensory_cards_state(self.root, new_state)
+                return envelope(True, STATUS_OK, {
+                    "action": action,
+                    "changed": True,
+                    "cleared_count": cleared_count,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at"),
+                })
+
+            return self._bad_request("BODY_SENSORY_ACTION_INVALID", action=action)
+        except view.CharacterPackValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except ValueError as exc:
+            return rejected(str(exc) or "SENSORY_CARDS_WRITE_FAILED")
+
+    # -- 主体日常自主拒绝边界 / 挂着的话题余温 / 主动改画风 / 真实异步延迟回信 ------------
+
+    def _autonomy_live_context(self) -> dict[str, Any]:
+        from . import sensory_character_view as char_view
+
+        world_result = self.world()
+        body_view = self._body_from_world(world_result)
+        somatic_state, somatic_reason = self._somatic_state()
+        character_state, _char_reason = char_view.read_character_pack_state(self.root)
+        cards_state, cards_reason = char_view.read_sensory_cards_state(self.root)
+        desk_result = self.desk_presence()
+        now_iso = self._somatic_now_iso()
+        sensory_projection = char_view.derive_sensory_field(
+            world_result=world_result,
+            body_view=body_view,
+            somatic_state=somatic_state,
+            somatic_reason=somatic_reason,
+            character_state=character_state,
+            cards_state=cards_state,
+            cards_reason=cards_reason,
+            now_iso=now_iso,
+            subject_view=False,
+            environment=self.environment,
+        )
+        return {
+            "character_state": character_state,
+            "world_result": world_result,
+            "body_view": body_view,
+            "desk_result": desk_result,
+            "somatic_state": somatic_state,
+            "sensory_projection": sensory_projection,
+            "now_iso": now_iso,
+        }
+
+    def autonomy_rhythm(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/autonomy/rhythm``: pure zero-write projection of the 4 autonomy pillars."""
+
+        from . import autonomy_rhythm_view as view
+
+        state, state_reason = view.read_autonomy_rhythm_state(self.root)
+        ctx = self._autonomy_live_context()
+        projected = view.project_autonomy_rhythm(
+            state,
+            state_reason=state_reason,
+            subject_view=bool(subject_view),
+            character_state=ctx["character_state"],
+            world_result=ctx["world_result"],
+            body_view=ctx["body_view"],
+            desk_result=ctx["desk_result"],
+            somatic_state=ctx["somatic_state"],
+            sensory_projection=ctx["sensory_projection"],
+            now_iso=ctx["now_iso"],
+        )
+        return envelope(True, STATUS_OK, projected)
+
+    def autonomy_rhythm_action(
+        self,
+        *,
+        action: str,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/autonomy/rhythm``: explicit refusal, thread, pivot & async rhythm actions."""
+
+        from . import autonomy_rhythm_view as view
+
+        body = dict(payload or {})
+        state, state_reason = view.read_autonomy_rhythm_state(self.root)
+        if state_reason:
+            return rejected(state_reason)
+        ctx = self._autonomy_live_context()
+
+        try:
+            new_state, extra = view.apply_autonomy_action(
+                state,
+                action=action,
+                payload=body,
+                subject_view=bool(subject_view),
+                character_state=ctx["character_state"],
+                world_result=ctx["world_result"],
+                body_view=ctx["body_view"],
+                desk_result=ctx["desk_result"],
+                somatic_state=ctx["somatic_state"],
+                sensory_projection=ctx["sensory_projection"],
+                now_iso=ctx["now_iso"],
+            )
+        except view.AutonomyRhythmValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except view.AutonomyRhythmNotFoundError as exc:
+            return envelope(False, STATUS_NOT_FOUND, {}, exc.reason_code)
+        except view.AutonomyRhythmConflictError as exc:
+            return rejected(exc.reason_code)
+
+        try:
+            written = view.write_autonomy_rhythm_state(self.root, new_state)
+        except ValueError as exc:
+            return rejected(str(exc) or "AUTONOMY_RHYTHM_WRITE_FAILED")
+
+        projected = view.project_autonomy_rhythm(
+            written,
+            state_reason=None,
+            subject_view=bool(subject_view),
+            character_state=ctx["character_state"],
+            world_result=ctx["world_result"],
+            body_view=ctx["body_view"],
+            desk_result=ctx["desk_result"],
+            somatic_state=ctx["somatic_state"],
+            sensory_projection=ctx["sensory_projection"],
+            now_iso=ctx["now_iso"],
+        )
+        out_data = dict(projected)
+        out_data["action"] = action
+        out_data["changed"] = True
+        out_data.update(extra)
+        return envelope(True, STATUS_OK, out_data)
+
+    # -- 0.3 情绪脾气与日常张力 / 看法修订与物件共在 / 欲望与 36B 成年亲密 ---------------
+
+    def emotional_tension(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/emotion/tension``: pure zero-write 5-domain tension projection."""
+
+        from . import emotional_tension_view as view
+
+        now_iso = self._somatic_now_iso()
+        try:
+            projected = view.read_emotional_tension(
+                self.root, now=now_iso, subject_view=bool(subject_view)
+            )
+        except view.EmotionalTensionValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except view.EmotionalTensionConflictError as exc:
+            return rejected(exc.reason_code)
+        return envelope(True, STATUS_OK, projected)
+
+    def emotional_tension_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/emotion/tension``: explicit schedule, quarrel, missing, low-mood & favor actions."""
+
+        from . import emotional_tension_view as view
+
+        now_iso = self._somatic_now_iso()
+        try:
+            out = view.apply_emotional_tension_action(
+                self.root,
+                dict(payload or {}),
+                now=now_iso,
+                subject_view=bool(subject_view),
+            )
+        except view.EmotionalTensionValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except view.EmotionalTensionPermissionError as exc:
+            return {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": exc.reason_code,
+                "http_status": 403,
+                "data": {},
+            }
+        except view.EmotionalTensionNotFoundError as exc:
+            return envelope(False, STATUS_NOT_FOUND, {}, exc.reason_code)
+        except view.EmotionalTensionConflictError as exc:
+            return rejected(exc.reason_code)
+
+        status_out = STATUS_ALREADY if out.get("status") == STATUS_ALREADY else STATUS_OK
+        return envelope(True, status_out, out, out.get("reason_code"))
+
+    def stance_containment(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/stance/containment``: pure zero-write stance, containment & shared desk/table projection."""
+
+        from . import stance_containment_view as view
+
+        now_iso = self._somatic_now_iso()
+        try:
+            projected = view.read_stance_containment(
+                self.root, now=now_iso, subject_view=bool(subject_view)
+            )
+        except view.StanceContainmentValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except view.StanceContainmentConflictError as exc:
+            return rejected(exc.reason_code)
+        return envelope(True, STATUS_OK, projected)
+
+    def stance_containment_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/stance/containment``: explicit stance lineage, container & shared desk/table actions."""
+
+        from . import stance_containment_view as view
+
+        now_iso = self._somatic_now_iso()
+        try:
+            out = view.apply_stance_containment_action(
+                self.root,
+                dict(payload or {}),
+                now=now_iso,
+                subject_view=bool(subject_view),
+            )
+        except view.StanceContainmentValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except view.StanceContainmentPermissionError as exc:
+            return {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": exc.reason_code,
+                "http_status": 403,
+                "data": {},
+            }
+        except view.StanceContainmentNotFoundError as exc:
+            return envelope(False, STATUS_NOT_FOUND, {}, exc.reason_code)
+        except view.StanceContainmentConflictError as exc:
+            return rejected(exc.reason_code)
+
+        status_out = STATUS_ALREADY if out.get("status") == STATUS_ALREADY else STATUS_OK
+        return envelope(True, status_out, out)
+
+    def adult_intimacy(self, *, subject_view: bool = False) -> dict[str, Any]:
+        """``GET /api/phone/intimacy/adult``: pure zero-write desire decay & 36B adult intimacy projection."""
+
+        from . import adult_intimacy_view as view
+
+        now_iso = self._somatic_now_iso()
+        try:
+            projected = view.read_adult_intimacy(
+                self.root, now=now_iso, subject_view=bool(subject_view)
+            )
+        except view.AdultIntimacyValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except view.AdultIntimacyConflictError as exc:
+            return rejected(exc.reason_code)
+        return envelope(True, STATUS_OK, projected)
+
+    def adult_intimacy_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /api/phone/intimacy/adult``: explicit 36B gate, body, consent, stop & private memory actions."""
+
+        from . import adult_intimacy_view as view
+
+        now_iso = self._somatic_now_iso()
+        try:
+            out = view.apply_adult_intimacy_action(
+                self.root,
+                dict(payload or {}),
+                now=now_iso,
+                subject_view=bool(subject_view),
+            )
+        except view.AdultIntimacyValidationError as exc:
+            return self._bad_request(exc.reason_code)
+        except view.AdultIntimacyPermissionError as exc:
+            return {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": exc.reason_code,
+                "http_status": 403,
+                "data": {},
+            }
+        except view.AdultIntimacyNotFoundError as exc:
+            return envelope(False, STATUS_NOT_FOUND, {}, exc.reason_code)
+        except view.AdultIntimacyConflictError as exc:
+            return rejected(exc.reason_code)
+
+        status_out = STATUS_ALREADY if out.get("status") == STATUS_ALREADY else STATUS_OK
+        return envelope(True, status_out, out)
+
+    # -- 0.3 / v3.0 三时钟蒸发 / 经济独立与生病自愈生态 / 厨房双手接触与邻里生态 ------------
+
+    @staticmethod
+    def _load_v03_clock_module() -> Any:
+        import sys as _sys
+
+        life_scripts = Path(__file__).resolve().parents[1] / "life" / "scripts"
+        if str(life_scripts) not in _sys.path:
+            _sys.path.insert(0, str(life_scripts))
+        from components.life.scripts import v03_clock_evaporation as clock_mod
+
+        return clock_mod
+
+    def v03_clock(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v03/clock``: pure zero-write three-clock & evaporation projection."""
+
+        clock_mod = self._load_v03_clock_module()
+        code, body = clock_mod.read_v03_clock_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v03_clock_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v03/clock``: zero-LLM clock projection advance, evaporable & idle actions."""
+
+        clock_mod = self._load_v03_clock_module()
+        actor_side = "subject" if subject_view else "partner"
+        code, body = clock_mod.mutate_v03_clock_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        return int(code), dict(body)
+
+    def v03_ecology(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v03/ecology``: pure zero-write economy, illness & reality-bridge projection."""
+
+        from . import v03_ecology_view as view
+
+        code, body = view.read_v03_ecology_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        return int(code), dict(body)
+
+    def v03_ecology_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v03/ecology``: independent economy, illness self-healing & outbound gate."""
+
+        from . import v03_ecology_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v03_ecology_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            if out.get("command_status") == "DUPLICATE":
+                out["status"] = STATUS_ALREADY
+            elif out.get("status") == "ok":
+                out["status"] = "applied"
+        return int(code), out
+
+    def v03_embodied_social(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v03/embodied-social``: pure zero-write kitchen, contact, NPC & style projection."""
+
+        from . import v03_embodied_social_view as view
+
+        code, body = view.read_v03_embodied_social_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v03_embodied_social_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v03/embodied-social``: kitchen conservation, two-hand contact, NPC & style."""
+
+        from . import v03_embodied_social_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v03_embodied_social_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        return int(code), dict(body)
+
+    # -- v0.4 街区院子手作公共生活 / 世界建设诊断与试住沙盒 / 弹性方向共同试验与玩心 ------
+
+    def v04_neighborhood(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v04/neighborhood``: pure zero-write neighborhood, courtyard, craft & shelf projection."""
+
+        from . import v04_neighborhood_view as view
+
+        code, body = view.read_v04_neighborhood_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v04_neighborhood_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v04/neighborhood``: local weather, journey, courtyard, notices, crafts & shelf."""
+
+        from . import v04_neighborhood_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v04_neighborhood_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
+                out["status"] = STATUS_ALREADY
+            elif out.get("status") in ("ok", None, ""):
+                out["status"] = "applied"
+        return int(code), out
+
+    def v04_builder_trylive(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v04/builder-trylive``: pure zero-write world diagnostics & sandbox projection."""
+
+        from . import v04_builder_trylive_view as view
+
+        code, body = view.read_v04_builder_trylive_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v04_builder_trylive_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v04/builder-trylive``: isolated route audit, prose gap check, 1h try-live & preview."""
+
+        from . import v04_builder_trylive_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v04_builder_trylive_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
+                out["status"] = STATUS_ALREADY
+            elif out.get("status") in ("ok", None, ""):
+                out["status"] = "applied"
+        return int(code), out
+
+    def v04_elastic_play(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v04/elastic-play``: pure zero-write elastic direction, shared learning & playfulness."""
+
+        from . import v04_elastic_play_view as view
+
+        code, body = view.read_v04_elastic_play_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v04_elastic_play_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v04/elastic-play``: day direction, shared notebook, experiment, game & surprise."""
+
+        from . import v04_elastic_play_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v04_elastic_play_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
+                out["status"] = STATUS_ALREADY
+            elif out.get("status") in ("ok", None, ""):
+                out["status"] = "applied"
+        return int(code), out
+
+    def v02_agency_depth(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v02/agency-depth``: pure zero-write agency depth projection."""
+
+        from . import v02_agency_depth_view as view
+
+        code, body = view.read_v02_agency_depth_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v02_agency_depth_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v02/agency-depth``: agency depth mutations with actor_side & idempotency."""
+
+        from . import v02_agency_depth_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v02_agency_depth_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
+                out["status"] = STATUS_ALREADY
+            elif out.get("status") in ("ok", None, ""):
+                out["status"] = "applied"
+        return int(code), out
+
+    def v02_crossmodal(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v02/crossmodal``: pure zero-write crossmodal palette, trial pad & reading marks."""
+
+        from . import v02_crossmodal_view as view
+
+        code, body = view.read_v02_crossmodal_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v02_crossmodal_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v02/crossmodal``: image palette analysis, color trial swatches & reading marks."""
+
+        from . import v02_crossmodal_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v02_crossmodal_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
+                out["status"] = STATUS_ALREADY
+            elif out.get("status") in ("ok", None, ""):
+                out["status"] = "applied"
+        return int(code), out
+
+    def v02_runtime_migration(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v02/runtime-migration``: pure zero-write runtime governance & migration projection."""
+
+        from . import v02_runtime_migration_view as view
+
+        code, body = view.read_v02_runtime_migration_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def v02_runtime_migration_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v02/runtime-migration``: budget mode, carrier check, suitcase & skill reverify."""
+
+        from . import v02_runtime_migration_view as view
+
+        actor_side = "subject" if subject_view else "partner"
+        code, body = view.mutate_v02_runtime_migration_view(
+            self.root,
+            dict(payload or {}),
+            actor_side=actor_side,
+            now_iso=self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if code == 200 and out.get("ok") is True:
+            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
+                out["status"] = STATUS_ALREADY
+            elif out.get("status") in ("ok", None, ""):
+                out["status"] = "applied"
+        return int(code), out
+
+    def v02_recall_projection(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v02/recall-projection``: pure zero-write 4-level recall projection."""
+
+        from components.life.scripts import v02_recall_projection as rp
+
+        now_iso = self._somatic_now_iso()
+        raw_view = rp.read_v02_recall_projection_view(self.root, now_iso=now_iso)
+        cognition = rp.summarize_recall_for_cognition(self.root, now_iso=now_iso)
+        persp = "subject" if subject_view else "partner"
+        data_block: dict[str, Any] = {
+            "schema": rp.SCHEMA_VERSION,
+            "endpoint": "/api/phone/v02/recall-projection",
+            "perspective": persp,
+            "revision": len(raw_view.get("direct_recall_items") or []),
+            "state_exists": (Path(self.root) / rp.RECALL_STATE_REL_PATH).is_file(),
+            "llm_calls": 0,
+            **raw_view,
+            "cognition_summary": cognition,
+        }
+        return 200, {
+            "ok": True,
+            "status": STATUS_OK,
+            "command_status": "READ",
+            "schema": rp.SCHEMA_VERSION,
+            "endpoint": "/api/phone/v02/recall-projection",
+            "perspective": persp,
+            "llm_calls": 0,
+            "data": data_block,
+            **raw_view,
+        }
+
+    def v02_recall_projection_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v02/recall-projection``: episodic trace, active fade, rehearsal & tombstone."""
+
+        from components.life.scripts import v02_recall_projection as rp
+
+        body = dict(payload or {})
+        action = str(body.get("action") or "").strip()
+        if not action:
+            return 400, {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": "ACTION_REQUIRED",
+                "error_code": "ACTION_REQUIRED",
+                "llm_calls": 0,
+                "data": {},
+            }
+        if action in ("mark_active_fade", "record_rehearsal") and not subject_view:
+            return 403, {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": "FORBIDDEN_ACTOR_SIDE",
+                "error_code": "FORBIDDEN_ACTOR_SIDE",
+                "llm_calls": 0,
+                "data": {},
+            }
+        res = rp.mutate_v02_recall_projection(self.root, body, now_iso=self._somatic_now_iso())
+        code = int(res.get("status_code") or (200 if res.get("ok") else 400))
+        if not res.get("ok"):
+            err = str(res.get("error_code") or res.get("reason_code") or "INVALID_FIELDS")
+            return code, {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": err,
+                "error_code": err,
+                "llm_calls": 0,
+                "data": {},
+            }
+        data_out = {k: v for k, v in res.items() if k not in ("ok", "status_code")}
+        data_out["action"] = action
+        data_out["perspective"] = "subject" if subject_view else "partner"
+        data_out["llm_calls"] = 0
+        return code, {
+            "ok": True,
+            "status": STATUS_OK,
+            "command_status": "APPLIED",
+            "schema": rp.SCHEMA_VERSION,
+            "endpoint": "/api/phone/v02/recall-projection",
+            "llm_calls": 0,
+            "data": data_out,
+            **data_out,
+        }
+
+    def v02_common_ground(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v02/common-ground``: pure zero-write common ground & unseen-move projection."""
+
+        from components.life.scripts import v02_common_ground as cg
+
+        viewer = "subject" if subject_view else "partner"
+        now_iso = self._somatic_now_iso()
+        raw_view = cg.read_v02_common_ground_view(self.root, viewer=viewer, now_iso=now_iso)
+        data_block: dict[str, Any] = {
+            "schema": cg.SCHEMA_VERSION,
+            "endpoint": "/api/phone/v02/common-ground",
+            "perspective": viewer,
+            "revision": len(raw_view.get("items") or []),
+            "state_exists": (Path(self.root) / cg.COMMON_GROUND_REL_PATH).is_file(),
+            "llm_calls": 0,
+            **raw_view,
+        }
+        if subject_view:
+            data_block["cognition_summary"] = cg.summarize_common_ground_for_cognition(
+                self.root, now_iso=now_iso
+            )
+        return 200, {
+            "ok": True,
+            "status": STATUS_OK,
+            "command_status": "READ",
+            "schema": cg.SCHEMA_VERSION,
+            "endpoint": "/api/phone/v02/common-ground",
+            "perspective": viewer,
+            "llm_calls": 0,
+            "data": data_block,
+            **raw_view,
+        }
+
+    def v02_common_ground_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v02/common-ground``: ground ledger, receipt state & unseen-move inquiry."""
+
+        from components.life.scripts import v02_common_ground as cg
+
+        body = dict(payload or {})
+        action = str(body.get("action") or "").strip()
+        if not action:
+            return 400, {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": "ACTION_REQUIRED",
+                "error_code": "ACTION_REQUIRED",
+                "llm_calls": 0,
+                "data": {},
+            }
+        if action in ("attempt_use_or_fetch_object", "search_nearby_spots") and not subject_view:
+            return 403, {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": "FORBIDDEN_ACTOR_SIDE",
+                "error_code": "FORBIDDEN_ACTOR_SIDE",
+                "llm_calls": 0,
+                "data": {},
+            }
+        res = cg.mutate_v02_common_ground(self.root, body, now_iso=self._somatic_now_iso())
+        code = int(res.get("status_code") or (200 if res.get("ok") else 400))
+        if not res.get("ok"):
+            err = str(res.get("error_code") or res.get("reason_code") or "INVALID_FIELDS")
+            return code, {
+                "ok": False,
+                "status": STATUS_REJECTED,
+                "reason_code": err,
+                "error_code": err,
+                "llm_calls": 0,
+                "data": {},
+            }
+        data_out = {k: v for k, v in res.items() if k not in ("ok", "status_code")}
+        data_out["action"] = action
+        data_out["perspective"] = "subject" if subject_view else "partner"
+        data_out["llm_calls"] = 0
+        return code, {
+            "ok": True,
+            "status": STATUS_OK,
+            "command_status": "APPLIED",
+            "schema": cg.SCHEMA_VERSION,
+            "endpoint": "/api/phone/v02/common-ground",
+            "llm_calls": 0,
+            "data": data_out,
+            **data_out,
+        }
+
+    # -- 具身冷暖 / 窗扇与外衣 / 桌边照顾（纯投影 + 一段显式本地仿真） ------------------
+
+    def _somatic_state(self) -> tuple[dict[str, Any], Optional[str]]:
+        from . import somatic_comfort_view as view
+
+        return view.read_state(self.root)
+
+    def _somatic_now_iso(self) -> str:
+        """The same business clock the rest of the phone uses; never a second clock."""
+
+        return self._home_now_iso(self._home_clock())
+
+    @staticmethod
+    def _somatic_place(world_result: Mapping[str, Any]) -> tuple[Optional[str],
+                                                                 Optional[str],
+                                                                 Optional[str]]:
+        from . import somatic_comfort_view as view
+
+        world = view.world_context(world_result)
+        if world.get("status") != "available":
+            return None, None, str(world.get("reason_code") or view.LOCATION_UNREADABLE)
+        if world.get("travelling"):
+            return None, None, view.LOCATION_UNSTABLE
+        place = world.get("place_id")
+        area = world.get("area_id")
+        if not place or not area:
+            return None, None, view.LOCATION_UNREADABLE
+        return str(place), str(area), None
+
+    def body_somatic(self) -> dict[str, Any]:
+        """``GET /api/phone/body/somatic``: bounded four-modality projection, pure read."""
+
+        from . import somatic_comfort_view as view
+
+        world_result = self.world()
+        body_view = self._body_from_world(world_result)
+        state, state_reason = self._somatic_state()
+        return envelope(True, STATUS_OK, view.somatic_block(
+            world_result=world_result, body_view=body_view, state=state,
+            state_reason=state_reason, now_iso=self._somatic_now_iso(),
+            soundscape=self._home_soundscape(world_result)))
+
+    def body_garment_window(self) -> dict[str, Any]:
+        """``GET /api/phone/body/garment-window``: window / local position / outerwear."""
+
+        from . import somatic_comfort_view as view
+
+        world_result = self.world()
+        state, state_reason = self._somatic_state()
+        return envelope(True, STATUS_OK, view.garment_window_block(
+            world_result=world_result, state=state, state_reason=state_reason,
+            now_iso=self._somatic_now_iso()))
+
+    def body_garment_window_action(self, *, action: str, state_value: Any = None,
+                                   zone: Any = None, garment_id: Any = None,
+                                   label: Any = None, dryness: Any = None,
+                                   hang_position: Any = None) -> dict[str, Any]:
+        """One explicit local condition.  Her window and her garment, never a partner's."""
+
+        from . import somatic_comfort_view as view
+
+        current, state_reason = self._somatic_state()
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._somatic_now_iso()
+        if action == "set_window":
+            new_state, changed, error = view.set_window(current, state_value, now_iso)
+        elif action == "set_local_position":
+            place, area, why = self._somatic_place(self.world())
+            if why:
+                return rejected(why)
+            new_state, changed, error = view.set_local_position(
+                current, zone=zone, place_id=place, area_id=area, now_iso=now_iso)
+        elif action == "wear_outerwear":
+            new_state, changed, error = view.wear_outerwear(
+                current, garment_id=garment_id, label=label, dryness=dryness,
+                now_iso=now_iso)
+        elif action == "hang_outerwear":
+            new_state, changed, error = view.hang_outerwear(
+                current, garment_id=garment_id, hang_position=hang_position,
+                dryness=dryness, now_iso=now_iso)
+        else:
+            return rejected("GARMENT_WINDOW_ACTION_UNSUPPORTED", action=action)
+        if error:
+            return rejected(error)
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "changed": False,
+                "revision": current.get("revision"),
+                "updated_at": current.get("updated_at")})
+        written = view.write_state(self.root, new_state)
+        data = {"action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at")}
+        if action == "set_window":
+            data["window"] = written.get("window")
+        elif action == "set_local_position":
+            data["local_position"] = written.get("local_position")
+        else:
+            data["garment"] = view.derive_garment(written, now_iso)
+        return envelope(True, STATUS_OK, data)
+
+    def _somatic_bound_drink_item(self, place_id: str, area_id: str) -> dict[str, Any]:
+        """A real, currently usable thirst-relieving instance at the bound room.
+
+        Selection is server-side only: the client never names an item, a path or a
+        capability.  A bought snack with no declared thirst effect is not a drink.
+        """
+
+        answer = self.inventory()
+        if not answer.get("ok"):
+            return {"item_instance_id": None,
+                    "reason_code": str(answer.get("reason_code")
+                                       or "INVENTORY_UNAVAILABLE")}
+        try:
+            import world_consumable_contract as contract
+
+            facts = contract.economy_facts(self.world_home)
+            economy = facts.get("economy") if facts.get("status") == "present" else None
+        except Exception:
+            contract = None
+            economy = None
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        expected = "room:%s/%s" % (place_id, area_id)
+        for entry in (data.get("items") or []):
+            if not isinstance(entry, Mapping) or entry.get("consumed"):
+                continue
+            if entry.get("usable") is not True:
+                continue
+            if str(entry.get("location") or "") != expected:
+                continue
+            item_id = str(entry.get("item_instance_id") or "")
+            if not item_id or contract is None:
+                continue
+            try:
+                declaration = contract.declaration_of(item_id, self.world_home,
+                                                      economy=economy)
+            except Exception:
+                continue
+            effects = declaration.get("lived_need_effects") \
+                if isinstance(declaration, Mapping) else None
+            thirst = effects.get("thirst") if isinstance(effects, Mapping) else None
+            if not (isinstance(thirst, (int, float)) and not isinstance(thirst, bool)
+                    and thirst > 0):
+                continue
+            return {"item_instance_id": item_id,
+                    "label": entry.get("name"),
+                    "reason_code": None}
+        return {"item_instance_id": None,
+                "reason_code": "NO_THIRST_RELIEVING_CONSUMABLE"}
+
+    @staticmethod
+    def _somatic_position_supported(world_result: Mapping[str, Any],
+                                    position: str) -> tuple[bool, Optional[str]]:
+        """``hand_side`` is always local; ``desk_side`` needs a real declared table here."""
+
+        if position == "hand_side":
+            return True, None
+        data = world_result.get("data") if isinstance(world_result.get("data"),
+                                                      Mapping) else {}
+        environment = data.get("local_environment") \
+            if isinstance(data.get("local_environment"), Mapping) else {}
+        furniture = environment.get("furniture") \
+            if isinstance(environment.get("furniture"), list) else []
+        if any(isinstance(row, Mapping) and str(row.get("kind") or "") == "table"
+               for row in furniture):
+            return True, None
+        objects = data.get("objects") if isinstance(data.get("objects"), Mapping) else {}
+        surfaces = objects.get("surfaces") if isinstance(objects.get("surfaces"),
+                                                          Mapping) else {}
+        for row in (surfaces.get("here") or []):
+            if isinstance(row, Mapping) and str(row.get("surface_kind") or "") in (
+                    "desk_surface", "table_surface"):
+                return True, None
+        return False, "NO_DECLARED_DESK_SURFACE"
+
+    def body_care_offering(self) -> dict[str, Any]:
+        """``GET /api/phone/body/care-offering``: one drink slot + one cushion slot."""
+
+        from . import somatic_comfort_view as view
+
+        world_result = self.world()
+        body_view = self._body_from_world(world_result)
+        state, state_reason = self._somatic_state()
+        return envelope(True, STATUS_OK, view.care_offering_block(
+            world_result=world_result, body_view=body_view, state=state,
+            state_reason=state_reason, now_iso=self._somatic_now_iso()))
+
+    def body_care_action(self, *, action: str, slot: str, actor_side: Optional[str] = None,
+                         kind: Optional[str] = None, position: Optional[str] = None
+                         ) -> dict[str, Any]:
+        """Explicit offer / take / drink / use / stow / withdraw on the local slots.
+
+        Only ``drink`` writes outside this instance: it forwards the already legal
+        ``PhoneShopping.use`` (the existing owner CONSUME channel).  Everything else is
+        this instance's own bounded simulation JSON.
+        """
+
+        from . import somatic_comfort_view as view
+
+        current, state_reason = self._somatic_state()
+        if state_reason:
+            return rejected(state_reason)
+        now_iso = self._somatic_now_iso()
+        world_result = self.world()
+        place, area, why = self._somatic_place(world_result)
+        if action in ("offer", "take", "drink", "use"):
+            if why:
+                return rejected(why)
+        if action in ("take", "drink") and slot != "drink":
+            return rejected("CARE_SLOT_ACTION_MISMATCH", action=action, slot=slot)
+        if action == "use" and slot != "cushion":
+            return rejected("CARE_SLOT_ACTION_MISMATCH", action=action, slot=slot)
+        if action == "offer":
+            supported, why_position = self._somatic_position_supported(
+                world_result, str(position))
+            if not supported:
+                return rejected(why_position or "CARE_POSITION_UNSUPPORTED",
+                                position=position)
+            bound = None
+            if slot == "drink":
+                bound = self._somatic_bound_drink_item(place, area)
+                if bound.get("item_instance_id") is None:
+                    bound = None
+            new_state, changed, error, offer = view.offer_care(
+                current, slot=slot, kind=kind, actor_side=actor_side,
+                position=position, place_id=place, area_id=area, now_iso=now_iso,
+                bound_item=bound)
+        elif action == "take":
+            new_state, changed, error, offer = view.take_drink(
+                current, place_id=place, area_id=area, now_iso=now_iso)
+        elif action == "use":
+            body_view = self._body_from_world(world_result)
+            pose = view.body_context(body_view).get("pose")
+            new_state, changed, error, offer = view.use_cushion(
+                current, pose=pose, place_id=place, area_id=area, now_iso=now_iso)
+        elif action == "stow":
+            new_state, changed, error, offer = view.stow_care(
+                current, slot=slot, now_iso=now_iso)
+        elif action == "withdraw":
+            new_state, changed, error, offer = view.withdraw_care(
+                current, slot=slot, now_iso=now_iso)
+        elif action == "drink":
+            return self._somatic_drink(current, now_iso=now_iso, place=place, area=area)
+        else:
+            return rejected("CARE_ACTION_UNSUPPORTED", action=action)
+        if error:
+            return rejected(error)
+        if not changed:
+            return envelope(True, STATUS_ALREADY, {
+                "action": action, "slot": slot, "changed": False,
+                "revision": current.get("revision"),
+                "updated_at": current.get("updated_at"),
+                "offer": offer})
+        written = view.write_state(self.root, new_state)
+        return envelope(True, STATUS_OK, {
+            "action": action, "slot": slot, "changed": True,
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+            "offer": offer})
+
+    def _somatic_drink(self, current: Mapping[str, Any], *, now_iso: str,
+                       place: str, area: str) -> dict[str, Any]:
+        from . import somatic_comfort_view as view
+
+        row = (current.get("care") or {}).get("drink")
+        if not isinstance(row, Mapping):
+            return rejected("NO_DRINK_OFFER")
+        if row.get("state") == "consumed":
+            # Replaying the same action never drinks twice: the owner already decided.
+            return envelope(True, STATUS_ALREADY, {
+                "action": "drink", "slot": "drink", "changed": False,
+                "consumed": True,
+                "bound_item_instance_id": row.get("bound_item_instance_id"),
+                "receipt_ref": row.get("receipt_ref"),
+                "operation_key": row.get("drink_operation_key"),
+                "replayed": True})
+        if row.get("state") != "taken":
+            return rejected("DRINK_REQUIRES_TAKE_FIRST", state=row.get("state"))
+        item_id = str(row.get("bound_item_instance_id") or "")
+        if not item_id:
+            # No real thirst-relieving instance was bound: never reduce thirst locally,
+            # never invent a receipt, never sign a new authority.
+            return rejected("DRINK_UNSUPPORTED",
+                            detail="NO_THIRST_RELIEVING_CONSUMABLE",
+                            consumed=False)
+        key = "somatic-drink:%s" % str(row.get("offer_id") or "")
+        answer = self.use(item_id, key)
+        status = str(answer.get("status") or "")
+        data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
+        if answer.get("ok") and status in (STATUS_OK, STATUS_ALREADY):
+            receipt = data.get("receipt") if isinstance(data.get("receipt"),
+                                                         Mapping) else {}
+            receipt_ref = receipt.get("receipt_id") or data.get("receipt_id")
+            new_state, changed = view.mark_drink_result(
+                current, outcome="consumed", receipt_ref=receipt_ref,
+                operation_key=key, now_iso=now_iso)
+            if changed:
+                view.write_state(self.root, new_state)
+            return envelope(True, STATUS_OK if status == STATUS_OK else STATUS_ALREADY, {
+                "action": "drink", "slot": "drink",
+                "changed": bool(changed), "consumed": True,
+                "bound_item_instance_id": item_id,
+                "operation_key": key,
+                "receipt": dict(receipt) or None,
+                "applied_to_body": data.get("applied_to_body"),
+                "source": "world_phone_shopping.use"})
+        if status == STATUS_UNKNOWN or answer.get("status") == STATUS_UNKNOWN:
+            # Never mark consumed while the owner is unknown.  The local slot stays
+            # "taken"; replaying this same action reuses the same key to reconcile.
+            return envelope(False, STATUS_UNKNOWN, {
+                "action": "drink", "slot": "drink", "consumed": False,
+                "bound_item_instance_id": item_id, "operation_key": key,
+                "note": "owner outcome unknown; replay the same action to reconcile, "
+                        "never a new key"}, answer.get("reason_code"))
+        return rejected(str(answer.get("reason_code") or "DRINK_REFUSED"),
+                        consumed=False, owner_status=status,
+                        bound_item_instance_id=item_id)
 
     # -- S03 current claims ----------------------------------------------------------------
 
@@ -3198,6 +7921,28 @@ class PhoneService:
 
     # -- Memory 与个人实践（A 的 LifeMemoryService + B 的 personal_practice_service） -------
 
+    def _effective_memory_env(self) -> dict[str, str]:
+        """Return effective Memory environment, merging nested ``one-day/instance.json`` read-only when unbound."""
+        from . import life as phone_life
+
+        env: dict[str, str] = dict(self.environment)
+        try:
+            db_names = tuple(phone_life.memory_env_names().get("database") or ())
+        except Exception:
+            db_names = ()
+        has_db = any(str(env.get(name) or "").strip() for name in db_names)
+        if not has_db:
+            try:
+                nested = phone_life.read_nested_life(self.root)
+                nested_env = nested.get("environment") if isinstance(nested, Mapping) else None
+                if isinstance(nested_env, Mapping):
+                    for k, v in nested_env.items():
+                        if isinstance(k, str) and v is not None and not str(env.get(k) or "").strip():
+                            env[k] = str(v)
+            except Exception:
+                pass
+        return env
+
     def memory_owner(self) -> str:
         """Which Memory persona this instance reads: the instance/env config, never a client.
 
@@ -3207,13 +7952,14 @@ class PhoneService:
         """
         from . import life as phone_life
 
+        eff_env = self._effective_memory_env()
         names: tuple[str, ...] = ()
         try:
             names = tuple(phone_life.memory_env_names().get("owner") or ())
         except Exception:
             names = ()
         for name in names:
-            value = str(self.environment.get(name) or "").strip()
+            value = str(eff_env.get(name) or "").strip()
             if value:
                 return value
         recorded = str(self.instance.get(MEMORY_OWNER_FIELD) or "").strip()
@@ -3232,7 +7978,7 @@ class PhoneService:
         except Exception:
             return None
         try:
-            return memory_service_from_env(dict(self.environment))
+            return memory_service_from_env(self._effective_memory_env())
         except Exception:
             return None
 
@@ -3325,14 +8071,40 @@ class PhoneService:
         Only an explicit POST reaches this: a GET/preflight never creates a store.  The owner is
         this instance's configured one -- the request cannot name an owner, a database or a path.
         """
+        import inspect
         from . import life as phone_life
 
         enabler = getattr(phone_life, "enable_instance_memory", None)
         if not callable(enabler):
             return unavailable("MEMORY_ENABLE_UNAVAILABLE",
                                detail="这一版还没有显式启用入口（A 的 enable_instance_memory）。")
+        call_kwargs: dict[str, Any] = {
+            "owner": self.memory_owner(),
+            "operation_key": operation_key,
+        }
         try:
-            answer = enabler(self.root, owner=self.memory_owner(), operation_key=operation_key)
+            eff_env = self._effective_memory_env()
+            env_names = phone_life.memory_env_names()
+            bound_keys = tuple(env_names.get("database") or ()) + tuple(env_names.get("authority") or ())
+            is_bound = any(str(eff_env.get(k) or "").strip() for k in bound_keys)
+            if not is_bound and "authority_path" in inspect.signature(enabler).parameters:
+                resolved_auth: Optional[Path] = None
+                managed_file = self.root / "nyairo-day-managed.json"
+                try:
+                    if not managed_file.is_symlink() and managed_file.is_file():
+                        mdoc = json.loads(managed_file.read_text(encoding="utf-8"))
+                        raw_ma = str((mdoc or {}).get("memory_authority") or "").strip() if isinstance(mdoc, Mapping) else ""
+                        if raw_ma:
+                            resolved_auth = Path(raw_ma).expanduser()
+                except Exception:
+                    resolved_auth = None
+                if resolved_auth is None:
+                    resolved_auth = self.root.parent / f"{self.root.name}-memory-authority.sqlite"
+                call_kwargs["authority_path"] = resolved_auth
+        except Exception:
+            pass
+        try:
+            answer = enabler(self.root, **call_kwargs)
         except Exception as exc:
             return unavailable("MEMORY_ENABLE_FAILED", error_type=type(exc).__name__)
         if not isinstance(answer, Mapping):

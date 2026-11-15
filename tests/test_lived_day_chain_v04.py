@@ -190,7 +190,7 @@ class ChainCognition:
             # the ONE thing she wants to do later.  ``park_current`` is only honest when parking a
             # *continuable* Activity is really on offer; here she is waiting on a dependency, so the
             # item is a plain note to herself and the WAIT itself names the dependency.
-            item = {"title": "等这本书的下一版", "in_minutes": 30}
+            item = {"title": "出门转一圈回来接着读", "in_minutes": 5}
             if (situation.get("park") or {}).get("available"):
                 item["park_current"] = True
             raw["later_item"] = item
@@ -296,8 +296,8 @@ class LivedDayChainTest(EpisodeFixture):
         reading_id = self.cognition.refs["reading"]
         self.assertTrue(reading_id, "the instance must carry a real reading material")
 
-        # 1) 读到这一版的真停点（一页一轮；第三页之后 owner 的阅读状态就是 EXHAUSTED）
-        for page in (1, 2, 3):
+        # 1) 先读两页（v0.7 读完最后一页会由完成契约收束，留第 3 页未读以保留进行中的同一条阅读 Activity）
+        for page in (1, 2):
             out = self.turn("read" if page == 1 else "continue",
                             trigger="chain:read:%d" % page)
             self.assertIn(out.get("outcome"), {"ACTED", "ALREADY_DONE"}, out)
@@ -305,17 +305,16 @@ class LivedDayChainTest(EpisodeFixture):
             print("CHAIN read page=%d state=%s next=%s"
                   % (page, situation.get("state"),
                      (situation.get("position") or {}).get("next_page")))
-        # 停点：这一版真的读完了（停在第 3 页），停点绑在 owner 的那个版本上。
         stop_head = self.head(reading_id)
         self.assertTrue(stop_head.get("version_id"), stop_head)
 
-        # 2) 明确 WAIT park：她自己选 WAIT（合法是因为这一轮真的有等待理由），前台释放、
+        # 2) 明确 WAIT park：她自己选 WAIT（合法是因为进行中的阅读提供真实 park），前台释放、
         #    Activity 变 WAITING —— 不是 PAUSE，也不是清指针。
         out = self.turn("park", trigger="chain:park")
         self.assertIn("WAIT", self.cognition.reads[-1]["legal_enums"])
-        self.assertEqual(out.get("step_readiness", {}).get("reason_code"),
-                         "READING_EXHAUSTED", out.get("step_readiness"))
-        self.assertNotIn("CONTINUE", self.cognition.reads[-1]["legal_enums"])
+        self.assertTrue((out.get("park") or {}).get("available"), out.get("park"))
+        self.assertEqual((out.get("wait_basis") or {}).get("source"),
+                         "PARK_UNTIL_CHOSEN_TIME", out.get("wait_basis"))
         self.assertEqual(out.get("decision"), "WAIT", out)
         self.assertEqual(out.get("outcome"), "PAUSED", out)
         exit_report = out.get("exit") or {}
@@ -330,7 +329,8 @@ class LivedDayChainTest(EpisodeFixture):
         # （不是被清空，也不是 PAUSED）；`exit` 报告里 owner 自己的状态才是判据。
         print("CHAIN park     foreground=%s status=%s"
               % (self.foreground(), self.activity(self.foreground() or "").get("status")))
-        self.assertEqual(self.foreground(), parked_ref, "the foreground still names the parked Activity")
+        self.assertIsNone(self.foreground(), "self-chosen park releases the foreground slot")
+        self.assertIs(parked.get("foreground_released"), True, parked)
 
         # 3) 真实拿起：AG-1 → AG-2 → AR-0 → bridge → IntentExecutor → gateway → Resolver
         out = self.turn("pick_up", trigger="chain:pick_up")
@@ -418,7 +418,8 @@ class LivedDayChainTest(EpisodeFixture):
               % (upkeep.get("checked"), upkeep.get("changed"), upkeep.get("satisfied"),
                  upkeep.get("emitted_eligibilities")))
         self.assertFalse(upkeep.get("auto_resumed"), upkeep)
-        self.assertEqual(upkeep.get("changed"), 1, upkeep)
+        due_agenda = upkeep.get("due_agenda") or {}
+        self.assertEqual(due_agenda.get("emitted_eligibilities"), 1, upkeep)
 
         resumed = self.turn("resume", trigger="chain:resume")
         self.assertEqual(resumed.get("decision"), "RESUME", resumed)

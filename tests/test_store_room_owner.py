@@ -254,10 +254,11 @@ class StoreReadTests(StoreBase):
         self.assertTrue(projection["at_store"])
         self.assertTrue(projection["purchase_available"])
         self.assertEqual(projection["channel"], economy.CHANNEL_HOME_GOODS_STORE)
-        self.assertEqual(len(projection["catalog"]), 6)
+        self.assertEqual(len(projection["catalog"]), 8)
         self.assertEqual(
             [entry["catalog_item_id"] for entry in projection["catalog"]],
-            [BED, DESK, CHAIR, LAMP, "small_bookshelf", "floor_cushion"],
+            [BED, DESK, CHAIR, LAMP, "small_bookshelf", "floor_cushion",
+             "warm_floor_lamp", "window_side_table"],
         )
         for entry in projection["catalog"]:
             self.assertEqual(entry["usable_kind"], "FURNISH")
@@ -1011,6 +1012,10 @@ class CoastalGeneratedWorldTests(unittest.TestCase):
             dict(features),
             local_owner_uid=os.getuid(),
             subject="chiyo",
+            # The walk above already runs on the injected OPEN_NOW; the counter read must
+            # use the same moment instead of the wall clock (otherwise the shelf test is
+            # red whenever the suite happens to run outside the shop's opening hours).
+            clock=lambda: OPEN_NOW,
         )
 
     def _balance(self, world_home: pathlib.Path, features: dict) -> int:
@@ -1081,7 +1086,7 @@ class CoastalGeneratedWorldTests(unittest.TestCase):
         self.assertFalse(shelf["data"]["at_store"])
         self.assertFalse(shelf["data"]["purchase_available"])
         self.assertEqual(shelf["data"]["location"]["location_id"], "home")
-        self.assertEqual(len(shelf["data"]["catalog"]), 6)
+        self.assertEqual(len(shelf["data"]["catalog"]), 8)
         before = self._balance(self.home_world, self.home_features)
         refused = phone.store_purchase("simple_desk", "coastal-home-01")
         self.assertFalse(refused["ok"], refused)

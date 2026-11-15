@@ -838,7 +838,8 @@ class _ServeHandle:
 def _default_service_runner(root: Path | str, *, stop_event: threading.Event,
                             ready_timeout: float,
                             room_living: bool = False,
-                            ambient_events: bool = False) -> _ServeHandle:
+                            ambient_events: bool = False,
+                            world_intent_gate: Optional[str] = None) -> _ServeHandle:
     """Start the phone's own owners in-process through ``demo.serve_instance``.
 
     Reusing that function (instead of spawning a second CLI generation) keeps the live binding,
@@ -861,6 +862,7 @@ def _default_service_runner(root: Path | str, *, stop_event: threading.Event,
             demo.serve_instance(Path(root), port=0, ready_timeout=float(ready_timeout),
                                 room_living=bool(room_living),
                                 ambient_events=bool(ambient_events),
+                                world_intent_gate=world_intent_gate,
                                 stop_event=stop_event, announce=False, on_ready=on_ready)
         except BaseException as exc:  # a real startup failure is reported, not swallowed
             state["error"] = "%s: %s" % (type(exc).__name__, exc)
@@ -878,6 +880,7 @@ def _ensure_services(root: Path | str, phone: Mapping[str, Any], *,
                      ready_timeout: float,
                      room_living: bool = False,
                      ambient_events: bool = False,
+                     world_intent_gate: Optional[str] = None,
                      service_runner: Optional[Callable[..., _ServeHandle]] = None
                      ) -> tuple[dict[str, Any], Optional[_ServeHandle]]:
     supply = str(phone.get("supply_socket") or "").strip()
@@ -901,7 +904,8 @@ def _ensure_services(root: Path | str, phone: Mapping[str, Any], *,
         handle = _default_service_runner(Path(root), stop_event=stop_event,
                                          ready_timeout=float(ready_timeout),
                                          room_living=bool(room_living),
-                                         ambient_events=bool(ambient_events))
+                                         ambient_events=bool(ambient_events),
+                                         world_intent_gate=world_intent_gate)
     else:
         handle = service_runner(Path(root), stop_event=stop_event,
                                 ready_timeout=float(ready_timeout))
@@ -987,12 +991,40 @@ class _signal_cancel:
         return False
 
 
+#: The daily segment's own default World switch.  0.7 A: a normal daily run lets her act in
+#: the local world even when the shell exports nothing; ``--world-gate off`` / an explicit
+#: ``feature_overrides`` value still wins.  实验入口（fast_day / g1_real_adoption）不走这里。
+DEFAULT_SEGMENT_FEATURES = {"WORLD_BODY_INTENT_MUTATION_GATE": "canonical"}
+
+
+def _segment_feature_overrides(room_living: bool = False, ambient_events: bool = False,
+                               feature_overrides: Optional[Mapping[str, str]] = None
+                               ) -> dict[str, str]:
+    """The switches one daily segment really runs with, in precedence order.
+
+    The entry's own default (canonical) first, then the serve-time room/ambient flags, then
+    whatever the caller passed -- so the explicit value always wins, including an explicit
+    ``off`` over an instance's recorded feature.  ``run_segment`` uses this exact function;
+    a test therefore proves the real merge instead of rebuilding it by hand.
+    """
+
+    from . import demo
+
+    merged = dict(demo._serve_feature_overrides(
+        room_living=bool(room_living), ambient_events=bool(ambient_events)) or {})
+    for name, value in DEFAULT_SEGMENT_FEATURES.items():
+        merged.setdefault(name, value)
+    merged.update({str(k): str(v) for k, v in dict(feature_overrides or {}).items()})
+    return merged
+
+
 def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_DURATION_SECONDS,
                 max_ticks: Optional[int] = None, poll_seconds: Optional[int] = None,
                 max_new_requests: Optional[int] = None, act: bool = True,
                 start_services: str = SERVICE_AUTO,
                 room_living: bool = False,
                 ambient_events: bool = False,
+                feature_overrides: Optional[Mapping[str, str]] = None,
                 environment: Optional[Mapping[str, str]] = None,
                 service_runner: Optional[Callable[..., _ServeHandle]] = None,
                 resident_factory: Optional[Callable[..., Any]] = None,
@@ -1106,11 +1138,17 @@ def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_D
         return refused("NESTED_LIFE_INSTANCE_MISSING",
                        "this phone root has no %s/instance.json; this entry never prepares one"
                        % phone_life.ONE_DAY_DIRNAME)
-    feature_overrides = demo._serve_feature_overrides(
-        room_living=bool(room_living), ambient_events=bool(ambient_events))
+    # The switches this segment runs with: the daily default (canonical) first, then the
+    # serve-time room/ambient flags, then any explicit per-run override the entry point
+    # supplied.  The caller's values win, so an explicit ``--world-gate off`` really reaches
+    # the resident and the World child instead of being covered by the instance's features.
+    feature_overrides = _segment_feature_overrides(
+        room_living=bool(room_living), ambient_events=bool(ambient_events),
+        feature_overrides=feature_overrides)
     binding_env = phone_life.map_life_environment(
         phone, nested, base_env=environment if environment is None else dict(environment),
         feature_overrides=feature_overrides)
+    world_intent_gate = feature_overrides.get("WORLD_BODY_INTENT_MUTATION_GATE") or None
     state_root = phone_life.life_state_root(root_path, nested)
     report["state_root"] = str(state_root)
     report["run_id"] = binding_env.get("CHIYO_AUTONOMOUS_RUN_ID")
@@ -1142,6 +1180,7 @@ def run_segment(root: Path | str, *, duration_seconds: Optional[int] = DEFAULT_D
                                        ready_timeout=ready_seconds,
                                        room_living=bool(room_living),
                                        ambient_events=bool(ambient_events),
+                                       world_intent_gate=world_intent_gate,
                                        service_runner=service_runner)
     report["services"] = services
     if serve is not None:

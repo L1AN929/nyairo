@@ -160,16 +160,15 @@ class BodySingleActionReadinessTests(unittest.TestCase):
         """WAIT needs a *named* dependency on another owner's next version.  This is not one."""
 
         body = _readiness()
-        exhausted_reading = lsr.assess_step_readiness(
-            activity={"activity_ref": "activity:read-1",
-                      "activity_kind": "READ_PRIVATE_MATERIAL", "status": "ACTIVE"},
-            target_ref="artifact:abc123", source_revision="artifactversion:h1",
-            reading_state={"state": "EXHAUSTED", "available": False})
+        work_no_change = lsr.StepReadiness(
+            available=False, reason_code=lsr.REASON_WORK_NO_CHANGE,
+            activity_ref="activity:work-1", activity_kind="CONTINUE_PERSONAL_ARTIFACT",
+            target_ref="artifact:abc123", source_revision="artifactversion:h1")
 
         self.assertIsNone(lwb.basis_from_readiness(body), body.to_dict())
         # positive control: the existing named dependency still produces its basis
-        basis = lwb.basis_from_readiness(exhausted_reading, state="EXHAUSTED")
-        self.assertIsInstance(basis, dict, exhausted_reading.to_dict())
+        basis = lwb.basis_from_readiness(work_no_change)
+        self.assertIsInstance(basis, dict, work_no_change.to_dict())
 
 
 @POSIX_ONLY

@@ -12,8 +12,25 @@
 const STAGE_CAPTIONS = [
   [
     {
+      kicker: '01 · 一次推门',
+      title: '从站坐切换到推门出门，全程连在同一条线上',
+      desc: '实时切换姿态并查看街区路网步程，选中文浜堂书店就能看门面介绍、营业状态与室内陈设。'
+    },
+    {
+      kicker: '02 · 逐字回复',
+      title: '流式交谈自然接住刚才的话题',
+      desc: '刚才点的地点和动作都会带进对话，消息逐字流式出现，说好的事会稳稳落进日程。'
+    },
+    {
+      kicker: '03 · 文稿留痕',
+      title: '共同写过的草稿每次修订都可对比',
+      desc: '切到随笔与创作即可展开跨版本留问与历史快照差异，深浅主题随时一键切换。'
+    }
+  ],
+  [
+    {
       kicker: '01 · 状态总览',
-      title: '一眼看清她此刻在哪、在做什么',
+      title: '一眼看清 TA 此刻在哪、在做什么',
       desc: '实时呈现当前房间、站坐姿态、窗外天色与最近记住的小事，推门就能自然搭话。'
     },
     {
@@ -24,14 +41,14 @@ const STAGE_CAPTIONS = [
     {
       kicker: '03 · 随手操控',
       title: 'Ctrl+K 呼出快捷动作',
-      desc: '随时切换页面、让她在卧室与客厅间走动、点亮床头灯，或直接开启一段新对话。'
+      desc: '随时切换页面、让 TA 在卧室与客厅间走动、点亮床头灯，或直接开启一段新对话。'
     }
   ],
   [
     {
-      kicker: '01 · 可换世界包',
-      title: '附带默认示例小镇，也可自由编辑',
-      desc: '当前内置「凪浦」作为默认示例世界，出行按路网距离真实计时；支持离线编辑器自定义布置，随机生成专属世界正在规划中。'
+      kicker: '01 · 7 套风貌与生成',
+      title: '内置海滨、温泉、田园、街区等多套世界',
+      desc: '随包附带凪浦、汤川、穗村、栞泽等 7 套示例世界；桌面端「生成新小镇」支持按 4 种地形与种子热切换，离线编辑器可改建（零配置全自动生成规划中）。'
     },
     {
       kicker: '02 · 室内平面',
@@ -65,7 +82,7 @@ const STAGE_CAPTIONS = [
     {
       kicker: '01 · 随笔与文稿',
       title: '手记、剪报资料与文稿分门别类',
-      desc: '她写下的日常手记、收集的参考资料与共同打磨的文稿分区整理，每次修改自动留存快照。'
+      desc: 'TA 写下的日常手记、收集的参考资料与共同打磨的文稿分区整理，每次修改自动留存快照。'
     },
     {
       kicker: '02 · 版本比对',
@@ -77,19 +94,71 @@ const STAGE_CAPTIONS = [
       title: '导入读物一起翻页、留书签与批注',
       desc: '支持把文章或书稿放进共读架，记录双人阅读进度与页码批注，也能围绕资料做专题整理。'
     }
+  ],
+  [
+    {
+      kicker: '内置世界编辑器 · 离线可视化',
+      title: '自己画墙、开窗、摆家具，导出给 TA 住的新街区',
+      desc: '无需写任何配置文件——打开内置世界编辑器直接框选房间、铺木地板、放咖啡桌或书架，并自动校验通道与导出 .world 世界包。'
+    }
   ]
 ];
 
+const STAGE_WORLD_PRESETS = {
+  nagiura: {
+    label: '凪浦 · 海滨小镇',
+    title: '街区与房间 · 凪浦',
+    dark: 'assets/screenshots/desktop-world-dark.webp?v=20261113-v060-13',
+    light: 'assets/screenshots/desktop-world-light.webp?v=20261113-v060-15',
+    alt: 'nyairo 桌面端：凪浦海滨小镇街区总图',
+    desc: '默认临海小镇「凪浦」含 17 处海湾与坡道地点，支持桌面端按 4 种地形种子生成新小镇或用离线编辑器自由布置（零配置全自动生成规划中）。'
+  },
+  onsawa: {
+    label: '汤川 · 山间温泉',
+    title: '街区与房间 · 汤川',
+    dark: 'assets/screenshots/desktop-world-onsawa-dark.webp?v=20261113-v060-20',
+    light: 'assets/screenshots/desktop-world-onsawa-light.webp?v=20261113-v060-20',
+    alt: 'nyairo 桌面端：汤川山间温泉小镇街区总图与翠泽汤屋详情',
+    desc: '山间温泉小镇「汤川」含 15 处山坡地点与露天翠泽汤屋，出门沿登山道步行真实耗时，桌面端可随时热切换体验不同地貌。'
+  },
+  inobe: {
+    label: '穗村 · 田园乡野',
+    title: '街区与房间 · 穗村',
+    dark: 'assets/screenshots/desktop-world-inobe-dark.webp?v=20261113-v060-20',
+    light: 'assets/screenshots/desktop-world-inobe-light.webp?v=20261113-v060-20',
+    alt: 'nyairo 桌面端：穗村田园乡野小镇街区总图与水车公园路线',
+    desc: '田园农庄村落「穗村」含 14 处水渠、农田与水车公园节点，每段田埂步程均按路网距离真实计时。'
+  },
+  wakaba: {
+    label: '栞泽 · 日常街区',
+    title: '街区与房间 · 栞泽',
+    dark: 'assets/screenshots/desktop-world-wakaba-dark.webp?v=20261113-v060-20',
+    light: 'assets/screenshots/desktop-world-wakaba-light.webp?v=20261113-v060-20',
+    alt: 'nyairo 桌面端：栞泽日常街区总图与栞泽书店陈设',
+    desc: '日常居住街区「栞泽」含 16 处近郊商店街、向阳咖啡店与栞泽书店，桌面端支持一键切换或导入编辑器按心意改建。'
+  }
+};
+
 const STAGE_SCENES_META = [
-  { title: '状态总览', dark: 'assets/screenshots/desktop-overview-dark.webp', light: 'assets/screenshots/desktop-overview-light.webp' },
-  { title: '街区与房间', dark: 'assets/screenshots/desktop-world-dark.webp', light: 'assets/screenshots/desktop-world-light.webp' },
-  { title: '流式交谈', dark: 'assets/screenshots/desktop-talk-dark.webp', light: 'assets/screenshots/desktop-talk-light.webp' },
-  { title: '文稿与共读', dark: 'assets/screenshots/desktop-notes-dark.webp', light: 'assets/screenshots/desktop-notes-light.webp' }
+  {
+    title: '实机演示',
+    kind: 'video',
+    dark: 'assets/screenshots/desktop-demo-dark.mp4?v=20261113-v060-14',
+    light: 'assets/screenshots/desktop-demo-light.mp4?v=20261113-v060-15',
+    stillDark: 'assets/screenshots/desktop-overview-dark.webp?v=20261113-v060-13',
+    stillLight: 'assets/screenshots/desktop-overview-light.webp?v=20261113-v060-15'
+  },
+  { title: '状态总览', dark: 'assets/screenshots/desktop-overview-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-overview-light.webp?v=20261113-v060-15' },
+  { title: '街区与房间', dark: 'assets/screenshots/desktop-world-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-world-light.webp?v=20261113-v060-15' },
+  { title: '流式交谈', dark: 'assets/screenshots/desktop-talk-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-talk-light.webp?v=20261113-v060-15' },
+  { title: '文稿与共读', dark: 'assets/screenshots/desktop-notes-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-notes-light.webp?v=20261113-v060-15' },
+  { title: '地图编辑', dark: 'assets/screenshots/desktop-editor.webp?v=20261113-v060-26', light: 'assets/screenshots/desktop-editor.webp?v=20261113-v060-26' }
 ];
 
 const layoutSyncFns = [];
 let syncHeaderLampFn = null;
 let openStageLightboxFn = null;
+let syncStageVideosFn = null;
 
 function bootstrap() {
   initTheme();
@@ -97,12 +166,12 @@ function bootstrap() {
   initSegmentedControls();
   initInstallDock();
   initProductStage();
-  initScrollStage3D();
   initStageLightbox();
   initEvolutionTimeline();
   initFaqAccordion();
   initScrollReveal();
-  initSpotlights();
+  initBentoMapInteraction();
+  initContrastShowcase();
   renderSidebar();
   initHomeSectionLinks();
   initRouting();
@@ -118,7 +187,7 @@ if (document.readyState === 'loading') {
 }
 
 /* ==========================================================================
-   1. Theme Switcher with Circular Clip-Path View Transition
+   1. Theme Switcher with Smooth Cross-Dissolve View Transition
    ========================================================================== */
 function initTheme() {
   const themeBtn = document.getElementById('theme-toggle');
@@ -127,49 +196,53 @@ function initTheme() {
     saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'dark';
   } catch {}
   applyTheme(saved);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.documentElement.classList.add('theme-ready');
+    });
+  });
 
   if (themeBtn) {
-    themeBtn.addEventListener('click', e => {
+    themeBtn.addEventListener('click', () => {
       const cur = document.documentElement.getAttribute('data-theme') || 'dark';
-      const next = cur === 'dark' ? 'light' : 'dark';
-      toggleThemeWithRipple(next, e);
+      switchTheme(cur === 'dark' ? 'light' : 'dark');
     });
   }
 }
 
-function toggleThemeWithRipple(nextTheme, evt) {
+function switchTheme(nextTheme) {
   const reduced = isReducedMotion();
-  if (!document.startViewTransition || reduced || !evt || typeof evt.clientX !== 'number') {
+  if (!document.startViewTransition || reduced) {
     applyTheme(nextTheme);
     return;
   }
 
-  const x = evt.clientX || window.innerWidth - 80;
-  const y = evt.clientY || 30;
-  const endRadius = Math.hypot(
-    Math.max(x, window.innerWidth - x),
-    Math.max(y, window.innerHeight - y)
-  );
-
+  document.documentElement.classList.add('vt-switching');
   const transition = document.startViewTransition(() => {
     applyTheme(nextTheme);
   });
 
   transition.ready.then(() => {
+    const easing = 'cubic-bezier(0.25, 0.8, 0.25, 1)';
     document.documentElement.animate(
-      {
-        clipPath: [
-          `circle(0px at ${x}px ${y}px)`,
-          `circle(${endRadius}px at ${x}px ${y}px)`
-        ]
-      },
-      {
-        duration: 440,
-        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-        pseudoElement: '::view-transition-new(root)'
-      }
+      { opacity: [0, 1] },
+      { duration: 280, easing, fill: 'both', pseudoElement: '::view-transition-new(root)' }
     );
+    const iconEl = document.getElementById('theme-icon');
+    if (iconEl && typeof iconEl.animate === 'function') {
+      iconEl.animate(
+        [
+          { transform: 'rotate(-36deg) scale(0.84)' },
+          { transform: 'rotate(0deg) scale(1)' }
+        ],
+        { duration: 400, easing: 'cubic-bezier(0.2, 0.9, 0.25, 1.02)' }
+      );
+    }
   }).catch(() => {});
+
+  Promise.resolve(transition.finished).finally(() => {
+    document.documentElement.classList.remove('vt-switching');
+  });
 }
 
 function applyTheme(theme) {
@@ -179,28 +252,12 @@ function applyTheme(theme) {
     localStorage.setItem('nyairo-theme', next);
     localStorage.setItem('chiyo-theme', next);
   } catch {}
+  if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
 
-  const iconEl = document.getElementById('theme-icon');
   const btnEl = document.getElementById('theme-toggle');
-  if (!iconEl || !btnEl) return;
-
-  if (next === 'dark') {
-    iconEl.innerHTML = `
-      <circle cx="12" cy="12" r="5"></circle>
-      <line x1="12" y1="1" x2="12" y2="3"></line>
-      <line x1="12" y1="21" x2="12" y2="23"></line>
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-      <line x1="1" y1="12" x2="3" y2="12"></line>
-      <line x1="21" y1="12" x2="23" y2="12"></line>
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-    `;
-    btnEl.setAttribute('title', '切换为亮色模式');
-  } else {
-    iconEl.innerHTML = `<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>`;
-    btnEl.setAttribute('title', '切换为暗色模式');
-  }
+  if (!btnEl) return;
+  btnEl.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
+  btnEl.setAttribute('title', next === 'dark' ? '切换为亮色模式' : '切换为暗色模式');
 }
 
 /* ==========================================================================
@@ -270,11 +327,14 @@ function initHeaderPhysics() {
     const homeView = document.getElementById('view-home');
     if (homeView && homeView.style.display !== 'none') {
       const faqEl = document.getElementById('home-faq');
+      const capEl = document.getElementById('home-capabilities');
       const archEl = document.getElementById('home-arch');
       const prevEl = document.getElementById('home-preview');
       let activeId = 'nav-home';
       if (faqEl && faqEl.getBoundingClientRect().top <= 240) {
         activeId = 'nav-faq';
+      } else if (capEl && capEl.getBoundingClientRect().top <= 240) {
+        activeId = 'nav-capabilities';
       } else if (archEl && archEl.getBoundingClientRect().top <= 240) {
         activeId = 'nav-arch';
       } else if (prevEl && prevEl.getBoundingClientRect().top <= 240) {
@@ -367,117 +427,140 @@ function morphContainerHeight(viewport, mutateDom) {
 function initInstallDock() {
   const bar = document.getElementById('install-seg');
   const viewport = document.getElementById('install-viewport');
-  if (!bar) return;
 
-  const order = ['win', 'cli', 'agent'];
-  let currentMode = 'win';
+  if (bar) {
+    const order = ['win', 'cli', 'agent'];
+    let currentMode = 'win';
 
-  const tabs = Array.from(bar.querySelectorAll('.seg-btn'));
-  const panels = {
-    win: document.getElementById('install-panel-win'),
-    cli: document.getElementById('install-panel-cli'),
-    agent: document.getElementById('install-panel-agent')
-  };
+    const tabs = Array.from(bar.querySelectorAll('.seg-btn'));
+    const panels = {
+      win: document.getElementById('install-panel-win'),
+      cli: document.getElementById('install-panel-cli'),
+      agent: document.getElementById('install-panel-agent')
+    };
 
-  function selectMode(mode, focusBtn = false) {
-    if (mode === currentMode && !focusBtn) return;
-    const prevIdx = order.indexOf(currentMode);
-    const nextIdx = order.indexOf(mode);
-    const isPrev = nextIdx < prevIdx;
-    currentMode = mode;
+    function selectMode(mode, focusBtn = false) {
+      if (mode === currentMode && !focusBtn) return;
+      const prevIdx = order.indexOf(currentMode);
+      const nextIdx = order.indexOf(mode);
+      const isPrev = nextIdx < prevIdx;
+      currentMode = mode;
 
-    tabs.forEach(btn => {
-      const isMatch = btn.getAttribute('data-install') === mode;
-      btn.classList.toggle('is-active', isMatch);
-      btn.setAttribute('aria-selected', String(isMatch));
-      btn.tabIndex = isMatch ? 0 : -1;
-      if (isMatch && focusBtn) btn.focus();
-    });
-
-    morphContainerHeight(viewport, () => {
-      Object.entries(panels).forEach(([k, el]) => {
-        if (!el) return;
-        const active = k === mode;
-        el.hidden = !active;
-        if (active) {
-          el.classList.toggle('dir-prev', isPrev);
-        }
-      });
-    });
-
-    syncSegThumb(bar);
-  }
-
-  tabs.forEach((btn, idx) => {
-    btn.addEventListener('click', () => selectMode(btn.getAttribute('data-install')));
-    btn.addEventListener('keydown', e => {
-      let nextIdx;
-      if (e.key === 'ArrowRight') nextIdx = (idx + 1) % tabs.length;
-      if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + tabs.length) % tabs.length;
-      if (e.key === 'Home') nextIdx = 0;
-      if (e.key === 'End') nextIdx = tabs.length - 1;
-      if (nextIdx === undefined) return;
-      e.preventDefault();
-      selectMode(tabs[nextIdx].getAttribute('data-install'), true);
-    });
-  });
-
-  // Smart OS Default: switch to CLI tab on desktop Linux so curl command is one click away
-  try {
-    const ua = navigator.userAgent || '';
-    if (/\bLinux\b/i.test(ua) && !/\bAndroid\b/i.test(ua)) {
-      currentMode = 'cli';
       tabs.forEach(btn => {
-        const isMatch = btn.getAttribute('data-install') === 'cli';
+        const isMatch = btn.getAttribute('data-install') === mode;
         btn.classList.toggle('is-active', isMatch);
         btn.setAttribute('aria-selected', String(isMatch));
         btn.tabIndex = isMatch ? 0 : -1;
+        if (isMatch && focusBtn) btn.focus();
       });
-      Object.entries(panels).forEach(([k, el]) => {
-        if (el) el.hidden = k !== 'cli';
-      });
-      requestAnimationFrame(() => syncSegThumb(bar));
-    }
-  } catch {}
 
-  // Post-download gentle guidance for Windows setup.exe
-  const winDlBtn = document.getElementById('win-download-btn');
-  const winDlFeedback = document.getElementById('win-dl-feedback');
-  if (winDlBtn && winDlFeedback) {
-    winDlBtn.addEventListener('click', () => {
-      if (!winDlFeedback.hidden) return;
       morphContainerHeight(viewport, () => {
-        winDlFeedback.hidden = false;
+        Object.entries(panels).forEach(([k, el]) => {
+          if (!el) return;
+          const active = k === mode;
+          el.hidden = !active;
+          if (active) {
+            el.classList.toggle('dir-prev', isPrev);
+          }
+        });
+      });
+
+      syncSegThumb(bar);
+    }
+
+    tabs.forEach((btn, idx) => {
+      btn.addEventListener('click', () => selectMode(btn.getAttribute('data-install')));
+      btn.addEventListener('keydown', e => {
+        let nextIdx;
+        if (e.key === 'ArrowRight') nextIdx = (idx + 1) % tabs.length;
+        if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + tabs.length) % tabs.length;
+        if (e.key === 'Home') nextIdx = 0;
+        if (e.key === 'End') nextIdx = tabs.length - 1;
+        if (nextIdx === undefined) return;
+        e.preventDefault();
+        selectMode(tabs[nextIdx].getAttribute('data-install'), true);
       });
     });
+
+    try {
+      const ua = navigator.userAgent || '';
+      if (/\bLinux\b/i.test(ua) && !/\bAndroid\b/i.test(ua)) {
+        currentMode = 'cli';
+        tabs.forEach(btn => {
+          const isMatch = btn.getAttribute('data-install') === 'cli';
+          btn.classList.toggle('is-active', isMatch);
+          btn.setAttribute('aria-selected', String(isMatch));
+          btn.tabIndex = isMatch ? 0 : -1;
+        });
+        Object.entries(panels).forEach(([k, el]) => {
+          if (el) el.hidden = k !== 'cli';
+        });
+        requestAnimationFrame(() => syncSegThumb(bar));
+      }
+    } catch {}
   }
 
-  // Copy setup.exe SHA256
-  const shaBtn = document.getElementById('copy-setup-sha');
-  const shaLbl = document.getElementById('sha-copy-label');
-  if (shaBtn && shaLbl) {
+  // Post-download gentle guidance for Windows setup.exe (Hero + #home-downloads card)
+  [
+    ['win-download-btn', 'win-dl-feedback'],
+    ['dl-win-card-btn', 'dl-win-card-feedback']
+  ].forEach(([btnId, fbId]) => {
+    const btn = document.getElementById(btnId);
+    const fb = document.getElementById(fbId);
+    if (!btn || !fb) return;
+    btn.addEventListener('click', () => {
+      if (!fb.hidden) return;
+      morphContainerHeight(viewport, () => {
+        fb.hidden = false;
+      });
+    });
+  });
+
+  // Copy setup.exe SHA256 (install dock + trust verify bar)
+  [
+    ['copy-setup-sha', 'sha-copy-label'],
+    ['copy-trust-sha', 'trust-sha-label']
+  ].forEach(([btnId, lblId]) => {
+    const shaBtn = document.getElementById(btnId);
+    const shaLbl = document.getElementById(lblId);
+    if (!shaBtn || !shaLbl) return;
     shaBtn.addEventListener('click', async () => {
       const sha = shaBtn.getAttribute('data-sha') || '';
       const ok = await writeClipboardText(sha);
       shaLbl.textContent = ok ? '已复制 ✓' : '复制失败';
       setTimeout(() => { shaLbl.textContent = '复制'; }, 2000);
     });
-  }
+  });
 
-  // Copy CLI install command
+  // Copy CLI install command (works on both the code bar and its action button)
   const cmdBar = document.getElementById('hero-cmd');
   const cmdBtn = document.getElementById('hero-cmd-btn');
   if (cmdBar && cmdBtn) {
-    cmdBar.addEventListener('click', async () => {
+    const defaultLabel = cmdBtn.textContent || '复制命令';
+    const triggerCliCopy = async () => {
       const codeEl = cmdBar.querySelector('.cmd-code');
       if (!codeEl) return;
       const ok = await copyElementText(codeEl);
       cmdBtn.textContent = ok ? '已复制 ✓' : '请按 Ctrl+C';
       cmdBtn.classList.toggle('copied', ok);
       setTimeout(() => {
-        cmdBtn.textContent = '复制命令';
+        cmdBtn.textContent = defaultLabel;
         cmdBtn.classList.remove('copied');
       }, 2000);
+    };
+    cmdBar.addEventListener('click', e => {
+      if (e.target === cmdBtn) return;
+      triggerCliCopy();
+    });
+    cmdBar.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        triggerCliCopy();
+      }
+    });
+    cmdBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      triggerCliCopy();
     });
   }
 
@@ -528,9 +611,45 @@ function initProductStage() {
   const btns = Array.from(bar.querySelectorAll('.seg-btn'));
   const scenes = Array.from(document.querySelectorAll('.stage-scene'));
   const captionCells = Array.from(document.querySelectorAll('.stage-caption-cell'));
+  const worldStrip = document.getElementById('stage-world-strip');
+
+  const darkV = document.getElementById('stage-video-dark');
+  const lightV = document.getElementById('stage-video-light');
 
   let currentIdx = 0;
   let manualLocked = false;
+
+  function syncStageVideos() {
+    if (!darkV && !lightV) return;
+    const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const activeV = theme === 'light' ? lightV : darkV;
+    const idleV = theme === 'light' ? darkV : lightV;
+    const prevTime = idleV && Number.isFinite(idleV.currentTime) ? idleV.currentTime : 0;
+    if (idleV && !idleV.paused) idleV.pause();
+
+    const lbOpen = !!document.getElementById('stage-lightbox')?.classList.contains('show');
+    const homeHidden = document.getElementById('view-home')?.style.display === 'none';
+    const shouldPlay = currentIdx === 0 && !stageEl.classList.contains('is-out-of-view') && !lbOpen && !homeHidden && !isReducedMotion();
+
+    if (activeV) {
+      if (activeV.preload !== 'auto') activeV.preload = 'auto';
+      if (prevTime > 0 && activeV.currentTime < 0.05 && Number.isFinite(activeV.duration) && activeV.duration > prevTime) {
+        activeV.currentTime = prevTime;
+      }
+      if (shouldPlay) {
+        activeV.play().catch(() => {});
+      } else if (!activeV.paused) {
+        activeV.pause();
+      }
+    }
+  }
+  syncStageVideosFn = () => {
+    syncStageVideos();
+    const lbBackdrop = document.getElementById('stage-lightbox');
+    if (lbBackdrop && lbBackdrop.classList.contains('show')) {
+      lbBackdrop.dispatchEvent(new CustomEvent('nyairo-theme-sync'));
+    }
+  };
 
   function restartAutoProgress() {
     if (!autoBar || isReducedMotion() || manualLocked) {
@@ -538,6 +657,7 @@ function initProductStage() {
       if (pausePill) pausePill.style.display = 'none';
       return;
     }
+    autoBar.style.setProperty('--stage-dur', currentIdx === 0 ? '17s' : '6.5s');
     autoBar.classList.remove('is-running');
     void autoBar.offsetWidth;
     autoBar.classList.add('is-running');
@@ -595,7 +715,9 @@ function initProductStage() {
     }
 
     syncSegThumb(bar);
+    if (worldStrip) worldStrip.hidden = index !== 2;
     restartAutoProgress();
+    syncStageVideos();
   }
 
   if (autoBar) {
@@ -608,7 +730,7 @@ function initProductStage() {
     requestAnimationFrame(restartAutoProgress);
   }
 
-  // Pause auto-cycle while offscreen so users see Scene 0 -> 1 cleanly when they reach #home-preview
+  // Pause auto-cycle & video while offscreen so Scene 0 always plays cleanly in view
   if (typeof IntersectionObserver !== 'undefined') {
     stageEl.classList.add('is-out-of-view');
     const stageIo = new IntersectionObserver(
@@ -616,16 +738,19 @@ function initProductStage() {
         entries.forEach(entry => {
           stageEl.classList.toggle('is-out-of-view', !entry.isIntersecting);
         });
+        syncStageVideos();
       },
-      { threshold: 0.18 }
+      { threshold: 0.12 }
     );
     stageIo.observe(stageEl);
   }
+  syncStageVideos();
 
   const triggerZoom = () => {
     manualLocked = true;
     if (autoBar) autoBar.classList.remove('is-running');
     if (pausePill) pausePill.style.display = 'none';
+    syncStageVideos();
     if (typeof openStageLightboxFn === 'function') {
       openStageLightboxFn(currentIdx, idx => setScene(idx, false, true));
     }
@@ -656,11 +781,64 @@ function initProductStage() {
     });
   });
 
-  // Pre-decode remaining stage screenshots during idle time so first switch never flashes
+  // Scene 2 Multi-Town Screenshot Switcher (凪浦 / 汤川 / 穗村 / 栞泽)
+  const worldBar = document.getElementById('stage-world-bar');
+  const worldImgDark = document.getElementById('stage-world-img-dark');
+  const worldImgLight = document.getElementById('stage-world-img-light');
+  if (worldBar && worldImgDark && worldImgLight) {
+    const worldBtns = Array.from(worldBar.querySelectorAll('.stage-world-pill'));
+    const selectWorld = (slug, byUser = true) => {
+      const preset = STAGE_WORLD_PRESETS[slug];
+      if (!preset) return;
+      if (byUser) {
+        manualLocked = true;
+        if (autoBar) autoBar.classList.remove('is-running');
+        if (pausePill) pausePill.style.display = 'none';
+      }
+      worldBtns.forEach(b => {
+        const active = b.getAttribute('data-world') === slug;
+        b.classList.toggle('is-active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
+      worldImgDark.src = preset.dark;
+      worldImgLight.src = preset.light;
+      worldImgDark.alt = preset.alt;
+      worldImgLight.alt = preset.alt;
+      if (STAGE_SCENES_META[2]) {
+        STAGE_SCENES_META[2].title = preset.title;
+        STAGE_SCENES_META[2].dark = preset.dark;
+        STAGE_SCENES_META[2].light = preset.light;
+      }
+      if (STAGE_CAPTIONS[2]?.[0]) {
+        STAGE_CAPTIONS[2][0].desc = preset.desc;
+        if (currentIdx === 2) {
+          const dEl = document.getElementById('cap-desc-1');
+          if (dEl) dEl.textContent = preset.desc;
+        }
+      }
+    };
+
+    worldBar.addEventListener('click', e => e.stopPropagation());
+    worldBar.addEventListener('keydown', e => e.stopPropagation());
+    worldBtns.forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        selectWorld(btn.getAttribute('data-world'), true);
+      });
+    });
+  }
+
+  // Pre-decode remaining stage screenshots (and extra world stills) during idle time
   const warmStageImages = () => {
     stageEl.querySelectorAll('img[loading="lazy"]').forEach(img => {
       img.loading = 'eager';
       if (typeof img.decode === 'function') img.decode().catch(() => {});
+    });
+    Object.values(STAGE_WORLD_PRESETS).forEach(p => {
+      ['dark', 'light'].forEach(k => {
+        const pre = new Image();
+        pre.src = p[k];
+      });
     });
   };
   if (typeof requestIdleCallback === 'function') {
@@ -679,6 +857,8 @@ function initStageLightbox() {
   const titleEl = document.getElementById('lightbox-title');
   const imgDark = document.getElementById('lightbox-img-dark');
   const imgLight = document.getElementById('lightbox-img-light');
+  const vidDark = document.getElementById('lightbox-video-dark');
+  const vidLight = document.getElementById('lightbox-video-light');
   const tabs = Array.from(document.querySelectorAll('#lightbox-tabs .lightbox-tab'));
   if (!backdrop || !imgDark || !imgLight) return;
 
@@ -687,15 +867,38 @@ function initStageLightbox() {
   let closeTimer = null;
   let lastTrigger = null;
 
+  function syncLightboxMedia(meta) {
+    const reduced = isReducedMotion();
+    const isVideo = meta?.kind === 'video' && !reduced && backdrop.classList.contains('show');
+    const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    if (isVideo && vidDark && vidLight) {
+      imgDark.hidden = true;
+      imgLight.hidden = true;
+      vidDark.hidden = false;
+      vidLight.hidden = false;
+      const activeV = theme === 'light' ? vidLight : vidDark;
+      const idleV = theme === 'light' ? vidDark : vidLight;
+      if (idleV && !idleV.paused) idleV.pause();
+      if (activeV.preload !== 'auto') activeV.preload = 'auto';
+      activeV.play().catch(() => {});
+    } else {
+      if (vidDark) { if (!vidDark.paused) vidDark.pause(); vidDark.hidden = true; }
+      if (vidLight) { if (!vidLight.paused) vidLight.pause(); vidLight.hidden = true; }
+      imgDark.hidden = false;
+      imgLight.hidden = false;
+      imgDark.src = (reduced && meta.stillDark) ? meta.stillDark : (meta.stillDark || meta.dark);
+      imgLight.src = (reduced && meta.stillLight) ? meta.stillLight : (meta.stillLight || meta.light);
+      imgDark.alt = `nyairo 桌面端高清预览：${meta.title}`;
+      imgLight.alt = `nyairo 桌面端高清预览：${meta.title}`;
+    }
+  }
+
   function renderLightboxScene(idx) {
     activeIdx = (idx + STAGE_SCENES_META.length) % STAGE_SCENES_META.length;
     const meta = STAGE_SCENES_META[activeIdx];
     if (counterEl) counterEl.textContent = `0${activeIdx + 1} / 0${STAGE_SCENES_META.length}`;
     if (titleEl) titleEl.textContent = meta.title;
-    imgDark.src = meta.dark;
-    imgLight.src = meta.light;
-    imgDark.alt = `nyairo 桌面端高清预览：${meta.title}`;
-    imgLight.alt = `nyairo 桌面端高清预览：${meta.title}`;
+    syncLightboxMedia(meta);
     tabs.forEach((t, i) => t.classList.toggle('is-active', i === activeIdx));
     if (typeof onSceneSync === 'function') onSceneSync(activeIdx);
   }
@@ -703,18 +906,28 @@ function initStageLightbox() {
   function closeLightbox() {
     if (!backdrop.classList.contains('show')) return;
     backdrop.setAttribute('aria-hidden', 'true');
+    if (vidDark && !vidDark.paused) vidDark.pause();
+    if (vidLight && !vidLight.paused) vidLight.pause();
+    const finishClose = () => {
+      if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
+      if (lastTrigger && typeof lastTrigger.focus === 'function') lastTrigger.focus();
+    };
     if (isReducedMotion()) {
       backdrop.classList.remove('show', 'is-closing');
-      if (lastTrigger && typeof lastTrigger.focus === 'function') lastTrigger.focus();
+      finishClose();
       return;
     }
     backdrop.classList.add('is-closing');
     closeTimer = setTimeout(() => {
       backdrop.classList.remove('show', 'is-closing');
       closeTimer = null;
-      if (lastTrigger && typeof lastTrigger.focus === 'function') lastTrigger.focus();
+      finishClose();
     }, 150);
   }
+
+  backdrop.addEventListener('nyairo-theme-sync', () => {
+    if (backdrop.classList.contains('show')) syncLightboxMedia(STAGE_SCENES_META[activeIdx]);
+  });
 
   openStageLightboxFn = (idx, syncCallback) => {
     if (closeTimer) {
@@ -723,10 +936,11 @@ function initStageLightbox() {
     }
     lastTrigger = document.activeElement;
     onSceneSync = syncCallback || null;
-    renderLightboxScene(idx || 0);
     backdrop.classList.remove('is-closing');
     backdrop.classList.add('show');
     backdrop.setAttribute('aria-hidden', 'false');
+    renderLightboxScene(idx || 0);
+    if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
     if (closeBtn) setTimeout(() => closeBtn.focus(), 20);
   };
 
@@ -1021,6 +1235,107 @@ function initSpotlights() {
   });
 }
 
+function initBentoMapInteraction() {
+  const lampBtn = document.getElementById('bento-lamp-btn');
+  const lampLabel = document.getElementById('bento-lamp-label');
+  const mapVisual = document.getElementById('bento-map-visual');
+  if (!lampBtn || !mapVisual) return;
+
+  lampBtn.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const isOff = mapVisual.classList.toggle('is-lamp-off');
+    lampBtn.setAttribute('aria-pressed', isOff ? 'false' : 'true');
+    lampBtn.classList.toggle('is-off', isOff);
+    if (lampLabel) {
+      lampLabel.textContent = isOff ? '卧室床头灯 · 关' : '卧室床头灯 · 开';
+    }
+  });
+}
+
+function initContrastShowcase() {
+  const tabsWrap = document.getElementById('contrast-tabs');
+  if (tabsWrap) {
+    const scenarios = [
+      {
+        channel: '桌面对话',
+        userMsg: '「刚下班回到家，外面风有点硬」',
+        plainReply: '「欢迎回家！今天工作辛苦了，请问今晚想聊些什么，或者有什么我可以帮你的吗？」',
+        plainNote: '每次都像刚认识的客服，既不知道现在几点，也没接着昨天的生活往事。',
+        nyairoState: '凪浦 · 沿浪打道步行返程（剩 3 分钟）',
+        nyairoReply: '「我刚好也快走到住居门口了，海边风道确实吹得挺硬。先把外套脱了喝口温水，昨晚一起留记号的《海风手记》还摊在桌上，歇会儿接着翻？」',
+        nyairoNote: '接住路网位置、共读书签进度与本机长期记忆，像一直住在一起的伙伴。'
+      },
+      {
+        channel: '微信手机直连 · 同步进本机',
+        userMsg: '「我出门买杯咖啡，顺便带你逛会儿？」',
+        plainReply: '「好的！喝咖啡是个不错的选择，散步也很有益健康。请问你需要我帮你推荐附近的咖啡店，还是列一份散步清单呢？」',
+        plainNote: '手机和电脑各自孤立成新会话，也不存在可以走过去的小镇街道。',
+        nyairoState: '汤川 · 从住居出门散步中',
+        nyairoReply: '「行，我这边也刚好从住居推门出来，顺着老街往温泉广场走。你外头要是刮风把外套拉链拉高，等会儿买到咖啡顺嘴聊聊味道怎么样。」',
+        nyairoNote: '微信扫码直连同条本地记忆线程，出门用手机发消息也能接住同一段日程。'
+      },
+      {
+        channel: '次日重启电脑后 · 接着昨天聊',
+        userMsg: '「早，昨晚说好周六一起看的那篇稿子我还留着呢」',
+        plainReply: '「早上好！很高兴看到你准备继续工作。由于每次新对话无法自动读取之前的聊天记录，请把你要看的文章或背景再发我一遍吧。」',
+        plainNote: '关掉窗口就全盘清零，昨天聊过的书签、计划与小约定全都得重新交代。',
+        nyairoState: '凪浦 · 住居书房 · 桌面台灯关闭',
+        nyairoReply: '「早啊，昨晚留到第 14 页批注的那份文稿还在共读架上，书签位置也没丢。等你坐稳了端杯水，在文稿栏点开就能直接接着昨天那段看。」',
+        nyairoNote: '对话、文稿版本快照与共读书签全部落在本机 SQLite，重启电脑也丝滑续上。'
+      }
+    ];
+
+    const fieldMap = {
+      channel: document.getElementById('contrast-channel'),
+      userMsg: document.getElementById('contrast-user-msg'),
+      plainReply: document.getElementById('contrast-plain-reply'),
+      plainNote: document.getElementById('contrast-plain-note'),
+      nyairoState: document.getElementById('contrast-nyairo-state'),
+      nyairoReply: document.getElementById('contrast-nyairo-reply'),
+      nyairoNote: document.getElementById('contrast-nyairo-note')
+    };
+
+    const tabs = Array.from(tabsWrap.querySelectorAll('.contrast-tab'));
+    const applyScenario = idx => {
+      const data = scenarios[idx];
+      if (!data) return;
+      tabs.forEach((btn, i) => {
+        const active = i === idx;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      Object.entries(fieldMap).forEach(([key, el]) => {
+        if (el) el.textContent = data[key];
+      });
+    };
+
+    tabsWrap.addEventListener('click', e => {
+      const btn = e.target.closest('.contrast-tab');
+      if (!btn) return;
+      const idx = Number(btn.getAttribute('data-contrast'));
+      if (!Number.isNaN(idx)) applyScenario(idx);
+    });
+  }
+
+  document.querySelectorAll('.persona-copy-btn[data-persona-copy]').forEach(btn => {
+    let resetTimer = null;
+    btn.addEventListener('click', async () => {
+      const key = btn.getAttribute('data-persona-copy');
+      const target = document.getElementById(`persona-text-${key}`);
+      if (!target) return;
+      const ok = await copyElementText(target);
+      btn.classList.toggle('is-copied', ok);
+      btn.textContent = ok ? '已复制模板' : '已选中，请按 Ctrl+C';
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        btn.classList.remove('is-copied');
+        btn.textContent = '复制模板';
+      }, 1800);
+    });
+  });
+}
+
 /* ==========================================================================
    8. Home Section Smooth Scroll Links
    ========================================================================== */
@@ -1082,6 +1397,8 @@ function renderSidebar() {
       <div class="sidebar-mobile-grid">
         <a href="#home" class="sidebar-mobile-chip primary" data-mobile-home="top">← 官网首页</a>
         <a href="#home-preview" class="sidebar-mobile-chip" data-mobile-home="home-preview">实机预览</a>
+        <a href="#home-arch" class="sidebar-mobile-chip" data-mobile-home="home-arch">核心机制</a>
+        <a href="#home-capabilities" class="sidebar-mobile-chip" data-mobile-home="home-capabilities">已装功能</a>
         <a href="#home-faq" class="sidebar-mobile-chip" data-mobile-home="home-faq">常见问题</a>
         <a href="#roadmap" class="sidebar-mobile-chip">未来规划</a>
       </div>
@@ -1230,10 +1547,13 @@ function routeHash(autoCloseSidebar = true) {
     const activeHomeNav =
       target === 'home-preview' ? document.getElementById('nav-preview') :
       target === 'home-arch' ? document.getElementById('nav-arch') :
+      target === 'home-capabilities' ? document.getElementById('nav-capabilities') :
       target === 'home-faq' ? document.getElementById('nav-faq') : navHome;
     if (activeHomeNav) activeHomeNav.classList.add('active');
     document.title = 'nyairo · 以虚拟世界为核心的 AI 个体框架';
+    updateCanonicalUrl(null);
     requestAnimationFrame(() => layoutSyncFns.forEach(fn => fn()));
+    if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
     if (target.startsWith('home-')) {
       const sec = document.getElementById(target);
       if (sec) sec.scrollIntoView({ behavior: preferredScrollBehavior() });
@@ -1245,6 +1565,7 @@ function routeHash(autoCloseSidebar = true) {
 
   const wasDocsHidden = docsView && docsView.classList.contains('is-hidden');
   if (homeView) homeView.style.display = 'none';
+  if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
   if (docsView) {
     docsView.classList.remove('is-hidden', 'drawer-only');
     if (wasDocsHidden && !isReducedMotion()) {
@@ -1265,6 +1586,12 @@ function routeHash(autoCloseSidebar = true) {
   loadDoc(docId, anchor, autoCloseSidebar);
 }
 
+function updateCanonicalUrl(docId = null) {
+  const link = document.getElementById('canonical-link') || document.querySelector('link[rel="canonical"]');
+  if (!link) return;
+  link.setAttribute('href', docId ? `https://nyairo.com/?doc=${encodeURIComponent(docId)}` : 'https://nyairo.com/');
+}
+
 let lastLoadedDocId = null;
 
 function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
@@ -1275,6 +1602,7 @@ function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
   lastLoadedDocId = targetId;
 
   document.title = `${doc.title} · nyairo 文档`;
+  updateCanonicalUrl(targetId);
 
   const sidebarContainer = document.getElementById('docs-sidebar');
   let activeSidebarLink = null;
@@ -1309,6 +1637,11 @@ function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
   }
 
   const tocItems = doc.toc || [];
+  const plainLen = stripHtmlToPlain(doc.content || '').length;
+  const readMins = Math.max(1, Math.round(plainLen / 380));
+  const secCount = tocItems.length;
+  const metaText = secCount > 0 ? `约 ${readMins} 分钟阅读 · ${secCount} 节` : `约 ${readMins} 分钟阅读`;
+
   const mobileTocHtml = tocItems.length > 1
     ? `<details class="mobile-toc-bar">
          <summary><span>本页目录（${tocItems.length} 节）</span><span>▾</span></summary>
@@ -1321,18 +1654,23 @@ function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
   const container = document.getElementById('doc-container');
   if (container) {
     container.innerHTML = `
-      <div class="breadcrumbs">
-        <a href="#home">首页</a>
-        <span>/</span>
-        <a href="#intro">文档</a>
-        <span>/</span>
-        <span>${escapeHtml(categoryName)}</span>
-        <span>/</span>
-        <span style="color: var(--fg); font-weight: 500;">${escapeHtml(doc.title)}</span>
-      </div>
+      <header class="doc-page-header">
+        <div class="doc-header-top">
+          <div class="breadcrumbs">
+            <a href="#home">首页</a>
+            <span>/</span>
+            <a href="#intro">文档</a>
+            <span>/</span>
+            <span class="crumb-cat">${escapeHtml(categoryName)}</span>
+            <span>/</span>
+            <span class="crumb-cur">${escapeHtml(doc.title)}</span>
+          </div>
+          <span class="doc-meta-pill">${metaText}</span>
+        </div>
 
-      <h1 class="page-title">${escapeHtml(doc.title)}</h1>
-      ${doc.summary ? `<p class="page-summary">${escapeHtml(doc.summary)}</p>` : ''}
+        <h1 class="page-title">${escapeHtml(doc.title)}</h1>
+        ${doc.summary ? `<p class="page-summary">${escapeHtml(doc.summary)}</p>` : ''}
+      </header>
 
       ${mobileTocHtml}
 
@@ -1396,10 +1734,10 @@ function renderPager(currentId) {
 
   const prevHtml = prev
     ? `<a href="#${escapeHtml(prev.id)}" class="pager-btn pager-prev"><span class="pager-dir">上一篇</span><span class="pager-title">← ${escapeHtml(prev.title)}</span></a>`
-    : `<div></div>`;
+    : `<a href="#home" class="pager-btn pager-prev pager-home"><span class="pager-dir">返回站点</span><span class="pager-title">← nyairo 官网首页</span></a>`;
   const nextHtml = next
     ? `<a href="#${escapeHtml(next.id)}" class="pager-btn pager-next"><span class="pager-dir">下一篇</span><span class="pager-title">${escapeHtml(next.title)} →</span></a>`
-    : `<div></div>`;
+    : `<a href="#intro" class="pager-btn pager-next pager-home"><span class="pager-dir">从头再读</span><span class="pager-title">项目介绍与核心能力 →</span></a>`;
   return prevHtml + nextHtml;
 }
 
@@ -1460,7 +1798,11 @@ function bindDocCopyButtons() {
       const orig = btn.textContent;
       const ok = await copyElementText(code);
       btn.textContent = ok ? '已复制 ✓' : '请按 Ctrl+C';
-      setTimeout(() => { btn.textContent = orig; }, 2200);
+      if (ok) btn.classList.add('is-copied');
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.classList.remove('is-copied');
+      }, 2200);
     });
   });
 
@@ -1469,9 +1811,15 @@ function bindDocCopyButtons() {
       const num = btn.getAttribute('data-copy-qq') || '1126943805';
       const st = btn.querySelector('.doc-qq-status');
       await writeClipboardText(num);
+      btn.classList.add('is-copied');
       if (st) {
         st.textContent = '已复制 ✓';
-        setTimeout(() => { st.textContent = '复制'; }, 1800);
+        setTimeout(() => {
+          st.textContent = '复制';
+          btn.classList.remove('is-copied');
+        }, 1800);
+      } else {
+        setTimeout(() => btn.classList.remove('is-copied'), 1800);
       }
     });
   });
@@ -1635,13 +1983,13 @@ function initCommandPalette() {
   const quickCommands = [
     {
       group: '快捷操作',
-      title: '下载 Windows 桌面客户端 (v0.5.1 · 5.08 MB)',
-      summary: '直接获取 nyairo-0.5.1-setup.exe 安装包（免管理员权限）',
+      title: '下载 Windows 桌面客户端 (v0.6.0 · 5.10 MB)',
+      summary: '直接获取 nyairo-0.6.0-setup.exe 安装包（免管理员权限）',
       badge: '下载',
       run: () => {
         const a = document.createElement('a');
-        a.href = 'downloads/nyairo-0.5.1-setup.exe';
-        a.download = 'nyairo-0.5.1-setup.exe';
+        a.href = 'downloads/nyairo-0.6.0-setup.exe';
+        a.download = 'nyairo-0.6.0-setup.exe';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1661,7 +2009,7 @@ function initCommandPalette() {
       badge: '主题',
       run: () => {
         const cur = document.documentElement.getAttribute('data-theme') || 'dark';
-        applyTheme(cur === 'dark' ? 'light' : 'dark');
+        switchTheme(cur === 'dark' ? 'light' : 'dark');
       }
     },
     {
@@ -1687,10 +2035,10 @@ function initCommandPalette() {
     },
     {
       group: '常用文档',
-      title: 'v0.5.1 版本动态与更新说明',
-      summary: '查看身体节律、街区日常及当前公开测试版边界说明',
+      title: 'v0.6.0 版本动态与更新说明',
+      summary: '查看日常相处回执、未来问题、双人共读及当前公开测试版边界说明',
       badge: 'NEW',
-      href: '#changelog-v0-5-1'
+      href: '#changelog-v0-6-0'
     },
     {
       group: '常用文档',

@@ -708,7 +708,9 @@ def _readonly_sqlite(path: Path | str):
 
     import sqlite3
 
-    return sqlite3.connect(Path(str(path)).resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
+    resolved = Path(str(path)).resolve()
+    query = "?mode=ro" if Path(f"{resolved}-wal").exists() else "?mode=ro&immutable=1"
+    return sqlite3.connect(resolved.as_uri() + query, uri=True, timeout=2)
 
 
 def _memory_probe(database: Path, controls: Path, *, owner: str, conversation: str,

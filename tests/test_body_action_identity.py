@@ -159,9 +159,13 @@ class BodyActionDecisionIdentityTests(unittest.TestCase):
         with self.assertRaises(body_actions.BodyActionTargetError):
             body_actions.build_body_action_step(
                 "place:home", place=PLACE_HOME, revision=7, decision_ref=DECISION_A)
+        sleep = body_actions.build_body_action_step(
+            "bodyact:rest:start:sleep_like", place=PLACE_HOME, revision=7,
+            decision_ref=DECISION_A)
+        self.assertEqual(sleep["payload_spec"]["verb"], "REST")
         with self.assertRaises(body_actions.BodyActionTargetError):
             body_actions.build_body_action_step(
-                "bodyact:rest:start:sleep_like", place=PLACE_HOME, revision=7,
+                "bodyact:rest:stop:sleep_like", place=PLACE_HOME, revision=7,
                 decision_ref=DECISION_A)
         # Decision id 不是无限容器；超长直接拒绝，而不是悄悄截断成可能碰撞的前缀。
         with self.assertRaises(body_actions.BodyActionTargetError):

@@ -113,6 +113,10 @@ ENV_REQUEST_UTC_DAY_MAX = "CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_UTC_DAY"
 ENV_REQUEST_RUN_WINDOW_MAX = "CHIYO_AUTONOMOUS_MAX_TOTAL_REQUESTS_PER_RUN_WINDOW"
 ENV_RUN_ID = "CHIYO_AUTONOMOUS_RUN_ID"
 ENV_NEW_RUN_WINDOW = "CHIYO_AUTONOMOUS_NEW_RUN_WINDOW"
+#: 07 章 §四"24 调用 / 50k tokens 双上限"的 token 一侧宿主旋钮。缺省（不设）即启用
+#: 设计值 ``DEFAULT_DAILY_TOKEN_BUDGET``；显式 ``0`` / ``off`` / ``none`` / ``false``
+#: 关闭该维度（调用计数与 token 记账照常，只是不设 token 上限）。
+ENV_REQUEST_DAILY_TOKEN_BUDGET = "CHIYO_AUTONOMOUS_DAILY_TOKEN_BUDGET"
 
 
 def _int_env(environment: Mapping[str, str], name: str) -> Optional[int]:
@@ -125,6 +129,113 @@ def _int_env(environment: Mapping[str, str], name: str) -> Optional[int]:
         return None
 
 
+def _daily_token_budget(environment: Mapping[str, str]) -> Optional[int]:
+    """07 章 §四：生产默认启用 50k 日 token 上限，宿主旋钮只做减档或关闭。
+
+    缺省（env 未设）返回设计值 ``DEFAULT_DAILY_TOKEN_BUDGET``；``0``/``off``/``none``/
+    ``false`` 显式关闭（``None``，语义与 ``utc_day_max=None`` 一致：不设该维度上限，
+    记账照常）；其余非负整数按字面生效。一个解析不出的上限拒绝启动而不是静默变成
+    "没上限"——那是预算边界上最不能做的替换。
+    """
+
+    from life_request_budget import DEFAULT_DAILY_TOKEN_BUDGET
+
+    raw = str(environment.get(ENV_REQUEST_DAILY_TOKEN_BUDGET) or "").strip()
+    if not raw:
+        return DEFAULT_DAILY_TOKEN_BUDGET
+    if raw.lower() in {"0", "off", "none", "false"}:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError("%s must be a non-negative int (or 0/off to disable), got %r"
+                         % (ENV_REQUEST_DAILY_TOKEN_BUDGET, raw)) from None
+    if value < 0:
+        raise ValueError("%s must be a non-negative int, got %r"
+                         % (ENV_REQUEST_DAILY_TOKEN_BUDGET, raw))
+    return value or None
+
+
+def wake_ticket_est_total(day_root: Path | str) -> Optional[int]:
+    """07 章 §二→§四 的接缝读数：当期 wake 票 ``est_tokens`` 合计（只读、零写入）。
+
+    读 runtime-migration 投影的 ``wake_coalescer.wake_tickets_summary``。读不到
+    （模块不在路径上、状态不存在、票账为空、内容损坏）一律 ``None``——``None`` 在
+    ``reserve(est_tokens=...)`` 里恰好落到保守常数
+    ``DEFAULT_CONSERVATIVE_TOKEN_RESERVATION``，绝不猜一个更大的数。
+    """
+
+    try:
+        try:
+            import v02_runtime_governance_migration as rm_engine
+        except ImportError:
+            from components.life.scripts import (
+                v02_runtime_governance_migration as rm_engine)
+        projection = rm_engine.project_v02_runtime_migration(Path(day_root))
+        summary = ((projection.get("wake_coalescer") or {})
+                   .get("wake_tickets_summary") or {})
+        total = summary.get("est_tokens_total")
+        if isinstance(total, bool) or not isinstance(total, int) or total <= 0:
+            return None
+        return int(total)
+    except Exception:
+        return None
+
+
+def _wake_ticket_day_root(state_root: Path | str) -> Optional[Path]:
+    """wake 票账所在的实例日根（``<instance>/phone/`` 持有 ``v02_runtime_migration.json``）。
+
+    沿用 ``v02_v03_daily_loop_bridge.resolve_day_and_life_roots`` 的两套既有布局解析；
+    解析不出 ``phone/`` 目录就 ``None``——票 est 是 best-effort 增益，找不到票账就按
+    保守常数计，绝不为它发明一种新布局。
+    """
+
+    try:
+        try:
+            import v02_v03_daily_loop_bridge as vbridge
+        except ImportError:
+            from components.life.scripts import v02_v03_daily_loop_bridge as vbridge
+        inst_root, _life_root = vbridge.resolve_day_and_life_roots(Path(state_root))
+    except Exception:
+        inst_root = Path(state_root)
+    if (inst_root / "phone").is_dir():
+        return inst_root
+    return None
+
+
+class WakeTicketEstimateRequestBudget:
+    """生产装配的预算出口：把当期 wake 票 est 合计喂进每一次 ``reserve``。
+
+    07 章 §四的接线点：``BudgetedCognitionAdapter`` / ``BudgetedModelClient`` 在 HTTP
+    边界调用 ``reserve(kind)``（不带 est），本包装在那同一跳把当前票账的
+    ``wake_tickets_summary.est_tokens_total``（无票/读不到 → 保守常数）补进
+    ``est_tokens``。除 ``reserve`` 外全部转发给内层 ``LifeRequestBudget``——包括
+    属性**写**（resident 的段上限 ``requests.utc_day_max = ...`` 必须落到真实账本
+    上）：视图、检查、failstop、attempt_guard 的语义零改动。
+    """
+
+    def __init__(self, inner: Any,
+                 *, est_reader: Optional[Callable[[], Optional[int]]] = None) -> None:
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "_est_reader", est_reader)
+
+    def reserve(self, kind: Any = None, *, est_tokens: Optional[int] = None,
+                now: Any = None) -> dict[str, Any]:
+        if est_tokens is None and self._est_reader is not None:
+            est_tokens = self._est_reader()
+        args = () if kind is None else (kind,)
+        return self._inner.reserve(*args, est_tokens=est_tokens, now=now)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_inner"), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(object.__getattribute__(self, "_inner"), name, value)
+
+
 def request_budget(environment: Mapping[str, str], state_root: Path | str) -> Any:
     """The persisted request budget for this instance, or ``None`` when unconfigured.
 
@@ -135,24 +246,37 @@ def request_budget(environment: Mapping[str, str], state_root: Path | str) -> An
     A window is opened the first time an identity is seen, and a plain restart carrying
     the same identity continues it.  A *new* identity is refused unless the caller
     explicitly asked for a new window, so restarting cannot mint a fresh allowance.
+
+    07 章 §四：with the call ceilings in place the returned budget also carries the
+    daily token dimension -- ``daily_token_budget`` defaults to the design value 50000
+    (``ENV_REQUEST_DAILY_TOKEN_BUDGET`` lowers, disables or raises it), and every
+    ``reserve`` is charged the *current* wake-ticket ``est_tokens`` sum (the
+    conservative constant when no tickets are readable), so a persisted wake batch's
+    estimated cost lands in the same ledger the call ceiling keeps.
     """
 
-    from life_request_budget import LifeRequestBudget
+    from life_request_budget import DEFAULT_DAILY_TOKEN_BUDGET, LifeRequestBudget
 
     day_max = _int_env(environment, ENV_REQUEST_UTC_DAY_MAX)
     window_max = _int_env(environment, ENV_REQUEST_RUN_WINDOW_MAX)
     if day_max is None and window_max is None:
         return None
+    token_budget = _daily_token_budget(environment)
     run_id = str(environment.get(ENV_RUN_ID) or "").strip() or (
         "run:" + hashlib.sha256(str(state_root).encode("utf-8")).hexdigest()[:16])
     budget = LifeRequestBudget(Path(state_root), utc_day_max=day_max,
                                run_window_max=window_max, run_id=run_id,
+                               daily_token_budget=token_budget,
                                failstop=str(environment.get("NYA02_BOUNDED_FAILSTOP") or "") == "1",
                                request_deadline=environment.get("NYA02_REQUEST_DEADLINE"))
     allow_new = str(environment.get(ENV_NEW_RUN_WINDOW) or "").strip().lower() in {
         "1", "true", "yes", "on"}
     budget.ensure_window(allow_new=allow_new)
-    return budget
+    # 07 章 §四 生产接线：每一次 reserve 的 est 由当期票合计供给（无票 → 保守常数）。
+    # 票账日根解析不出就完全跳过读数——保守常数路径与今天的行为逐字节一致。
+    day_root = _wake_ticket_day_root(state_root)
+    est_reader = (lambda: wake_ticket_est_total(day_root)) if day_root is not None else None
+    return WakeTicketEstimateRequestBudget(budget, est_reader=est_reader)
 
 
 #: D (life-v1): the explicit work binding and the World/Body read seam.  The work artifact is
@@ -1468,8 +1592,11 @@ __all__ = [
     "runner_tick",
     "ENV_REQUEST_RUN_WINDOW_MAX",
     "ENV_REQUEST_UTC_DAY_MAX",
+    "ENV_REQUEST_DAILY_TOKEN_BUDGET",
     "ENV_RUN_ID",
     "request_budget",
+    "wake_ticket_est_total",
+    "WakeTicketEstimateRequestBudget",
     "resolve_situation_source",
     "resolve_claims_service",
     "resolve_sharing_service",

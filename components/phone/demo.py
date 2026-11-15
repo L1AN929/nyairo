@@ -902,7 +902,8 @@ def prepare_demo(
     seed: int = DEFAULT_SEED,
     theme: str = DEFAULT_THEME,
     reading_title: str = DEFAULT_READING_TITLE,
-    reading_content: str = DEFAULT_READING_CONTENT,
+    reading_content: Optional[str] = DEFAULT_READING_CONTENT,
+    starter_reading: bool = False,
     with_world: bool = False,
     run_id: Optional[str] = None,
     seed_work_artifact: bool = True,
@@ -954,7 +955,8 @@ def prepare_demo(
             raise PhoneDemoError("SUPPLY_NOT_READY")
         prepared = _prepare_owners(root_path, socket_path, subject=subject, seed=seed,
                                    theme=theme, reading_title=reading_title,
-                                   reading_content=reading_content, with_world=with_world,
+                                   reading_content=reading_content,
+                                   starter_reading=starter_reading, with_world=with_world,
                                    run_id=run_id,
                                    seed_work_artifact=seed_work_artifact,
                                    request_utc_day_max=request_utc_day_max,
@@ -992,7 +994,8 @@ def prepare_demo(
 
 
 def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, theme: str,
-                    reading_title: str, reading_content: str,
+                    reading_title: str, reading_content: Optional[str],
+                    starter_reading: bool = False,
                     with_world: bool = False, run_id: Optional[str] = None,
                     seed_work_artifact: bool = True,
                     request_utc_day_max: Optional[int] = None,
@@ -1032,6 +1035,7 @@ def _prepare_owners(root: Path, socket_path: Path, *, subject: str, seed: int, t
         world_theme=str(theme),
         reading_title=reading_title,
         reading_content=reading_content,
+        starter_reading=starter_reading,
         private_items_title=PRIVATE_ITEMS_TITLE,
         create_private_items=True,
         run_id=run_id,

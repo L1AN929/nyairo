@@ -54,6 +54,7 @@ from life_artifact_port import (  # noqa: E402
     ArtifactResumePoint,
     LifeArtifactPort,
     LifeArtifactUnavailable,
+    is_album_manifest,
 )
 
 #: Availability as the candidate contract spells it (the value AG-1 reads).
@@ -126,6 +127,11 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         #: What the last discover()/refresh() saw for the closeout seam, per artifact id.
         self.last_closeout_targets: set[str] = set()
         self.last_closeout_skip_reasons: dict[str, str] = {}
+        #: 0.7 stage 3: artifacts a *due* item already names as its own executable target.  The
+        #: due item is the reminder she wrote; a second plain continuation for the very same
+        #: object is the same choice spelled twice (and would push the round over AG-1's
+        #: sixteen-candidate budget).  Report only.
+        self.last_due_dedupe_skips: dict[str, str] = {}
         #: v0.5: artifact continuation entries dropped because a *reserved today slot* already
         #: offers the same real executable target.  The closeout entry for that object is a
         #: different action and is never dropped by this.  Report only.
@@ -135,6 +141,10 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         #: v0.4 research: artifacts the workspace calls material and this source therefore never
         #: offers as work, per artifact id (report only).
         self.last_material_skip_reasons: dict[str, str] = {}
+        #: EP-16 album manifests are media references, not text works.  An import that just
+        #: landed is already out of the continuation offer; the skip is reported by name, not
+        #: silently dropped (the owner still lists the artifact -- it is a picture, not a work).
+        self.last_album_skip_reasons: dict[str, str] = {}
         #: What the last discover()/refresh() saw for that material, per artifact id.
         self.last_reading_state: dict[str, dict[str, Any]] = {}
         self.last_reading_skip_reason: Optional[str] = None
@@ -383,11 +393,17 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         points: list[ArtifactResumePoint] = []
         self.last_reading_skip_reason = None
         self.last_paused_skip_reasons = {}
+        self.last_share_skip_reasons = {}
         paused = self._paused_targets()
         # v0.4 research: an imported material is reference text, not a work.  The workspace is read
         # once per pass (it is a bounded read), so a material imported a moment ago is already out.
         material_ids = self._material_exclusions()
         self.last_material_skip_reasons = {}
+        self.last_album_skip_reasons = {}
+        # v0.7 stage 5: a share draft is an artifact of the same owner library, but it is a
+        # *sharing record*, not a work to continue.  B's own title marker decides it, and the
+        # row is already in hand from the one owner list above -- no extra read, no guessing.
+        import life_sharing_context as lsc
         for row in self.port.list_artifacts():
             if str(row.get("lifecycle")) != "ACTIVE":
                 continue
@@ -395,6 +411,9 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
             if not artifact_id:
                 continue
             if artifact_id in self.exclude_artifact_ids:
+                continue
+            if lsc.is_share_title(row.get("title")):
+                self.last_share_skip_reasons[artifact_id] = "SHARE_DRAFT_NOT_A_WORK"
                 continue
             if self._bare_id(artifact_id) in material_ids:
                 # Reported, never silently dropped: "the workspace says this is material" is a
@@ -417,6 +436,12 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                         self.last_reading_skip_reason = str(state.get("state") or "UNAVAILABLE")
                         continue
             point = self.port.resume_point(artifact_id)
+            if is_album_manifest(point.content):
+                # EP-16: an imported picture is a real artifact of hers, but its head is a
+                # media manifest -- never the text work to continue.  Report the skip; the
+                # album has its own owner read surface.
+                self.last_album_skip_reasons[artifact_id] = "ALBUM_MANIFEST_NOT_A_WORK"
+                continue
             if point.resumable:
                 points.append(point)
         return points
@@ -439,9 +464,26 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         self.last_closeout_targets = self._closeout_targets()
         self.last_closeout_skip_reasons = {}
         self.last_reserved_dedupe_skips = {}
+        self.last_due_dedupe_skips = {}
         extra_total = len(extra_items)
         reserved_targets: set[str] = set()
         reserved_refs: set[str] = set()
+        #: A due item that names an artifact is already an executable offer for *that* object
+        #: (``fitem:`` with the artifact as its target).  The plain continuation entry for the
+        #: same artifact would be the same choice twice; the due item wins because it is the one
+        #: that carries her own time binding, and dropping the plain copy keeps the round within
+        #: AG-1's sixteen-candidate budget.  This never touches the closeout entry (a different
+        #: action) and never hides the artifact from the owner.
+        due_targets: set[str] = set()
+        for extra_item in extra_items:
+            detail = (extra_item.get("detail")
+                      if isinstance(extra_item.get("detail"), Mapping) else {})
+            if str(detail.get("kind") or "") != "FUTURE_ITEM_DUE":
+                continue
+            for target in extra_item.get("target_refs") or ():
+                bare = self._bare_id(target)
+                if bare:
+                    due_targets.add(bare)
         for extra_item in extra_items:
             detail = (extra_item.get("detail")
                       if isinstance(extra_item.get("detail"), Mapping) else {})
@@ -481,6 +523,17 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                 # twice.  The *closeout* entry is a different legal action and stays.
                 self.last_reserved_dedupe_skips[str(point.artifact_id)] = (
                     "RESERVED_TARGET_ALREADY_OFFERED")
+                deduped += 1
+                if closeout_offered:
+                    items.append(self._closeout_item_for(point, obs_iso))
+                continue
+            if bare in due_targets:
+                # 0.7: a due item already carries this artifact as its executable target, so the
+                # plain continuation for the same object is the same choice twice.  Keep the
+                # due-bound one (the ``fitem:`` candidate built from ``extra_items`` below) and
+                # the closeout entry (a different action); report the plain copy as skipped.
+                self.last_due_dedupe_skips[str(point.artifact_id)] = (
+                    "FUTURE_ITEM_DUE_ALREADY_OFFERS_TARGET")
                 deduped += 1
                 if closeout_offered:
                     items.append(self._closeout_item_for(point, obs_iso))
@@ -832,6 +885,12 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                                    observed_at=obs_iso, new_status=status)
         if not point.resumable:
             return self.invalidate(candidate, reason_code="ARTIFACT_NOT_CONTINUABLE",
+                                   observed_at=obs_iso, new_status=CANDIDATE_STATUS_WITHDRAWN)
+        if is_album_manifest(point.content):
+            # EP-16: the same object, now (or still) a picture manifest.  A continuation that
+            # somehow named it is withdrawn by name instead of being refreshed as a work.
+            self.last_album_skip_reasons[artifact_id] = "ALBUM_MANIFEST_NOT_A_WORK"
+            return self.invalidate(candidate, reason_code="ALBUM_MANIFEST_NOT_A_WORK",
                                    observed_at=obs_iso, new_status=CANDIDATE_STATUS_WITHDRAWN)
         if any(str(ref).startswith("closeout:") for ref in (candidate.target_refs or [])):
             # v0.4 C: a wrap-up candidate is bound to *one* offer (the plan's target and the head

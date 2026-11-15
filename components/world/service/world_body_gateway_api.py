@@ -521,6 +521,10 @@ class GatewaySurface:
             "current": {
                 "pose": pose or None,
                 "recovery_state": recovery_state,
+                # The owner's own session mode, so a client can tell the night sleep
+                # (``sleep_like``) from an ordinary rest session without guessing.  It is
+                # a capability fact, not a raw somatic value.
+                "recovery_mode": recovery.get("mode") or None,
                 "travelling": travelling,
                 "rest_surface": surface_id,
             },

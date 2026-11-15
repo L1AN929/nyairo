@@ -3,11 +3,16 @@
 
 Status of this protocol (read before wiring)
 --------------------------------------------
-There is **no S07 affect owner** in the tree: the Affect reconnaissance found no
-owner for stable affect (``CHIYO-施工规划/05-身体与情绪现状勘察.md`` §2), and the
-design says a short appraisal is light, may fade and does not need a full
-psychological engine (15:147).  So this module is deliberately the smallest thing
-that can exist honestly:
+Update 2026-11-14: the minimal **S07 affect owner now exists** — it lives in
+``components/life/scripts/s07_affect_owner.py`` (typed ``mood_shift`` /
+``affect_pulse`` / ``drive`` records, single-owner attribution, bounded
+quantized intensity, mandatory sources, deterministic decay, mandatory expiry).
+This module is *not* the owner and has not become one: it stays a light,
+sourced, bounded short-appraisal projection (the design says a short appraisal
+may fade and does not need a full psychological engine, 15:147), and it
+forwards caller-supplied affect records through the owner's read contract via
+the ``affect_records`` parameter — with no records passed, behaviour is exactly
+what it was before the owner landed.  What remains true here:
 
 * **experimental, rebuildable projection** — it takes appraisals the caller
   already has and projects them; it holds no store, writes no file, keeps no
@@ -64,6 +69,7 @@ if _LIFE_SCRIPTS not in sys.path:
     sys.path.insert(0, _LIFE_SCRIPTS)
 
 import body_capacity_source as body_capacity  # noqa: E402
+import s07_affect_owner as s07_owner  # noqa: E402
 
 __all__ = [
     "APPRAISAL_STATUS_INVALID",
@@ -106,8 +112,9 @@ APPRAISAL_STATUS_VALID = "VALID"
 APPRAISAL_STATUS_INVALID = "INVALID"
 VALID_APPRAISAL_STATUSES = frozenset({APPRAISAL_STATUS_VALID, APPRAISAL_STATUS_INVALID})
 
-#: This module's own closed reason vocabulary.  There is no S07 owner, so these
-#: are projection labels and are never presented as an owner's assertion.
+#: This module's own closed reason vocabulary.  These are projection labels of
+#: *this* (non-owner) module and are never presented as the S07 owner's
+#: assertion — the affect domain's own vocabulary lives in s07_affect_owner.
 REASON_OK_SOURCED_APPRAISAL = "OK_SOURCED_BOUNDED_APPRAISAL"
 REASON_APPRAISAL_NOT_MAPPING = "APPRAISAL_NOT_A_MAPPING"
 REASON_APPRAISAL_REF_MISSING = "APPRAISAL_REF_MISSING"
@@ -472,23 +479,25 @@ def _source_intensity(items: Sequence[Mapping[str, Any]]) -> tuple[dict, list]:
     return declared, sorted(conflicts)
 
 
-def build_short_appraisal_view(
+def _assemble_view(
     *,
     home: Any,
-    subject_id: Optional[str] = None,
-    now: Any = None,
-    appraisals: Sequence[Any] = (),
-    corrections: Sequence[Any] = (),
-    lost_source_refs: Sequence[Any] = (),
+    subject_id: Optional[str],
+    now: Any,
+    appraisals: Sequence[Any],
+    corrections: Sequence[Any],
+    lost_source_refs: Sequence[Any],
+    affect_records: Sequence[Any],
 ) -> dict[str, Any]:
-    """Project the appraisals the caller already has into a bounded read view.
-
-    ``appraisals`` are mappings with ``appraisal_ref``, ``source_refs``,
-    ``observed_at`` and ``valid_until`` (``uncertainty`` / ``declared_scope`` /
-    ``intensity`` / ``correction_refs`` optional).  ``corrections`` carry
-    ``correction_ref`` + ``corrects_refs``.  ``lost_source_refs`` are sources the
-    caller can no longer read.  ``now`` is injected by the caller.
+    """The real builder.  ``affect_records`` are S07 records minted by the owner
+    (``s07_affect_owner.mint_affect_record``); the pinned public signature of
+    ``build_short_appraisal_view`` stays fixed, so the owner-version read face
+    (``affect_records``) is reached through :class:`ShortAppraisalView`, which
+    forwards them here.  With no records the ``affect`` block carries only the
+    owner pointer and an empty identity-only face — behaviour otherwise
+    unchanged from before the owner landed.
     """
+
 
     reference = None if now is None else _instant(now, "now")
     reference_iso = reference.isoformat() if reference is not None else None
@@ -544,6 +553,19 @@ def build_short_appraisal_view(
     else:
         empty_reason = invalid[0]["reason_code"]
 
+    # S07 affect read face: forwarded through the owner's contract.  With no
+    # records this is still computed (identity resolution only) and adds the
+    # owner pointer without changing any appraisal behaviour.  NOTE: the
+    # appraisal-surface protocol keeps ``s07_owner: None`` — this module is not
+    # the affect owner and its appraisal face engages no owner; the owner
+    # pointer lives on the ``affect`` block only.
+    affect_view = s07_owner.build_s07_affect_view(
+        home=home,
+        subject_id=resolved_subject,
+        now=now,
+        records=affect_records,
+    )
+
     return {
         "schema_version": SCHEMA_SHORT_APPRAISAL_VIEW,
         "kind": KIND_SHORT_APPRAISAL_VIEW,
@@ -568,6 +590,21 @@ def build_short_appraisal_view(
         "source_intensity": intensity,
         "conflicting_source_refs": conflicts,
         "intensity_aggregation": "none",
+        "affect": {
+            "owner_module": s07_owner.S07_AFFECT_OWNER_ID,
+            "engaged": bool(affect_records),
+            "identity_bound": affect_view["identity_bound"],
+            "record_kinds": affect_view["record_kinds"],
+            "live_records": affect_view["live_records"],
+            "live_record_refs": affect_view["live_record_refs"],
+            "has_live_affect": affect_view["has_live_affect"],
+            "faded_count": affect_view["faded_count"],
+            "expired_count": affect_view["expired_count"],
+            "invalid_records": affect_view["invalid_records"],
+            "empty_reason_code": affect_view["empty_reason_code"],
+            "intensity_aggregation": "none",
+            "zero_tombstone": True,
+        },
         "protocol": {
             "kind": "experimental_rebuildable_projection",
             "canonical": False,
@@ -593,6 +630,39 @@ def build_short_appraisal_view(
     }
 
 
+def build_short_appraisal_view(
+    *,
+    home: Any,
+    subject_id: Optional[str] = None,
+    now: Any = None,
+    appraisals: Sequence[Any] = (),
+    corrections: Sequence[Any] = (),
+    lost_source_refs: Sequence[Any] = (),
+) -> dict[str, Any]:
+    """Project the appraisals the caller already has into a bounded read view.
+
+    ``appraisals`` are mappings with ``appraisal_ref``, ``source_refs``,
+    ``observed_at`` and ``valid_until`` (``uncertainty`` / ``declared_scope`` /
+    ``intensity`` / ``correction_refs`` optional).  ``corrections`` carry
+    ``correction_ref`` + ``corrects_refs``.  ``lost_source_refs`` are sources the
+    caller can no longer read.  ``now`` is injected by the caller.
+
+    This signature is part of the module's frozen public contract.  The owner
+    version of the read face (S07 affect records projected through
+    ``s07_affect_owner``) is reached via :class:`ShortAppraisalView`, which
+    accepts and forwards ``affect_records``.
+    """
+    return _assemble_view(
+        home=home,
+        subject_id=subject_id,
+        now=now,
+        appraisals=appraisals,
+        corrections=corrections,
+        lost_source_refs=lost_source_refs,
+        affect_records=(),
+    )
+
+
 def _identity_unbound_view(*, home_ref: Optional[str], reason: str) -> dict[str, Any]:
     """The one-subject rule could not be resolved: nothing can be attributed."""
 
@@ -616,6 +686,21 @@ def _identity_unbound_view(*, home_ref: Optional[str], reason: str) -> dict[str,
         "source_intensity": {},
         "conflicting_source_refs": [],
         "intensity_aggregation": "none",
+        "affect": {
+            "owner_module": s07_owner.S07_AFFECT_OWNER_ID,
+            "engaged": False,
+            "identity_bound": False,
+            "record_kinds": list(s07_owner.AFFECT_RECORD_KINDS),
+            "live_records": [],
+            "live_record_refs": [],
+            "has_live_affect": False,
+            "faded_count": 0,
+            "expired_count": 0,
+            "invalid_records": [],
+            "empty_reason_code": reason,
+            "intensity_aggregation": "none",
+            "zero_tombstone": True,
+        },
         "protocol": {
             "kind": "experimental_rebuildable_projection",
             "canonical": False,
@@ -660,9 +745,21 @@ class ShortAppraisalView:
     unparseable instant).  The object stores nothing between calls: every
     ``build`` projects exactly the input it was given, which is what
     "rebuildable" means here.
+
+    Owner version: ``affect_records`` (S07 records minted by
+    ``s07_affect_owner.mint_affect_record``) may be fixed per instance or passed
+    per ``build`` call; they are projected through the owner's read contract
+    into the view's ``affect`` block.  With none supplied, behaviour is exactly
+    the pre-owner behaviour.
     """
 
-    def __init__(self, *, home: Any, subject_id: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        *,
+        home: Any,
+        subject_id: Optional[str] = None,
+        affect_records: Sequence[Any] = (),
+    ) -> None:
         resolved_subject = _subject(subject_id)
         if resolved_subject is None:
             raise ShortAppraisalViewError(
@@ -672,6 +769,7 @@ class ShortAppraisalView:
         self.home = home
         self.home_ref = _home_ref(home)
         self.subject_id = resolved_subject
+        self.affect_records = list(affect_records or ())
         self.last_view: Optional[dict[str, Any]] = None
 
     def build(
@@ -681,14 +779,17 @@ class ShortAppraisalView:
         appraisals: Sequence[Any] = (),
         corrections: Sequence[Any] = (),
         lost_source_refs: Sequence[Any] = (),
+        affect_records: Optional[Sequence[Any]] = None,
     ) -> dict[str, Any]:
-        view = build_short_appraisal_view(
+        records = self.affect_records if affect_records is None else list(affect_records or ())
+        view = _assemble_view(
             home=self.home,
             subject_id=self.subject_id,
             now=now,
             appraisals=appraisals,
             corrections=corrections,
             lost_source_refs=lost_source_refs,
+            affect_records=records,
         )
         self.last_view = view
         return view

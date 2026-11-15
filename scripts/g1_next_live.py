@@ -90,8 +90,9 @@ def _bare(value: Any) -> str:
 
 
 def _matching_continue(p2: Mapping[str, Any], artifact_a: str, activity_ref: str) -> Optional[dict]:
-    """p2 的第一条「同 A、同 actA、带新 Action」的 CONTINUE 轮；找不到返回 None。"""
+    """p2 的第一条「同 A、同 actA、带新 Action」且真实落新版本的 CONTINUE 轮（无落盘则回退首条匹配轮）。"""
 
+    fallback: Optional[dict] = None
     for row in p2.get("rounds") or ():
         wake = dict((row or {}).get("wake") or {})
         if str(wake.get("decision") or "") != "CONTINUE":
@@ -102,8 +103,11 @@ def _matching_continue(p2: Mapping[str, Any], artifact_a: str, activity_ref: str
             continue
         if not str(wake.get("action_id") or ""):
             continue
-        return {"row": row, "wake": wake}
-    return None
+        if fallback is None:
+            fallback = {"row": row, "wake": wake}
+        if wake.get("owner_version_created") is True:
+            return {"row": row, "wake": wake}
+    return fallback
 
 
 def _segments(p2: Mapping[str, Any], *, cross_pid: bool) -> dict[str, str]:

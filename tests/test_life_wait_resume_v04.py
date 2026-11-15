@@ -125,13 +125,21 @@ class WaitBasisSourceTest(unittest.TestCase):
             self.assertIsNone(lwb.basis_from_readiness(readiness), reason)
 
     def test_only_an_exhausted_material_waits_for_a_next_version(self):
+        # v0.7: reaching the end of a reading revision completes that reading (READING_WAIT_STATES
+        # is empty), so readiness never auto-offers a wait dependency for reading states; explicit
+        # reading_basis() and work-head no_change remain the named head-change dependencies.
         exhausted = _Readiness(available=False, reason_code="READING_EXHAUSTED",
                                target_ref="artifact:" + OWNER_ID, source_revision=HEAD_V3)
-        basis = lwb.basis_from_readiness(exhausted, state="EXHAUSTED")
-        self.assertIsNotNone(basis)
-        self.assertEqual(basis["source"], lwb.SOURCE_READING)
-        # Everything that is not "read to the end of this revision" is *not* a wait: a revoked
-        # source will never deliver a new version, and an unknown state is not a known dependency.
+        self.assertIsNone(lwb.basis_from_readiness(exhausted, state="EXHAUSTED"))
+        explicit = lwb.reading_basis(artifact_id=OWNER_ID, baseline_head=HEAD_V3)
+        self.assertIsNotNone(explicit)
+        self.assertEqual(explicit["source"], lwb.SOURCE_READING)
+        work_no_change = _Readiness(available=False, reason_code="WORK_NO_CHANGE_CONFIRMED",
+                                    target_ref="artifact:" + OWNER_ID, source_revision=HEAD_V3)
+        work_basis = lwb.basis_from_readiness(work_no_change)
+        self.assertIsNotNone(work_basis)
+        self.assertEqual(work_basis["source"], lwb.SOURCE_WORK_HEAD)
+        # Everything else in reading states is also *not* a readiness wait dependency.
         for reason, state in (("READING_SOURCE_REVOKED", "SOURCE_REVOKED"),
                               ("READING_MATERIAL_NOT_ACTIVE", "MATERIAL_NOT_ACTIVE"),
                               ("READING_OWNER_UNAVAILABLE", "OWNER_UNAVAILABLE"),

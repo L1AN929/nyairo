@@ -13,14 +13,17 @@ import json
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, tzinfo
 from typing import Any, Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+#: 业务日界唯一权威（19 章 §一.4）：默认时区与预算同源（固定偏移 +08:00，可配置），
+#: 不再各自硬编码 ``Asia/Tokyo``。
+import business_day_key as _bdk
 
 
 FEATURE_ENV = "CHIYO_WORLD_SCHOOL_DAY_ENABLED"
 WORLD_ID = "shiomi_city"
-WORLD_TIMEZONE = "Asia/Tokyo"
+WORLD_TIMEZONE = _bdk.DEFAULT_BUSINESS_TZ_LABEL
 SCHEMA_VERSION = "world.school.day.v1"
 PROJECTION_KIND = "shiomi_school_day"
 ATTENDANCE_CANDIDATE_KIND = "world_school_class_attendance"
@@ -98,11 +101,12 @@ def feature_enabled(environment: Optional[Mapping[str, str]] = None) -> bool:
     return _truthy(_environment(environment).get(FEATURE_ENV))
 
 
-def _zone() -> ZoneInfo:
-    try:
-        return ZoneInfo(WORLD_TIMEZONE)
-    except ZoneInfoNotFoundError as exc:  # pragma: no cover - platform data
-        raise SchoolDayError("school timezone is unavailable") from exc
+def _zone() -> tzinfo:
+    # 业务日界共享解析（19 章 §一.4）；解析不了仍然 fail closed。
+    zone = _bdk.resolve_zone(WORLD_TIMEZONE)
+    if zone is None:  # pragma: no cover - 默认标签恒可解析
+        raise SchoolDayError("school timezone is unavailable")
+    return zone
 
 
 def _local(now: Optional[datetime]) -> datetime:

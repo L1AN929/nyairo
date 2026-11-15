@@ -46,7 +46,7 @@ result all produce ``None`` here, which can only ever leave the condition PENDIN
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Mapping, Optional
 
 SCHEMA_VERSION = "chiyo.life.wait_basis.v1"
@@ -66,12 +66,15 @@ SOURCE_WORK_HEAD = "WORK_HEAD_AFTER_NO_CHANGE"
 SOURCE_READING = "READING_MATERIAL_NEXT_VERSION"
 BASIS_SOURCES = (SOURCE_WORK_HEAD, SOURCE_READING)
 
-#: The reading states that really are "this material owes me a next version".  Everything else
-#: (``SOURCE_REVOKED``, ``MATERIAL_NOT_ACTIVE``, ``MATERIAL_EMPTY``, ``POSITION_OUT_OF_RANGE``,
-#: ``PRIVATE_ITEMS_UNAVAILABLE``, ``OWNER_UNAVAILABLE``/``OWNER_REFUSED``, ``READING_NOT_BOUND``,
-#: ``UNKNOWN``) is *not* a dependency on a future version: a revoked source will never deliver
-#: one, and an unknown state is not a known dependency at all.
-READING_WAIT_STATES = ("EXHAUSTED",)
+#: The reading states that really are "this material owes me a next version".  As of 0.7 this
+#: is deliberately **empty**: reaching the end of the current revision is the end of *this*
+#: reading, not a dependency on a public next version.  The last page (and its annotation) is
+#: handled by the formal reading step, and LR-5's own page-position completion criterion turns
+#: it into COMPLETION_ELIGIBLE; waiting for "a new version" here would strand a finished book.
+#: A revoked source, an empty material, an out-of-range stop and an UNKNOWN state were never
+#: dependencies either.  Other contexts that really need a new version still use
+#: ``WORK_HEAD_AFTER_NO_CHANGE`` / ``reading_basis`` explicitly.
+READING_WAIT_STATES: tuple[str, ...] = ()
 
 #: ``ResumeCondition.parameters`` keys this module owns.  They are read back by the maintain
 #: step to re-check the *same* baseline; none of them is a predicate LR-4 has to interpret.
@@ -613,6 +616,73 @@ def body_easing_event(basis: Mapping[str, Any], *, observed_body_id: Any,
     }
 
 
+# =====================================================================================
+# 0.7 B: the reading-only short break -- an existing time condition, never a new timer
+# =====================================================================================
+#
+# A model PAUSE with no ``reevaluation_hint_ref`` is legal and stays legal for every other
+# Activity: it binds nothing and can never become a resume candidate.  Reading is the one
+# documented exception: an unfinished book paused without a hint would otherwise be stranded
+# forever, because the only conditions the cycle offered were "owner writes a new version" or
+# "my body eases".  This module therefore supplies a *reading-only* default: the existing
+# ``TIME_AT_OR_AFTER`` condition kind with a short interval counted from the round's own
+# observed instant.  It is not a new condition kind, store, owner or timer; LR-4's own due
+# scan reads it, and a satisfied condition only emits an OPEN eligibility -- a fresh Decision
+# must still choose RESUME.  The caller (the cycle) supplies this spec only when the PAUSE
+# target really is the foreground reading Activity and the material still has pages left.
+
+READING_PAUSE_SOURCE = "READING_SHORT_BREAK"
+#: 30 logical minutes.  This is the same order as the existing short daily stretch used by
+#: the demo clock; it is a pause, not a sleep and not a new schedule.
+READING_PAUSE_DEFAULT_SECONDS = 1800
+READING_PAUSE_CONDITION_KIND = "TIME_AT_OR_AFTER"
+
+
+def reading_pause_default_spec(*, activity_ref: Any, observed_at: Any,
+                               seconds: int = READING_PAUSE_DEFAULT_SECONDS,
+                               ) -> Optional[dict[str, Any]]:
+    """The reading-only default condition for an unconditional model PAUSE -- or ``None``.
+
+    ``None`` means the instant could not be read, the activity ref is empty or the interval
+    is not a positive integer; then the PAUSE simply stays unconditional, exactly as before.
+    """
+
+    ref = str(activity_ref or "").strip()
+    if not ref:
+        return None
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    try:
+        base = datetime.fromisoformat(str(observed_at or "").replace("Z", "+00:00"))
+        target = base + timedelta(seconds=seconds)
+    except (TypeError, ValueError):
+        return None
+    if base.tzinfo is None or target.tzinfo is None:
+        return None
+    target_iso = target.isoformat()
+    token = _token("%s|%s|%d" % (ref, base.isoformat(), seconds))
+    return {
+        "basis_ref": "pausebasis:%s" % token,
+        "source": READING_PAUSE_SOURCE,
+        "activity_ref": ref,
+        "condition_kind": READING_PAUSE_CONDITION_KIND,
+        "waiting_on_ref": "wait_dep:reading_short_break.%s.%s" % (_token(ref), token),
+        "parameters": {
+            "target_time": target_iso,
+            "source": READING_PAUSE_SOURCE,
+            "requested_at": base.isoformat(),
+            "seconds": seconds,
+        },
+        "detail": ("the reading material still has pages left; this PAUSE binds the existing "
+                   "30-minute time condition so the same book can be resumed from its own "
+                   "checkpoint"),
+    }
+
+
 def basis_from_condition(condition: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     """Rebuild the basis a stored LR-4 condition was bound to (report/maintain only).
 
@@ -652,6 +722,9 @@ __all__ = [
     "PARAM_BODY_REF",
     "PARAM_SOURCE",
     "PROGRESS_BAND_RANK",
+    "READING_PAUSE_CONDITION_KIND",
+    "READING_PAUSE_DEFAULT_SECONDS",
+    "READING_PAUSE_SOURCE",
     "SCHEMA_VERSION",
     "SOURCE_BODY_REST",
     "SOURCE_READING",
@@ -672,6 +745,7 @@ __all__ = [
     "is_artifact_head_condition",
     "is_body_capacity_condition",
     "reading_basis",
+    "reading_pause_default_spec",
     "waiting_on_ref",
     "waiting_spec",
     "work_head_basis",

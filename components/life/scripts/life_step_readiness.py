@@ -63,6 +63,10 @@ REASON_WORLD_STEP_NOT_WIRED = "WORLD_STEP_NOT_WIRED"
 #: staged REST protocol.  The name says only that, never that the action failed or succeeded --
 #: submission, settlement and LR-5 completion stay separate layers.
 REASON_BODY_SINGLE_ACTION = "BODY_SINGLE_ACTION_NO_FURTHER_STEP"
+#: A daily hand action (``dailyact:`` PICK_UP / PLACE) carries exactly one owner verb and
+#: one completion fact.  Like a BODY action it has no second Life step: repeating the same
+#: target is not progress, and a refused step is closed by the owner rather than re-sent.
+REASON_DAILY_ACTION_SINGLE_ACTION = "DAILY_ACTION_SINGLE_ACTION_NO_FURTHER_STEP"
 #: A World move Activity has exactly one Life step: the departure submission.  Reaching the
 #: destination is settled by the World owner's own observation (``settle_world_journey``), and
 #: the journey engine starts its own next timed segment after each confirmed one -- neither is a
@@ -93,6 +97,11 @@ STAY_ACTIVITY_KIND = "STAY_AT_OBSERVED_PLACE"
 #: it is one of the two World-shaped Activities with no follow-up step of its own (the other is a
 #: GO_TO move, whose one Life step is its departure).
 BODY_ACTIVITY_KIND = "BODY_ACTION_AT_OBSERVED_PLACE"
+#: The Activity shape of one everyday hand action (mirrors
+#: ``autonomous_life_cycle.DAILY_ACTION_ACTIVITY_KIND``).  One such Activity carries one
+#: PICK_UP/PLACE target -- one owner verb and one completion fact -- so there is no second
+#: step to execute after it.
+DAILY_ACTION_ACTIVITY_KIND = "DAILY_ACTION_IN_OBSERVED_WORLD"
 #: The Activity shape of one World move (mirrors ``autonomous_life_cycle``'s
 #: ``_world_adoption_spec(activity_kind=...)``).  Its one Life step is the departure; the rest of
 #: the journey belongs to the World owner, so it is the other World-shaped Activity with no
@@ -312,6 +321,15 @@ def assess_step_readiness(
         return build(False, REASON_BODY_SINGLE_ACTION,
                      "a BODY Activity carries one action and one completion condition; this tree "
                      "defines no further step for it")
+    if kind == DAILY_ACTION_ACTIVITY_KIND or namespace == TARGET_DAILY_ACTION:
+        #: One PICK_UP/PLACE target == one owner verb and one completion fact.  There is no
+        #: defined second step, so a CONTINUE offered while this Activity still holds the
+        #: foreground would always land on ``NO_STEP_AVAILABLE``.  This says only that no
+        #: further step exists; it never claims the one step failed -- the cycle closes a
+        #: definitely refused step through the owner's own formal suspension transition.
+        return build(False, REASON_DAILY_ACTION_SINGLE_ACTION,
+                     "a dailyact Activity carries one hand action and one completion fact; "
+                     "this tree defines no further step for it")
     if namespace == TARGET_STAY or kind == STAY_ACTIVITY_KIND:
         return build(True, REASON_STAY_CHECKPOINT,
                      "a stay's step is its own internal checkpoint")
@@ -457,6 +475,12 @@ SITUATION_KEYS = (
     #: experience, a withdrawn one, a method re-written or moved to TRIAL/CONTESTED is a new
     #: situation; a clock tick is not.  Ids, heads and state words only -- no text.
     "practice_experiences", "practice_methods", "practice_reviews",
+    #: 2026-11-14 T3-wave2: the body dossier the owners reported this round (capacity band,
+    #: freshness, recovery-session phase — autonomous_life_cycle.fingerprint_parts already
+    #: supplies ``parts["body"]``) enters the whitelist, so a body that turned LIMITED (or a
+    #: recovery session opening) is a new situation instead of being silently unhashed.
+    #: Bounded owner words only -- no free text, no guessed values.
+    "body",
 )
 
 

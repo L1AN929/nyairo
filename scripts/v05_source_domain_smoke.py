@@ -171,9 +171,13 @@ def main() -> int:
         # The cycle's own work target is the source it actually offered (the receipt artifact
         # and the current work can differ in this fixture); the refusal must name *that* one.
         work_artifact = str(d_source.get("artifact_id") or "")
-        offered_source = next((row for row in
-                               (sharing_ref.latest_sharing_block(planner).get("sources") or [])
-                               if isinstance(row, dict)), {})
+        offered_sources = [row for row in
+                           (sharing_ref.latest_sharing_block(planner).get("sources") or [])
+                           if isinstance(row, dict)]
+        offered_source = next(
+            (row for row in offered_sources
+             if bare(row.get("artifact_id")) == bare(work_artifact)),
+            offered_sources[0] if offered_sources else {})
         check("prepare creates a real DRAFT bound to the work the request offered",
               prepared.get("ok") is True and prepared.get("state") == lss.STATE_DRAFT
               and bool(draft_d) and bool(d_bound) and bool(work_artifact)

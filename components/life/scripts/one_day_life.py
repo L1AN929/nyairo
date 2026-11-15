@@ -280,6 +280,31 @@ def _issue_grant(governance_socket: Path | str, *, subject: str, capability: str
 # ---------------------------------------------------------------------------------
 
 
+def resolve_reading_material(*, reading_content: Optional[str], reading_title: str,
+                             starter_reading: bool, seed: int,
+                             theme: str) -> dict[str, Any]:
+    """The one place the reading-material choice is made (pure, no owners touched).
+
+    Precedence, encoded so it cannot drift between callers and tests:
+
+    1. any explicit ``reading_content`` -- including the empty string -- keeps the caller's
+       explicit-text semantics and is returned verbatim (never replaced);
+    2. otherwise only an explicit ``starter_reading`` opt-in selects a deterministic
+       theme+seed starter text from the local library;
+    3. otherwise there is no reading material (the old default).
+    """
+
+    if reading_content is not None:
+        return {"title": reading_title, "content": reading_content, "starter": None}
+    if not starter_reading:
+        return {"title": reading_title, "content": None, "starter": None}
+    import starter_reading_library as _starter_library
+
+    selection = _starter_library.select_starter_reading(seed, theme)
+    return {"title": str(selection["title"]), "content": str(selection["content"]),
+            "starter": selection}
+
+
 def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socket: Path | str,
             subject: str, title: str, world_package: Optional[Path | str] = None,
             seed_content: Optional[str] = None, world_seed: int = 929711,
@@ -292,6 +317,7 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
             world_bridge_dir: Optional[Path | str] = None,
             reading_title: str = "",
             reading_content: Optional[str] = None,
+            starter_reading: bool = False,
             private_items_title: str = "私人日常事项",
             create_private_items: bool = False,
             create_work_artifact: bool = True,
@@ -383,7 +409,22 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
 
     # D (life-v1): the reading material is a *second* real artifact with its own explicit id.
     # Its versions are what a real page read is taken from; nothing here claims she read it.
+    # A theme+seed starter text is used **only** on the explicit opt-in path and only when the
+    # caller passed no reading content at all (``None``); an explicit text -- including the
+    # empty string -- keeps the existing explicit-text semantics and is never replaced.
+    resolved_reading = resolve_reading_material(
+        reading_content=reading_content, reading_title=reading_title,
+        starter_reading=starter_reading, seed=world_seed, theme=world_theme)
+    reading_title = resolved_reading["title"]
+    reading_content = resolved_reading["content"]
+    starter_selection: Optional[dict[str, Any]] = resolved_reading["starter"]
+    if starter_selection is not None:
+        steps.append({"step": "select_starter_reading",
+                      "entry_id": starter_selection["entry_id"],
+                      "theme": starter_selection["theme"], "seed": starter_selection["seed"],
+                      "pages": starter_selection["pages"]})
     reading_artifact_id: Optional[str] = None
+    reading_provided_by = "starter_library" if starter_selection else "operator"
     if reading_content:
         reading = supply_call(supply_socket, {
             "op": "create_artifact", "grant_id": artifact_grant["grant_id"],
@@ -395,7 +436,8 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
                               % (reading.get("status"), reading.get("detail")))
         reading_artifact_id = str(reading["artifact_id"])
         steps.append({"step": "create_reading_material", "artifact_id": reading_artifact_id,
-                      "version_id": reading.get("version_id"), "provided_by": "operator"})
+                      "version_id": reading.get("version_id"),
+                      "provided_by": reading_provided_by})
 
     # D (life-v1): the typed private-items document (B's v1 prototype protocol), bound to its
     # own explicit artifact id.  A refusal here is recorded and reported, never hidden: the
@@ -461,6 +503,11 @@ def prepare(*, instance: Path | str, supply_socket: Path | str, governance_socke
         "CHIYO_NATIVE_LIFE_SUPPLY_SOCKET": str(supply_socket),
         "NYA02_SUBJECT": subject,
         "CHIYO_NATIVE_LIFE_SUPPLY_SUBJECT": subject,
+        # 0.7: the private-project/practice owner factories resolve the subject by *their* own
+        # documented env name.  The prepare profile already knows the real same-instance subject,
+        # so it records it under that existing authoritative alias too -- never a hard-coded
+        # "chiyo", and no host environment can stand in for it.
+        "CHIYO_LIFE_SUPPLY_SUBJECT": subject,
         "NYA02_ARTIFACT_GRANT": artifact_grant["grant_id"],
         "CHIYO_LIFE_SUPPLY_ARTIFACT_GRANT": artifact_grant["grant_id"],
         "CHIYO_LIFE_SUPPLY_WORKSPACE_ID": workspace_id,

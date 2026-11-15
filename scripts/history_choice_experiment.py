@@ -1056,11 +1056,11 @@ def m0_has_artifact(port: Any, h_ref: str) -> dict[str, Any]:
 
 
 def _idle_trigger_kind() -> str:
-    """cycle 自己的 IDLE_WINDOW 触发词（就是 AG-1 的 EXPLICIT_REEVALUATION）。"""
+    """cycle 的定时触发词（AG-1 的 EXPLICIT_REEVALUATION 真名，别名已废止）。"""
 
     import autonomous_life_cycle as cycle_module
 
-    return cycle_module.TRIGGER_IDLE_WINDOW
+    return cycle_module.TRIGGER_EXPLICIT_REEVALUATION
 
 
 def run_acquisition(bundle: Mapping[str, Any], *, ledger: BatchLedger, budget: Any,

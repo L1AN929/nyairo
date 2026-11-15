@@ -337,7 +337,7 @@ class AutonomousLifeRunner:
     # -- the wake itself -------------------------------------------------------
 
     def wake(self, *, kind: str, reason: str, trigger_ref: str,
-             trigger_kind: str = alc.TRIGGER_IDLE_WINDOW, act: bool = True,
+             trigger_kind: str = alc.TRIGGER_EXPLICIT_REEVALUATION, act: bool = True,
              dedupe: bool = False, now: Optional[datetime] = None,
              extra: Optional[Mapping[str, Any]] = None,
              maintain: bool = True,
@@ -540,7 +540,7 @@ class AutonomousLifeRunner:
             return self._record(WAKE_KIND_CHECK_WINDOW, "check-window", WAKE_NOT_DUE,
                                 "silence", moment,
                                 trigger_ref="evt:autonomous:check",
-                                trigger_kind=alc.TRIGGER_IDLE_WINDOW,
+                                trigger_kind=alc.TRIGGER_EXPLICIT_REEVALUATION,
                                 detail="the check window is not open yet: %s" % why,
                                 extra=({"waiting": upkeep} if upkeep is not None else None))
         return self.wake(kind=WAKE_KIND_CHECK_WINDOW, reason="check-window",
@@ -561,7 +561,7 @@ class AutonomousLifeRunner:
         if not noted["fresh"]:
             return self._record(WAKE_KIND_EVENT, kind, WAKE_DUPLICATE_EVENT, "silence",
                                 moment, trigger_ref=ref,
-                                trigger_kind=alc.TRIGGER_IDLE_WINDOW,
+                                trigger_kind=alc.TRIGGER_EXPLICIT_REEVALUATION,
                                 detail="the same event was already considered")
         trigger_kind = self._trigger_kind_for_event(kind)
         # v0.4 day-life: a real event *about the object the cycle is quiet about* is exactly what
@@ -592,7 +592,7 @@ class AutonomousLifeRunner:
 
         if kind == EVENT_RESUME_ELIGIBILITY_OPENED:
             return alc.TRIGGER_RESUME_OPENED
-        return alc.TRIGGER_IDLE_WINDOW
+        return alc.TRIGGER_EXPLICIT_REEVALUATION
 
     def _event_is_fresh(self, reason: str, ref: str, moment: datetime) -> bool:
         seen = _parse((self._event_state().get("seen") or {}).get("%s|%s" % (reason, ref)))

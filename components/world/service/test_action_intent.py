@@ -152,8 +152,10 @@ class IntentTests(unittest.TestCase):
         self.assertIn("PICK_UP", ai.EXPOSED_VERBS)
         self.assertIn("PLACE", ai.EXPOSED_VERBS)
         self.assertIn("CONSUME", ai.EXPOSED_VERBS)
-        self.assertEqual(tuple(ai.ACTION_ALLOWLIST),
-                         ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME"))
+        self.assertEqual(
+            tuple(ai.ACTION_ALLOWLIST),
+            ("MOVE", "POSE", "PICK_UP", "PLACE", "CONSUME", "REST", "ARRANGE", "TOGGLE_FIXTURE"),
+        )
         for verb in ("DROP", "THROW", "GIVE", "PUT_IN_CONTAINER", "STACK",
                      "EQUIP", "USE"):
             self.assertNotIn(verb, ai.ACTION_ALLOWLIST)

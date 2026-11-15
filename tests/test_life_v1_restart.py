@@ -103,9 +103,10 @@ WORKER = textwrap.dedent(
                                for c in candidates])
             about_work = [
                 c for c in candidates
-                if any(WORK in ref for ref in
-                       ([str(x) for x in (c.get("target_refs") or [])]
-                        + [str(c.get("source_ref") or "")]))]
+                if not any(str(x).startswith("closeout:") for x in (c.get("target_refs") or []))
+                and any(WORK in ref for ref in
+                        ([str(x) for x in (c.get("target_refs") or [])]
+                         + [str(c.get("source_ref") or "")]))]
             continue_legal = [c for c in about_work
                               if "CONTINUE" in [str(x) for x in (c.get("legal_decisions") or [])]]
             start_legal = [c for c in about_work

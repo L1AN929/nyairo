@@ -612,6 +612,46 @@ def record_phone_action_receipt(
     elif action == "claim_observe":
         label = "已实地感知当前环境"
         nav = "world:ev"
+    elif action == "phone_life_update":
+        surface = str(args.get("target_surface") or "").strip()
+        pl = args.get("payload") if isinstance(args.get("payload"), Mapping) else {}
+        sub = str(pl.get("action") or pl.get("op") or "").strip()
+        # Never expose private body text, diary/note contents, or solo keywords in receipts.
+        safe_sub = "state_update" if ("solo" in sub.lower() or "private_memory" in sub.lower()) else sub
+        verb = f"{surface}:{safe_sub}" if (surface and safe_sub) else surface
+        _LIFE_SURFACE_RECEIPT_META: dict[str, tuple[str, str]] = {
+            "desk_tomorrow": ("已更新书桌明日安排", "world:notes"),
+            "home_keepsakes": ("已整理居家纪念物", "world:home"),
+            "home_workbench": ("已整理书桌手作托盘", "world:home"),
+            "home_trio": ("已更新居家分享小物", "world:home"),
+            "home_reunion_anchor": ("已记录重逢时刻锚点", "world:home"),
+            "home_recipes": ("已更新夜茶食谱小记", "world:home"),
+            "home_tentative_plans": ("已更新待定小约定", "world:home"),
+            "wardrobe": ("已调整居家穿搭", "world:home"),
+            "pocket_lists": ("已更新随身小清单", "world:notes"),
+            "outing_bench_bookstore": ("已记录散步长椅与书店见闻", "world:map"),
+            "outing_routes_market": ("已更新散步路线与市集见闻", "world:map"),
+            "outing_gallery_blueprint": ("已更新展廊与生活小蓝图", "world:home"),
+            "longterm_habits": ("已更新日常小习惯", "world:home"),
+            "longterm_gifts_lantern": ("已更新心意礼盒与回忆夜灯", "world:home"),
+            "body_garment_window": ("已调整窗扇或外衣状态", "world:body"),
+            "body_care": ("已添置手边茶饮或靠垫", "world:body"),
+            "body_sensory": ("已收录环境声音印象", "world:media"),
+            "character_pack": ("已更新自身称呼与设定", "world:profile"),
+            "autonomy_rhythm": ("已更新日常节奏与边界", "world:profile"),
+            "emotional_tension": ("已更新日常心绪与相处状态", "world:social"),
+            "stance_containment": ("已更新个人看法或桌面收纳", "world:home"),
+            "adult_intimacy": ("已更新私密状态与边界", "world:profile"),
+            "v03_clock": ("已记录片刻闲暇或思绪", "world:ev"),
+            "v03_ecology": ("已更新独立工作与日常收支", "world:shop"),
+            "v03_embodied_social": ("已更新下厨备餐或邻里往来", "world:social"),
+            "v04_neighborhood": ("已更新院子照料或街区生活", "world:map"),
+            "v04_builder_trylive": ("已运行世界路线与场景自检", "world:map"),
+            "v04_elastic_play": ("已更新今日方向或双人小互动", "world:social"),
+        }
+        label, nav = _LIFE_SURFACE_RECEIPT_META.get(
+            surface, ("已更新日常状态", "world:home")
+        )
     else:
         return None
 

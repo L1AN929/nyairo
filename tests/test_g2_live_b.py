@@ -213,7 +213,8 @@ class BCliFlowTest(unittest.TestCase):
         self.assertEqual(prereg["run_id"], g2.B_RUN_ID)
         self.assertEqual(prereg["domain_id"], g2.B_DOMAIN_ID)
         self.assertEqual(prereg["root"], str(self.root))
-        self.assertEqual(prereg["history"], {"used": 186, "total_cap": 300, "new_cap": 52})
+        self.assertEqual(prereg["history"],
+                         {"used": 186, "total_cap": 300, "new_cap": 52, "utc_day_cap": 300})
         self.assertEqual(prereg["deadline"], "2026-11-01T02:00:00+08:00")
         self.assertEqual(prereg["latest_start"], "2026-10-31T22:30:00+08:00")
         caps = prereg["caps"]

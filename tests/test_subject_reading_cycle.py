@@ -104,6 +104,8 @@ class ScriptedCognition(StubCognition):
             candidate = dict(candidate)
             refs = [str(ref) for ref in (candidate.get("target_refs") or [])]
             refs.append(str(candidate.get("source_ref") or ""))
+            if any(ref.startswith("closeout:") for ref in refs):
+                continue
             if not any(wanted in ref for ref in refs):
                 continue
             legal = [str(item) for item in (candidate.get("legal_decisions") or [])]
@@ -322,12 +324,14 @@ class SubjectReadingCycleTest(OneDayTestCase):
         offered = self._offered_reading(fixture.cycle)
         self.assertFalse(any(data["reading_artifact_id"] in ref
                              for refs in offered for ref in refs), offered)
-        # ... and a CONTINUE on the still-running reading Activity is a legal stop, not an
-        # error and not a work commit
+        # v0.7: reaching the last page completes the reading Activity and releases foreground,
+        # so the next round chooses NO_ACTION with zero reading continuation and zero work write.
+        self.assertIsNone(fixture.runtime.canonical_state().get("foreground_activity_ref"))
         out = fixture.cycle.evaluate_once(trigger_ref="evt:c:finish4", act=True)
         self.assertEqual(out["outcome"], "NO_ACTION", out)
-        self.assertEqual(out["reading_continued"], False, out)
-        self.assertEqual(out["reading_state"], spm.STATE_EXHAUSTED, out)
+        self.assertFalse(out.get("reading_continued", False), out)
+        self.assertEqual(fixture.cycle.private_material_situation(refresh=True)["state"],
+                         spm.STATE_EXHAUSTED)
         self.assertEqual(self._head(data["work_artifact_id"])["version_id"], work_head,
                          "an exhausted reading round must not commit the work")
         self.assertEqual(self._head(data["private_items_artifact_id"])["version_id"], doc_head,

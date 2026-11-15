@@ -156,8 +156,10 @@ class AmbientEventExpansionTest(unittest.TestCase):
         valid_until = datetime.fromisoformat(event["valid_until"])
 
         def active(now: datetime) -> list[dict]:
+            # 19 章 §一.4：与上面的 materialize 同用共享业务日界默认时区，
+            # 窗前/窗内断言才与生成侧同一时区。
             return self.wae.active_ambient_events(
-                day, now, timezone_name="Asia/Tokyo", environment=self.env
+                day, now, environment=self.env
             )
 
         ids = lambda items: [item["event_id"] for item in items]
@@ -383,8 +385,11 @@ class AmbientEventExpansionTest(unittest.TestCase):
         self.wrd.reset_cache()
         self.addCleanup(self.wrd.reset_cache)
         for day_text, expected in golden["days"].items():
+            # 19 章 §一.4：共享业务日界默认改成 +08:00 之后，这条「改前行为冻结」
+            # golden 显式钉住旧的包时区（Asia/Tokyo），继续只验证 v1 兼容性本身。
             actual = self.wae.materialize_ambient_events(
-                date.fromisoformat(day_text), environment=environment
+                date.fromisoformat(day_text), environment=environment,
+                timezone_name="Asia/Tokyo",
             )
             self.assertEqual(actual, expected, day_text)
 

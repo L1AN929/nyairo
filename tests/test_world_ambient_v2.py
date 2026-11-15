@@ -391,10 +391,11 @@ class AmbientV2RuntimeTest(unittest.TestCase):
         self.assertEqual(valid_until.hour, 0)
 
         def active(now: datetime) -> set[str]:
+            # 19 章 §一.4：与 materialize 同用共享业务日界默认时区（不显式传）。
             return {
                 item["event_id"]
                 for item in self.wae.active_ambient_events(
-                    day, now, timezone_name="Asia/Tokyo", environment=env
+                    day, now, environment=env
                 )
             }
 

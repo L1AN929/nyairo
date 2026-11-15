@@ -1340,6 +1340,19 @@ def _extract_numeric_suffix(ref: Optional[str]) -> Optional[int]:
     return None
 
 
+def _source_version_token(ref: Any) -> str:
+    """The bare version id inside a structured ref or a raw version id.
+
+    ``artifact-version:<hash>``, ``artifactversion:<hash>`` and
+    ``artifactstate:<artifact>:<hash>`` all name the same revision by its last segment; a
+    caller that already holds the bare id is unchanged.  Empty means "no version fact".
+    """
+    text = str(ref or "").strip()
+    if not text:
+        return ""
+    return text.rsplit(":", 1)[-1]
+
+
 class NaturalProgressEvaluator:
     """Deterministic progress reducer for an Activity given its ProgressContract and matched evidences (0 LLM)."""
 
@@ -1668,6 +1681,20 @@ class NaturalCompletionEvaluator:
             dict.fromkeys(str(e["settlement_ref"]) for e in matched_evs if e.get("settlement_ref"))
         )
         auth_refs: list[str] = []
+        # The completion evidence must name *this execution's* own evidence record first,
+        # not only a state value that two identical executions can produce.  A repeated
+        # absolute toggle (off→on→off→on) writes the same ``world_fact:fixture:<id>:off``
+        # twice; keyed on that value alone the later execution's completion would be
+        # rejected as ``CONSEQUENCE_COMPLETION_EVIDENCE_BELONGS_TO_OTHER_ACTIVITY`` even
+        # though a real new action produced it.  ``progress_evidence_id`` is unique per
+        # settled execution, so leading with it binds completion to the execution that
+        # really produced the evidence while the cross-Activity guard stays as strict as
+        # before (a state value another Activity authored is still in *its* ref list).
+        for e in matched_evs:
+            val = e.get("progress_evidence_id")
+            if (isinstance(val, str) and val.split(":", 1)[0] in VALID_EVIDENCE_PREFIXES
+                    and val not in auth_refs):
+                auth_refs.append(val)
         for e in matched_evs:
             facts = e.get("observed_facts") or {}
             for ar in facts.get("authoritative_result_refs") or []:
@@ -1680,7 +1707,6 @@ class NaturalCompletionEvaluator:
                 "settlement_ref",
                 "source_ref",
                 "target_ref",
-                "progress_evidence_id",
             ):
                 val = e.get(ref_field)
                 if isinstance(val, str) and val in VALID_EVIDENCE_PREFIXES or (
@@ -1751,6 +1777,11 @@ class NaturalCompletionEvaluator:
         if criteria_kind == CRITERIA_PAGE_POSITION_REACHED:
             target_page = int(criteria["target_page"])
             req_book = criteria.get("book_ref") or (target_refs[0] if target_refs else None)
+            # 0.7 B: a contract that names the source version only settles against a page
+            # observation of *that* version.  Without this an old contract (adopted at N pages)
+            # would complete early when the same Activity continues on a longer new version.
+            # Contracts without the fact keep the old behaviour (backwards compatible).
+            req_version = _source_version_token(criteria.get("source_version_ref"))
             # Evaluate against latest position if LATEST_POSITION or any verified if MAX
             matching = []
             for ev in verified_evs:
@@ -1758,6 +1789,12 @@ class NaturalCompletionEvaluator:
                 ev_target = ev.get("target_ref") or facts.get("book_ref")
                 if req_book and ev_target and ev_target != req_book:
                     continue
+                if req_version:
+                    ev_version = _source_version_token(
+                        facts.get("source_version_ref")
+                        or facts.get("latest_version_ref") or ev.get("source_ref"))
+                    if ev_version != req_version:
+                        continue
                 page = facts.get("page")
                 if page is None:
                     page = _extract_numeric_suffix(facts.get("checkpoint_ref") or ev.get("source_ref"))

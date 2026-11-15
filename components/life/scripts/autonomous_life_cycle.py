@@ -60,8 +60,9 @@ import hashlib
 import inspect
 from collections.abc import Mapping as AbcMapping
 import json
-import sys
 import os
+import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -146,6 +147,11 @@ import life_sharing_context as lsc
 #: provenance / owner-confirmed results / evidence-linked methods / local drafts.  It owns nothing:
 #: every block is a bounded read of an existing owner, and association is decided by owner refs.
 import life_work_context as lwc
+#: 30/32 章 A 批: the limited-attention projector (concerns / visible cues / current views) --
+#: a pure, zero-model, zero-write read that the stance GET and the phone tool already use.
+#: The cycle only *carries* its view into the decision situation; the adapter applies the
+#: prompt bound, and any failure here leaves the block out instead of blocking the round.
+import attention_view_projector as attn_proj
 
 READING_PAGE_MARKER = "%%PAGE%%"
 #: rc1-C: the Activity shape of one bounded page read.  Named here (and used by
@@ -265,8 +271,11 @@ ENV_MAX_COGNITION_CALLS_PER_DAY = "CHIYO_AUTONOMOUS_MAX_COGNITION_CALLS_PER_DAY"
 ENV_MAX_ACTIONS_PER_DAY = "CHIYO_AUTONOMOUS_MAX_ACTIONS_PER_DAY"
 ENV_CHECK_INTERVAL_MINUTES = "CHIYO_AUTONOMOUS_CHECK_INTERVAL_MINUTES"
 
-#: The only trigger a timer may produce.  See the module docstring.
-TRIGGER_IDLE_WINDOW = ag1.TRIGGER_EXPLICIT_REEVALUATION
+#: The only trigger a timer may produce.  See the module docstring.  19 章 §一.3：这里
+#: 只有一个真名，不再保留 ``TRIGGER_IDLE_WINDOW`` 的别名伪装——定时唤醒与显式重估
+#: 本来就是同一个 AG-1 触发词（``EXPLICIT_REEVALUATION``），唤醒日志的诚实分类
+#: 按触发词的**值**记录，改名不改变任何一行日志语义。
+TRIGGER_EXPLICIT_REEVALUATION = ag1.TRIGGER_EXPLICIT_REEVALUATION
 #: Trigger used when a real inbound event asked for the evaluation.
 TRIGGER_USER_EVENT = ag1.TRIGGER_USER_REQUEST_EVENT
 #: Trigger used when a previously waiting activity became eligible again.
@@ -318,9 +327,24 @@ BODY_ACTION_ACTIVITY_KIND = "BODY_ACTION_AT_OBSERVED_PLACE"
 DAILYACT_REF_PREFIX = "dailyact:"
 PICK_UP_VERB = "PICK_UP"
 PLACE_VERB = "PLACE"
+#: v0.4 room-living: the two furniture/fixture verbs also travel as one ``dailyact:`` target
+#: and share the single-daily-action Activity shape below; only the completion fact (a
+#: current placement, or an absolute fixture power) comes from the encoding module.
+ARRANGE_VERB = "ARRANGE"
+TOGGLE_FIXTURE_VERB = "TOGGLE_FIXTURE"
 #: The Activity shape of one everyday hand step: a bounded target state on an object that really
 #: exists in the World, finished only by the owner's own post-action observation.
 DAILY_ACTION_ACTIVITY_KIND = "DAILY_ACTION_IN_OBSERVED_WORLD"
+#: 0.7: buying one item at the physical counter.  The purchase is *not* a World verb and
+#: does not cross the World bridge's verb allowlist: the committed Decision names
+#: ``buy:<catalog_item_id>``, and this cycle calls the existing ``world_property_economy``
+#: main-self purchase entry with the Decision's own operation key.  The economy owner keeps
+#: the store/open/balance/catalogue checks, the idempotent key and the ownership record; the
+#: Activity is finished only by the transaction it really wrote.
+PURCHASE_REF_PREFIX = "buy:"
+PURCHASE_VERB = "PURCHASE"
+PURCHASE_FACT_KEY = "world_purchase_ref"
+PURCHASE_ACTIVITY_KIND = "PURCHASE_AT_OBSERVED_STORE"
 #: I-r1: a non-productive stay (the park bench, a quiet stop on the way) is not a World
 #: verb and not a resting/nutrition effect.  It is a bounded Life Activity whose only
 #: World-side inputs are the canonical observation that she really is in that place, the W
@@ -347,6 +371,11 @@ STAY_TITLES = {
     "LOOK_AROUND": "看看周围",
     "WALK": "走一走",
     "USE_PHONE": "看看手机",
+    # 0.7 C: 家中家具边的自然小事。标题只描述「在这个家具边待一会儿」，不声称
+    # 真的整理了东西或泡了茶——端口只做得到停留。
+    "DESK_PAUSE": "在书桌边坐一会儿",
+    "WINDOW_PAUSE": "在窗边待一会儿",
+    "TEA_PAUSE": "在茶桌边坐一会儿",
     # 什么都不干的三档：说人话，别写成系统日志。
     "DAZE": "坐着发会儿呆",
     "POTTER": "在屋里随便转转",
@@ -1137,6 +1166,8 @@ class AutonomousLifeCycle:
         experience_provider: Optional[Callable[[], list[dict[str, Any]]]] = None,
         world_opportunity_provider: Optional[Callable[[], list[dict[str, Any]]]] = None,
         max_rounds_per_day: Optional[int] = None,
+        max_cognition_calls_per_day: Optional[int] = None,
+        budget_policy: Optional[Mapping[str, Any]] = None,
         enabled: Optional[bool] = None,
         env: Optional[Mapping[str, str]] = None,
         world_home: Optional[str] = None,
@@ -1218,20 +1249,59 @@ class AutonomousLifeCycle:
             return raw in {"1", "true", "yes", "on"}
 
         self.enabled = _flag(ENV_AUTONOMOUS_ENABLED, False) if enabled is None else bool(enabled)
+        resolved_policy = self._load_budget_policy_readonly(self.state_root, budget_policy)
+        self.budget_policy_source: dict[str, Any] = resolved_policy
+
+        explicit_rounds = max_rounds_per_day
         if max_rounds_per_day is None:
-            try:
-                max_rounds_per_day = int(src.get(ENV_MAX_ROUNDS_PER_DAY) or DEFAULT_MAX_ROUNDS_PER_DAY)
-            except ValueError:
+            if resolved_policy.get("max_rounds_per_day") is not None:
+                max_rounds_per_day = int(resolved_policy["max_rounds_per_day"])
+            elif src.get(ENV_MAX_ROUNDS_PER_DAY) is not None:
+                max_rounds_per_day = _int_setting(src, ENV_MAX_ROUNDS_PER_DAY, DEFAULT_MAX_ROUNDS_PER_DAY)
+            else:
                 max_rounds_per_day = DEFAULT_MAX_ROUNDS_PER_DAY
+
+        if max_cognition_calls_per_day is not None:
+            resolved_cog_cap = max(0, int(max_cognition_calls_per_day))
+        elif resolved_policy.get("max_cognition_calls_per_day") is not None:
+            resolved_cog_cap = int(resolved_policy["max_cognition_calls_per_day"])
+        elif src.get(ENV_MAX_COGNITION_CALLS_PER_DAY) is not None:
+            resolved_cog_cap = _int_setting(
+                src, ENV_MAX_COGNITION_CALLS_PER_DAY, DEFAULT_MAX_COGNITION_CALLS_PER_DAY
+            )
+        elif getattr(requests, "utc_day_max", None) is not None:
+            resolved_cog_cap = max(0, int(getattr(requests, "utc_day_max")))
+        else:
+            resolved_cog_cap = DEFAULT_MAX_COGNITION_CALLS_PER_DAY
+
+        resolved_actions_cap = (
+            int(resolved_policy["max_actions_per_day"])
+            if resolved_policy.get("max_actions_per_day") is not None and src.get(ENV_MAX_ACTIONS_PER_DAY) is None
+            else _int_setting(src, ENV_MAX_ACTIONS_PER_DAY, DEFAULT_MAX_ACTIONS_PER_DAY)
+        )
+
+        gov_mode = str(resolved_policy.get("governance_mode") or "NORMAL")
+        gov_scale = resolved_policy.get("governance_scale_pct")
+        if explicit_rounds is None and resolved_policy.get("max_rounds_per_day") is None and src.get(ENV_MAX_ROUNDS_PER_DAY) is None:
+            if gov_mode in {"DORMANT", "DORMANT_NO_COGNITION"}:
+                max_rounds_per_day = 0
+                resolved_cog_cap = 0
+            elif gov_mode in {"LOW_BUDGET", "LOW_BUDGET_CONSERVATION", "CONSERVATION"} and isinstance(gov_scale, int) and 0 < gov_scale < 100:
+                max_rounds_per_day = max(1, (max_rounds_per_day * gov_scale + 99) // 100)
+                if max_cognition_calls_per_day is None and resolved_policy.get("max_cognition_calls_per_day") is None:
+                    resolved_cog_cap = max(1, (resolved_cog_cap * gov_scale + 99) // 100)
+
         self.budget = RoundBudget(
             self.state_root,
             max_rounds_per_day=max_rounds_per_day,
-            max_cognition_calls_per_day=_int_setting(
-                src, ENV_MAX_COGNITION_CALLS_PER_DAY, DEFAULT_MAX_COGNITION_CALLS_PER_DAY),
-            max_actions_per_day=_int_setting(
-                src, ENV_MAX_ACTIONS_PER_DAY, DEFAULT_MAX_ACTIONS_PER_DAY),
+            max_cognition_calls_per_day=resolved_cog_cap,
+            max_actions_per_day=resolved_actions_cap,
             requests=requests,
         )
+        self._v02_v03_day_root: Optional[Path] = None
+        self._prepared_v02_v03_collected: Optional[dict[str, Any]] = None
+        self.last_v02_v03_collected: Optional[dict[str, Any]] = None
+        self.last_opportunity_funnel_summary: Optional[dict[str, Any]] = None
         #: W05: the request environment this cycle decides in.  The journey engine is called
         #: with exactly these values, so no second world can be reached by accident.
         self.env = dict(src)
@@ -1389,6 +1459,13 @@ class AutonomousLifeCycle:
         self.last_project_created: Optional[dict[str, Any]] = None
         self._round_future_items: list[dict[str, Any]] = []
         self._round_project_options: list[dict[str, Any]] = []
+        self._round_project_clipped_due_refs: set[str] = set()
+        #: v0.5 same-work provenance: for each QUESTION_FROM_MATERIAL option this round offered,
+        #: the *real* material artifact + the version she read when she wrote that note, keyed by
+        #: the option's own ``basis_ref`` (``question:<marker>``).  It is read in the same round the
+        #: option is built from her private ``unclear`` marker, so an adoption can stamp the work's
+        #: first version with where it really came from -- never a title invented later.
+        self._round_question_sources: dict[str, dict[str, str]] = {}
         #: v0.4 research: the bounded seam onto B's research workspace.  It reads material hits and
         #: research heads (the decision prompt and the writing prompt both get bounded slices) and
         #: it is the one thing that may ask the workspace to create a research work -- only when a
@@ -2235,13 +2312,24 @@ class AutonomousLifeCycle:
                         "formal decision path; if you want to abandon it, make that choice "
                         "while it is still ACTIVE.")
         if not isinstance(basis, Mapping) or not str(basis.get("basis_ref") or ""):
+            foreground = self._last_foreground_record or {}
+            reading = (str(foreground.get("activity_kind") or "") == READING_ACTIVITY_KIND
+                       and self.reading_available())
+            if reading:
+                how = ("a conditional PAUSE needs a condition this round can really check; "
+                       "without one PAUSE is still allowed, and for your page reading a short "
+                       "reading-specific interval condition is attached after it, so the "
+                       "Activity can be resumed from its own checkpoint later -- it is not "
+                       "permanent. " + abandon_cost)
+            else:
+                how = ("a conditional PAUSE needs a condition this round can really check; "
+                       "without one PAUSE is still allowed, but it is unconditional and can "
+                       "never become a resume candidate. " + abandon_cost)
             return {
                 "schema_version": "chiyo.life.pause_condition.v1",
                 "available": False,
                 "why_not": "NO_OFFERED_CONDITION",
-                "how": ("a conditional PAUSE needs a condition this round can really check; "
-                        "without one PAUSE is still allowed, but it is unconditional and can "
-                        "never become a resume candidate. " + abandon_cost),
+                "how": how,
             }
         source = str(basis.get("source") or "")
         if source == lwb.SOURCE_BODY_REST:
@@ -3366,6 +3454,32 @@ class AutonomousLifeCycle:
         doc_ref = ("artifact:%s" % self.private_items_artifact_id
                    if not str(self.private_items_artifact_id).startswith("artifact:")
                    else str(self.private_items_artifact_id))
+        # Completion is the *last page of this revision* -- not "a new version arrived".  The
+        # page fact is submitted with the page-read progress evidence (see
+        # ``_record_artifact_progress``), and LR-5's own PAGE_POSITION_REACHED criterion is the
+        # only thing that can satisfy it.  Without a readable page count there is no contract:
+        # the cycle never invents a target page.
+        situation = self.private_material_situation() or {}
+        material = situation.get("material") if isinstance(situation.get("material"), Mapping) else {}
+        pages = material.get("pages")
+        completion_spec = None
+        if isinstance(pages, int) and not isinstance(pages, bool) and pages >= 1:
+            criteria = {"target_page": int(pages), "book_ref": reading_ref}
+            # 0.7 B: 这份合同只对 adoption 当时那一版材料的页数有效。证据本来就带
+            # ``latest_version_ref``；把源版本写进条件后，旧合同不会被同 Activity
+            # 后来换成更长的新版本按旧 target_page 提前判完成。没有版本事实就不写，
+            # 保持旧合同原样（向后兼容）。
+            source_version = str(material.get("version_id") or "").strip()
+            if source_version:
+                criteria["source_version_ref"] = source_version
+            completion_spec = {
+                "criteria_kind": lr5_module().CRITERIA_PAGE_POSITION_REACHED,
+                "target_refs": [reading_ref],
+                "criteria": criteria,
+                "required_evidence_kinds": [lr5_module().SOURCE_KIND_ARTIFACT_STATE],
+                "required_authority_domains": ["artifact_authority"],
+                "policy_version": lr5_module().POLICY_ARTIFACT_V1,
+            }
         spec = ag2.ActivityAdoptionSpec(
             activity_kind=READING_ACTIVITY_KIND,
             title="读一份自己的材料",
@@ -3377,6 +3491,7 @@ class AutonomousLifeCycle:
                 "target_refs": [reading_ref],
                 "policy_version": lr5_module().POLICY_ARTIFACT_V1,
             },
+            completion_contract_spec=completion_spec,
             result_binding_spec={
                 "target_refs": [reading_ref, doc_ref],
                 "allowed_evidence_kinds": ["SETTLED_RESULT_EVENT", "ARTIFACT_CANONICAL_STATE"],
@@ -3564,15 +3679,69 @@ class AutonomousLifeCycle:
         return context
     # -- v0.4 sharing: what is open, what could be shared from, and the one owner call ---------
 
+    def _foreground_share_source(self) -> Optional[dict[str, Any]]:
+        """The artifact the **ACTIVE foreground Activity** is really working on, or ``None``.
+
+        0.7 第五阶段: the work she has open right now can be a new private artifact (the evening
+        booklet), not only the start-up ``work_artifact_id``.  The owner's own Activity record is
+        the authority: the target is derived with the *same* normalization ``step_readiness`` uses
+        (the single-valued artifact binding first, never the first item of ``subject_refs``), and
+        the object is confirmed by one read-only ``resume_point`` (the same owner read the round
+        already paid for when it is cached).  Anything that is not a *work* -- the private-items
+        document, the reading material, a research/method reference, or a share draft -- is left
+        out.  Offering a source is not a permission to share its body: ``prepare`` still needs an
+        explicit bounded text or prefix.
+        """
+
+        activity = self._foreground_activity_record()
+        if not activity or str(activity.get("status") or "") != "ACTIVE":
+            return None
+        target = self._readiness_target_ref(activity)
+        canonical = lsr.canonical_target_ref(target) if target else None
+        if not canonical or not lsr.is_artifact_target(canonical):
+            return None
+        identity = self._artifact_identity(canonical)
+        if not identity:
+            return None
+        excluded = {self._artifact_identity(self.private_items_artifact_id),
+                    self._artifact_identity(self.reading_artifact_id)}
+        for ref in self._non_work_artifact_ids():
+            excluded.add(self._artifact_identity(ref))
+        if identity in excluded:
+            return None
+        point = self.resume_point_for_artifact(canonical)
+        if point is None:
+            return None
+        title = " ".join(str(getattr(point, "title", "") or "").split())[:120]
+        if title and lsc.is_share_title(title):
+            # A share draft is an artifact too; it is never offered as a *source* for another.
+            return None
+        work_identity = (self._artifact_identity(self.work_artifact_id)
+                         if getattr(self, "work_artifact_id", None) else "")
+        kind = "current_work" if (work_identity and identity == work_identity) else "foreground_work"
+        artifact_ref = "artifact:%s" % identity
+        if not title and kind == "current_work":
+            title = self._round_work_title_for(artifact_ref)
+        source = {"artifact_id": artifact_ref, "kind": kind}
+        if title:
+            source["title"] = title
+        return source
+
     def shareable_sources(self, *, limit: int = 3) -> list[dict[str, Any]]:
         """The artifacts she is *actually* working on or reading right now, with their real ids.
 
-        Only what this round already holds: the work artifact this round is about and the private
-        material she is reading.  No listing of the artifact library, no search, no title guessing:
-        a source she is not currently engaged with is not "shareable" just because it exists.
+        Only what this round already holds: the artifact the ACTIVE foreground Activity is bound
+        to, the work artifact this round is about and the private material she is reading.  No
+        listing of the artifact library, no search, no title guessing: a source she is not
+        currently engaged with is not "shareable" just because it exists.  The foreground source
+        is first so a running Activity always gets the one slot it needs; the static legal sources
+        stay bounded by the same ``limit``.
         """
 
         sources: list[dict[str, Any]] = []
+        foreground = self._foreground_share_source()
+        if foreground is not None:
+            sources.append(foreground)
         work = self.work_artifact_id
         if work:
             work_ref = "artifact:%s" % str(work).replace("artifact:", "")
@@ -3864,6 +4033,60 @@ class AutonomousLifeCycle:
             self.last_error = f"PARK_BASIS_FAILED: {type(exc).__name__}: {exc}"[:200]
             return None
 
+    def _attention_day_root(self) -> Optional[Path]:
+        """The instance day root the attention projector reads (same root the stance GET uses)."""
+
+        explicit = getattr(self, "_v02_v03_day_root", None)
+        if isinstance(explicit, Path):
+            return explicit
+        try:
+            import v02_v03_daily_loop_bridge as _vbridge
+
+            return self._resolve_v02_v03_day_root_for_cycle(_vbridge)
+        except Exception:
+            return None
+
+    def attention_view_block(self, *, now: Optional[str] = None) -> dict[str, Any]:
+        """30/32 章 A 批：把有限注意投影带进正式决策请求的处境上下文。
+
+        「她带着问题去读」在此前只发生在 stance GET 与聊天工具面；本方法把同一份
+        ``attention_view_projector.build_attention_view``（纯只读、零模型调用、零写盘）
+        接进自主生活回合的决策请求。fail-open 是硬要求：投影器抛错、读不到实例日根、
+        或内容为空（``SOURCE_UNAVAILABLE``/无未决关切/无可见线索/无当前看法）时
+        **整块缺席**（返回 ``{}``），绝不阻断决策链；行数与总预算由 adapter 的
+        ``_bounded_attention`` 白名单施加（32 章 §6，块总长 <= 1600 字符）。
+        """
+
+        try:
+            day_root = self._attention_day_root()
+            if day_root is None:
+                return {}
+            view = attn_proj.build_attention_view(day_root, now=now)
+            # 30 章：关切 = 她自己写下的未决私记（EXPLICIT_PRIVATE_NOTE）。生产源就是
+            # project_questions_provider 背后的私人笔记（与 ctx["questions"] 同源）；
+            # 投影器按 30 章上限只带 2 条，本合并同样遵守该上限。
+            notes = self._bounded_questions()
+            merged = [{"ref": "concern_pnote:%d" % (index + 1), "scope_ref": "general",
+                       "text": str(row.get("note") or "")[:240],
+                       "origin": "EXPLICIT_PRIVATE_NOTE"}
+                      for index, row in enumerate(notes)
+                      if isinstance(row, Mapping) and str(row.get("note") or "").strip()]
+            if merged:
+                view["concerns"] = (merged + list(view.get("concerns") or []))[
+                    :attn_proj.DEFAULT_LIMITS["max_concerns"]]
+        except Exception as exc:  # a read failure is reported, never allowed to block
+            self.last_error = "%s: %s" % (type(exc).__name__, exc)
+            return {}
+        if not isinstance(view, Mapping) or not view:
+            return {}
+        if str(view.get("availability") or "") == "SOURCE_UNAVAILABLE":
+            return {}
+        # 32 章 §6：空内容不出块——没有关切、没有可见线索、没有当前看法时整块缺席。
+        if not (view.get("concerns") or view.get("visible_cues")
+                or view.get("current_views")):
+            return {}
+        return dict(view)
+
     def decision_situation_context(self, *, now: str, park: Any = None,
                                    park_basis: Optional[Mapping[str, Any]] = None,
                                    wait_basis: Optional[Mapping[str, Any]] = None
@@ -4020,6 +4243,12 @@ class AutonomousLifeCycle:
         questions = self._bounded_questions()
         if questions:
             ctx["questions"] = questions
+        #: 30/32 章 A 批：「她带着问题去读」-- 有限注意投影以有界块进正式决策请求。
+        #: 零模型调用、零写盘（投影器自身保证）；fail-open：投影器抛错或无内容时
+        #: 整块缺席，绝不阻断决策链。块总预算（<=1600 字符）在 adapter 白名单里。
+        attention = self.attention_view_block(now=now)
+        if attention:
+            ctx["attention"] = attention
         activity = self._last_foreground_record or {}
         if activity:
             ctx["activity"] = {
@@ -4337,6 +4566,7 @@ class AutonomousLifeCycle:
         if not (project_available or research_available or practice_available):
             self.last_project_options = list(reserved)
             self._round_project_options = list(reserved)
+            self._round_project_clipped_due_refs = set()
             self._round_methods = []
             return list(reserved)
         questions: list[dict[str, Any]] = []
@@ -4347,6 +4577,25 @@ class AutonomousLifeCycle:
             except Exception as exc:  # a failed read is reported, never guessed
                 self.last_error = f"PROJECT_QUESTIONS_READ_FAILED: {type(exc).__name__}: {exc}"[:200]
                 questions = []
+        # The real source behind each question seed: the material artifact and the *version* she
+        # actually read when she wrote the note.  Kept beside the options (never inside their
+        # prompt-facing dict) so adoption can reuse the owner's sourced-create path.  A seed whose
+        # marker names no material/revision stays absent and the old plain create is kept.
+        self._round_question_sources = {}
+        try:
+            for seed in lpo.question_seeds(questions):
+                source_id = str(seed.get("source_id") or "")
+                revision = str(seed.get("source_revision") or "")
+                if not source_id or not revision:
+                    continue
+                key = "question:" + lpo._safe_ref_id(seed.get("marker_id"))
+                self._round_question_sources[key] = {
+                    "source_artifact_id": source_id,
+                    "source_version_id": revision,
+                    "marker_id": str(seed.get("marker_id") or ""),
+                }
+        except Exception:
+            self._round_question_sources = {}
         projects = gateway.list_projects() if project_available else []
         # v0.4 sharing: share artifacts live in the same owner library, so they would otherwise show
         # up as "projects to continue".  B's own marker decides what a share is (imported, not
@@ -4382,9 +4631,23 @@ class AutonomousLifeCycle:
                                             (classification.get("review_ids") or ())]
         if due_items is not None:
             self._round_future_items = [dict(row) for row in due_items]
+        #: A due item is offered exactly once: one that names a real object is carried out on
+        #: that object (the ``fitem:`` candidate the PERSONAL_OPPORTUNITY source builds), and
+        #: only an item with **no** object becomes a ``FUTURE_ITEM_DUE`` project option.  Offering
+        #: both would be the same intent spelled twice and would spend a second candidate slot in
+        #: a round that already has to fit AG-1's sixteen.
+        objectless_due = [
+            item
+            for item in self._round_future_items
+            if self._future_item_artifact_ref(item) is None
+            and not any(
+                ":" in str(r or "").strip() and not str(r or "").strip().startswith("artifact:")
+                for r in (list(item.get("source_refs") or ()) + list(item.get("target_refs") or ()))
+            )
+        ]
         options = lpo.build_options(
             questions=questions,
-            due_items=self._round_future_items,
+            due_items=objectless_due,
             existing_projects=projects,
             research_materials=materials,
             research_available=research_available,
@@ -4394,47 +4657,410 @@ class AutonomousLifeCycle:
             review_source_verified=review_source_verified,
             limit=self.max_project_options,
             reserved=reserved)
+        admitted_basis = {str(opt.get("basis_ref") or "").strip() for opt in options if isinstance(opt, Mapping)}
+        self._round_project_clipped_due_refs = {
+            str(item.get("item_ref") or "").strip()
+            for item in objectless_due
+            if str(item.get("item_ref") or "").strip()
+            and str(item.get("item_ref") or "").strip() not in admitted_basis
+        }
         # The source reads this in the same round, so the candidates and this report agree.
         self._round_project_options = options
         self.last_project_options = options
 
         return options
     @staticmethod
+    def _load_budget_policy_readonly(
+        state_root: Path, explicit_policy: Optional[Mapping[str, Any]] = None
+    ) -> dict[str, Any]:
+        """Read-only lookup of cycle round/cognition budget policy (zero disk writes)."""
+        out: dict[str, Any] = {
+            "source": "defaults",
+            "max_rounds_per_day": None,
+            "max_cognition_calls_per_day": None,
+            "max_actions_per_day": None,
+            "governance_mode": "NORMAL",
+            "governance_scale_pct": 100,
+        }
+
+        def _extract_positive_or_zero_int(mapping: Mapping[str, Any], *keys: str) -> Optional[int]:
+            for k in keys:
+                val = mapping.get(k)
+                if isinstance(val, bool) or val is None:
+                    continue
+                try:
+                    return max(0, int(val))
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        if isinstance(explicit_policy, Mapping):
+            out["source"] = "explicit_policy"
+            out["max_rounds_per_day"] = _extract_positive_or_zero_int(
+                explicit_policy, "max_rounds_per_day", "rounds_per_day"
+            )
+            out["max_cognition_calls_per_day"] = _extract_positive_or_zero_int(
+                explicit_policy,
+                "max_cognition_calls_per_day",
+                "cognition_calls_per_day",
+                "daily_cognition_cap",
+            )
+            out["max_actions_per_day"] = _extract_positive_or_zero_int(
+                explicit_policy, "max_actions_per_day", "actions_per_day"
+            )
+
+        policy_paths = [
+            state_root / "life_budget_policy.json",
+            state_root / "budget_policy.json",
+            state_root.parent / "budget_policy.json",
+            state_root.parent / "state" / "life_budget_policy.json",
+        ]
+        for p_path in policy_paths:
+            if not p_path.is_file():
+                continue
+            try:
+                raw_pol = json.loads(p_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(raw_pol, Mapping):
+                continue
+            if out["source"] == "defaults":
+                out["source"] = str(p_path.name)
+            if out["max_rounds_per_day"] is None:
+                out["max_rounds_per_day"] = _extract_positive_or_zero_int(
+                    raw_pol, "max_rounds_per_day", "rounds_per_day"
+                )
+            if out["max_cognition_calls_per_day"] is None:
+                out["max_cognition_calls_per_day"] = _extract_positive_or_zero_int(
+                    raw_pol,
+                    "max_cognition_calls_per_day",
+                    "cognition_calls_per_day",
+                    "daily_cognition_cap",
+                )
+            if out["max_actions_per_day"] is None:
+                out["max_actions_per_day"] = _extract_positive_or_zero_int(
+                    raw_pol, "max_actions_per_day", "actions_per_day"
+                )
+
+        mig_paths = [
+            state_root / "v02_runtime_migration.json",
+            state_root.parent / "phone" / "v02_runtime_migration.json",
+            state_root.parent / "state" / "v02_runtime_migration.json",
+        ]
+        if state_root.name == "state" and state_root.parent.name == "life":
+            mig_paths.append(state_root.parent.parent / "phone" / "v02_runtime_migration.json")
+            mig_paths.append(state_root.parent.parent / "state" / "v02_runtime_migration.json")
+        for m_path in mig_paths:
+            if not m_path.is_file():
+                continue
+            try:
+                mig_doc = json.loads(m_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(mig_doc, Mapping) and isinstance(mig_doc.get("mode_config"), Mapping):
+                mcfg = mig_doc["mode_config"]
+                out["governance_mode"] = str(mcfg.get("mode") or "NORMAL").strip().upper()
+                try:
+                    out["governance_scale_pct"] = int(mcfg.get("budget_scale_pct") or 100)
+                except (TypeError, ValueError):
+                    out["governance_scale_pct"] = 100
+                break
+        return out
+
+    @staticmethod
     def _future_item_artifact_ref(item: Mapping[str, Any]) -> Optional[str]:
         """The one artifact a due item can be *carried out on*, if it named one."""
 
-        for ref in item.get("source_refs") or []:
+        raw_refs = list(item.get("source_refs") or ()) + list(item.get("target_refs") or ())
+        for ref in raw_refs:
             text = str(ref)
             if text.startswith("artifact:") and len(text) > len("artifact:"):
                 return text
         return None
 
+    @staticmethod
+    def _future_item_non_artifact_targets(item: Mapping[str, Any], item_ref: str) -> list[str]:
+        """Structured targets for an ordinary non-artifact tomorrow note / life todo."""
+        targets: list[str] = []
+        raw_refs = list(item.get("source_refs") or ()) + list(item.get("target_refs") or ())
+        for ref in raw_refs:
+            text = str(ref or "").strip()
+            if ":" in text and not text.startswith("artifact:") and text not in targets:
+                targets.append(text)
+        if not targets and item_ref:
+            targets.append(item_ref)
+        return targets
+
+    def _resolve_v02_v03_day_root_for_cycle(self, vbridge: Any) -> Path:
+        explicit = getattr(self, "_v02_v03_day_root", None)
+        if isinstance(explicit, Path):
+            return explicit
+        inst_root, _ = vbridge.resolve_day_and_life_roots(self.state_root)
+        if (inst_root / "phone").is_dir():
+            return inst_root
+        if self.world_home:
+            wh_parent = Path(self.world_home).parent
+            if (wh_parent / "phone").is_dir():
+                return wh_parent
+        return inst_root
+
+    def _collect_v02_v03_bridge_candidates_safe(self) -> Optional[dict[str, Any]]:
+        """Pull v02_v03_daily_loop_bridge candidates via lazy import (0 circular deps, 0 writes)."""
+        prepared = getattr(self, "_prepared_v02_v03_collected", None)
+        if isinstance(prepared, Mapping):
+            collected = dict(prepared)
+            self.last_v02_v03_collected = collected
+            return collected
+        try:
+            import v02_v03_daily_loop_bridge as _vbridge
+
+            day_root = self._resolve_v02_v03_day_root_for_cycle(_vbridge)
+            explicit_flag = getattr(self, "enable_v02_v03_opportunities", None)
+            if explicit_flag is False:
+                return None
+            has_state = (
+                bool(explicit_flag)
+                or _vbridge.has_v02_v03_active_state(day_root)
+                or (day_root / "phone" / "v02_agency_depth_state.json").is_file()
+                or (day_root / "phone" / "v02_runtime_migration.json").is_file()
+                or (day_root / "state" / "v02_agency_depth_state.json").is_file()
+                or (day_root / "state" / "v02_runtime_migration.json").is_file()
+            )
+            if not has_state:
+                return None
+            now_iso = None
+            try:
+                now_iso = self._now_iso()
+            except Exception:
+                now_iso = None
+            collected = _vbridge.collect_v02_v03_loop_candidates(day_root, now_iso=now_iso)
+            self.last_v02_v03_collected = collected
+            return collected
+        except Exception as exc:
+            self.last_v02_v03_bridge_error = f"{type(exc).__name__}: {exc}"[:160]
+            return None
+
+    def _build_b1_b10_funnel_summary(
+        self,
+        *,
+        emitted_extra: Sequence[Mapping[str, Any]],
+        v02_collected: Optional[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Compute deterministic B1-B10 ecological interface & opportunity-space funnel summary."""
+        gating = (
+            v02_collected.get("gating")
+            if isinstance(v02_collected, Mapping) and isinstance(v02_collected.get("gating"), Mapping)
+            else {}
+        )
+        descriptors = (
+            v02_collected.get("descriptors")
+            if isinstance(v02_collected, Mapping) and isinstance(v02_collected.get("descriptors"), Mapping)
+            else {}
+        )
+        filtered_list = list(gating.get("filtered_candidates") or ())
+        capped_list = list(gating.get("capped_candidates") or ())
+        satiation_list = list(
+            (v02_collected.get("satiation_adjusted") if isinstance(v02_collected, Mapping) else None)
+            or gating.get("satiation_adjusted")
+            or ()
+        )
+        rule_adj_list = list(
+            (v02_collected.get("second_order_rule_adjusted") if isinstance(v02_collected, Mapping) else None)
+            or gating.get("second_order_rule_adjusted")
+            or ()
+        )
+
+        world_count = len(getattr(self, "last_world_opportunities", None) or ())
+        future_due_count = len(getattr(self, "_round_future_items", None) or ())
+        project_opt_count = len(getattr(self, "_round_project_options", None) or ())
+        v02_admitted_count = len(descriptors)
+        surfaced_raw_total = (
+            future_due_count
+            + project_opt_count
+            + world_count
+            + v02_admitted_count
+            + len(filtered_list)
+            + len(capped_list)
+        )
+        capable_total = max(0, surfaced_raw_total - len(filtered_list))
+        admitted_total = len(emitted_extra) + world_count
+
+        origin_counts = {
+            "subject_self": 0,
+            "partner_or_user": 0,
+            "world_environment": world_count,
+            "system_scaffold": 0,
+        }
+        care_count = 0
+        scaffold_count = project_opt_count
+        social_count = 0
+        for row in emitted_extra:
+            kind = str(row.get("kind") or "")
+            fam = str(row.get("action_family") or "")
+            if fam in {"adopt_tentative_plan"} or "SHARED" in kind:
+                origin_counts["partner_or_user"] += 1
+                social_count += 1
+            elif fam in {"strenuous_outing_walk", "follow_bookstore_bookmark"}:
+                origin_counts["world_environment"] += 1
+            elif fam in {"meaningless_idle"}:
+                origin_counts["system_scaffold"] += 1
+            else:
+                origin_counts["subject_self"] += 1
+            if fam in {"observe_plant_journal", "illness_rest_recovery", "courtyard_care"} or kind == "OBLIGATION":
+                care_count += 1
+            if fam in {"advance_workbench_draft", "follow_tomorrow_note"} or kind in {"FUTURE_ITEM_DUE", "TOMORROW_NOTE_DUE"}:
+                scaffold_count += 1
+
+        practice_methods_count = 0
+        prac = getattr(self, "practice", None)
+        if prac is not None and callable(getattr(prac, "methods", None)):
+            try:
+                practice_methods_count = len(prac.methods() or ())
+            except Exception:
+                practice_methods_count = 0
+
+        co_pres = gating.get("co_presence") if isinstance(gating.get("co_presence"), Mapping) else {}
+        partner_at_desk = bool(co_pres.get("partner_attached_at_desk", False))
+        dormant_suppressed = bool(
+            (v02_collected or {}).get("dormant_suppressed", False) or gating.get("dormant_suppressed", False)
+        )
+        low_budget_flag = bool(
+            (v02_collected or {}).get("low_budget_conservation", False) or gating.get("low_budget_conservation", False)
+        )
+
+        selected_count = 1 if getattr(self, "last_outcome", None) in {"ACTED", "STEP_COMMITTED", "NO_OP_ALREADY_CURRENT"} else 0
+        applied_count = 1 if getattr(getattr(self, "last_receipt", None), "effect_state", None) == "APPLIED" else 0
+
+        summary = {
+            "schema": "chiyo.life.opportunity_funnel_b1_b10.v1",
+            "B1_local_opportunities": {
+                "personal_extra_count": len(emitted_extra),
+                "world_observed_count": world_count,
+                "v02_v03_bridge_count": v02_admitted_count,
+            },
+            "B2_handy_and_bounded_budget": {
+                "max_rounds_per_day": self.budget.max_rounds_per_day,
+                "max_cognition_calls_per_day": self.budget.max_cognition_calls_per_day,
+                "rounds_remaining": self.budget.remaining(),
+                "low_budget_conservation": low_budget_flag,
+            },
+            "B3_self_built_scaffolding": {
+                "scaffold_opportunity_count": scaffold_count,
+                "project_option_count": project_opt_count,
+            },
+            "B4_maintenance_and_care": {
+                "care_and_obligation_count": care_count,
+                "illness_filtered_count": sum(
+                    1 for f in filtered_list if "ILLNESS" in str(f.get("reason_code") or "")
+                ),
+            },
+            "B5_practice_method_transfer": {
+                "available_method_count": practice_methods_count,
+                "second_order_rule_adjusted_count": len(rule_adj_list),
+            },
+            "B6_social_opportunities": {
+                "social_plan_opportunity_count": social_count,
+                "active_stance_lock_count": len(gating.get("stance_locks") or ()),
+            },
+            "B7_co_presence_and_resume": {
+                "partner_attached_at_desk": partner_at_desk,
+                "foreground_interrupted": False,
+            },
+            "B8_expiry_and_quiet_health": {
+                "runtime_health_state": str(gating.get("runtime_health_state") or "QUIET_HEALTHY"),
+                "dormant_suppressed": dormant_suppressed,
+                "filtered_out_count": len(filtered_list),
+            },
+            "B9_historical_retirement_and_archive": {
+                "satiation_downweighted_count": len(satiation_list),
+                "capped_out_count": len(capped_list),
+            },
+            "B10_causal_attribution_funnel": {
+                "stages": {
+                    "implemented_sources": 4,
+                    "surfaced_raw": surfaced_raw_total,
+                    "observed_valid": surfaced_raw_total,
+                    "resource_capable": capable_total,
+                    "admitted_candidates": admitted_total,
+                    "selected_in_last_round": selected_count,
+                    "executed_applied": applied_count,
+                },
+                "origin_attribution": origin_counts,
+            },
+            "llm_calls": 0,
+        }
+        self.last_opportunity_funnel_summary = summary
+        return summary
+
+    def opportunity_funnel_summary(self) -> dict[str, Any]:
+        """Return the latest B1-B10 opportunity funnel statistics summary (0 writes, 0 LLM)."""
+        if isinstance(self.last_opportunity_funnel_summary, Mapping):
+            return dict(self.last_opportunity_funnel_summary)
+        return self._build_b1_b10_funnel_summary(emitted_extra=(), v02_collected=self.last_v02_v03_collected)
+
     def _extra_opportunities(self) -> list[dict[str, Any]]:
         """What the PERSONAL_OPPORTUNITY source may offer beyond artifacts, this round (0 LLM).
 
-        A due item is offered only when it names an object a step can really act on; an item with
-        no object is offered as a *project option* instead (see ``project_options``), so selecting
-        it can never start an Activity with nothing to do.  Both are her own refs -- no other
-        owner's namespace is reachable from here.
+        Preserves both artifact-backed AND ordinary non-artifact tomorrow notes / life todos,
+        pulls 0.2/0.3 loop bridge candidates via lazy safe import, and updates the B1-B10
+        opportunity funnel summary.
         """
 
         out: list[dict[str, Any]] = []
-        for item in self._round_future_items:
-            artifact_ref = self._future_item_artifact_ref(item)
-            if not artifact_ref:
-                continue
-            out.append({
-                "source_ref": str(item.get("item_ref")),
-                "target_refs": [artifact_ref],
-                "title": item.get("title"),
-                "due_at": item.get("due_at"),
-                "kind": "FUTURE_ITEM_DUE",
-                "revision": int(item.get("revision") or 1),
-            })
+        seen_source_refs: set[str] = set()
+        covered_by_project_options: set[str] = set(
+            getattr(self, "_round_project_clipped_due_refs", ()) or ()
+        )
         for option in self._round_project_options:
+            if not isinstance(option, Mapping):
+                continue
+            basis = str(option.get("basis_ref") or "").strip()
+            if basis:
+                covered_by_project_options.add(basis)
+            for sref in option.get("source_refs") or ():
+                if sref:
+                    covered_by_project_options.add(str(sref))
+            for dref in option.get("dedupe_refs") or ():
+                if dref:
+                    covered_by_project_options.add(str(dref))
+
+        for item in self._round_future_items:
+            item_ref = str(item.get("item_ref") or "").strip()
+            if not item_ref or item_ref in seen_source_refs:
+                continue
+            artifact_ref = self._future_item_artifact_ref(item)
+            if artifact_ref:
+                seen_source_refs.add(item_ref)
+                out.append({
+                    "source_ref": item_ref,
+                    "target_refs": [artifact_ref],
+                    "title": item.get("title"),
+                    "due_at": item.get("due_at"),
+                    "kind": "FUTURE_ITEM_DUE",
+                    "revision": int(item.get("revision") or 1),
+                })
+            elif item_ref not in covered_by_project_options:
+                # Preserve non-artifact tomorrow notes / everyday life todos instead of dropping them!
+                targets = self._future_item_non_artifact_targets(item, item_ref)
+                seen_source_refs.add(item_ref)
+                out.append({
+                    "source_ref": item_ref,
+                    "target_refs": targets,
+                    "title": item.get("title"),
+                    "due_at": item.get("due_at"),
+                    "kind": "TOMORROW_NOTE_DUE",
+                    "non_artifact_todo": True,
+                    "revision": int(item.get("revision") or 1),
+                })
+
+        for option in self._round_project_options:
+            opt_ref = str(option.get("option_ref") or "").strip()
+            if not opt_ref or opt_ref in seen_source_refs:
+                continue
+            seen_source_refs.add(opt_ref)
             out.append({
-                "source_ref": str(option.get("option_ref")),
-                "target_refs": [str(option.get("option_ref"))],
+                "source_ref": opt_ref,
+                "target_refs": [opt_ref],
                 "title": option.get("title"),
                 "kind": option.get("kind"),
                 #: v0.5: the reserved today slots carry the *real* work they already validated,
@@ -4445,6 +5071,53 @@ class AutonomousLifeCycle:
                 "dedupe_refs": [str(ref) for ref in (option.get("dedupe_refs") or ())],
                 "revision": int(option.get("revision") or 1),
             })
+
+        v02_collected = self._collect_v02_v03_bridge_candidates_safe()
+        if isinstance(v02_collected, Mapping):
+            descriptors = (
+                v02_collected.get("descriptors")
+                if isinstance(v02_collected.get("descriptors"), Mapping)
+                else {}
+            )
+            for cand in v02_collected.get("candidates") or ():
+                if not isinstance(cand, Mapping):
+                    continue
+                cid = str(cand.get("candidate_id") or "").strip()
+                desc = descriptors.get(cid) if isinstance(descriptors.get(cid), Mapping) else {}
+                raw_sref = str(desc.get("source_ref") or cand.get("source_ref") or "").strip()
+                if not raw_sref:
+                    continue
+                if raw_sref in seen_source_refs or raw_sref in covered_by_project_options:
+                    continue
+                if raw_sref.startswith((lfi.ITEM_REF_NAMESPACE, lpo.OPTION_REF_NAMESPACE)):
+                    mapped_sref = raw_sref
+                else:
+                    safe_tok = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_sref).strip("-")[:72] or "cue"
+                    mapped_sref = f"{lfi.ITEM_REF_NAMESPACE}v02v03-{safe_tok}"
+                if mapped_sref in seen_source_refs:
+                    continue
+                raw_targets = [
+                    str(t).strip()
+                    for t in (cand.get("target_refs") or ())
+                    if str(t or "").strip() and ":" in str(t)
+                ]
+                if not raw_targets:
+                    raw_targets = [raw_sref if ":" in raw_sref else mapped_sref]
+                seen_source_refs.add(raw_sref)
+                seen_source_refs.add(mapped_sref)
+                out.append({
+                    "source_ref": mapped_sref,
+                    "origin_source_ref": raw_sref,
+                    "target_refs": raw_targets,
+                    "title": str(desc.get("title") or desc.get("summary_cn") or raw_sref)[:120],
+                    "due_at": desc.get("due_at"),
+                    "kind": str(desc.get("cue_kind") or desc.get("action_family") or "V02_V03_LOOP_CANDIDATE"),
+                    "action_family": str(desc.get("action_family") or ""),
+                    "dedupe_refs": [raw_sref],
+                    "revision": int(cand.get("source_revision") or cand.get("revision") or 1),
+                })
+
+        self._build_b1_b10_funnel_summary(emitted_extra=out, v02_collected=v02_collected)
         return out
 
     def _selected_candidate_payload(self, decision_record: Any) -> Optional[dict[str, Any]]:
@@ -4589,6 +5262,24 @@ class AutonomousLifeCycle:
             return self._review_adoption_spec(option, option_ref=option_ref)
         if option.get("research"):
             return self._research_adoption_spec(option, option_ref=option_ref)
+        #: A question that came from a material she really read is created through the owner's
+        #: existing *sourced* create path, so its immutable first version carries the real
+        #: source/provenance.  Only when that round's read named no material + version does this
+        #: keep the old plain ``create_project`` (nothing is invented to fill the gap).
+        if str(option.get("kind") or "") == lpo.KIND_QUESTION:
+            source = (self._round_question_sources or {}).get(str(option.get("basis_ref") or ""))
+            if source:
+                created = self._create_sourced_question_project(
+                    option=option, source=source, option_ref=option_ref)
+                self.last_project_created = dict(created, option_ref=option_ref,
+                                                 title=option.get("title"), sourced=True)
+                point = self.resume_point_for_artifact(created.get("artifact_id"))
+                if point is not None:
+                    return self._adoption_spec(point)
+                return self._work_adoption_spec_for(
+                    artifact_id=str(created.get("artifact_id") or ""),
+                    title=str(option.get("title") or ""),
+                    head_version_id=created.get("version_id"))
         gateway = self.project_gateway
         if gateway is None or not getattr(gateway, "available", lambda: False)():
             raise lpo.ProjectOptionError(lpo.REASON_OWNER_UNAVAILABLE,
@@ -4608,6 +5299,52 @@ class AutonomousLifeCycle:
             artifact_id=str(created.get("artifact_id") or ""),
             title=str(option.get("title") or ""),
             head_version_id=created.get("version_id"))
+
+    def _create_sourced_question_project(self, *, option: Mapping[str, Any],
+                                         source: Mapping[str, str],
+                                         option_ref: str) -> dict[str, Any]:
+        """Create her QUESTION work through the owner's existing *sourced* create path.
+
+        The source is the material artifact and the **version she actually read** when she wrote
+        the note (both read from the same round's private-items marker), so the work's immutable
+        first version carries the real ``nyairo-work-source`` provenance.  This reuses the owner
+        service the cycle already holds for earlier-version reads -- one owner, one workspace,
+        no new grant and no invented title/body.  A refusal is raised by name; the caller reports
+        no project rather than creating an unsourced one.
+        """
+
+        try:
+            service = self._project_service_for_earlier_versions()
+            answer = service.create_derived_project(
+                title=str(option.get("title") or ""),
+                content=str(option.get("seed_text") or ""),
+                source_artifact_id=str(source.get("source_artifact_id") or ""),
+                source_version_id=str(source.get("source_version_id") or ""),
+                purpose="adapt",
+                note=str(option.get("basis_ref") or "")[:200],
+            )
+        except Exception as exc:
+            raise lpo.ProjectOptionError(
+                lpo.REASON_OWNER_UNUSABLE,
+                f"{type(exc).__name__}: {exc}"[:180]) from exc
+        status = str(answer.get("status") or "") if isinstance(answer, Mapping) else ""
+        artifact_id = str(answer.get("artifact_id") or "") if isinstance(answer, Mapping) else ""
+        if (not isinstance(answer, Mapping) or not answer.get("ok")
+                or status not in ("applied", "already_applied") or not artifact_id):
+            reason = (str(answer.get("reason_code") or status or "OWNER_REFUSED")
+                      if isinstance(answer, Mapping) else "OWNER_UNUSABLE")
+            raise lpo.ProjectOptionError(lpo.REASON_OWNER_REFUSED, reason[:180])
+        return {
+            "status": "OK",
+            "operation_key": answer.get("operation_key"),
+            "artifact_id": artifact_id,
+            "version_id": answer.get("version_id"),
+            "version_number": answer.get("version_number"),
+            "provenance": answer.get("provenance"),
+            "source_artifact_id": answer.get("source_artifact_id"),
+            "source_version_id": answer.get("source_version_id"),
+            "option_ref": option_ref,
+        }
 
     def _research_adoption_spec(self, option: Mapping[str, Any], *,
                                 option_ref: str) -> dict[str, Any]:
@@ -4728,6 +5465,7 @@ class AutonomousLifeCycle:
 
         material = "|".join(str(x) for x in experience_ids)
         digest = hashlib.sha256(("%s|%s" % (option_ref, material)).encode("utf-8")).hexdigest()
+        return "review:%s" % digest[:24]
 
     def _save_method_proposal(self, record: Any) -> None:
         """Save at most one bounded practice proposal through B's practice workspace.
@@ -5852,7 +6590,8 @@ class AutonomousLifeCycle:
     def _foreground_activity_record(self) -> Optional[dict[str, Any]]:
         """The owner's own record for the Activity it holds in the foreground, or ``None``."""
 
-        reader = getattr(self.runtime, "activity_read", None)
+        rt = getattr(self, "runtime", None)
+        reader = getattr(rt, "activity_read", None)
         ref = self._foreground_activity_ref()
         if reader is None or not ref:
             return None
@@ -5954,6 +6693,11 @@ class AutonomousLifeCycle:
         # new arrival or a session opening/closing is a new situation; an idle tick is not (no
         # clock enters here), which is the bounded silence this loop already had.
         parts["contact"] = self.contact_parts()
+        # 19 章 §一.5: the body the owners really reported this round -- capacity band,
+        # freshness and the recovery-session phase only, all UNKNOWN-safe and never a guessed
+        # value.  A body that turned LIMITED (or a session opening) is a real change she can
+        # act on; "not read this round" is written as BODY_NOT_READ, never as "fine".
+        parts["body"] = self.body_parts()
         # v0.4 B: an eligibility the owner just opened is a *new* situation -- it reopens a
         # question this loop may already have settled (a decline recorded before the eligibility
         # existed must not silence the resume).  Ids only, bounded, from LR-4's own store.
@@ -5971,6 +6715,49 @@ class AutonomousLifeCycle:
         except Exception as exc:  # a read failure is reported, never guessed
             self.last_error = "%s: %s" % (type(exc).__name__, exc)
             return {"available": False, "reason_code": "LOCAL_CONTACT_VIEW_FAILED"}
+
+    def body_parts(self) -> dict[str, Any]:
+        """19 章 §一.5：处境指纹的身体档 -- 有界、全部 UNKNOWN 安全、零文本。
+
+        数据来源是本轮**已经发生**的那次 Body 只读投影（``read_situation`` ->
+        ``life_situation_view`` 的 body 列 -> ``life_body_context``；其源头就是
+        ``body_capacity_source.read_body_capacity``），所以这里**零额外读**、零猜测：
+        能力档（capacity）、freshness、恢复会话相位（recovery.session）与休息可能性
+        都原样取 owner 的词；本轮还没读过身体（或读不出）时整档记
+        ``BODY_NOT_READ``，每个字段都写 ``UNKNOWN``，绝不把"没读"写成"没事"。
+        """
+
+        context = self.last_body_context
+        if not isinstance(context, Mapping) or not context:
+            return {
+                "available": False,
+                "reason_code": "BODY_NOT_READ",
+                "capacity": lbc.CAPACITY_UNKNOWN,
+                "freshness": "unknown",
+                "recovery_session": lbc.RECOVERY_SESSION_UNKNOWN,
+                "rest_can_start": None,
+            }
+        recovery = (context.get("recovery")
+                    if isinstance(context.get("recovery"), Mapping) else {})
+        rest = (context.get("rest")
+                if isinstance(context.get("rest"), Mapping) else {})
+        capacity = str(context.get("capacity") or lbc.CAPACITY_UNKNOWN)
+        if capacity not in lbc.body_capacity.VALID_CAPACITY_STATES:
+            capacity = lbc.CAPACITY_UNKNOWN
+        freshness = str(context.get("freshness") or "unknown")
+        return {
+            "available": True,
+            "reason_code": str(context.get("reason_code") or "")[:64],
+            # 能力档：owner 自己的词（AVAILABLE/LIMITED/...），越界一律 UNKNOWN。
+            "capacity": capacity,
+            # freshness：owner 报告的时效档；没有就是 unknown，不猜新旧。
+            "freshness": freshness[:24],
+            # 相位：恢复会话是否开着（OPEN/CLOSED/UNKNOWN）--会话不是恢复本身。
+            "recovery_session": str(recovery.get("session")
+                                    or lbc.RECOVERY_SESSION_UNKNOWN)[:24],
+            # 休息能力：owner 的 REST 判定；None 就是"没读"，不是"不能"。
+            "rest_can_start": rest.get("can_start"),
+        }
 
     def poll_local_contacts(self, *, limit: Optional[int] = None) -> dict[str, Any]:
         """One bounded local-contact pass -- the cycle's own entry to the resident's step.
@@ -6152,7 +6939,7 @@ class AutonomousLifeCycle:
         self,
         *,
         trigger_ref: str,
-        trigger_kind: str = TRIGGER_IDLE_WINDOW,
+        trigger_kind: str = TRIGGER_EXPLICIT_REEVALUATION,
         observed_at: Optional[str] = None,
         act: bool = True,
     ) -> dict[str, Any]:
@@ -6178,7 +6965,7 @@ class AutonomousLifeCycle:
         self,
         *,
         trigger_ref: str,
-        trigger_kind: str = TRIGGER_IDLE_WINDOW,
+        trigger_kind: str = TRIGGER_EXPLICIT_REEVALUATION,
         observed_at: Optional[str] = None,
         act: bool = True,
     ) -> dict[str, Any]:
@@ -6190,6 +6977,9 @@ class AutonomousLifeCycle:
         # round, and the next round must see whatever the owners then say).
         self.begin_round_reads(obs)
         self._reading_situation_cache = None
+        # The page this round's own reading step planned (if any).  Reset here so a later work
+        # step can never inherit the previous round's page as its progress fact.
+        self.last_reading_plan = None
         # v0.4 day-life: the round's own readiness is reset here, so an early exit below can never
         # record the previous round's state into the reconsideration ledger.
         self._round_readiness = None
@@ -6633,6 +7423,24 @@ class AutonomousLifeCycle:
                 def pause_condition_spec(decision, _spec=_pause_static):
                     return dict(_spec)
 
+        # 0.7 B: the reading-only default.  Supplied only while the foreground Activity really
+        # is this material's page read *and* the current revision still has pages left; every
+        # other Activity keeps the old "unconditional PAUSE binds nothing" rule.  The spec uses
+        # the existing TIME_AT_OR_AFTER condition kind and LR-4's own due scan, so no new timer
+        # or owner is introduced, and nothing resumes by itself.
+        pause_default_condition_spec: Any = None
+        if foreground_reading is not None and self.reading_available():
+            _reading_pause_ref = str(
+                foreground_reading.get("activity_ref")
+                or foreground_reading.get("activity_id") or "")
+
+            def pause_default_condition_spec(decision, _ref=_reading_pause_ref,
+                                             _obs=obs):
+                target = str(getattr(decision, "target_activity_ref", None) or "")
+                if target and target != _ref:
+                    return None
+                return lwb.reading_pause_default_spec(activity_ref=_ref, observed_at=_obs)
+
         # W05R-R1: the round is deliberately *not* wrapped in one pause boundary.  A
         # boundary held across the decision and content requests made the operator's
         # ``pause`` wait behind a model call, which is not a finite commit and is exactly
@@ -6725,6 +7533,7 @@ class AutonomousLifeCycle:
                 # v0.4 explicit-condition PAUSE: the same offered basis, with the same spec but
                 # carrying its own ``basis_ref`` so AG-2 can prove the Decision quoted it.
                 pause_condition_spec=pause_condition_spec,
+                pause_default_condition_spec=pause_default_condition_spec,
                 **capacity_kwargs,
                 pre_adoption_mutation_hook=self._pause_gate_hook,
                 fault_hook=self._pause_fault_hook,
@@ -6794,6 +7603,10 @@ class AutonomousLifeCycle:
             "short_rationale": getattr(record, "short_rationale", None),
             "selected_candidate_ref": getattr(record, "selected_candidate_ref", None),
             "adoption_status": getattr(adp_rec, "adoption_status", None),
+            # The adoption this round really committed: the formal terminal closeout of a
+            # definitively refused step needs both this and the Decision as agency evidence
+            # (never a caller-supplied authority string).
+            "adoption_ref": getattr(adp_rec, "adoption_id", None),
             "activity_ref": getattr(int_rec, "activity_ref", None),
             # I-r2: the integration this round really committed.  It is what an owner-confirmed
             # World consequence is handed to Memory through (``emit_experience_handoff``), so it
@@ -7136,7 +7949,13 @@ class AutonomousLifeCycle:
                 base, activity_ref=base.get("activity_ref"),
                 artifact_id=progress_ref, version_id=details.get("version_id"),
                 version_number=details.get("version_number"),
-                correlation_id=base.get("correlation_id"), action_ref=action.get("action_id"))
+                correlation_id=base.get("correlation_id"), action_ref=action.get("action_id"),
+                # Only this round's own reading plan contributes a page; a work step's plan is
+                # absent (reset at round entry), so it can never carry a stale number.
+                page=(self.last_reading_plan or {}).get("page"),
+                # The reading material's version this page belongs to (also from the same
+                # round's plan; absent for a work step).
+                source_revision=(self.last_reading_plan or {}).get("source_revision"))
             # A real, owner-confirmed change is the milestone Memory cares about.  AG-2 only
             # emitted COMPLETED/ABANDONED/CONFLICT before, so "she actually changed something"
             # had no handoff at all.
@@ -7278,7 +8097,8 @@ class AutonomousLifeCycle:
                     or text.startswith(WORLD_OBJECT_REF_PREFIX)
                     or text.startswith(STAY_REF_PREFIX)
                     or text.startswith(BODYACT_REF_PREFIX)
-                    or text.startswith(DAILYACT_REF_PREFIX)):
+                    or text.startswith(DAILYACT_REF_PREFIX)
+                    or text.startswith(PURCHASE_REF_PREFIX)):
                 return text
         return ""
         return ""
@@ -7358,6 +8178,10 @@ class AutonomousLifeCycle:
             # key and the expected value come from B's ``daily_action_completion``, so this cycle
             # never re-spells them.
             return self._daily_action_adoption_spec(targets, origin, chosen_target, lr5)
+        if chosen_target.startswith(PURCHASE_REF_PREFIX):
+            # 0.7: one counter purchase.  The completion fact is the economy owner's own
+            # transaction for exactly this target, never "the money left the wallet".
+            return self._purchase_adoption_spec(origin, chosen_target, lr5)
 
         completion_spec = None
         chosen = self._chosen_place(decision) if decision is not None else ""
@@ -7475,27 +8299,32 @@ class AutonomousLifeCycle:
                 "the committed Decision chose %r, which is not a whole stay plan"
                 % (chosen_target,))
         expected = "%s%s" % (WORLD_STAY_FACT_PREFIX, chosen_target[len(STAY_REF_PREFIX):])
+        # 0.7 C: bind the Activity to the stay the Decision really chose, not to every stay the
+        # place happened to offer.  The continuation reads its plan back from the Activity, so
+        # carrying all sibling targets made it pick the first vocabulary entry (e.g. REST) and
+        # submit that sibling's end fact -- the chosen DESK_PAUSE stay then never completed.
+        stay_targets = ["world_fact:%s" % chosen_target]
         spec = ag2.ActivityAdoptionSpec(
             activity_kind=STAY_ACTIVITY_KIND,
             title=self._stay_title(chosen_target, plan),
-            target_refs=targets,
+            target_refs=stay_targets,
             origin_ref=origin,
             progress_contract_spec={
                 "progress_kind": "WORLD_ACTION_BOUNDED",
                 "checkpoint_semantics": lr5.CHECKPOINT_SEMANTICS_LATEST_POSITION,
-                "target_refs": targets,
+                "target_refs": stay_targets,
                 "policy_version": lr5.POLICY_POSITION_V1,
             },
             completion_contract_spec={
                 "criteria_kind": lr5.CRITERIA_WORLD_FACT_MATCH,
-                "target_refs": targets,
+                "target_refs": stay_targets,
                 "criteria": {"fact_key": WORLD_STAY_FACT_KEY, "expected_value": expected},
                 "required_evidence_kinds": [lr5.SOURCE_KIND_WORLD_FACT],
                 "required_authority_domains": ["world_authority"],
                 "policy_version": lr5.POLICY_WORLD_FACT_V1,
             },
             result_binding_spec={
-                "target_refs": targets,
+                "target_refs": stay_targets,
                 "allowed_evidence_kinds": ["SETTLED_RESULT_EVENT", "WORLD_CANONICAL_OBSERVATION"],
                 "authority_domains": ["result_settlement_authority", "world_authority"],
                 "policy_version": lr5.POLICY_POSITION_V1,
@@ -7644,6 +8473,61 @@ class AutonomousLifeCycle:
         )
         return spec.to_dict()
 
+    def _purchase_adoption_spec(self, origin: str, chosen_target: str,
+                                lr5: Any) -> dict[str, Any]:
+        """The Activity shape for one counter purchase she really chose.
+
+        Only LR-5's existing vocabulary is used: ``WORLD_ACTION_BOUNDED`` with a
+        ``TARGET_STATE`` checkpoint, and ``WORLD_FACT_MATCH`` on the economy owner's own
+        purchase fact.  The fact value is ``world_fact:buy:<catalog_item_id>``; the evidence
+        carrying it is only submitted after ``purchase_item`` really returned an applied (or
+        idempotently replayed) transaction, so a refused or unknown charge can never settle
+        this Activity.
+        """
+
+        item_id = chosen_target[len(PURCHASE_REF_PREFIX):]
+        if not item_id:
+            raise AutonomousLifeError(
+                "the committed Decision chose %r, which names no catalogue item"
+                % (chosen_target,))
+        expected = "world_fact:%s" % chosen_target
+        name = ""
+        for item in self.last_world_opportunity_view:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("target_ref") or "") != str(chosen_target):
+                continue
+            purchase = item.get("purchase") if isinstance(item.get("purchase"), Mapping) else {}
+            name = str(purchase.get("name") or "").strip()
+            break
+        spec = ag2.ActivityAdoptionSpec(
+            activity_kind=PURCHASE_ACTIVITY_KIND,
+            title=("在店里买「%s」" % name) if name else "在店里买一件东西",
+            target_refs=[expected],
+            origin_ref=origin,
+            progress_contract_spec={
+                "progress_kind": "WORLD_ACTION_BOUNDED",
+                "checkpoint_semantics": lr5.CHECKPOINT_SEMANTICS_TARGET_STATE,
+                "target_refs": [expected],
+                "policy_version": lr5.POLICY_POSITION_V1,
+            },
+            completion_contract_spec={
+                "criteria_kind": lr5.CRITERIA_WORLD_FACT_MATCH,
+                "target_refs": [expected],
+                "criteria": {"fact_key": PURCHASE_FACT_KEY, "expected_value": expected},
+                "required_evidence_kinds": [lr5.SOURCE_KIND_WORLD_FACT],
+                "required_authority_domains": ["world_authority"],
+                "policy_version": lr5.POLICY_WORLD_FACT_V1,
+            },
+            result_binding_spec={
+                "target_refs": [expected],
+                "allowed_evidence_kinds": ["SETTLED_RESULT_EVENT", "WORLD_CANONICAL_OBSERVATION"],
+                "authority_domains": ["result_settlement_authority", "world_authority"],
+                "policy_version": lr5.POLICY_POSITION_V1,
+            },
+        )
+        return spec.to_dict()
+
     # -- routing the step by the committed Decision (W05R) -------------------------
 
     def _selected_candidate(self, decision_record: Any) -> Optional[dict[str, Any]]:
@@ -7661,7 +8545,8 @@ class AutonomousLifeCycle:
 
     @staticmethod
     def _candidate_is_world(candidate: Optional[Mapping[str, Any]]) -> bool:
-        """A World candidate is one whose target is a place, an object, a stay or a body step.
+        """A World candidate is one whose target is a place, an object, a stay, a body step,
+        a hand step or a counter purchase.
 
         The discriminator is the committed candidate record itself -- the same ``place:`` /
         ``object:`` / ``stay:`` / ``bodyact:`` namespaces ``_world_step_spec`` reads its target
@@ -7676,6 +8561,7 @@ class AutonomousLifeCycle:
                    or str(ref).startswith(STAY_REF_PREFIX)
                    or str(ref).startswith(BODYACT_REF_PREFIX)
                    or str(ref).startswith(DAILYACT_REF_PREFIX)
+                   or str(ref).startswith(PURCHASE_REF_PREFIX)
                    for ref in (candidate.get("target_refs") or []))
 
     def _decision_chose_world(self, decision_record: Any) -> bool:
@@ -7801,7 +8687,8 @@ class AutonomousLifeCycle:
                         or text.startswith(WORLD_OBJECT_REF_PREFIX)
                         or text.startswith(STAY_REF_PREFIX)
                         or text.startswith(BODYACT_REF_PREFIX)
-                        or text.startswith(DAILYACT_REF_PREFIX)):
+                        or text.startswith(DAILYACT_REF_PREFIX)
+                        or text.startswith(PURCHASE_REF_PREFIX)):
                     target_ref = text
                     break
         if not target_ref:
@@ -7810,6 +8697,45 @@ class AutonomousLifeCycle:
         observation = self.last_world_observation or {}
         place = str((observation.get("location") or {}).get("place_id") or "unknown")
         revision = observation.get("world_revision")
+        if target_ref.startswith(PURCHASE_REF_PREFIX):
+            # 0.7: a counter purchase is a Life-internal owner step, not a World verb: it is
+            # deliberately absent from the World bridge's verb allowlist.  The Decision's own
+            # identity is the operation key's stable part, so a retry of this Decision reuses
+            # the economy's idempotent purchase intent instead of charging twice.
+            item_id = target_ref[len(PURCHASE_REF_PREFIX):]
+            decision_identity = str(
+                getattr(decision_record, "decision_id", "") or "").strip()
+            digest_input = "%s:%s:%s" % (place, decision_identity or revision, item_id)
+            key = "idem_purchase:%s" % hashlib.sha256(
+                digest_input.encode("utf-8")).hexdigest()[:40]
+            facts: dict[str, Any] = {}
+            for item in self.last_world_opportunity_view:
+                if not isinstance(item, Mapping):
+                    continue
+                if str(item.get("target_ref") or "") == str(target_ref):
+                    purchase = item.get("purchase")
+                    facts = dict(purchase) if isinstance(purchase, Mapping) else {}
+                    break
+            return {
+                "step_kind": ag2.STEP_KIND_INTERNAL_CHECKPOINT,
+                # No owner Action crosses AR-0: the economy call is this cycle's own bounded
+                # internal step (the same shape the direct artifact port already uses).
+                "action_kind": None,
+                "target_ref": target_ref,
+                "payload_spec": {
+                    "purchase_phase": "BUY",
+                    "purchase_catalog_item_id": item_id,
+                    "purchase_operation_key": key,
+                    "purchase_target_ref": target_ref,
+                    "purchase_store_place": place,
+                    "purchase_item_name": facts.get("name"),
+                    "purchase_price": facts.get("price"),
+                    "purchase_currency": facts.get("currency"),
+                },
+                "expected_effect_predicates": [],
+                "post_submit_life_behavior": ag2.POST_SUBMIT_KEEP_ACTIVE,
+                "idempotency_key": key,
+            }
         if target_ref.startswith(WORLD_OBJECT_REF_PREFIX):
             object_id = target_ref[len(WORLD_OBJECT_REF_PREFIX):]
             return {
@@ -8424,7 +9350,7 @@ class AutonomousLifeCycle:
             # The journey really completed, but no activity claims that destination, so no
             # progress is invented for one.
             return record
-        base: dict[str, Any] = {"trigger_kind": TRIGGER_IDLE_WINDOW,
+        base: dict[str, Any] = {"trigger_kind": TRIGGER_EXPLICIT_REEVALUATION,
                                 "trigger_ref": "evt:journey:arrival",
                                 "observed_at": observed_at or self._now_iso()}
         self._record_world_progress(
@@ -8589,6 +9515,104 @@ class AutonomousLifeCycle:
                 return candidate
         return {}
 
+    def _close_refused_single_step(self, base: dict[str, Any], *,
+                                   status: str,
+                                   details: Mapping[str, Any]) -> dict[str, Any]:
+        """Release a single-step World Activity whose one action was definitively refused.
+
+        Reached only when the one World action this round executed came back with a
+        *definite* terminal ``FAILED`` (an owner rejection or execution failure with no
+        unknown side effect).  The Action and its owner receipt stay exactly where the
+        Action ledger put them -- the failure is not rewritten and never reported as a
+        completion.
+
+        The Activity is closed through LR-2's existing **BLOCK** transition (the S09
+        suspension owner, ``BLOCKED_BY_CONDITION``): it is the one formal lifecycle exit
+        this caller actually holds authority for, it keeps the goal/checkpoint/last action
+        intact, and it releases the single foreground slot so the next round is free to
+        choose something else.  Nothing is re-sent, and no replacement action is chosen
+        here -- a fresh Decision owns that.
+
+        A synchronous terminal ``FAILED`` needs the S09 failure assessment (which by design
+        refuses "one failed attempt" as proof the goal is unreachable), and a terminal
+        ``ABANDONED`` needs an agency ABANDON grant or a dedicated consequence capability
+        this composition root does not issue.  Minting either here would be a new
+        permission/owner contract, so this method deliberately stops at the existing BLOCK.
+
+        A UNKNOWN / in-transit / no-action result never reaches this method, so an unknown
+        execution is still reconciled under its original execution id instead of being
+        closed as if it had failed.
+        """
+
+        outcome_service = getattr(self.runtime, "activity_outcome", None)
+        reader = getattr(self.runtime, "activity_read", None)
+        action_read = getattr(self.runtime, "action_read", None)
+        ref = self._foreground_activity_ref()
+        action_id = str(base.get("action_id") or "")
+        closeout: dict[str, Any] = {
+            "action_status": status,
+            "owner_code": details.get("code"),
+            "activity_ref": ref or None,
+            "action_ref": action_id or None,
+        }
+        base["step_closeout"] = closeout
+        if outcome_service is None or reader is None or not ref:
+            closeout.update({"status": "SKIPPED",
+                             "reason_code": "NO_ACTIVITY_OUTCOME_OR_REF"})
+            return base
+        try:
+            record = dict(reader.get_activity(str(ref)) or {})
+        except Exception as exc:  # noqa: BLE001 - a failed read never guesses
+            closeout.update({"status": "SKIPPED", "reason_code": "ACTIVITY_READ_FAILED",
+                             "error_type": type(exc).__name__})
+            return base
+        if str(record.get("status") or "") != "ACTIVE":
+            closeout.update({"status": "SKIPPED", "reason_code": "ACTIVITY_NOT_ACTIVE",
+                             "owner_status": record.get("status")})
+            return base
+        # The named basis has to be a real owner row of *this* execution.  The Action id
+        # itself is not in the BLOCK basis vocabulary, but its receipt ref is, and the
+        # receipt is exactly the owner's record of the refusal.
+        receipt_ref = ""
+        if action_read is not None and action_id:
+            try:
+                for row in reversed(list(action_read.list_receipts(action_id) or [])):
+                    rid = str((row or {}).get("receipt_id") or "")
+                    if rid:
+                        receipt_ref = rid
+                        break
+            except Exception:  # noqa: BLE001 - a missing receipt means no named basis
+                receipt_ref = ""
+        if not receipt_ref:
+            closeout.update({"status": "SKIPPED", "reason_code": "NO_OWNER_RECEIPT"})
+            return base
+        stamp = str(base.get("observed_at") or self._now_iso())
+        try:
+            result = outcome_service.block_activity(
+                str(ref),
+                blocked_on_ref=receipt_ref,
+                blocked_reason_code="ACTION_TERMINALLY_REFUSED",
+                idempotency_key="lr2_step_refused:%s:%s"
+                                % (ref, action_id or receipt_ref),
+                expected_revision=int(record.get("revision") or 0),
+                causal_parent_refs=[action_id] if action_id else [],
+                occurred_at=stamp,
+                observed_at=stamp,
+            )
+        except Exception as exc:  # noqa: BLE001 - the refusal stands; closeout says why
+            closeout.update({"status": "FAILED", "reason_code": "LR2_BLOCK_FAILED",
+                             "error_type": type(exc).__name__})
+            return base
+        activity = getattr(result, "activity", None) or {}
+        closeout.update({
+            "status": "BLOCKED",
+            "reason_code": "ACTION_TERMINALLY_REFUSED",
+            "owner_status": str(activity.get("status") or ""),
+            "foreground_released": self._foreground_activity_ref() != ref,
+            "blocked_on_ref": receipt_ref,
+        })
+        return base
+
     def _classify_world_step(self, out: Mapping[str, Any], base: dict[str, Any],
                              obs: str) -> dict[str, Any]:
         """Report the World result as exactly what the World owner confirmed.
@@ -8602,6 +9626,11 @@ class AutonomousLifeCycle:
         if (step_spec is not None
                 and str(getattr(step_spec, "step_kind", ""))
                 == ag2.STEP_KIND_INTERNAL_CHECKPOINT):
+            payload = getattr(step_spec, "payload_spec", None) or {}
+            if isinstance(payload, Mapping) and payload.get("purchase_catalog_item_id"):
+                # 0.7: the counter purchase.  It is an internal checkpoint step (no AR-0
+                # Action), and its owner call happened in this same bounded step.
+                return self._classify_purchase_step(step_spec, base, obs)
             return self._classify_stay_step(step_spec, base, obs)
         submit = step_res.get("submit_result")
         if not isinstance(submit, Mapping):
@@ -8655,7 +9684,8 @@ class AutonomousLifeCycle:
         # v0.4 lived day: her everyday hand work.  "The owner accepted the command" is not the fact
         # -- the placement/hand state the World reports *after* the action is, and B's contract says
         # which one to read.  A re-read that cannot answer stays unsettled.
-        if status == "SUCCEEDED" and verb in {PICK_UP_VERB, PLACE_VERB}:
+        if status == "SUCCEEDED" and verb in {PICK_UP_VERB, PLACE_VERB,
+                                              ARRANGE_VERB, TOGGLE_FIXTURE_VERB}:
             return self._classify_daily_action(base, verb=verb, action=action)
         if status == "SUCCEEDED" and verb == CONSUME_VERB:
             return self._classify_world_consume(base, details)
@@ -8692,6 +9722,18 @@ class AutonomousLifeCycle:
                 detail="world action result unknown; reconcile the original execution "
                        "before any retry")
         if status == "FAILED":
+            # A definite terminal FAILED is one World action the owner really refused; it
+            # is not a multi-segment trip in progress (that is IN_TRANSIT), not a no-op and
+            # not an UNKNOWN awaiting reconciliation.  Record the fact, end the Activity
+            # through LR-2's formal terminal transition (releasing the foreground) and let
+            # the next fresh Decision choose what to do -- this round never re-sends it and
+            # never picks a replacement action for her.
+            base["world_step_failure"] = {
+                "status": status,
+                "code": details.get("code") or status,
+                "verb": verb,
+            }
+            self._close_refused_single_step(base, status=status, details=details)
             return self._finish(
                 base, OUTCOME_STEP_REFUSED, llm_calls=1,
                 detail="world owner refused: %s %s" % (details.get("code") or status,
@@ -8971,8 +10013,15 @@ class AutonomousLifeCycle:
         expected = str((completion or {}).get("expected_value") or "") if isinstance(
             completion, Mapping) else ""
         fresh = self._fresh_world_body_observation()
+        # The room-living facts (current furniture placement, recorded fixture power) are
+        # published by the owner's own availability read; the provider re-read that seam in
+        # the fresh observation above, so hand its answer to the reader.  It is ``None`` for
+        # an unwired/older provider, and the reader then answers "unknown" honestly.
+        available_actions = getattr(
+            self.world_opportunity_provider, "last_available_actions", None)
         observed = self._daily_action_observed_state(
-            module, parsed, fresh["snapshot"], verb=str(parsed.get("verb") or verb))
+            module, parsed, fresh["snapshot"], verb=str(parsed.get("verb") or verb),
+            available_actions=available_actions)
         satisfied = bool(observed.get("satisfied")) if fresh["ok"] else False
         base["daily_action"] = {
             "verb": str(parsed.get("verb") or verb),
@@ -9019,7 +10068,8 @@ class AutonomousLifeCycle:
 
     @staticmethod
     def _daily_action_observed_state(module: Any, parsed: Mapping[str, Any],
-                                     snapshot: Mapping[str, Any], *, verb: str
+                                     snapshot: Mapping[str, Any], *, verb: str,
+                                     available_actions: Any = None
                                      ) -> dict[str, Any]:
         """Is the object really where the verb says, in the owner's own fresh snapshot?
 
@@ -9033,7 +10083,13 @@ class AutonomousLifeCycle:
         reader = getattr(module, "daily_action_observed_fact", None)
         if callable(reader):
             try:
-                fact = reader(parsed, snapshot)
+                fact = reader(parsed, snapshot, available_actions=available_actions)
+            except TypeError:
+                # An older reader with the two-argument shape: the hand verbs still work.
+                try:
+                    fact = reader(parsed, snapshot)
+                except Exception:  # noqa: BLE001
+                    fact = None
             except Exception:  # noqa: BLE001 - an owner reader that breaks answers nothing
                 fact = None
             if isinstance(fact, Mapping):
@@ -9110,6 +10166,176 @@ class AutonomousLifeCycle:
         self._emit_world_experience(base, activity_ref=activity_ref,
                                     world_refs=[expected,
                                                 "world:daily:%s" % _world_ref_token(target_ref)])
+
+    def _classify_purchase_step(self, step_spec: Any, base: dict[str, Any],
+                                obs: str) -> dict[str, Any]:
+        """Buy one catalogue item through the existing economy owner, then report only it.
+
+        This is a Life-internal action adapter, not a new World verb and not a second
+        economy: ``world_property_economy.purchase_item(main_self_verified=True, ...)`` is
+        the same main-self entry the rest of the tree uses, and its ``purchase_intent_id``
+        is this Decision's stable operation key.  The owner keeps the store/open/balance/
+        catalogue checks and the atomic debit+ownership write; a replay returns
+        ``already_applied`` and cannot charge twice.
+
+        An exception or an indeterminate owner answer is reconciled by asking the economy
+        owner itself for that operation key (``find_purchase_intent``) before anything is
+        claimed.  A refused purchase reports the owner's own reason and completes nothing.
+        """
+
+        payload = dict(getattr(step_spec, "payload_spec", None) or {})
+        item_id = str(payload.get("purchase_catalog_item_id") or "").strip()
+        key = str(payload.get("purchase_operation_key") or "").strip()
+        target_ref = str(payload.get("purchase_target_ref") or "")
+        if not item_id or not key:
+            return self._finish(
+                base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                detail="the purchase step carries no catalogue item or operation key")
+
+        try:
+            import world_property_economy as economy
+        except Exception as exc:  # noqa: BLE001 - a missing owner is a named refusal
+            return self._finish(
+                base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                detail="the economy owner is not importable: %s" % type(exc).__name__)
+
+        # ``world_daily_rhythm`` requires a real datetime (it is also what the World catalog
+        # was read with); the round's own instant is an ISO string, so decode that same instant.
+        try:
+            purchase_now: Any = (datetime.fromisoformat(str(obs).replace("Z", "+00:00"))
+                                 if isinstance(obs, str) and obs else self._now())
+        except ValueError:
+            purchase_now = self._now()
+        error: Optional[BaseException] = None
+        result: Any = None
+        try:
+            result = economy.purchase_item(
+                catalog_item_id=item_id,
+                purchase_intent_id=key,
+                main_self_verified=True,
+                hermes_home=self.world_home,
+                environment=self.env,
+                now=purchase_now,
+            )
+        except Exception as exc:  # noqa: BLE001 - reconciled below, never assumed
+            error = exc
+
+        status = str((result or {}).get("status") or "")
+        reconciled = False
+        if error is not None or status in ("", "failed", "unknown"):
+            # The write may have landed before the answer was lost.  Ask the same owner for
+            # this operation key; only its own record may turn an unknown into a purchase.
+            try:
+                found = economy.find_purchase_intent(key, hermes_home=self.world_home)
+            except Exception:  # noqa: BLE001 - an unreadable ledger is not a purchase
+                found = None
+            if isinstance(found, Mapping) and str(found.get("status")) in (
+                    "applied", "already_applied"):
+                result = dict(found)
+                status = "applied"
+                reconciled = True
+
+        if status in ("applied", "already_applied"):
+            base["purchase"] = {
+                "status": status,
+                "catalog_item_id": item_id,
+                "item_name": payload.get("purchase_item_name"),
+                "price": (result or {}).get("price"),
+                "currency": (result or {}).get("currency"),
+                "transaction_id": (result or {}).get("transaction_id"),
+                "purchase_intent_id": (result or {}).get("purchase_intent_id") or key,
+                "item_instance_id": (result or {}).get("item_instance_id"),
+                "current_balance": (result or {}).get("current_balance"),
+                "ownership": (result or {}).get("ownership") or "OWNED",
+                "location": ((result or {}).get("location")
+                             or (result or {}).get("delivery_location")),
+                "delivery_status": (result or {}).get("delivery_status"),
+                "expected_delivery_at": (result or {}).get("expected_delivery_at"),
+                "store_place": payload.get("purchase_store_place"),
+                "replayed": status == "already_applied",
+                "reconciled": reconciled,
+                "owner": "world_property_economy",
+            }
+            self._record_purchase_progress(
+                base, activity_ref=base.get("activity_ref"),
+                target_ref=target_ref, transaction=result or {})
+            return self._finish(
+                base, OUTCOME_ACTED, llm_calls=1,
+                detail="the economy owner confirmed purchase %s (%s)"
+                       % ((result or {}).get("transaction_id") or key, item_id))
+
+        reason = str((result or {}).get("reason_code") or "") or (
+            type(error).__name__ if error is not None else "")
+        base["purchase"] = {
+            "status": status or "unknown",
+            "catalog_item_id": item_id,
+            "item_name": payload.get("purchase_item_name"),
+            "purchase_intent_id": key,
+            "reason_code": reason or None,
+            "owner": "world_property_economy",
+            "reconciled": reconciled,
+        }
+        return self._finish(
+            base, OUTCOME_STEP_REFUSED, llm_calls=1,
+            detail="the economy owner refused the purchase: %s" % (reason or status or "unknown"))
+
+    def _record_purchase_progress(self, base: dict[str, Any], *, activity_ref: Any,
+                                  target_ref: str, transaction: Mapping[str, Any]) -> None:
+        """Hand LR-5 the economy owner's own purchase fact -- and only after it wrote one."""
+
+        import activity_progress_completion_lr5 as lr5
+
+        expected = "world_fact:%s" % target_ref
+        if not activity_ref:
+            return
+        now = self._now_iso()
+        observed_facts: dict[str, Any] = {
+            PURCHASE_FACT_KEY: expected,
+            "purchase_transaction_id": transaction.get("transaction_id"),
+            "purchase_intent_id": transaction.get("purchase_intent_id"),
+            "purchase_catalog_item_id": transaction.get("catalog_item_id"),
+            "purchase_item_instance_id": transaction.get("item_instance_id"),
+            "purchase_price": transaction.get("price"),
+            "purchase_balance_after": transaction.get("current_balance"),
+            "purchase_currency": transaction.get("currency"),
+            "purchase_ownership": transaction.get("ownership") or "OWNED",
+            "observation_source": "world_property_economy.purchase_item",
+        }
+        evidence = lr5.LifeProgressEvidence(
+            progress_evidence_id=(
+                f"pevid:{hashlib.sha256(f'{activity_ref}:{target_ref}'.encode('utf-8')).hexdigest()[:16]}"),
+            source_kind=lr5.SOURCE_KIND_WORLD_FACT,
+            source_ref="world:purchase:%s" % _world_ref_token(target_ref),
+            authority_domain="world_authority",
+            epistemic_kind=lr5.EPISTEMIC_CANONICAL_OBSERVATION,
+            occurred_at=now,
+            observed_at=now,
+            recorded_at=now,
+            idempotency_key="pevid_idem:%s:%s" % (activity_ref, target_ref),
+            activity_id=str(activity_ref),
+            # The economy transaction id is ``purchase-<digest>``; LR-5 only accepts its
+            # existing owner-execution ref prefixes, so the id travels under ``world_exec:``.
+            action_ref=(("world_exec:%s" % transaction["transaction_id"])
+                        if transaction.get("transaction_id") else None),
+            world_fact_ref=expected,
+            target_ref=expected,
+            observed_facts=observed_facts,
+            correlation_id=str(base.get("correlation_id") or "") or None,
+        )
+        try:
+            result = self.runtime.ag2_progress_port.ingest_progress_evidence(evidence)
+        except Exception as exc:  # noqa: BLE001 - a progress write failure is reported
+            base["progress_ingest_error"] = f"{type(exc).__name__}: {exc}"
+            return
+        state = result.get("progress_state")
+        base["progress_state"] = (state.get("progress_state")
+                                  if isinstance(state, dict) else state)
+        update = result.get("checkpoint_update") or {}
+        base["checkpoint_update_ref"] = update.get("checkpoint_update_id")
+        base["checkpoint_ref"] = update.get("checkpoint_ref") or update.get("new_checkpoint_ref")
+        self._emit_world_experience(base, activity_ref=activity_ref,
+                                    world_refs=[expected,
+                                                "world:purchase:%s" % _world_ref_token(target_ref)])
 
     def _stay_began_at(self, activity_ref: Any) -> tuple[Optional[str], Optional[str]]:
         """When LR-5 recorded this stay's first checkpoint, and that checkpoint's ref.
@@ -9634,7 +10860,8 @@ class AutonomousLifeCycle:
 
     def _record_artifact_progress(self, base: dict[str, Any], *, activity_ref: Any,
                                   artifact_id: Any, version_id: Any, version_number: Any,
-                                  correlation_id: Any, action_ref: Any) -> None:
+                                  correlation_id: Any, action_ref: Any,
+                                  page: Any = None, source_revision: Any = None) -> None:
         """Hand LR-5 the only thing it may act on: an observation of the owner's own state.
 
         The version reference comes from the owner's ``read_head``, never from the model or from
@@ -9658,6 +10885,20 @@ class AutonomousLifeCycle:
         artifact_bare = str(artifact_id or "").split(":", 1)[-1]
         version_bare = str(version_id).split(":", 1)[-1]
         now = self._now_iso()
+        observed = {"latest_version_ref": f"artifactversion:{version_bare}",
+                    "version_number": version_number,
+                    "observation_source": "life_supply.read_head"}
+        # A page read also states *which* page the owner's private-items document confirms.  It is
+        # the same canonical artifact-state observation, one extra bounded fact, so LR-5's own
+        # PAGE_POSITION_REACHED criterion can be evaluated without a second evidence channel.
+        if isinstance(page, int) and not isinstance(page, bool) and page >= 1:
+            observed["page"] = int(page)
+        # The *source* revision the page belongs to (the reading material's own head at the
+        # time of the read).  It is a second bounded fact like ``page``; the completion
+        # criterion uses it so an old page target cannot settle on a different material
+        # version.  ``version_id`` above stays the committed owner version, untouched.
+        if source_revision:
+            observed["source_version_ref"] = str(source_revision)
         evidence = lr5.LifeProgressEvidence(
             progress_evidence_id=(
                 f"pevid:{hashlib.sha256(f'{activity_ref}:{version_id}'.encode('utf-8')).hexdigest()[:16]}"),
@@ -9673,9 +10914,7 @@ class AutonomousLifeCycle:
             action_ref=str(action_ref) if action_ref else None,
             artifact_ref=f"artifact:{artifact_bare}",
             target_ref=f"artifact:{artifact_bare}",
-            observed_facts={"latest_version_ref": f"artifactversion:{version_bare}",
-                            "version_number": version_number,
-                            "observation_source": "life_supply.read_head"},
+            observed_facts=observed,
             correlation_id=str(correlation_id) if correlation_id else None,
         )
         try:
@@ -9900,6 +11139,31 @@ class AutonomousLifeCycle:
 
     # -- reporting ---------------------------------------------------------------------
 
+    def _note_bounded_first_fault(self, base: dict[str, Any]) -> None:
+        """Persist the bounded experiment's first definite execution fault.
+
+        The ordinary daily budget has ``failstop`` off, so this returns without doing
+        anything there -- no permanent lock is ever written for daily life.  In the
+        bounded experiment the same round that saw an owner definitively refuse its one
+        World step writes the fixed marker here, and the *next* reserve/send (the request
+        budget's own ``check_failstop``) refuses before any model call.  Only a fixed code
+        travels; no exception message or free text is stored.
+        """
+
+        requests = getattr(self.budget, "requests", None)
+        if requests is None or not getattr(requests, "failstop", False):
+            return
+        failure = base.get("world_step_failure")
+        if not isinstance(failure, Mapping) or not failure:
+            return
+        try:
+            requests.note_failure("STEP_REFUSED")
+        except SystemExit:
+            # note_failure's own persist-failure escape must keep its hard-stop meaning.
+            raise
+        except Exception as exc:  # noqa: BLE001 - reported, never a silent success
+            base["bounded_failstop_error"] = type(exc).__name__
+
     def _finish(self, base: dict[str, Any], outcome: str, *, llm_calls: int,
                 detail: str = "") -> dict[str, Any]:
         # A round whose committed Decision says ``RULE_RESOLVED`` made no model request by
@@ -9938,6 +11202,12 @@ class AutonomousLifeCycle:
         base.update({"outcome": outcome, "detail": detail, "llm_calls": llm_calls,
                      "budget_remaining": self.budget.remaining(),
                      "budget": self.budget.snapshot()})
+        # Bounded-experiment first-fault gate: a definite owner refusal / real execution
+        # failure of this round's World step is persisted as the very next thing the
+        # request budget reads, so the next reserve/send is refused *synchronously*
+        # instead of waiting for another poll or another model call.  It is a no-op for
+        # every ordinary (non-failstop) daily run, which keeps the default behaviour.
+        self._note_bounded_first_fault(base)
         # v0.4 day-life: remember that this *whole* situation was considered and declined, so an
         # identical one -- in this process or after a restart -- is not asked again.  The keyed entry
         # is kept beside it for the no-step report and for release-by-ref; neither stores text, a
@@ -10139,7 +11409,7 @@ __all__ = [
     "OUTCOME_QUIET",
     "OUTCOME_STEP_REFUSED",
     "OUTCOME_STEP_UNKNOWN",
-    "TRIGGER_IDLE_WINDOW",
+    "TRIGGER_EXPLICIT_REEVALUATION",
     "TRIGGER_RECOVERY",
     "TRIGGER_RESUME_OPENED",
     "TRIGGER_USER_EVENT",

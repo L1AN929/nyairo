@@ -62,6 +62,7 @@ from . import service as phone_service
 from . import living as phone_living
 from . import sharing as phone_sharing
 from . import contact as phone_contact
+from . import outing_places_view as outing_view
 from . import practice_shared as phone_practice
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -173,6 +174,250 @@ SHARE_ACTION_FIELDS = frozenset({"action", "expected_head", "operation_key", "de
                                  "opportunity_ref", "reason"})
 #: The only two query parameters the share list accepts (``states`` may repeat).
 SHARE_QUERY_FIELDS = frozenset({"states", "limit"})
+
+#: ``/api/phone/desk/*`` -- the two-person desk projection.  ``presence`` and ``notes`` are
+#: pure reads.  ``POST /api/phone/desk/tomorrow`` is the one explicit write: it forwards a
+#: propose/cancel/reschedule to the existing ``FutureItems`` owner, after CSRF and this
+#: serve's local capability; it creates no second store and no autonomous decision.
+DESK_TOMORROW_FIELDS = frozenset({"action", "title", "item_ref", "due_at", "due_in_minutes",
+                                  "reason"})
+DESK_ACTIONS = frozenset({"propose", "cancel", "reschedule"})
+
+#: ``/api/phone/home/*`` -- 窗边景致、冰箱贴与自选锁屏、分日慢写的信。两个 GET 是纯读聚合；
+#: ``POST /api/phone/home/keepsakes`` 只写实例自己的显式选择 JSON：先 CSRF，再本次 serve 的
+#: 本地 capability；引用会被 owner 现读核验，但正文/图片/路径永远不进这个请求体。
+WINDOW_KEEPSAKE_FIELDS = frozenset({"action", "album_artifact_id", "share_id"})
+WINDOW_KEEPSAKE_ACTIONS = frozenset({
+    "select_lockscreen", "clear_lockscreen", "pin_share", "unpin_share",
+})
+#: 「顺手带一张图/一段话进来」不是这个面的输入。客户端若发这些字段就按名字拒绝（409），
+#: 而不是静默丢掉——静默丢掉会看起来像选择已经生效。
+WINDOW_KEEPSAKE_REFUSED_FIELDS = frozenset({
+    "caption", "text", "title", "summary", "media", "bytes", "data", "sha256", "hash",
+    "path", "file", "file_path", "url", "uri", "endpoint", "body", "content",
+    "audience", "channel", "recipient", "to", "transport", "provider", "source",
+})
+
+#: ``/api/phone/home/workbench`` -- the explicit creation tray.  ``GET`` re-reads every
+#: reference; ``POST`` writes only the instance's own reference JSON after CSRF + capability.
+#: The client may not send a caption/body/version: the baseline version is always read by the
+#: server from the real owner at insertion time.
+WORKBENCH_ACTIONS = frozenset({"set_tray", "clear_tray"})
+WORKBENCH_FIELDS = frozenset({"action", "album_artifact_ids", "material_ids",
+                              "work_artifact_id", "note"})
+WORKBENCH_REFUSED_FIELDS = WINDOW_KEEPSAKE_REFUSED_FIELDS | frozenset({
+    "version", "version_id", "head_version_id", "baseline", "baseline_version_id",
+    "source_revision", "artifact_type",
+})
+
+#: ``/api/phone/home/trio-exchange`` -- her delivered picks and the partner's short cards.
+#: ``set_her_picks`` needs CSRF + capability; ``set_partner_picks`` needs CSRF only (a
+#: capability header that *is* presented must still verify and never downgrades silently).
+TRIO_ACTIONS = frozenset({"set_her_picks", "set_partner_picks"})
+TRIO_FIELDS = frozenset({"action", "her_picks", "partner_picks"})
+
+#: ``/api/phone/home/wardrobe`` -- explicit styling choices only.  ``GET`` re-reads the real
+#: economy for any named owned instance; ``POST`` writes only this instance's own selection
+#: JSON after CSRF + capability.  A wardrobe choice is not ownership, location or wear state.
+WARDROBE_ACTIONS = frozenset({"set", "clear"})
+WARDROBE_SET_FIELDS = frozenset({
+    "homewear_style", "homewear_item_instance_id", "outdoor_style",
+    "outdoor_item_instance_id", "hairband_style", "hairband_item_instance_id",
+    "hairclip_style", "hairclip_item_instance_id", "pairing_note", "blanket_season",
+    "cushion_season",
+})
+WARDROBE_FIELDS = WARDROBE_SET_FIELDS | frozenset({"action", "fields"})
+WARDROBE_REFUSED_FIELDS = frozenset({
+    "path", "file", "file_path", "url", "uri", "endpoint", "media", "bytes", "data",
+    "owner", "actor", "subject", "uid", "world_id", "place_id", "area_id", "location",
+    "shared", "revision", "worn", "equipped", "apply_to_world", "change_world",
+})
+
+#: ``/api/phone/pocket/lists`` -- bounded personal cards + up to three partner suggestions.
+#: Personal add/update/remove need CSRF + capability; the partner replacement needs CSRF only
+#: (a capability that *is* presented must still verify).  Nothing here calls reading, a model,
+#: Memory or FutureItems.
+POCKET_ACTIONS = frozenset({"add", "update", "remove", "set_partner_suggestions"})
+POCKET_FIELDS = frozenset({
+    "action", "list", "entry_id", "title", "reason", "expectation", "verdict", "note",
+    "status", "shared", "operation_key", "suggestions",
+})
+POCKET_REFUSED_FIELDS = frozenset({
+    "path", "file", "file_path", "url", "uri", "endpoint", "media", "bytes", "data",
+    "owner", "actor", "subject", "uid", "revision", "created_at", "updated_at",
+    "partner_contributed", "private_count", "total", "count", "entries",
+})
+#: The partner suggestion replacement: each card carries only a short title and note.
+POCKET_SUGGESTION_FIELDS = frozenset({"title", "note"})
+#: The finite status vocabulary *per list*.  A status that belongs to another list (or to no
+#: list at all) is a 400 request error, never silently coerced.
+POCKET_LIST_STATUSES = {
+    "playlist": frozenset({"active", "resting"}),
+    "favorites": frozenset({"saved_unread", "reviewed"}),
+    "want_to_try": frozenset({"active", "paused", "dropped", "done"}),
+}
+
+#: ``/api/phone/pocket/work-revisit`` -- exactly these three query keys, each once, no default.
+WORK_REVISIT_QUERY_FIELDS = frozenset({"artifact_id", "left_version_id", "right_version_id"})
+
+#: ``/api/phone/home/reunion-anchor`` -- one explicit safe capture.  The client names only the
+#: action: every fact in the snapshot is read here from the real owners, never submitted.
+REUNION_FIELDS = frozenset({"action"})
+REUNION_ACTIONS = frozenset({"capture"})
+
+#: ``/api/phone/home/recipes`` -- the two-person shared recipe cards.  ``author_side`` selects
+#: the write gate (her = CSRF + this serve's capability; partner = CSRF only, and a capability
+#: that *is* presented must still verify).  It never grants her identity.
+RECIPE_FIELDS = frozenset({"action", "recipe_id", "title", "memo", "author_side"})
+RECIPE_ACTIONS = frozenset({"upsert"})
+
+#: ``/api/phone/home/tentative-plans`` -- propose / reschedule / drop only.  There is no generic
+#: status write, no ACCEPTED and no import into core arrangements, Activity or FutureItems.
+PLAN_ACTIONS = frozenset({"propose", "reschedule", "drop"})
+PLAN_FIELDS = frozenset({"action", "plan_id", "title", "window_note", "proposer"})
+
+#: ``/api/phone/outing/*`` -- 房间外六项生活细节：长椅重访与书店橱窗、散步路线与虚拟预算集市、
+#: 可重访作品展与共同新地点草图。所有动作均按精确允许键存在性校验，跨动作空字段一律 400。
+OUTING_BENCH_BOOKSTORE_ACTIONS = frozenset({
+    "log_bench_visit", "set_bench_visibility", "bookmark_window_book",
+    "set_partner_window_note", "clear_partner_window_note",
+})
+OUTING_BENCH_BOOKSTORE_FIELDS = frozenset({
+    "action", "place_id", "note", "shared", "operation_key", "visit_id", "slot_index",
+})
+OUTING_ROUTES_MARKET_ACTIONS = frozenset({
+    "save_walk_route", "remove_walk_route", "note_market_wish",
+    "set_partner_market_tip", "clear_partner_market_tip",
+})
+OUTING_ROUTES_MARKET_FIELDS = frozenset({
+    "action", "route_id", "title", "place_ids", "album_artifact_id", "caption", "shared",
+    "stall_code", "memo", "budget_cap_jpy", "tip",
+})
+OUTING_GALLERY_BLUEPRINT_ACTIONS = frozenset({
+    "curate_exhibit", "remove_exhibit", "upsert_blueprint", "archive_blueprint",
+})
+OUTING_GALLERY_BLUEPRINT_FIELDS = frozenset({
+    "action", "artifact_id", "version_id", "wall_caption", "exhibit_id",
+    "blueprint_id", "title", "sketch_note", "intended_use", "author_side",
+})
+
+#: ``/api/phone/longterm/*`` -- 长程陪伴六项生活细节：首日房间与盆栽手账/共同习惯册、
+#: 共同礼物轨迹与回忆空间双层灯光、一键续接与归档/恢复只读总览。所有动作均按精确键集校验。
+LONGTERM_FIRST_ROOM_HABITS_ACTIONS = frozenset({
+    "capture_first_room", "link_plant_sketch", "remove_plant_sketch",
+    "upsert_habit", "retire_habit",
+})
+LONGTERM_FIRST_ROOM_HABITS_FIELDS = frozenset({
+    "action", "album_artifact_id", "note",
+    "plant_id", "target_kind", "target_artifact_id", "observation_note", "shared", "link_id",
+    "habit_id", "title", "habit_text", "revised_reason", "retired_reason", "author_side",
+})
+LONGTERM_GIFTS_LANTERN_ACTIONS = frozenset({
+    "upsert_gift", "send_gift", "record_later_reflection",
+})
+LONGTERM_GIFTS_LANTERN_FIELDS = frozenset({
+    "action", "gift_id", "author_side", "stage", "title", "draft_seed_note",
+    "finished_note", "artifact_id", "version_id",
+    "source_artifact_id", "source_version_id", "reflection_note", "shared",
+})
+LONGTERM_LANTERN_LAYERS = frozenset({"then_only", "with_later_context"})
+
+#: ``/api/phone/character/pack`` & ``/api/phone/body/sensory`` -- 开源角色包合同、可组合身体与
+#: 五路环境感官场 + 文字声景卡。按精确动作键集白名单校验，任何多余或空串可选键一律 400。
+CHARACTER_PACK_ACTIONS = frozenset({
+    "select_preset",
+    "apply_custom_pack",
+    "update_identity",
+    "set_optional_physiology",
+    "export_pack",
+    "import_pack_json",
+    "attest_character_pack",
+})
+CHARACTER_PACK_FIELDS = frozenset({
+    "action", "preset_id", "pack",
+    "display_name", "pronouns", "subject_calls_user", "user_calls_subject",
+    "sensory_preferences", "everyday_accessories",
+    "optional_processes",
+    "pack_json", "attested_by", "pack_id", "version",
+    "adult_confirmed", "life_stage", "declared_age", "fictional_confirmed",
+    "include_sexual_seed", "pack_sha256", "note", "owner",
+})
+BODY_SENSORY_ACTIONS = frozenset({
+    "capture_sound_card", "set_sound_card_share", "remove_sound_card",
+    "leave_sensory_note", "remove_sensory_note", "clear_sensory_notes",
+})
+BODY_SENSORY_FIELDS = frozenset({
+    "action", "title", "impression_note", "shared", "operation_key",
+    "card_id", "text", "note_id",
+})
+
+#: ``/api/phone/autonomy/rhythm`` -- 主体日常自主拒绝边界、挂着的话题余温、主动走神改画风与
+#: 真实异步延迟回信。GET 纯读零写；POST 先校验 CSRF，主体动作必须带 X-Phone-Capability。
+AUTONOMY_RHYTHM_ACTIONS = frozenset({
+    "evaluate_turn",
+    "declare_refusal",
+    "release_refusal",
+    "record_turn_context",
+    "hold_subject_topic",
+    "return_to_thread",
+    "clear_session_threads",
+    "wave_off_retracted",
+    "trigger_spontaneous_pivot",
+    "set_phone_aside",
+    "urgent_knock",
+    "claim_ready_messages",
+    "clear_delivered_messages",
+    "update_preferences",
+})
+AUTONOMY_RHYTHM_SUBJECT_ACTIONS = frozenset({
+    "declare_refusal",
+    "release_refusal",
+    "hold_subject_topic",
+    "return_to_thread",
+    "trigger_spontaneous_pivot",
+    "set_phone_aside",
+})
+AUTONOMY_RHYTHM_FIELDS = frozenset({
+    "action",
+    "user_text", "urgent", "session_id",
+    "topic_label", "category", "reason_summary", "private_note", "lock_id",
+    "reason", "owner", "thread_id",
+    "custom_prompt",
+    "mode", "minutes", "note",
+    "msg_id", "msg_ids",
+    "pace_mode", "away_delay_minutes", "anti_errand_firmness",
+    "thread_hold_min", "spontaneous_pivot_enabled",
+    "pivot_cooldown_min", "spontaneous_pivot_cooldown_min",
+})
+
+#: ``/api/phone/body/*`` -- 具身冷暖/坐姿投影、窗扇与外衣、桌边温饮/靠垫。三个 GET 都是
+#: 纯读聚合；两个 POST 只写实例自己的局部仿真 JSON（先 CSRF；本人动作再要本次 serve 的
+#: capability）。窗/衣物/照顾都只记显式条件，不复制 Body/世界位置，不建第二动作账本。
+SOMATIC_WINDOW_STATES = frozenset({"open", "ajar", "closed"})
+SOMATIC_LOCAL_ZONES = frozenset({"window_side", "desk_side", "elsewhere"})
+SOMATIC_DRYNESS = frozenset({"dry", "damp", "unknown"})
+SOMATIC_GARMENT_WINDOW_ACTIONS = frozenset({
+    "set_window", "set_local_position", "wear_outerwear", "hang_outerwear",
+})
+SOMATIC_GARMENT_WINDOW_FIELDS = frozenset({
+    "action", "state", "zone", "garment_id", "label", "dryness", "hang_position",
+})
+SOMATIC_CARE_ACTIONS = frozenset({"offer", "take", "drink", "use", "stow", "withdraw"})
+SOMATIC_CARE_FIELDS = frozenset({"action", "slot", "kind", "actor_side", "position"})
+SOMATIC_CARE_SLOTS = frozenset({"drink", "cushion"})
+SOMATIC_CARE_KINDS = {"drink": frozenset({"warm_water", "hot_tea"}),
+                      "cushion": frozenset({"floor_cushion"})}
+SOMATIC_CARE_ACTORS = frozenset({"her", "partner"})
+SOMATIC_CARE_POSITIONS = frozenset({"hand_side", "desk_side"})
+#: A client may not name the real instance, its path/URL, its temperature or a body value:
+#: those are the owner's or this module's own facts, never request fields.
+SOMATIC_REFUSED_FIELDS = frozenset({
+    "path", "file", "file_path", "url", "uri", "endpoint", "media", "bytes", "data",
+    "item_instance_id", "object_id", "object", "slot_id", "container_id", "catalog_item_id",
+    "temperature", "temp", "warmth", "cooling_seconds", "elapsed", "elapsed_seconds",
+    "seconds", "duration", "body", "pose", "needs", "thirst", "hunger", "toilet",
+    "place_id", "area_id", "location", "location_id", "revision", "operation_key",
+})
 SHARE_ACTIONS = phone_sharing.PHONE_SHARE_ACTIONS
 #: Anything that would try to address this share somewhere other than the local inbox.  A client
 #: that sends one is refused by name (409), never silently ignored.
@@ -711,7 +956,9 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
 
     def _read_body(self, fields: frozenset[str],
                    refused: frozenset[str] = frozenset(),
-                   max_bytes: Optional[int] = None) -> dict[str, Any]:
+                   max_bytes: Optional[int] = None,
+                   *,
+                   allow_identity_fields: frozenset[str] = frozenset()) -> dict[str, Any]:
         content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
             raise PhoneRequestError("CONTENT_TYPE_REQUIRED")
@@ -732,7 +979,7 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             raise PhoneRequestError("BODY_NOT_JSON") from None
         if not isinstance(payload, dict):
             raise PhoneRequestError("BODY_NOT_AN_OBJECT")
-        identifiers = sorted(set(payload) & IDENTITY_FIELDS)
+        identifiers = sorted((set(payload) & IDENTITY_FIELDS) - set(allow_identity_fields))
         if identifiers:
             # The phone layer drops these; the owner never sees them as identity either.
             raise PhoneRequestError("CLIENT_IDENTITY_REFUSED:%s" % ",".join(identifiers), 409)
@@ -956,6 +1203,9 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/today/timeline":
                 self._get_day_timeline(service)
                 return
+            if path == f"{API_PREFIX}/today/story":
+                self._get_today_story(service)
+                return
             # S03: her current claims -- observed / reported / inferred, each with its
             # scope, time and status; conflicts, stale and unknown stay distinct.  A pure
             # read: no World fetch, no model, no Memory write, no action permission.
@@ -1013,6 +1263,19 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             # carries where she is and what her body is doing.
             if path == f"{API_PREFIX}/world":
                 self._get_world(service)
+                return
+            # 具身冷暖/干湿/坐姿/触觉：真实 World/Body 只读投影，加本实例显式的窗/衣物/
+            # 桌边条件；没有证据的模态就是 unknown/无信号，不为了凑四类编事实。
+            if path == f"{API_PREFIX}/body/somatic":
+                self._get_body_somatic(service)
+                return
+            # 窗扇开关、局部位置与外衣穿挂：只读投影；写口只在 POST，且只属于本人。
+            if path == f"{API_PREFIX}/body/garment-window":
+                self._get_body_garment_window(service)
+                return
+            # 桌边温饮/靠垫：一个饮品槽 + 一个靠垫槽；GET 按 elapsed 派生冷却与支撑。
+            if path == f"{API_PREFIX}/body/care-offering":
+                self._get_body_care_offering(service)
                 return
             # Her private album: the list carries captions/owner media metadata (no bytes); the
             # detail carries no bytes either; only ``/image`` serves the real picture.  The image
@@ -1092,6 +1355,133 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if _PRACTICE_METHOD_PATH.match(path):
                 self._get_practice_method(service, _PRACTICE_METHOD_PATH.match(path).group(1))
                 return
+            # 双人书桌：四态木牌与桌面物件、留存短笺与明日便签。两条都是纯读；默认视角
+            # 不带任何正文/私人标题，只有本次 serve 的本地 capability 有效时才是自己视角。
+            if path == f"{API_PREFIX}/desk/presence":
+                self._get_desk_presence(service)
+                return
+            if path == f"{API_PREFIX}/desk/notes":
+                self._get_desk_notes(service)
+                return
+            # 窗边景致 / 冰箱贴与自选锁屏 / 分日慢写的信。三个 GET 都只读：真实 World
+            # 家具/灯光、世界家 personal space、当天 ambient 模板声景、相册/分享/
+            # 作品版本都由原 owner 现读；没有气象权威就不编天气。
+            if path == f"{API_PREFIX}/home/window":
+                self._get_home_window(service)
+                return
+            if path == f"{API_PREFIX}/home/keepsakes":
+                self._get_home_keepsakes(service)
+                return
+            if path == f"{API_PREFIX}/home/letters":
+                self._get_home_letters(service)
+                return
+            # 创作托盘 / 小物履历 / 三样喜欢之物。三个 GET 都是纯读：托盘引用现读
+            # album/material/project owner；小物履历只读 economy + substrate；交换匣现读
+            # 已投递分享正文并受 source 治理约束。
+            if path == f"{API_PREFIX}/home/workbench":
+                self._get_home_workbench(service)
+                return
+            if path == f"{API_PREFIX}/home/curios":
+                self._get_home_curios(service)
+                return
+            if path == f"{API_PREFIX}/home/trio-exchange":
+                self._get_home_trio_exchange(service)
+                return
+            # 衣柜梳妆 / 歌单收藏想试小列表 / 作品旧版安全并排。衣柜与列表默认只给安全视图，
+            # 本人 capability 才给私人备注与全量；旧版并排只读两个真实版本，绝不写。
+            if path == f"{API_PREFIX}/home/wardrobe":
+                self._get_home_wardrobe(service)
+                return
+            if path == f"{API_PREFIX}/pocket/lists":
+                self._get_pocket_lists(service)
+                return
+            if path == f"{API_PREFIX}/pocket/work-revisit":
+                self._get_pocket_work_revisit(service)
+                return
+            # 居家收官：重逢锚点 / 夜茶菜谱 / 待定小约定。三个 GET 都纯读；锚点 GET 只比对
+            # 真实 owner 事实，菜谱参考区只读真实购买/消费，暂定项与正式今日安排分列。
+            if path == f"{API_PREFIX}/home/reunion-anchor":
+                self._get_home_reunion_anchor(service)
+                return
+            if path == f"{API_PREFIX}/home/recipes":
+                self._get_home_recipes(service)
+                return
+            if path == f"{API_PREFIX}/home/tentative-plans":
+                self._get_home_tentative_plans(service)
+                return
+            # 房间外六项生活细节：三个 GET 均纯读零写；默认 partner_default 安全视图，显式错误凭据 403。
+            if path == f"{API_PREFIX}/outing/bench-bookstore":
+                self._get_outing_bench_bookstore(service)
+                return
+            if path == f"{API_PREFIX}/outing/routes-market":
+                self._get_outing_routes_market(service)
+                return
+            if path == f"{API_PREFIX}/outing/gallery-blueprint":
+                self._get_outing_gallery_blueprint(service)
+                return
+            # 长程陪伴六项生活细节：三个 GET 均纯读零写；默认 partner_default 安全视图，显式错误凭据 403。
+            if path == f"{API_PREFIX}/longterm/first-room-habits":
+                self._get_longterm_first_room_habits(service)
+                return
+            if path == f"{API_PREFIX}/longterm/gifts-lantern":
+                self._get_longterm_gifts_lantern(service)
+                return
+            if path == f"{API_PREFIX}/longterm/resume-hub":
+                self._get_longterm_resume_hub(service)
+                return
+            # 开源角色包与多通道感官场：两个 GET 均 100% 纯读零写；默认安全视图，错误凭据 403。
+            if path == f"{API_PREFIX}/character/pack":
+                self._get_character_pack(service)
+                return
+            if path == f"{API_PREFIX}/body/sensory":
+                self._get_body_sensory(service)
+                return
+            if path == f"{API_PREFIX}/autonomy/rhythm":
+                self._get_autonomy_rhythm(service)
+                return
+            # 0.3 情绪脾气与日常张力 / 看法修订与物件共在 / 欲望自然消退与 36B 成年亲密：三个 GET 均 100% 纯读零写。
+            if path == f"{API_PREFIX}/emotion/tension":
+                self._get_emotional_tension(service)
+                return
+            if path == f"{API_PREFIX}/stance/containment":
+                self._get_stance_containment(service)
+                return
+            if path == f"{API_PREFIX}/intimacy/adult":
+                self._get_adult_intimacy(service)
+                return
+            if path == f"{API_PREFIX}/v03/clock":
+                self._get_v03_clock(service)
+                return
+            if path == f"{API_PREFIX}/v03/ecology":
+                self._get_v03_ecology(service)
+                return
+            if path == f"{API_PREFIX}/v03/embodied-social":
+                self._get_v03_embodied_social(service)
+                return
+            if path == f"{API_PREFIX}/v04/neighborhood":
+                self._get_v04_neighborhood(service)
+                return
+            if path == f"{API_PREFIX}/v04/builder-trylive":
+                self._get_v04_builder_trylive(service)
+                return
+            if path == f"{API_PREFIX}/v04/elastic-play":
+                self._get_v04_elastic_play(service)
+                return
+            if path == f"{API_PREFIX}/v02/agency-depth":
+                self._get_v02_agency_depth(service)
+                return
+            if path == f"{API_PREFIX}/v02/crossmodal":
+                self._get_v02_crossmodal(service)
+                return
+            if path == f"{API_PREFIX}/v02/runtime-migration":
+                self._get_v02_runtime_migration(service)
+                return
+            if path == f"{API_PREFIX}/v02/recall-projection":
+                self._get_v02_recall_projection(service)
+                return
+            if path == f"{API_PREFIX}/v02/common-ground":
+                self._get_v02_common_ground(service)
+                return
             # Her shares (B's LifeSharingService): two guarded pure reads and one pure-read
             # reconciliation.  ``/shares/sources`` is matched before the id pattern.
             if path == f"{API_PREFIX}/shares":
@@ -1158,6 +1548,120 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             self._send(404, _failure("NOT_FOUND"))
             return
         if method == "POST":
+            # 窗扇/外衣：只属于本人，先 CSRF 再本地凭据；不开放伴侣替她调整。
+            if path == f"{API_PREFIX}/body/garment-window":
+                self._post_body_garment_window(service)
+                return
+            # 桌边照顾：伴侣可 offer（CSRF），本人动作要 CSRF + capability；
+            # 伴侣只能撤回自己尚未被动过的 offer。
+            if path == f"{API_PREFIX}/body/care-offering":
+                self._post_body_care_offering(service)
+                return
+            # 明日便签的唯一写口：显式操作者意图，走现有 FutureItems；先 CSRF，再本地凭据。
+            if path == f"{API_PREFIX}/desk/tomorrow":
+                self._post_desk_tomorrow(service)
+                return
+            # 冰箱贴/锁屏的唯一写口：只记显式选择引用，不复制正文或图片。
+            if path == f"{API_PREFIX}/home/keepsakes":
+                self._post_home_keepsakes(service)
+                return
+            # 创作托盘：显式放入/清空引用，只写实例自己的 JSON。
+            if path == f"{API_PREFIX}/home/workbench":
+                self._post_home_workbench(service)
+                return
+            # 交换匣：her 选择需 CSRF + capability；partner 短卡只需 CSRF。
+            if path == f"{API_PREFIX}/home/trio-exchange":
+                self._post_home_trio_exchange(service)
+                return
+            # 衣柜：本人 CSRF + capability；小列表：个人卡片 CSRF + capability，伴侣建议只
+            # 需 CSRF（显式携带的 capability 仍要验证）。
+            if path == f"{API_PREFIX}/home/wardrobe":
+                self._post_home_wardrobe(service)
+                return
+            if path == f"{API_PREFIX}/pocket/lists":
+                self._post_pocket_lists(service)
+                return
+            # 居家收官：锚点 capture 只需 CSRF（不接收客户端时间/快照）；菜谱作者侧只选择
+            # 验证策略；暂定项没有任何核心安排写口。
+            if path == f"{API_PREFIX}/home/reunion-anchor":
+                self._post_home_reunion_anchor(service)
+                return
+            if path == f"{API_PREFIX}/home/recipes":
+                self._post_home_recipes(service)
+                return
+            if path == f"{API_PREFIX}/home/tentative-plans":
+                self._post_home_tentative_plans(service)
+                return
+            # 房间外写口：本人动作需 CSRF + capability；伴侣动作需 CSRF（显式携带凭据仍校验，错凭据 403）。
+            if path == f"{API_PREFIX}/outing/bench-bookstore":
+                self._post_outing_bench_bookstore(service)
+                return
+            if path == f"{API_PREFIX}/outing/routes-market":
+                self._post_outing_routes_market(service)
+                return
+            if path == f"{API_PREFIX}/outing/gallery-blueprint":
+                self._post_outing_gallery_blueprint(service)
+                return
+            # 长程陪伴写口：本人动作需 CSRF + capability；伴侣动作需 CSRF（显式携带凭据仍校验，错凭据 403）。
+            if path == f"{API_PREFIX}/longterm/first-room-habits":
+                self._post_longterm_first_room_habits(service)
+                return
+            if path == f"{API_PREFIX}/longterm/gifts-lantern":
+                self._post_longterm_gifts_lantern(service)
+                return
+            # 开源角色包与多通道感官场写口：可选生理体验与文字声景卡写操作必须带 capability（否则 403）；
+            # 预设切换/角色包导入/基础称呼偏好与伴侣感官小贴士走 CSRF，但显式携带错误凭据一律 403。
+            if path == f"{API_PREFIX}/character/pack":
+                self._post_character_pack(service)
+                return
+            if path == f"{API_PREFIX}/body/sensory":
+                self._post_body_sensory(service)
+                return
+            if path == f"{API_PREFIX}/autonomy/rhythm":
+                self._post_autonomy_rhythm(service)
+                return
+            if path == f"{API_PREFIX}/emotion/tension":
+                self._post_emotional_tension(service)
+                return
+            if path == f"{API_PREFIX}/stance/containment":
+                self._post_stance_containment(service)
+                return
+            if path == f"{API_PREFIX}/intimacy/adult":
+                self._post_adult_intimacy(service)
+                return
+            if path == f"{API_PREFIX}/v03/clock":
+                self._post_v03_clock(service)
+                return
+            if path == f"{API_PREFIX}/v03/ecology":
+                self._post_v03_ecology(service)
+                return
+            if path == f"{API_PREFIX}/v03/embodied-social":
+                self._post_v03_embodied_social(service)
+                return
+            if path == f"{API_PREFIX}/v04/neighborhood":
+                self._post_v04_neighborhood(service)
+                return
+            if path == f"{API_PREFIX}/v04/builder-trylive":
+                self._post_v04_builder_trylive(service)
+                return
+            if path == f"{API_PREFIX}/v04/elastic-play":
+                self._post_v04_elastic_play(service)
+                return
+            if path == f"{API_PREFIX}/v02/agency-depth":
+                self._post_v02_agency_depth(service)
+                return
+            if path == f"{API_PREFIX}/v02/crossmodal":
+                self._post_v02_crossmodal(service)
+                return
+            if path == f"{API_PREFIX}/v02/runtime-migration":
+                self._post_v02_runtime_migration(service)
+                return
+            if path == f"{API_PREFIX}/v02/recall-projection":
+                self._post_v02_recall_projection(service)
+                return
+            if path == f"{API_PREFIX}/v02/common-ground":
+                self._post_v02_common_ground(service)
+                return
             if path == f"{API_PREFIX}/control/activity/stop":
                 self._post_activity_stop(service)
                 return
@@ -1382,6 +1886,2284 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         if urlsplit(self.path).query:
             raise PhoneRequestError("UNKNOWN_QUERY")
         self._send_or_map(service.share_operation(_operation_key(key)))
+
+    # -- 双人书桌 -------------------------------------------------------------------------
+
+    def _desk_subject_view(self) -> tuple[bool, Optional[tuple[int, dict[str, Any]]]]:
+        """Absent credential = default partner/operator view; wrong credential never degrades.
+
+        ``X-Phone-Actor`` alone is not authority here (same rule as the private diary).  A
+        credential that *is* presented must match this serve, otherwise the answer is a 403 --
+        never a quiet fallback to the private view or to the body-less one.
+        """
+
+        capability = getattr(self.server, "capability", None)
+        presented, reason = self._presented_capability()
+        if reason == "CAPABILITY_REQUIRED":
+            return False, None
+        if reason is not None:
+            return False, (403, _failure(reason))
+        if capability is None:
+            return False, (403, _failure("CAPABILITY_UNAVAILABLE"))
+        if not phone_capability.matches(capability, presented):
+            return False, (403, _failure("CAPABILITY_INVALID"))
+        return True, None
+
+    def _get_desk_presence(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/desk/presence``: door sign + desk objects, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.desk_presence())
+
+    def _get_desk_notes(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/desk/notes``: retained short notes + tomorrow items, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.desk_notes(subject_view=subject_view))
+
+    def _post_desk_tomorrow(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/desk/tomorrow``: one explicit tomorrow-item write."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        payload = self._read_body(DESK_TOMORROW_FIELDS)
+        action = _clean_text(payload.get("action"), 20, "DESK_ACTION_REQUIRED").lower()
+        if action not in DESK_ACTIONS:
+            raise PhoneRequestError("DESK_ACTION_UNSUPPORTED")
+        allowed = {
+            "propose": frozenset({"action", "title", "due_at", "due_in_minutes"}),
+            "cancel": frozenset({"action", "item_ref", "reason"}),
+            "reschedule": frozenset({"action", "item_ref", "due_at", "due_in_minutes",
+                                     "reason"}),
+        }[action]
+        extra = sorted(key for key in payload if key not in allowed
+                       and payload.get(key) not in (None, ""))
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        title = None
+        item_ref = None
+        due_at = None
+        minutes = None
+        reason = None
+        if action == "propose":
+            title = _clean_text(payload.get("title"), 120, "FUTURE_ITEM_TITLE_INVALID")
+        else:
+            item_ref = _clean_text(payload.get("item_ref"), 200, "ITEM_REF_INVALID")
+        if action in ("propose", "reschedule"):
+            due_at, minutes = _desk_due_fields(payload)
+        if payload.get("reason") not in (None, ""):
+            reason = _clean_text(payload.get("reason"), 120, "REASON_INVALID")
+        result = service.desk_tomorrow_write(
+            action=action, title=title, item_ref=item_ref, due_at=due_at,
+            due_in_minutes=minutes, reason=reason)
+        self._send_or_map(result)
+
+    # -- 具身冷暖 / 窗扇与外衣 / 桌边照顾 ---------------------------------------------
+
+    def _get_body_somatic(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/body/somatic``: bounded four-modality read, zero writes."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._optional_capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.body_somatic())
+
+    def _get_body_garment_window(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/body/garment-window``: local window/garment conditions."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._optional_capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.body_garment_window())
+
+    def _get_body_care_offering(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/body/care-offering``: the two local slots, owner re-read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._optional_capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.body_care_offering())
+
+    def _post_body_garment_window(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/body/garment-window``: her own window/position/outerwear."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        payload = self._read_body(SOMATIC_GARMENT_WINDOW_FIELDS, SOMATIC_REFUSED_FIELDS)
+        action = _clean_text(payload.get("action"), 40,
+                             "GARMENT_WINDOW_ACTION_REQUIRED").lower()
+        if action not in SOMATIC_GARMENT_WINDOW_ACTIONS:
+            raise PhoneRequestError("GARMENT_WINDOW_ACTION_UNSUPPORTED")
+        allowed = {
+            "set_window": frozenset({"action", "state"}),
+            "set_local_position": frozenset({"action", "zone"}),
+            "wear_outerwear": frozenset({"action", "garment_id", "label", "dryness"}),
+            "hang_outerwear": frozenset({"action", "garment_id", "hang_position",
+                                         "dryness"}),
+        }[action]
+        # Presence, not truthiness: ``state: ""`` / ``zone: null`` / ``label: []`` still
+        # names an intent this action never performs.
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        if action == "set_window":
+            state_value = _world_choice(payload.get("state"), SOMATIC_WINDOW_STATES,
+                                        "WINDOW_STATE_INVALID")
+            result = service.body_garment_window_action(action=action,
+                                                        state_value=state_value)
+        elif action == "set_local_position":
+            zone = _world_choice(payload.get("zone"), SOMATIC_LOCAL_ZONES,
+                                 "LOCAL_ZONE_INVALID")
+            result = service.body_garment_window_action(action=action, zone=zone)
+        elif action == "wear_outerwear":
+            garment_id = _optional_local_id(payload.get("garment_id"),
+                                            "GARMENT_ID_INVALID")
+            if garment_id is None:
+                raise PhoneRequestError("GARMENT_ID_REQUIRED")
+            label = _somatic_optional_label(payload.get("label"))
+            dryness = _somatic_optional_choice(payload.get("dryness"), SOMATIC_DRYNESS,
+                                               "GARMENT_DRYNESS_INVALID")
+            result = service.body_garment_window_action(
+                action=action, garment_id=garment_id, label=label, dryness=dryness)
+        else:
+            garment_id = _optional_local_id(payload.get("garment_id"),
+                                            "GARMENT_ID_INVALID")
+            if garment_id is None:
+                raise PhoneRequestError("GARMENT_ID_REQUIRED")
+            hang_position = _optional_local_id(payload.get("hang_position"),
+                                               "HANG_POSITION_INVALID")
+            if hang_position is None:
+                raise PhoneRequestError("HANG_POSITION_REQUIRED")
+            dryness = _somatic_optional_choice(payload.get("dryness"), SOMATIC_DRYNESS,
+                                               "GARMENT_DRYNESS_INVALID")
+            result = service.body_garment_window_action(
+                action=action, garment_id=garment_id, hang_position=hang_position,
+                dryness=dryness)
+        self._send_or_map(result)
+
+    def _post_body_care_offering(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/body/care-offering``: offer / take / drink / use / stow / withdraw."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(SOMATIC_CARE_FIELDS, SOMATIC_REFUSED_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "CARE_ACTION_REQUIRED").lower()
+        if action not in SOMATIC_CARE_ACTIONS:
+            raise PhoneRequestError("CARE_ACTION_UNSUPPORTED")
+        slot = _world_choice(payload.get("slot"), SOMATIC_CARE_SLOTS, "CARE_SLOT_INVALID")
+        allowed = (frozenset({"action", "slot", "kind", "actor_side", "position"})
+                   if action == "offer" else frozenset({"action", "slot"}))
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        if action == "offer":
+            actor_side = _world_choice(payload.get("actor_side"), SOMATIC_CARE_ACTORS,
+                                       "CARE_ACTOR_INVALID")
+            kind = _world_choice(payload.get("kind"), SOMATIC_CARE_KINDS[slot],
+                                 "CARE_KIND_INVALID")
+            position = _world_choice(payload.get("position"), SOMATIC_CARE_POSITIONS,
+                                     "CARE_POSITION_INVALID")
+            if actor_side == "her":
+                refusal = self._capability_refusal()
+            else:
+                refusal = self._partner_gate_passed()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+            result = service.body_care_action(action=action, slot=slot,
+                                              actor_side=actor_side, kind=kind,
+                                              position=position)
+        else:
+            if action == "withdraw":
+                # A partner withdraws their own untouched offer; a presented credential
+                # must still verify rather than silently downgrade.
+                refusal = self._partner_gate_passed()
+            else:
+                # take / drink / use / stow are hers: CSRF + this serve's capability.
+                refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+            result = service.body_care_action(action=action, slot=slot)
+        self._send_or_map(result)
+
+    # -- 窗边景致 / 冰箱贴与自选锁屏 / 分日慢写的信 -----------------------------------
+
+    def _get_home_window(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/window``: real home plants/light/personal space, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.home_window())
+
+    def _get_home_keepsakes(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/keepsakes``: lockscreen/pins, owner re-read, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.home_keepsakes(subject_view=subject_view))
+
+    def _get_home_letters(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/letters``: cross-day share/source projection, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.home_letters(subject_view=subject_view))
+
+    def _post_home_keepsakes(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/keepsakes``: one explicit select/clear/pin/unpin."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        payload = self._read_body(WINDOW_KEEPSAKE_FIELDS, WINDOW_KEEPSAKE_REFUSED_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "KEEPSAKE_ACTION_REQUIRED").lower()
+        if action not in WINDOW_KEEPSAKE_ACTIONS:
+            raise PhoneRequestError("KEEPSAKE_ACTION_UNSUPPORTED")
+        allowed = {
+            "select_lockscreen": frozenset({"action", "album_artifact_id"}),
+            "clear_lockscreen": frozenset({"action"}),
+            "pin_share": frozenset({"action", "share_id"}),
+            "unpin_share": frozenset({"action", "share_id"}),
+        }[action]
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        album_artifact_id = None
+        share_id = None
+        if action == "select_lockscreen":
+            album_artifact_id = _owner_path_id(payload.get("album_artifact_id"),
+                                               "LOCKSCREEN_IMAGE_INVALID")
+        elif action in ("pin_share", "unpin_share"):
+            share_id = _share_id(payload.get("share_id"))
+        self._send_or_map(service.home_keepsake_action(
+            action=action, album_artifact_id=album_artifact_id, share_id=share_id))
+
+    def _get_home_workbench(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/workbench``: the tray, re-read from real owners."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.home_workbench(subject_view=subject_view))
+
+    def _get_home_curios(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/curios``: owned instances + real positions, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.home_curios())
+
+    def _get_home_trio_exchange(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/trio-exchange``: delivered picks + partner cards, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.home_trio_exchange())
+
+    def _post_home_workbench(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/workbench``: one explicit set/clear of tray references."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        payload = self._read_body(WORKBENCH_FIELDS, WORKBENCH_REFUSED_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "TRAY_ACTION_REQUIRED").lower()
+        if action not in WORKBENCH_ACTIONS:
+            raise PhoneRequestError("TRAY_ACTION_UNSUPPORTED")
+        allowed = {
+            "set_tray": frozenset({"action", "album_artifact_ids", "material_ids",
+                                   "work_artifact_id", "note"}),
+            "clear_tray": frozenset({"action"}),
+        }[action]
+        # A field this action does not take is refused by presence, not by truthiness:
+        # ``[]`` / ``null`` / ``""`` still name an intent the action never performs.
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        result = service.home_workbench_action(
+            action=action,
+            album_artifact_ids=payload.get("album_artifact_ids"),
+            material_ids=payload.get("material_ids"),
+            work_artifact_id=payload.get("work_artifact_id"),
+            note=payload.get("note"))
+        self._send_or_map(result)
+
+    def _post_home_trio_exchange(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/trio-exchange``: her picks (CSRF+cap) / partner cards (CSRF)."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(TRIO_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "TRIO_ACTION_REQUIRED").lower()
+        if action not in TRIO_ACTIONS:
+            raise PhoneRequestError("TRIO_ACTION_UNSUPPORTED")
+        if action == "set_her_picks":
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+            # Presence, not truthiness: ``partner_picks: []`` / ``null`` / ``""`` carried by a
+            # her-pick action is still a field that action does not take.
+            if "partner_picks" in payload:
+                raise PhoneRequestError("UNKNOWN_FIELD:partner_picks")
+            result = service.home_trio_exchange_action(
+                action=action, her_picks=payload.get("her_picks"))
+        else:
+            # Partner cards need only CSRF.  A credential that *is* presented must still be
+            # this serve's, otherwise the request is refused instead of silently downgraded.
+            _presented, reason = self._presented_capability()
+            if reason != "CAPABILITY_REQUIRED":
+                refusal = self._capability_refusal()
+                if refusal is not None:
+                    self._send(*refusal)
+                    return
+            if "her_picks" in payload:
+                raise PhoneRequestError("UNKNOWN_FIELD:her_picks")
+            result = service.home_trio_exchange_action(
+                action=action, partner_picks=payload.get("partner_picks"))
+        self._send_or_map(result)
+
+    # -- 衣柜梳妆 / 歌单收藏想试小列表 / 作品旧版安全并排 ---------------------------------
+
+    def _get_home_wardrobe(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/wardrobe``: styling choices + real ownership checks."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.home_wardrobe(subject_view=subject_view))
+
+    def _post_home_wardrobe(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/wardrobe``: one explicit set/clear of her selection."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        refusal = self._capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        payload = self._read_body(WARDROBE_FIELDS, WARDROBE_REFUSED_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "WARDROBE_ACTION_REQUIRED").lower()
+        if action not in WARDROBE_ACTIONS:
+            raise PhoneRequestError("WARDROBE_ACTION_UNSUPPORTED")
+        if action == "set":
+            allowed = frozenset({"action"}) | WARDROBE_SET_FIELDS
+            # Presence, not truthiness: ``fields`` carried by a set action is not a field it takes.
+            extra = sorted(set(payload) - allowed)
+            if extra:
+                raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+            values: dict[str, Any] = {}
+            if "homewear_style" in payload:
+                values["homewear_style"] = _clean_text(
+                    payload.get("homewear_style"), 120, "WARDROBE_STYLE_REQUIRED")
+            if "outdoor_style" in payload:
+                values["outdoor_style"] = _clean_text(
+                    payload.get("outdoor_style"), 120, "WARDROBE_STYLE_REQUIRED")
+            if "hairband_style" in payload:
+                values["hairband_style"] = _clean_text(
+                    payload.get("hairband_style"), 120, "WARDROBE_STYLE_REQUIRED")
+            if "hairclip_style" in payload:
+                values["hairclip_style"] = _clean_text(
+                    payload.get("hairclip_style"), 120, "WARDROBE_STYLE_REQUIRED")
+            for field in ("homewear_item_instance_id", "outdoor_item_instance_id",
+                          "hairband_item_instance_id", "hairclip_item_instance_id"):
+                if field in payload:
+                    item_id = _optional_local_id(payload.get(field),
+                                                 "WARDROBE_ITEM_ID_INVALID")
+                    if item_id is None:
+                        raise PhoneRequestError("WARDROBE_ITEM_ID_INVALID")
+                    values[field] = item_id
+            if "pairing_note" in payload:
+                values["pairing_note"] = _clean_text(
+                    payload.get("pairing_note"), 120, "WARDROBE_NOTE_REQUIRED")
+            for field in ("blanket_season", "cushion_season"):
+                if field in payload:
+                    values[field] = _world_choice(
+                        payload.get(field), frozenset({"summer", "spring_autumn", "winter"}),
+                        "WARDROBE_SEASON_INVALID")
+            if not values:
+                raise PhoneRequestError("WARDROBE_FIELDS_REQUIRED")
+            self._send_or_map(service.home_wardrobe_action(action=action, values=values))
+            return
+        extra = sorted(set(payload) - {"action", "fields"})
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        fields = payload.get("fields")
+        if not isinstance(fields, list) or not fields:
+            raise PhoneRequestError("WARDROBE_CLEAR_FIELDS_REQUIRED")
+        cleaned: list[str] = []
+        for field in fields:
+            if not isinstance(field, str) or field not in WARDROBE_SET_FIELDS:
+                raise PhoneRequestError("WARDROBE_CLEAR_FIELD_INVALID")
+            if field in cleaned:
+                raise PhoneRequestError("WARDROBE_CLEAR_FIELD_DUPLICATED")
+            cleaned.append(field)
+        self._send_or_map(service.home_wardrobe_action(action=action, fields=cleaned))
+
+    def _get_pocket_lists(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/pocket/lists``: shared cards + partner suggestions, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.pocket_lists(subject_view=subject_view))
+
+    def _pocket_suggestion_rows(self, raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            raise PhoneRequestError("POCKET_SUGGESTIONS_INVALID")
+        if len(raw) > 3:
+            raise PhoneRequestError("POCKET_PARTNER_TOO_MANY")
+        rows: list[dict[str, Any]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise PhoneRequestError("POCKET_SUGGESTIONS_INVALID")
+            extra = sorted(set(item) - POCKET_SUGGESTION_FIELDS)
+            if extra:
+                raise PhoneRequestError("UNKNOWN_SUGGESTION_FIELD:%s" % ",".join(extra))
+            title = _clean_text(item.get("title"), 60, "POCKET_PARTNER_TITLE_REQUIRED")
+            note = None
+            if "note" in item:
+                note = _clean_text(item.get("note"), 120, "POCKET_PARTNER_NOTE_INVALID")
+            rows.append({"title": title, "note": note})
+        return rows
+
+    def _post_pocket_lists(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/pocket/lists``: personal cards (CSRF+cap) / partner cards (CSRF)."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(POCKET_FIELDS, POCKET_REFUSED_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "POCKET_ACTION_REQUIRED").lower()
+        if action not in POCKET_ACTIONS:
+            raise PhoneRequestError("POCKET_ACTION_UNSUPPORTED")
+        if action == "set_partner_suggestions":
+            # Partner write: CSRF only, but a presented credential must still verify.
+            _presented, reason = self._presented_capability()
+            if reason != "CAPABILITY_REQUIRED":
+                refusal = self._capability_refusal()
+                if refusal is not None:
+                    self._send(*refusal)
+                    return
+            # A partner card is not a way to name her list, an entry, a shared flag or a
+            # personal field; every field other than action+suggestions is refused by presence
+            # even when empty/null.
+            extra = sorted(set(payload) - {"action", "suggestions"})
+            if extra:
+                raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+            if "suggestions" not in payload:
+                raise PhoneRequestError("POCKET_SUGGESTIONS_REQUIRED")
+            rows = self._pocket_suggestion_rows(payload.get("suggestions"))
+            self._send_or_map(service.pocket_lists_action(
+                action=action, suggestions=rows))
+            return
+
+        refusal = self._capability_refusal()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        if "suggestions" in payload:
+            raise PhoneRequestError("UNKNOWN_FIELD:suggestions")
+        kind = _world_choice(payload.get("list"), frozenset({"playlist", "favorites",
+                                                             "want_to_try"}),
+                             "POCKET_LIST_INVALID")
+        status = None
+        if "status" in payload:
+            status = _clean_text(payload.get("status"), 40, "POCKET_STATUS_REQUIRED")
+            if status not in POCKET_LIST_STATUSES[kind]:
+                raise PhoneRequestError("POCKET_STATUS_NOT_FOR_LIST")
+        shared = None
+        if "shared" in payload:
+            shared = _strict_boolean(payload.get("shared"), "POCKET_SHARED_INVALID")
+        if action == "add":
+            allowed = frozenset({"action", "list", "title", "status", "shared",
+                                 "operation_key"})
+            if kind == "playlist":
+                allowed = allowed | {"reason"}
+            elif kind == "favorites":
+                allowed = allowed | {"expectation", "verdict"}
+            else:
+                allowed = allowed | {"note"}
+            extra = sorted(set(payload) - allowed)
+            if extra:
+                raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+            values: dict[str, Any] = {
+                "title": _clean_text(payload.get("title"), 80, "POCKET_TITLE_REQUIRED")}
+            for field in ("reason", "expectation", "verdict", "note"):
+                if field in payload:
+                    values[field] = _clean_text(payload.get(field), 120,
+                                                "POCKET_%s_INVALID" % field.upper())
+            key = _clean_text(payload.get("operation_key"), 120,
+                              "POCKET_OPERATION_KEY_REQUIRED")
+            self._send_or_map(service.pocket_lists_action(
+                action=action, kind=kind, values=values, status=status, shared=shared,
+                operation_key=key))
+            return
+        if action == "update":
+            entry_id = _pocket_entry_id(payload.get("entry_id"))
+            allowed = frozenset({"action", "list", "entry_id", "title", "status", "shared"})
+            if kind == "playlist":
+                allowed = allowed | {"reason"}
+            elif kind == "favorites":
+                allowed = allowed | {"expectation", "verdict"}
+            else:
+                allowed = allowed | {"note"}
+            extra = sorted(set(payload) - allowed)
+            if extra:
+                raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+            values = {}
+            if "title" in payload:
+                values["title"] = _clean_text(payload.get("title"), 80,
+                                              "POCKET_TITLE_REQUIRED")
+            for field in ("reason", "expectation", "verdict", "note"):
+                if field in payload:
+                    values[field] = _clean_text(payload.get(field), 120,
+                                                "POCKET_%s_INVALID" % field.upper())
+            self._send_or_map(service.pocket_lists_action(
+                action=action, kind=kind, entry_id=entry_id, values=values,
+                status=status, shared=shared))
+            return
+        entry_id = _pocket_entry_id(payload.get("entry_id"))
+        extra = sorted(set(payload) - {"action", "list", "entry_id"})
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        self._send_or_map(service.pocket_lists_action(
+            action=action, kind=kind, entry_id=entry_id))
+
+    def _work_revisit_query(self) -> tuple[str, str, str]:
+        """Exactly three named ids, each once; no default and no "latest work" guess."""
+
+        pairs = parse_qsl(urlsplit(self.path).query, keep_blank_values=True)
+        keys = [key for key, _value in pairs]
+        unknown = sorted(set(keys) - WORK_REVISIT_QUERY_FIELDS)
+        if unknown:
+            raise PhoneRequestError("UNKNOWN_QUERY:%s" % ",".join(unknown))
+        values: dict[str, str] = {}
+        for key, value in pairs:
+            if key in values:
+                raise PhoneRequestError("QUERY_REPEATED:%s" % key)
+            text = str(value).strip()
+            if not text:
+                raise PhoneRequestError("WORK_REVISIT_QUERY_REQUIRED:%s" % key)
+            values[key] = text
+        missing = sorted(WORK_REVISIT_QUERY_FIELDS - set(values))
+        if missing:
+            raise PhoneRequestError("WORK_REVISIT_QUERY_REQUIRED:%s" % ",".join(missing))
+        return values["artifact_id"], values["left_version_id"], values["right_version_id"]
+
+    def _get_pocket_work_revisit(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/pocket/work-revisit``: two real versions, bounded summaries."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        artifact_id, left_version_id, right_version_id = self._work_revisit_query()
+        artifact_id = _owner_path_id(artifact_id, "ARTIFACT_ID_INVALID")
+        left_version_id = _version_path_id(left_version_id)
+        right_version_id = _version_path_id(right_version_id)
+        if left_version_id == right_version_id:
+            raise PhoneRequestError("VERSIONS_NOT_DISTINCT")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.pocket_work_revisit(
+            artifact_id=artifact_id, left_version_id=left_version_id,
+            right_version_id=right_version_id, subject_view=subject_view))
+
+    # -- 居家收官：重逢锚点 / 夜茶菜谱 / 待定小约定 -------------------------------------
+
+    def _get_home_reunion_anchor(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/reunion-anchor``: stored anchor vs current owners, pure read."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.home_reunion_anchor())
+
+    def _get_home_recipes(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/recipes``: shared cards + a bounded owner reference area."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        self._send_or_map(service.home_recipes())
+
+    def _get_home_tentative_plans(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/home/tentative-plans``: safe arrangement summary + local plans."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.home_tentative_plans(subject_view=subject_view))
+
+    def _post_home_reunion_anchor(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/reunion-anchor``: one explicit safe capture (CSRF only)."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        # CSRF-only still refuses a credential that is presented but is not this serve's.
+        refusal = self._partner_gate_passed()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        payload = self._read_body(REUNION_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "REUNION_ACTION_REQUIRED").lower()
+        if action not in REUNION_ACTIONS:
+            raise PhoneRequestError("REUNION_ACTION_UNSUPPORTED")
+        extra = sorted(set(payload) - {"action"})
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        self._send_or_map(service.home_reunion_capture())
+
+    def _optional_capability_refusal(self) -> Optional[tuple[int, dict[str, Any]]]:
+        """A read that keeps a safe default view may omit the credential.
+
+        An absent credential keeps that default path; a malformed / wrong / unavailable one
+        is a 403 and never a quiet downgrade to it.  The same constant-time check the write
+        doors use.
+        """
+
+        presented, reason = self._presented_capability()
+        if reason == "CAPABILITY_REQUIRED":
+            return None
+        return self._capability_refusal()
+
+    def _partner_gate_passed(self) -> Optional[tuple[int, dict[str, Any]]]:
+        """Partner writes need only CSRF.  A capability that *is* presented must verify.
+
+        An absent credential is the partner path; a malformed / wrong / unavailable one is a
+        403 and never a quiet downgrade to "partner".
+        """
+
+        return self._optional_capability_refusal()
+
+    def _post_home_recipes(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/recipes``: one explicit create/update of a shared card."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(RECIPE_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "RECIPE_ACTION_REQUIRED").lower()
+        if action not in RECIPE_ACTIONS:
+            raise PhoneRequestError("RECIPE_ACTION_UNSUPPORTED")
+        extra = sorted(set(payload) - {"action", "recipe_id", "title", "memo", "author_side"})
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        author_side = _clean_text(payload.get("author_side"), 20,
+                                  "RECIPE_AUTHOR_REQUIRED").lower()
+        if author_side not in ("her", "partner"):
+            raise PhoneRequestError("RECIPE_AUTHOR_INVALID")
+        if author_side == "her":
+            refusal = self._capability_refusal()
+        else:
+            refusal = self._partner_gate_passed()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        recipe_id = _optional_local_id(payload.get("recipe_id"), "RECIPE_ID_INVALID")
+        title = _clean_text(payload.get("title"), 40, "RECIPE_TITLE_INVALID")
+        memo = _clean_text(payload.get("memo"), 240, "RECIPE_MEMO_INVALID")
+        self._send_or_map(service.home_recipe_upsert(
+            recipe_id=recipe_id, title=title, memo=memo, author_side=author_side))
+
+    def _post_home_tentative_plans(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/tentative-plans``: propose / reschedule / drop."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        payload = self._read_body(PLAN_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "PLAN_ACTION_REQUIRED").lower()
+        if action not in PLAN_ACTIONS:
+            raise PhoneRequestError("PLAN_ACTION_UNSUPPORTED")
+        allowed = {
+            "propose": {"action", "plan_id", "title", "window_note", "proposer"},
+            "reschedule": {"action", "plan_id", "window_note"},
+            "drop": {"action", "plan_id"},
+        }[action]
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+        plan_id = _optional_local_id(payload.get("plan_id"), "PLAN_ID_INVALID")
+        if action == "propose":
+            proposer = _clean_text(payload.get("proposer"), 20,
+                                   "PLAN_PROPOSER_REQUIRED").lower()
+            if proposer not in ("her", "partner"):
+                raise PhoneRequestError("PLAN_PROPOSER_INVALID")
+            if proposer == "her":
+                refusal = self._capability_refusal()
+            else:
+                refusal = self._partner_gate_passed()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+            title = _clean_text(payload.get("title"), 60, "PLAN_TITLE_INVALID")
+            window_note = None
+            if payload.get("window_note") is not None:
+                if not isinstance(payload.get("window_note"), str):
+                    raise PhoneRequestError("PLAN_WINDOW_INVALID")
+                window_note = payload["window_note"].strip()
+                if len(window_note) > 40 or any(ch in window_note for ch in ("\x00", "\r")):
+                    raise PhoneRequestError("PLAN_WINDOW_INVALID")
+            result = service.home_tentative_plan_action(
+                action="propose", actor_is_her=(proposer == "her"),
+                plan_id=plan_id, title=title, window_note=window_note,
+                proposer=proposer)
+            self._send_or_map(result)
+            return
+        if plan_id is None:
+            raise PhoneRequestError("PLAN_ID_REQUIRED")
+        actor_is_her = False
+        presented, reason = self._presented_capability()
+        if reason not in (None, "CAPABILITY_REQUIRED"):
+            self._send(403, _failure(reason))
+            return
+        if reason is None:
+            capability = getattr(self.server, "capability", None)
+            if capability is None:
+                self._send(403, _failure("CAPABILITY_UNAVAILABLE"))
+                return
+            if not phone_capability.matches(capability, presented):
+                self._send(403, _failure("CAPABILITY_INVALID"))
+                return
+            actor_is_her = True
+        window_note = None
+        if action == "reschedule":
+            window_note = _clean_text(payload.get("window_note"), 40, "PLAN_WINDOW_INVALID")
+        self._send_or_map(service.home_tentative_plan_action(
+            action=action, actor_is_her=actor_is_her, plan_id=plan_id,
+            window_note=window_note))
+
+    # -- 房间外日常：长椅书店 / 散步路线节日集市 / 可重访作品展与共同新地点草图 ----------
+
+    def _get_outing_bench_bookstore(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/outing/bench-bookstore``: pure read, 403 on bad capability."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.outing_bench_bookstore(subject_view=subject_view))
+
+    def _post_outing_bench_bookstore(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/outing/bench-bookstore``: bench trace & bookstore window."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        # Any explicitly presented capability must verify first, even on partner actions.
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(OUTING_BENCH_BOOKSTORE_FIELDS)
+        action = _clean_text(payload.get("action"), 40,
+                             "BENCH_BOOKSTORE_ACTION_REQUIRED").lower()
+        if action not in OUTING_BENCH_BOOKSTORE_ACTIONS:
+            raise PhoneRequestError("BENCH_BOOKSTORE_ACTION_UNSUPPORTED")
+
+        allowed_by_action = {
+            "log_bench_visit": {"action", "place_id", "note", "shared", "operation_key"},
+            "set_bench_visibility": {"action", "visit_id", "shared"},
+            "bookmark_window_book": {"action", "slot_index", "shared", "note"},
+            "set_partner_window_note": {"action", "slot_index", "note"},
+            "clear_partner_window_note": {"action"},
+        }
+        if action in ("log_bench_visit", "set_bench_visibility", "bookmark_window_book"):
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        if action == "log_bench_visit":
+            place_id = _outing_place_id(payload.get("place_id"))
+            key = _operation_key(payload.get("operation_key"))
+            note = (_outing_optional_note(payload.get("note"), 120, "BENCH_NOTE_INVALID")
+                    if "note" in payload else None)
+            shared = (_strict_boolean(payload.get("shared"), "BENCH_SHARED_INVALID")
+                      if "shared" in payload else None)
+            self._send_or_map(service.outing_bench_bookstore_action(
+                action=action, place_id=place_id, note=note, shared=shared,
+                operation_key=key))
+            return
+
+        if action == "set_bench_visibility":
+            visit_id = _outing_required_local_id(payload.get("visit_id"),
+                                                 "BENCH_VISIT_ID_INVALID")
+            shared = _strict_boolean(payload.get("shared"), "BENCH_SHARED_INVALID")
+            self._send_or_map(service.outing_bench_bookstore_action(
+                action=action, visit_id=visit_id, shared=shared))
+            return
+
+        if action == "bookmark_window_book":
+            slot_index = _outing_slot_index(payload.get("slot_index"))
+            shared = (_strict_boolean(payload.get("shared"), "WINDOW_SHARED_INVALID")
+                      if "shared" in payload else None)
+            note_supplied = "note" in payload
+            note = (_outing_optional_note(payload.get("note"), 120, "WINDOW_NOTE_INVALID")
+                    if note_supplied else None)
+            self._send_or_map(service.outing_bench_bookstore_action(
+                action=action, slot_index=slot_index, shared=shared,
+                note=note, note_supplied=note_supplied))
+            return
+
+        if action == "set_partner_window_note":
+            slot_index = _outing_slot_index(payload.get("slot_index"))
+            note = _clean_text(payload.get("note"), 120, "WINDOW_NOTE_INVALID")
+            self._send_or_map(service.outing_bench_bookstore_action(
+                action=action, slot_index=slot_index, note=note))
+            return
+
+        self._send_or_map(service.outing_bench_bookstore_action(action=action))
+
+    def _get_outing_routes_market(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/outing/routes-market``: pure read, 403 on bad capability."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.outing_routes_market(subject_view=subject_view))
+
+    def _post_outing_routes_market(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/outing/routes-market``: walk routes & festival market memos."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(OUTING_ROUTES_MARKET_FIELDS)
+        action = _clean_text(payload.get("action"), 40,
+                             "ROUTES_MARKET_ACTION_REQUIRED").lower()
+        if action not in OUTING_ROUTES_MARKET_ACTIONS:
+            raise PhoneRequestError("ROUTES_MARKET_ACTION_UNSUPPORTED")
+
+        allowed_by_action = {
+            "save_walk_route": {
+                "action", "route_id", "title", "place_ids",
+                "album_artifact_id", "caption", "shared",
+            },
+            "remove_walk_route": {"action", "route_id"},
+            "note_market_wish": {
+                "action", "stall_code", "memo", "budget_cap_jpy", "shared",
+            },
+            "set_partner_market_tip": {"action", "stall_code", "tip"},
+            "clear_partner_market_tip": {"action"},
+        }
+        if action in ("save_walk_route", "remove_walk_route", "note_market_wish"):
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        if action == "save_walk_route":
+            route_id = _optional_local_id(payload.get("route_id"), "ROUTE_ID_INVALID")
+            title = _clean_text(payload.get("title"), 60, "ROUTE_TITLE_INVALID")
+            place_ids = _outing_place_list(payload.get("place_ids"))
+            album_supplied = "album_artifact_id" in payload
+            raw_album = payload.get("album_artifact_id")
+            if raw_album in (None, ""):
+                if raw_album is not None and not isinstance(raw_album, str):
+                    raise PhoneRequestError("ALBUM_ID_INVALID")
+                album_id = None
+            else:
+                album_id = _owner_path_id(raw_album, "ALBUM_ID_INVALID")
+            caption_supplied = "caption" in payload
+            caption = (_outing_optional_note(payload.get("caption"), 120,
+                                             "ROUTE_CAPTION_INVALID")
+                       if caption_supplied else None)
+            shared = (_strict_boolean(payload.get("shared"), "ROUTE_SHARED_INVALID")
+                      if "shared" in payload else None)
+            self._send_or_map(service.outing_routes_market_action(
+                action=action, route_id=route_id, title=title, place_ids=place_ids,
+                album_artifact_id=album_id, album_supplied=album_supplied,
+                caption=caption, caption_supplied=caption_supplied, shared=shared))
+            return
+
+        if action == "remove_walk_route":
+            route_id = _outing_required_local_id(payload.get("route_id"), "ROUTE_ID_INVALID")
+            self._send_or_map(service.outing_routes_market_action(
+                action=action, route_id=route_id))
+            return
+
+        if action == "note_market_wish":
+            stall_code = _world_choice(payload.get("stall_code"), outing_view.STALL_CODES,
+                                       "MARKET_STALL_INVALID")
+            memo = _clean_text(payload.get("memo"), 120, "MARKET_MEMO_INVALID")
+            budget_supplied = "budget_cap_jpy" in payload
+            budget_cap = (_outing_budget_cap(payload.get("budget_cap_jpy"))
+                          if budget_supplied else None)
+            shared = (_strict_boolean(payload.get("shared"), "MARKET_SHARED_INVALID")
+                      if "shared" in payload else None)
+            self._send_or_map(service.outing_routes_market_action(
+                action=action, stall_code=stall_code, memo=memo,
+                budget_cap_jpy=budget_cap, budget_supplied=budget_supplied,
+                shared=shared))
+            return
+
+        if action == "set_partner_market_tip":
+            stall_code = _world_choice(payload.get("stall_code"), outing_view.STALL_CODES,
+                                       "MARKET_STALL_INVALID")
+            tip = _clean_text(payload.get("tip"), 120, "MARKET_TIP_INVALID")
+            self._send_or_map(service.outing_routes_market_action(
+                action=action, stall_code=stall_code, tip=tip))
+            return
+
+        self._send_or_map(service.outing_routes_market_action(action=action))
+
+    def _get_outing_gallery_blueprint(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/outing/gallery-blueprint``: pure read, 403 on bad capability."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.outing_gallery_blueprint(subject_view=subject_view))
+
+    def _post_outing_gallery_blueprint(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/outing/gallery-blueprint``: gallery curating & co-blueprints."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(OUTING_GALLERY_BLUEPRINT_FIELDS,
+                                  allow_identity_fields=frozenset({"artifact_id"}))
+        action = _clean_text(payload.get("action"), 40,
+                             "GALLERY_BLUEPRINT_ACTION_REQUIRED").lower()
+        if action not in OUTING_GALLERY_BLUEPRINT_ACTIONS:
+            raise PhoneRequestError("GALLERY_BLUEPRINT_ACTION_UNSUPPORTED")
+
+        allowed_by_action = {
+            "curate_exhibit": {"action", "artifact_id", "version_id", "wall_caption"},
+            "remove_exhibit": {"action", "exhibit_id"},
+            "upsert_blueprint": {
+                "action", "blueprint_id", "title", "sketch_note",
+                "intended_use", "author_side",
+            },
+            "archive_blueprint": {"action", "blueprint_id", "author_side"},
+        }
+        if action in ("curate_exhibit", "remove_exhibit"):
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        if action == "curate_exhibit":
+            artifact_id = _owner_path_id(payload.get("artifact_id"), "ARTIFACT_ID_INVALID")
+            version_id = _version_path_id(payload.get("version_id"))
+            caption_supplied = "wall_caption" in payload
+            wall_caption = (_outing_optional_note(payload.get("wall_caption"), 120,
+                                                  "WALL_CAPTION_INVALID")
+                            if caption_supplied else None)
+            self._send_or_map(service.outing_gallery_blueprint_action(
+                action=action, artifact_id=artifact_id, version_id=version_id,
+                wall_caption=wall_caption, caption_supplied=caption_supplied))
+            return
+
+        if action == "remove_exhibit":
+            exhibit_id = _outing_required_local_id(payload.get("exhibit_id"),
+                                                   "EXHIBIT_ID_INVALID")
+            self._send_or_map(service.outing_gallery_blueprint_action(
+                action=action, exhibit_id=exhibit_id))
+            return
+
+        author_side = _clean_text(payload.get("author_side"), 20,
+                                  "BLUEPRINT_AUTHOR_REQUIRED").lower()
+        if author_side not in ("her", "partner"):
+            raise PhoneRequestError("BLUEPRINT_AUTHOR_INVALID")
+        if author_side == "her":
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        if action == "upsert_blueprint":
+            blueprint_id = _optional_local_id(payload.get("blueprint_id"),
+                                              "BLUEPRINT_ID_INVALID")
+            title = _clean_text(payload.get("title"), 40, "BLUEPRINT_TITLE_INVALID")
+            sketch_note = _clean_text(payload.get("sketch_note"), 160,
+                                      "BLUEPRINT_SKETCH_INVALID")
+            intended_use = _clean_text(payload.get("intended_use"), 120,
+                                       "BLUEPRINT_USE_INVALID")
+            self._send_or_map(service.outing_gallery_blueprint_action(
+                action=action, blueprint_id=blueprint_id, title=title,
+                sketch_note=sketch_note, intended_use=intended_use,
+                author_side=author_side))
+            return
+
+        blueprint_id = _outing_required_local_id(payload.get("blueprint_id"),
+                                                 "BLUEPRINT_ID_INVALID")
+        self._send_or_map(service.outing_gallery_blueprint_action(
+            action=action, blueprint_id=blueprint_id, author_side=author_side))
+
+    # -- 长程陪伴日常：首日房间/盆栽手账/共同习惯册/共同礼物/双层灯光/一键续接 ----------
+
+    def _get_longterm_first_room_habits(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/longterm/first-room-habits``: pure read, 403 on bad capability."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.longterm_first_room_habits(subject_view=subject_view))
+
+    def _post_longterm_first_room_habits(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/longterm/first-room-habits``: Day-1 room / plant sketch / habits."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(LONGTERM_FIRST_ROOM_HABITS_FIELDS)
+        action = _clean_text(payload.get("action"), 40,
+                             "FIRST_ROOM_HABITS_ACTION_REQUIRED").lower()
+        if action not in LONGTERM_FIRST_ROOM_HABITS_ACTIONS:
+            raise PhoneRequestError("FIRST_ROOM_HABITS_ACTION_UNSUPPORTED")
+
+        allowed_by_action = {
+            "capture_first_room": {"action", "album_artifact_id", "note"},
+            "link_plant_sketch": {
+                "action", "plant_id", "target_kind", "target_artifact_id",
+                "observation_note", "shared",
+            },
+            "remove_plant_sketch": {"action", "link_id"},
+            "upsert_habit": {
+                "action", "habit_id", "title", "habit_text",
+                "revised_reason", "author_side",
+            },
+            "retire_habit": {"action", "habit_id", "retired_reason", "author_side"},
+        }
+        if action in ("capture_first_room", "link_plant_sketch", "remove_plant_sketch"):
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        if action == "capture_first_room":
+            album_id = (
+                _owner_path_id(payload.get("album_artifact_id"), "FIRST_ROOM_ALBUM_ID_INVALID")
+                if payload.get("album_artifact_id") is not None else None
+            )
+            note = (
+                _outing_optional_note(payload.get("note"), 160, "FIRST_ROOM_NOTE_INVALID")
+                if "note" in payload else None
+            )
+            self._send_or_map(service.longterm_first_room_habits_action(
+                action=action, album_artifact_id=album_id, note=note))
+            return
+
+        if action == "link_plant_sketch":
+            plant_id = _outing_required_local_id(payload.get("plant_id"), "PLANT_ID_INVALID")
+            target_kind = _clean_text(payload.get("target_kind"), 20,
+                                      "SKETCH_TARGET_KIND_REQUIRED").lower()
+            if target_kind not in ("project", "album"):
+                raise PhoneRequestError("SKETCH_TARGET_KIND_INVALID")
+            target_artifact_id = _owner_path_id(payload.get("target_artifact_id"),
+                                                "SKETCH_TARGET_ID_INVALID")
+            observation_note = _clean_text(payload.get("observation_note"), 160,
+                                           "SKETCH_OBSERVATION_INVALID")
+            shared = (
+                _strict_boolean(payload.get("shared"), "SKETCH_SHARED_INVALID")
+                if "shared" in payload else False
+            )
+            self._send_or_map(service.longterm_first_room_habits_action(
+                action=action, plant_id=plant_id, target_kind=target_kind,
+                target_artifact_id=target_artifact_id,
+                observation_note=observation_note, shared=shared))
+            return
+
+        if action == "remove_plant_sketch":
+            link_id = _outing_required_local_id(payload.get("link_id"), "SKETCH_LINK_ID_INVALID")
+            self._send_or_map(service.longterm_first_room_habits_action(
+                action=action, link_id=link_id))
+            return
+
+        author_side = _clean_text(payload.get("author_side"), 20,
+                                  "HABIT_AUTHOR_REQUIRED").lower()
+        if author_side not in ("her", "partner"):
+            raise PhoneRequestError("HABIT_AUTHOR_INVALID")
+        if author_side == "her":
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        if action == "upsert_habit":
+            habit_id = _optional_local_id(payload.get("habit_id"), "HABIT_ID_INVALID")
+            title = _clean_text(payload.get("title"), 60, "HABIT_TITLE_INVALID")
+            habit_text = _clean_text(payload.get("habit_text"), 200, "HABIT_TEXT_INVALID")
+            revised_reason = (
+                _outing_optional_note(payload.get("revised_reason"), 160, "HABIT_REASON_INVALID")
+                if "revised_reason" in payload else None
+            )
+            self._send_or_map(service.longterm_first_room_habits_action(
+                action=action, habit_id=habit_id, title=title, habit_text=habit_text,
+                revised_reason=revised_reason, author_side=author_side))
+            return
+
+        habit_id = _outing_required_local_id(payload.get("habit_id"), "HABIT_ID_INVALID")
+        retired_reason = (
+            _outing_optional_note(payload.get("retired_reason"), 160, "HABIT_REASON_INVALID")
+            if "retired_reason" in payload else None
+        )
+        self._send_or_map(service.longterm_first_room_habits_action(
+            action=action, habit_id=habit_id, retired_reason=retired_reason,
+            author_side=author_side))
+
+    def _get_longterm_gifts_lantern(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/longterm/gifts-lantern``: optional `?layer=then_only|with_later_context`."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        raw_query = urlsplit(self.path).query
+        layer = "then_only"
+        if raw_query:
+            pairs = parse_qsl(raw_query, keep_blank_values=True, strict_parsing=False)
+            if not pairs:
+                raise PhoneRequestError("UNKNOWN_QUERY")
+            seen_layer = False
+            for key, val in pairs:
+                if key != "layer":
+                    raise PhoneRequestError("UNKNOWN_QUERY")
+                if seen_layer:
+                    raise PhoneRequestError("DUPLICATE_QUERY:layer")
+                seen_layer = True
+                if val not in LONGTERM_LANTERN_LAYERS:
+                    raise PhoneRequestError("LANTERN_LAYER_INVALID")
+                layer = val
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.longterm_gifts_lantern(
+            layer=layer, subject_view=subject_view))
+
+    def _post_longterm_gifts_lantern(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/longterm/gifts-lantern``: gift draft->gifted & later reflections."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(LONGTERM_GIFTS_LANTERN_FIELDS,
+                                  allow_identity_fields=frozenset({"artifact_id"}))
+        action = _clean_text(payload.get("action"), 40,
+                             "GIFTS_LANTERN_ACTION_REQUIRED").lower()
+        if action not in LONGTERM_GIFTS_LANTERN_ACTIONS:
+            raise PhoneRequestError("GIFTS_LANTERN_ACTION_UNSUPPORTED")
+
+        allowed_by_action = {
+            "upsert_gift": {
+                "action", "gift_id", "author_side", "stage", "title",
+                "draft_seed_note", "finished_note", "artifact_id", "version_id",
+            },
+            "send_gift": {"action", "gift_id", "author_side", "finished_note"},
+            "record_later_reflection": {
+                "action", "source_artifact_id", "source_version_id",
+                "reflection_note", "shared",
+            },
+        }
+        if action == "record_later_reflection":
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        if action == "record_later_reflection":
+            source_artifact_id = _owner_path_id(
+                payload.get("source_artifact_id"), "REFLECTION_SOURCE_ARTIFACT_INVALID")
+            source_version_id = _version_path_id(payload.get("source_version_id"))
+            reflection_note = _clean_text(payload.get("reflection_note"), 240,
+                                          "REFLECTION_NOTE_INVALID")
+            shared = (
+                _strict_boolean(payload.get("shared"), "REFLECTION_SHARED_INVALID")
+                if "shared" in payload else False
+            )
+            self._send_or_map(service.longterm_gifts_lantern_action(
+                action=action, source_artifact_id=source_artifact_id,
+                source_version_id=source_version_id,
+                reflection_note=reflection_note, shared=shared))
+            return
+
+        author_side = _clean_text(payload.get("author_side"), 20,
+                                  "GIFT_AUTHOR_REQUIRED").lower()
+        if author_side not in ("her", "partner"):
+            raise PhoneRequestError("GIFT_AUTHOR_INVALID")
+        if author_side == "her":
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        if action == "upsert_gift":
+            gift_id = _optional_local_id(payload.get("gift_id"), "GIFT_ID_INVALID")
+            stage = _clean_text(payload.get("stage"), 20, "GIFT_STAGE_REQUIRED").lower()
+            if stage not in ("draft", "wrapped"):
+                raise PhoneRequestError("GIFT_STAGE_INVALID")
+            title = _clean_text(payload.get("title"), 60, "GIFT_TITLE_INVALID")
+            draft_seed_note = _clean_text(payload.get("draft_seed_note"), 200,
+                                          "GIFT_DRAFT_SEED_INVALID")
+            finished_supplied = "finished_note" in payload
+            finished_note = (
+                _outing_optional_note(payload.get("finished_note"), 200, "GIFT_FINISHED_NOTE_INVALID")
+                if finished_supplied else None
+            )
+            link_supplied = ("artifact_id" in payload) or ("version_id" in payload)
+            art_raw = payload.get("artifact_id")
+            ver_raw = payload.get("version_id")
+            if (art_raw is None) != (ver_raw is None):
+                raise PhoneRequestError("GIFT_WORK_LINK_INCOMPLETE")
+            artifact_id = (
+                _owner_path_id(art_raw, "GIFT_ARTIFACT_ID_INVALID")
+                if art_raw is not None else None
+            )
+            version_id = _version_path_id(ver_raw) if ver_raw is not None else None
+            self._send_or_map(service.longterm_gifts_lantern_action(
+                action=action, gift_id=gift_id, author_side=author_side, stage=stage,
+                title=title, draft_seed_note=draft_seed_note,
+                finished_note=finished_note, finished_note_supplied=finished_supplied,
+                artifact_id=artifact_id, version_id=version_id, link_supplied=link_supplied))
+            return
+
+        gift_id = _outing_required_local_id(payload.get("gift_id"), "GIFT_ID_INVALID")
+        finished_note = (
+            _outing_optional_note(payload.get("finished_note"), 200, "GIFT_FINISHED_NOTE_INVALID")
+            if "finished_note" in payload else None
+        )
+        self._send_or_map(service.longterm_gifts_lantern_action(
+            action=action, gift_id=gift_id, author_side=author_side,
+            finished_note=finished_note))
+
+    def _get_longterm_resume_hub(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/longterm/resume-hub``: pure zero-write resume & closed/recovery hub."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.longterm_resume_hub(subject_view=subject_view))
+
+    def _get_character_pack(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/character/pack``: pure zero-write character pack & body summary."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.character_pack(subject_view=subject_view))
+
+    def _post_character_pack(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/character/pack``: preset / custom pack / identity / physiology."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(
+            CHARACTER_PACK_FIELDS,
+            max_bytes=65536,
+            allow_identity_fields=frozenset({"owner"}),
+        )
+        action = _clean_text(payload.get("action"), 40, "CHARACTER_PACK_ACTION_REQUIRED").lower()
+        if action not in CHARACTER_PACK_ACTIONS:
+            raise PhoneRequestError("CHARACTER_PACK_ACTION_INVALID")
+
+        if action == "set_optional_physiology":
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        allowed_by_action: dict[str, set[str]] = {
+            "select_preset": {"action", "preset_id"},
+            "apply_custom_pack": {"action", "pack"},
+            "import_pack_json": {"action", "pack_json", "pack"},
+            "export_pack": {"action", "include_sexual_seed"},
+            "attest_character_pack": {
+                "action",
+                "attested_by",
+                "pack_id",
+                "version",
+                "adult_confirmed",
+                "life_stage",
+                "declared_age",
+                "fictional_confirmed",
+                "pack_sha256",
+                "note",
+                "owner",
+            },
+            "update_identity": {
+                "action", "display_name", "pronouns",
+                "subject_calls_user", "user_calls_subject",
+                "sensory_preferences", "everyday_accessories",
+            },
+            "set_optional_physiology": {"action", "optional_processes"},
+        }
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        subject_view = self._capability_refusal() is None
+        self._send_or_map(service.character_pack_action(
+            action=action, payload=payload, subject_view=subject_view))
+
+    def _get_body_sensory(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/body/sensory``: pure zero-write 5-channel sensory field & cards."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.body_sensory(subject_view=subject_view))
+
+    def _post_body_sensory(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/body/sensory``: sound cards & partner sensory notes."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(BODY_SENSORY_FIELDS)
+        action = _clean_text(payload.get("action"), 40, "BODY_SENSORY_ACTION_REQUIRED").lower()
+        if action not in BODY_SENSORY_ACTIONS:
+            raise PhoneRequestError("BODY_SENSORY_ACTION_INVALID")
+
+        if action in ("capture_sound_card", "set_sound_card_share", "remove_sound_card"):
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        allowed_by_action: dict[str, set[str]] = {
+            "capture_sound_card": {
+                "action", "title", "impression_note", "shared", "operation_key",
+            },
+            "set_sound_card_share": {"action", "card_id", "shared"},
+            "remove_sound_card": {"action", "card_id"},
+            "leave_sensory_note": {"action", "text"},
+            "remove_sensory_note": {"action", "note_id"},
+            "clear_sensory_notes": {"action"},
+        }
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        subject_view = self._capability_refusal() is None
+        self._send_or_map(service.body_sensory_action(
+            action=action, payload=payload, subject_view=subject_view))
+
+    def _get_autonomy_rhythm(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/autonomy/rhythm``: pure zero-write autonomy & reply rhythm projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.autonomy_rhythm(subject_view=subject_view))
+
+    def _post_autonomy_rhythm(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/autonomy/rhythm``: explicit refusal, thread, pivot & async rhythm actions."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_body(
+            AUTONOMY_RHYTHM_FIELDS,
+            allow_identity_fields=frozenset({"owner"}),
+        )
+        action = _clean_text(
+            payload.get("action"), 48, "AUTONOMY_RHYTHM_ACTION_REQUIRED"
+        ).lower()
+        if action not in AUTONOMY_RHYTHM_ACTIONS:
+            raise PhoneRequestError("AUTONOMY_RHYTHM_ACTION_INVALID")
+
+        if action in AUTONOMY_RHYTHM_SUBJECT_ACTIONS:
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+
+        allowed_by_action: dict[str, set[str]] = {
+            "evaluate_turn": {"action", "user_text", "urgent", "session_id"},
+            "declare_refusal": {
+                "action", "topic_label", "category", "reason_summary", "private_note",
+            },
+            "release_refusal": {"action", "lock_id"},
+            "record_turn_context": {
+                "action", "topic_label", "reason", "owner", "private_note",
+            },
+            "hold_subject_topic": {
+                "action", "topic_label", "reason", "owner", "private_note",
+            },
+            "return_to_thread": {"action", "thread_id"},
+            "clear_session_threads": {"action", "session_id", "reason"},
+            "wave_off_retracted": {"action", "thread_id"},
+            "trigger_spontaneous_pivot": {"action", "custom_prompt"},
+            "set_phone_aside": {"action", "mode", "minutes", "note", "private_note"},
+            "urgent_knock": {"action", "msg_id", "reason"},
+            "claim_ready_messages": {"action"},
+            "clear_delivered_messages": {"action", "msg_ids"},
+            "update_preferences": {
+                "action",
+                "pace_mode",
+                "away_delay_minutes",
+                "anti_errand_firmness",
+                "thread_hold_min",
+                "spontaneous_pivot_enabled",
+                "pivot_cooldown_min",
+                "spontaneous_pivot_cooldown_min",
+            },
+        }
+        extra = sorted(set(payload) - allowed_by_action[action])
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra))
+
+        subject_view = self._capability_refusal() is None
+        self._send_or_map(service.autonomy_rhythm_action(
+            action=action, payload=payload, subject_view=subject_view))
+
+    # -- 0.3 情绪脾气与日常张力 / 看法修订与物件共在 / 欲望与 36B 成年亲密 -----------------
+
+    def _read_v03_json_body(
+        self,
+        *,
+        allow_identity_fields: frozenset[str] = frozenset(),
+        max_bytes: int = MAX_BODY_BYTES,
+    ) -> dict[str, Any]:
+        """Parse a strict JSON object body with Content-Type/Length guards and identity fence."""
+
+        content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            raise PhoneRequestError("CONTENT_TYPE_REQUIRED")
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None or not str(raw_length).strip().isdigit():
+            raise PhoneRequestError("CONTENT_LENGTH_REQUIRED")
+        length = int(str(raw_length).strip())
+        if length <= 0:
+            raise PhoneRequestError("BODY_REQUIRED")
+        if length > int(max_bytes):
+            raise PhoneRequestError("BODY_TOO_LARGE", 413)
+        raw = self.rfile.read(length)
+        self._body_consumed = True
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise PhoneRequestError("BODY_NOT_JSON") from None
+        if not isinstance(payload, dict):
+            raise PhoneRequestError("BODY_NOT_AN_OBJECT")
+        identifiers = sorted((set(payload) & IDENTITY_FIELDS) - set(allow_identity_fields))
+        if identifiers:
+            raise PhoneRequestError("CLIENT_IDENTITY_REFUSED:%s" % ",".join(identifiers), 409)
+        return payload
+
+    def _send_v03_result(self, result: Mapping[str, Any]) -> None:
+        if not result.get("ok") and result.get("http_status") == 403:
+            self._send(403, _failure(str(result.get("reason_code") or "FORBIDDEN")))
+            return
+        self._send_or_map(result)
+
+    def _get_emotional_tension(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/emotion/tension``: pure zero-write 5-domain tension projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.emotional_tension(subject_view=subject_view))
+
+    def _post_emotional_tension(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/emotion/tension``: schedule, quarrel, missing, low-mood & favor actions."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body(allow_identity_fields=frozenset({"actor"}))
+        subject_view = self._capability_refusal() is None
+        self._send_v03_result(
+            service.emotional_tension_action(payload=payload, subject_view=subject_view)
+        )
+
+    def _get_stance_containment(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/stance/containment``: pure zero-write stance, containment & desk/table projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.stance_containment(subject_view=subject_view))
+
+    def _post_stance_containment(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/stance/containment``: stance lineage, container & shared desk/table actions."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body(allow_identity_fields=frozenset({"actor"}))
+        subject_view = self._capability_refusal() is None
+        self._send_v03_result(
+            service.stance_containment_action(payload=payload, subject_view=subject_view)
+        )
+
+    def _get_adult_intimacy(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/intimacy/adult``: pure zero-write desire decay & 36B adult intimacy projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        self._send_or_map(service.adult_intimacy(subject_view=subject_view))
+
+    def _post_adult_intimacy(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/intimacy/adult``: 36B adult gate, consent, stop & private memory actions."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body(
+            allow_identity_fields=frozenset({"source", "price", "balance", "currency"})
+        )
+        raw_action = str(payload.get("action") or "").strip()
+        subject_only_actions = {
+            "revise_subject_preference",
+            "evaluate_solo_window",
+            "record_private_memory",
+            "update_body_context",
+        }
+        by_actions = {
+            "request_widen",
+            "answer_widen",
+            "pause_scene",
+            "confirm_resume",
+            "narrow_scene",
+            "stop_scene",
+            "erase_private_memory",
+            "revoke_intimacy_consent",
+        }
+
+        def _norm_role(val: Any) -> str:
+            return val.strip().lower() if isinstance(val, str) else ""
+
+        refusal = self._capability_refusal()
+        acts_as_subject = (
+            raw_action in subject_only_actions
+            or _norm_role(payload.get("by")) == "subject"
+            or _norm_role(payload.get("proposer")) == "subject"
+            or _norm_role(payload.get("responder")) == "subject"
+            or _norm_role(payload.get("speaker")) == "subject"
+        )
+        if refusal is not None:
+            if acts_as_subject:
+                self._send(*refusal)
+                return
+            if raw_action in by_actions and (
+                payload.get("by") is None
+                or (isinstance(payload.get("by"), str) and not payload.get("by").strip())
+            ):
+                payload = {**payload, "by": "partner"}
+        subject_view = refusal is None
+        self._send_v03_result(
+            service.adult_intimacy_action(payload=payload, subject_view=subject_view)
+        )
+
+    def _get_v03_clock(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v03/clock``: pure zero-write three-clock & memory evaporation projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v03_clock(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v03_clock(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v03/clock``: zero-LLM clock advance, evaporable pool & meaningless idle."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body(
+            allow_identity_fields=frozenset({"grant_id", "actor", "source"})
+        )
+        subject_view = self._capability_refusal() is None
+        code, body = service.v03_clock_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v03_ecology(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v03/ecology``: pure zero-write economy, illness & reality-bridge projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v03_ecology(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v03_ecology(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v03/ecology``: independent economy, illness self-healing & outbound gate."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body(
+            allow_identity_fields=frozenset({"source", "actor", "price", "balance", "currency"})
+        )
+        subject_view = self._capability_refusal() is None
+        code, body = service.v03_ecology_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v03_embodied_social(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v03/embodied-social``: pure zero-write kitchen, contact, NPC & style projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v03_embodied_social(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v03_embodied_social(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v03/embodied-social``: kitchen conservation, two-hand contact, NPC & style."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body(
+            allow_identity_fields=frozenset({"actor", "source"})
+        )
+        subject_view = self._capability_refusal() is None
+        code, body = service.v03_embodied_social_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v04_neighborhood(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v04/neighborhood``: pure zero-write neighborhood, courtyard, craft & shelf projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v04_neighborhood(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v04_neighborhood(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v04/neighborhood``: local weather, journey, courtyard, notices, crafts & shelf."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body()
+        subject_view = self._capability_refusal() is None
+        code, body = service.v04_neighborhood_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v04_builder_trylive(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v04/builder-trylive``: pure zero-write world diagnostics & try-live sandbox projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v04_builder_trylive(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v04_builder_trylive(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v04/builder-trylive``: isolated route audit, prose gap check, 1h try-live & preview."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body()
+        subject_view = self._capability_refusal() is None
+        code, body = service.v04_builder_trylive_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v04_elastic_play(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v04/elastic-play``: pure zero-write elastic direction, shared learning & playfulness."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v04_elastic_play(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v04_elastic_play(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v04/elastic-play``: day direction, shared notebook, experiment, game & surprise."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body()
+        subject_view = self._capability_refusal() is None
+        code, body = service.v04_elastic_play_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _read_v02_crossmodal_json_body(
+        self,
+        *,
+        max_bytes: int = 6 * 1024 * 1024,
+        allow_identity_fields: frozenset[str] = frozenset(),
+    ) -> dict[str, Any]:
+        """Parse a strict non-empty JSON object body up to ``max_bytes`` for local image base64 uploads."""
+
+        content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            raise PhoneRequestError("CONTENT_TYPE_REQUIRED")
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None or not str(raw_length).strip().isdigit():
+            raise PhoneRequestError("CONTENT_LENGTH_REQUIRED")
+        length = int(str(raw_length).strip())
+        if length <= 0:
+            raise PhoneRequestError("BODY_REQUIRED")
+        if length > int(max_bytes):
+            raise PhoneRequestError("BODY_TOO_LARGE", 413)
+        raw = self.rfile.read(length)
+        self._body_consumed = True
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise PhoneRequestError("BODY_NOT_JSON") from None
+        if not isinstance(payload, dict):
+            raise PhoneRequestError("BODY_NOT_AN_OBJECT")
+        if not payload:
+            raise PhoneRequestError("BODY_REQUIRED")
+        identifiers = sorted((set(payload) & IDENTITY_FIELDS) - set(allow_identity_fields))
+        if identifiers:
+            raise PhoneRequestError("CLIENT_IDENTITY_REFUSED:%s" % ",".join(identifiers), 409)
+        return payload
+
+    def _get_v02_agency_depth(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/agency-depth``: pure zero-write agency depth projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v02_agency_depth(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v02_agency_depth(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/agency-depth``: agency depth mutations with actor_side & idempotency."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body()
+        subject_view = self._capability_refusal() is None
+        code, body = service.v02_agency_depth_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v02_crossmodal(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/crossmodal``: pure zero-write crossmodal palette, trial pad & reading marks."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v02_crossmodal(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v02_crossmodal(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/crossmodal``: image palette analysis, color trial swatches & reading marks."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v02_crossmodal_json_body(max_bytes=6 * 1024 * 1024)
+        subject_view = self._capability_refusal() is None
+        code, body = service.v02_crossmodal_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v02_runtime_migration(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/runtime-migration``: pure zero-write runtime governance & migration projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v02_runtime_migration(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v02_runtime_migration(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/runtime-migration``: budget mode, carrier check, suitcase & skill reverify."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v03_json_body(max_bytes=4 * 1024 * 1024)
+        subject_view = self._capability_refusal() is None
+        code, body = service.v02_runtime_migration_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v02_recall_projection(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/recall-projection``: pure zero-write 4-level recall projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v02_recall_projection(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v02_recall_projection(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/recall-projection``: episodic trace, active fade, rehearsal & tombstone."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v02_crossmodal_json_body(
+            max_bytes=MAX_BODY_BYTES,
+            allow_identity_fields=frozenset({"actor", "source", "owner"}),
+        )
+        subject_view = self._capability_refusal() is None
+        code, body = service.v02_recall_projection_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
+
+    def _get_v02_common_ground(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/common-ground``: pure zero-write common ground & unseen-move projection."""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, refusal = self._desk_subject_view()
+        if refusal is not None:
+            self._send(*refusal)
+            return
+        code, body = service.v02_common_ground(subject_view=subject_view)
+        self._send(code, body)
+
+    def _post_v02_common_ground(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/common-ground``: ground ledger, receipt state & unseen-move inquiry."""
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_v02_crossmodal_json_body(
+            max_bytes=MAX_BODY_BYTES,
+            allow_identity_fields=frozenset({"actor", "source", "owner"}),
+        )
+        subject_view = self._capability_refusal() is None
+        code, body = service.v02_common_ground_action(payload=payload, subject_view=subject_view)
+        self._send(code, body)
 
     def _post_share_prepare(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/shares``: one explicit draft.  Never a whole private material."""
@@ -1811,6 +4593,32 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             raise PhoneRequestError("UNKNOWN_QUERY")
         self._send_or_map(service.day_timeline(
             subject_view=self._actor() == phone_service.ACTOR_MODEL))
+
+    def _get_today_story(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/today/story``: 统一因果生活故事线（100% 零写纯读）。"""
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        raw_query = urlsplit(self.path).query
+        day_param: Optional[str] = None
+        if raw_query:
+            pairs = parse_qsl(raw_query, keep_blank_values=True)
+            unknown = sorted({k for k, _v in pairs} - {"day"})
+            if unknown:
+                raise PhoneRequestError("UNKNOWN_QUERY:%s" % ",".join(unknown))
+            if len(pairs) > 1:
+                raise PhoneRequestError("QUERY_REPEATED:day")
+            cand_day = str(pairs[0][1] or "").strip()
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", cand_day):
+                raise PhoneRequestError("STORY_DAY_INVALID")
+            day_param = cand_day
+        self._send_or_map(service.day_story(day=day_param))
 
     def _get_claims(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/claims``: bounded current claims; host/origin guarded.
@@ -3215,6 +6023,22 @@ def _share_title(value: Any) -> Optional[str]:
     return text
 
 
+def _desk_due_fields(payload: Mapping[str, Any]) -> tuple[Optional[str], Optional[int]]:
+    """Exactly one of ``due_at`` / ``due_in_minutes``; the owner keeps the final word."""
+
+    due_at = payload.get("due_at")
+    minutes = payload.get("due_in_minutes")
+    has_due = due_at is not None and str(due_at).strip() != ""
+    has_min = minutes is not None and str(minutes).strip() != ""
+    if has_due == has_min:
+        raise PhoneRequestError("DESK_DUE_TIME_AMBIGUOUS")
+    if has_due:
+        return _clean_text(due_at, 80, "DUE_AT_INVALID"), None
+    if isinstance(minutes, bool) or not isinstance(minutes, int) or minutes < 1:
+        raise PhoneRequestError("DUE_IN_MINUTES_INVALID")
+    return None, int(minutes)
+
+
 def _expires_after_s(value: Any) -> Optional[int]:
     """An optional draft expiry window, inside B's own MIN/MAX."""
 
@@ -3369,6 +6193,147 @@ def _clean_annotation(value: Any, maximum_bytes: int, reason: str) -> str:
         raise PhoneRequestError(reason)
     if len(text.encode("utf-8")) > int(maximum_bytes):
         raise PhoneRequestError(reason)
+    return text
+
+
+def _optional_local_id(value: Any, reason: str) -> Optional[str]:
+    """An optional local card id (recipe/plan).  ``None``/``""`` mean "derive it"; a path,
+    a URL or a non-string is refused by name."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise PhoneRequestError(reason)
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) > 80 or any(ch in text for ch in ("\x00", "\r", "\n", "/", "\\", "?", "#")):
+        raise PhoneRequestError(reason)
+    return text
+
+
+def _outing_required_local_id(value: Any, reason: str) -> str:
+    """One required local card/visit/route/exhibit/blueprint id."""
+
+    if not isinstance(value, str):
+        raise PhoneRequestError(reason)
+    text = value.strip()
+    if not text or len(text) > 80 or not re.match(r"^[A-Za-z0-9._:\-]+$", text):
+        raise PhoneRequestError(reason)
+    return text
+
+
+def _outing_optional_note(value: Any, maximum: int, reason: str) -> Optional[str]:
+    """An optional bounded single-line note; `None`/`""` normalize to `None`."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise PhoneRequestError(reason)
+    if any(ch in value for ch in ("\x00", "\r")):
+        raise PhoneRequestError(reason)
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if len(stripped) > maximum:
+        raise PhoneRequestError(reason)
+    return " ".join(stripped.split())[:maximum]
+
+
+def _outing_place_id(value: Any) -> str:
+    """One World location identifier shape check before owner/world lookup."""
+
+    if not isinstance(value, str):
+        raise PhoneRequestError("PLACE_ID_REQUIRED")
+    text = value.strip()
+    if not text or len(text) > MAX_WORLD_DESTINATION:
+        raise PhoneRequestError("PLACE_ID_INVALID")
+    if any(ch in text for ch in ("\x00", "\r", "\n", "/", "\\", "?", "#", " ")):
+        raise PhoneRequestError("PLACE_ID_INVALID")
+    return text
+
+
+def _outing_place_list(value: Any) -> list[str]:
+    """Non-empty list of 1..6 distinct place_ids for a walk route."""
+
+    if not isinstance(value, list) or not 1 <= len(value) <= outing_view.MAX_ROUTE_STOPS:
+        raise PhoneRequestError("ROUTE_PLACES_INVALID")
+    places: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str) or not raw.strip():
+            raise PhoneRequestError("ROUTE_PLACES_INVALID")
+        pid = raw.strip()
+        if len(pid) > MAX_WORLD_DESTINATION or any(
+                ch in pid for ch in ("\x00", "\r", "\n", "/", "\\", "?", "#", " ")):
+            raise PhoneRequestError("ROUTE_PLACES_INVALID")
+        if pid in places:
+            raise PhoneRequestError("ROUTE_PLACES_DUPLICATED")
+        places.append(pid)
+    return places
+
+
+def _outing_slot_index(value: Any) -> int:
+    """Strict integer `0..2` for featured bookstore window slots."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2:
+        raise PhoneRequestError("WINDOW_SLOT_INVALID")
+    return int(value)
+
+
+def _outing_budget_cap(value: Any) -> Optional[int]:
+    """Optional integer >= 0 for virtual festival market budget memo."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PhoneRequestError("MARKET_BUDGET_CAP_INVALID")
+    if not 0 <= value <= 10_000_000:
+        raise PhoneRequestError("MARKET_BUDGET_CAP_INVALID")
+    return int(value)
+
+
+def _somatic_optional_label(value: Any) -> Optional[str]:
+    """A short local garment label; empty/absent means "no label", never a path."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise PhoneRequestError("GARMENT_LABEL_INVALID")
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) > 40 or any(ch in text for ch in ("\x00", "\r", "\n")):
+        raise PhoneRequestError("GARMENT_LABEL_INVALID")
+    return text
+
+
+def _somatic_optional_choice(value: Any, allowed: frozenset[str],
+                             reason: str) -> Optional[str]:
+    """An optional finite vocabulary value; absent stays ``None``, a wrong value is 400."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str) or value not in allowed:
+        raise PhoneRequestError(reason)
+    return value
+
+
+def _strict_boolean(value: Any, reason: str) -> bool:
+    """A JSON boolean, exactly.  ``"true"``/1/null are refusals, never coerced."""
+
+    if not isinstance(value, bool):
+        raise PhoneRequestError(reason)
+    return value
+
+
+def _pocket_entry_id(value: Any) -> str:
+    """One stable local card id (no path, URL or owner identity)."""
+
+    if not isinstance(value, str):
+        raise PhoneRequestError("POCKET_ENTRY_ID_INVALID")
+    text = value.strip()
+    if not text or len(text) > 80 or not re.match(r"^[A-Za-z0-9_-]+$", text):
+        raise PhoneRequestError("POCKET_ENTRY_ID_INVALID")
     return text
 
 

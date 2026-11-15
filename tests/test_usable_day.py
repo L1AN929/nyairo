@@ -84,9 +84,11 @@ class UsableDayCliTest(unittest.TestCase):
         self.assertEqual(payload.get("reason"), "SUPERVISOR_PROCESS_GONE")
 
     def test_window_refuses_out_of_range_before_starting(self):
+        from components.phone import living
+
         for argv, reason in (
-            (("window", "--root", str(self.root), "--duration-seconds", "601"), "DURATION_OUT_OF_RANGE"),
-            (("window", "--root", str(self.root), "--max-new-requests", "5"), "REQUEST_CAP_OUT_OF_RANGE"),
+            (("window", "--root", str(self.root), "--duration-seconds", str(living.MAX_WINDOW_SECONDS + 1)), "DURATION_OUT_OF_RANGE"),
+            (("window", "--root", str(self.root), "--max-new-requests", str(living.MAX_WINDOW_REQUESTS + 1)), "REQUEST_CAP_OUT_OF_RANGE"),
         ):
             code, payload = run_cli(*argv)
             self.assertEqual(code, usable_day.EXIT_REFUSED)

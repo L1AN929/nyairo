@@ -114,6 +114,9 @@ SURFACE_KINDS: dict[str, dict[str, Any]] = {
     "desk_surface": {
         "surface_id": "desk_surface",
         "owner_catalog_item_id": "simple_desk",
+        # Several catalog items can really provide the same *kind* of surface; the
+        # instance id still keeps the two tables' surfaces apart.
+        "owner_catalog_items": ("simple_desk", "window_side_table"),
         "label": "desk",
         "pose_condition": None,
         "rest_modes": (),
@@ -747,11 +750,28 @@ def surface_declared(surface_id: Any) -> bool:
     return True
 
 
+def _declared_surface_owners(declaration: Mapping[str, Any]) -> tuple[str, ...]:
+    """Every catalog item that can provide this surface *kind* (instance id still scopes it)."""
+
+    listed = declaration.get("owner_catalog_items")
+    if listed:
+        return tuple(str(item) for item in listed)
+    owner = declaration.get("owner_catalog_item_id")
+    return (str(owner),) if owner else ()
+
+
 def surface_owner_catalog(surface_id: Any) -> Optional[str]:
-    """The catalog item that must exist for the surface to be real."""
+    """The (primary) catalog item that must exist for the surface to be real."""
 
     kind = surface_kind_of(surface_id)
     return SURFACE_KINDS[kind]["owner_catalog_item_id"] if kind else None
+
+
+def surface_owner_catalog_items(surface_id: Any) -> tuple[str, ...]:
+    """All catalog items that may own this surface kind (empty when undeclared)."""
+
+    kind = surface_kind_of(surface_id)
+    return _declared_surface_owners(SURFACE_KINDS[kind]) if kind else ()
 
 
 def surface_declaration(surface_id: Any) -> dict[str, Any]:
@@ -789,7 +809,7 @@ def derived_surfaces(
         if not catalog_item:
             continue
         for kind, declaration in sorted(SURFACE_KINDS.items()):
-            if declaration["owner_catalog_item_id"] != catalog_item:
+            if catalog_item not in _declared_surface_owners(declaration):
                 continue
             if str(target.get("location_id")) != str(location_id):
                 continue

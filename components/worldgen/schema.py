@@ -791,8 +791,8 @@ def validate_objects_doc(doc: Any) -> dict[str, Any]:
     objects_raw = doc.get("objects")
     if not isinstance(objects_raw, list):
         raise WorldPackageError("objects.json 必须包含 objects 列表")
-    if len(objects_raw) > 128:
-        raise WorldPackageError("objects.objects 数量不能超过 128")
+    if len(objects_raw) > 300:
+        raise WorldPackageError("objects.objects 数量不能超过 300")
     objects = []
     ids: set[str] = set()
     for index, obj in enumerate(objects_raw):

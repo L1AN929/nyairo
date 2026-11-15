@@ -23,16 +23,18 @@ import os
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any, Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import world_runtime_data as wrd
+#: 业务日界唯一权威（19 章 §一.4）：默认时区与预算同源（固定偏移 +08:00，可配置），
+#: 不再各自硬编码 ``Asia/Tokyo``。
+import business_day_key as _bdk
 
 
 FEATURE_ENV = "CHIYO_WORLD_AMBIENT_EVENTS_ENABLED"
 WORLD_ID = "shiomi_city"
-WORLD_TIMEZONE = "Asia/Tokyo"
+WORLD_TIMEZONE = _bdk.DEFAULT_BUSINESS_TZ_LABEL
 SCHEMA_VERSION = "world.ambient.event.v1"
 MAX_EVENTS_PER_DAY = 3
 MAX_SUMMARY_LENGTH = 240
@@ -427,13 +429,14 @@ def _require_date(value: Any) -> date:
     return value
 
 
-def _zone(timezone_name: str) -> ZoneInfo:
+def _zone(timezone_name: str) -> tzinfo:
     if not isinstance(timezone_name, str) or not timezone_name.strip():
         raise AmbientWorldEventError("timezone_name is invalid")
-    try:
-        return ZoneInfo(timezone_name.strip())
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise AmbientWorldEventError("timezone_name is invalid") from exc
+    # 业务日界共享解析（偏移拼写与 IANA 名都接受）；未知拼写仍然 fail closed。
+    zone = _bdk.resolve_zone(timezone_name.strip())
+    if zone is None:
+        raise AmbientWorldEventError("timezone_name is invalid")
+    return zone
 
 
 def _bounded_summary(value: Any) -> str:
@@ -445,7 +448,7 @@ def _bounded_summary(value: Any) -> str:
     return result
 
 
-def _boundary(local_date: date, hour: int, zone: ZoneInfo) -> datetime:
+def _boundary(local_date: date, hour: int, zone: tzinfo) -> datetime:
     if hour == 24:
         local_date = local_date + timedelta(days=1)
         hour = 0
@@ -457,7 +460,7 @@ def _boundary(local_date: date, hour: int, zone: ZoneInfo) -> datetime:
 def _build_event(
     template: _Template,
     local_date: date,
-    zone: ZoneInfo,
+    zone: tzinfo,
     environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
     valid_from = _boundary(local_date, template.start_hour, zone)
@@ -496,7 +499,7 @@ def _build_finite_event(
     template: _Template,
     local_date: date,
     phase: _FinitePhase,
-    zone: ZoneInfo,
+    zone: tzinfo,
     environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
     """有限跨天阶段事件：身份由世界包作者固定，窗口与叙述用当天阶段。
@@ -526,7 +529,7 @@ def _build_finite_event(
 
 def _validate_event(
     event: Mapping[str, Any],
-    zone: ZoneInfo,
+    zone: tzinfo,
     environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
     world = wrd.active_world(environment)
@@ -705,7 +708,7 @@ def _active_templates(
 def _select_events(
     day: date,
     templates: tuple[_Template, ...],
-    zone: ZoneInfo,
+    zone: tzinfo,
     environment: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, Any]]:
     """按既有每日上限选事件：跨天阶段优先占位，其余给单日轮转。"""

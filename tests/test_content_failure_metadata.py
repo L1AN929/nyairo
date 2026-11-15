@@ -129,13 +129,15 @@ class ContentFailureMetadataTests(unittest.TestCase):
         cls._guard.__exit__(None, None, None)
 
     def test_01_actual_stage_cap_and_finish_reason(self):
-        # 负控：真实阅读 writer 用 512 调，client 构造默认 2048 —— 记录的必须是实参 512。
+        # 负控：真实阅读 writer 显式用 512 调，client 构造默认 2048 —— 记录的必须是实参 512。
+        # （2026-11-09 起不传 max_output_tokens 会继承 client 的 2048，所以这里必须显式传。）
         root = scratch()
         transport = ScriptTransport(failure="PROVIDER_OUTPUT_TRUNCATED",
                                     metadata={"finish_reason": "length"})
         writer = srr.ModelReadingResponse(
             BudgetedModelClient(client("reading_response", cap=2048, transport=transport),
-                                budget(root)))
+                                budget(root)),
+            max_output_tokens=512)
         with self.assertRaises(srr.ReadingResponseError) as caught:
             writer.respond(READING_CONTEXT, observed_at="2026-11-06T00:00:00+00:00")
         self.assertEqual(transport.caps, [512])

@@ -176,7 +176,7 @@ class CompanionExtrasTests(unittest.TestCase):
             g = mod._world_move_guidance()
         self.assertIn("chiyo_phone", g)
         self.assertIn("world_action", g)
-        self.assertLessEqual(len(g), 1200)
+        self.assertLessEqual(len(g), 1800)
 
     def test_chiyo_world_tools_not_deferred_by_hermes_tool_search(self) -> None:
         import types

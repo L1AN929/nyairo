@@ -21,7 +21,9 @@ from memory_authority import (MemoryDeletionAuthority, authority_min_seq_from_en
 
 
 def readonly(path: Path) -> sqlite3.Connection:
-    c = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=2)
+    resolved = path.resolve()
+    query = '?mode=ro' if Path(f'{resolved}-wal').exists() else '?mode=ro&immutable=1'
+    c = sqlite3.connect(resolved.as_uri() + query, uri=True, timeout=2)
     c.row_factory = sqlite3.Row
     return c
 

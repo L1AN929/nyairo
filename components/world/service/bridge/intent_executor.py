@@ -161,7 +161,7 @@ def execute_intent(
         _env: dict[str, str] = dict(os.environ)
         for _k, _v in _client_env.items():
             if _v is not None and str(_v) != "":
-                if _k == "WORLD_BODY_INTENT_MUTATION_GATE" and str(_v) == "off" and os.environ.get(_k):
+                if _k == "WORLD_BODY_INTENT_MUTATION_GATE" and os.environ.get(_k):
                     continue
                 _env[_k] = str(_v)
     else:

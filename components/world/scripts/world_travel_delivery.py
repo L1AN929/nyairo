@@ -17,6 +17,8 @@ from typing import Any, Iterator, Optional
 import world_foundation as wf
 import world_runtime_data as wrd
 import world_timeline as wt
+#: 业务日界唯一权威（19 章 §一.4）：默认时区与预算同源（固定偏移 +08:00，可配置）。
+import business_day_key as _bdk
 
 try:
     import fcntl
@@ -27,7 +29,8 @@ except ImportError:  # pragma: no cover - production is POSIX
 TRAVEL_FEATURE_ENV = "CHIYO_WORLD_TRAVEL_TIME_ENABLED"
 DELIVERY_FEATURE_ENV = "CHIYO_WORLD_DELIVERY_TIME_ENABLED"
 WORLD_ID = "shiomi_city"
-WORLD_TIMEZONE = "Asia/Tokyo"
+#: 业务日界唯一权威（19 章 §一.4）：默认时区与预算同源（固定偏移 +08:00，可配置）。
+WORLD_TIMEZONE = _bdk.DEFAULT_BUSINESS_TZ_LABEL
 SCHEMA_VERSION = "world.travel_delivery.v1"
 TRAVEL_MODE_WALK = "WALK"
 TRAVEL_STATUS_IN_PROGRESS = "IN_PROGRESS"

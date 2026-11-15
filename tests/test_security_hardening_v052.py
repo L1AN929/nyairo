@@ -200,6 +200,34 @@ class WorldEditorConfinementTest(unittest.TestCase):
                 req_ok = urllib.request.Request(url, headers={"Sec-Fetch-Site": "same-origin"})
                 with urllib.request.urlopen(req_ok, timeout=5) as resp:
                     self.assertEqual(resp.status, 200)
+
+                post_url = f"http://127.0.0.1:{srv.server_port}/api/validate"
+                req_post_bad = urllib.request.Request(
+                    post_url,
+                    data=b"{}",
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Nyairo-Editor": "1",
+                        "Sec-Fetch-Site": "same-site",
+                    },
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx_post:
+                    urllib.request.urlopen(req_post_bad, timeout=5)
+                self.assertEqual(ctx_post.exception.code, 403)
+                ctx_post.exception.close()
+
+                iframe_url = f"http://127.0.0.1:{srv.server_port}/"
+                req_iframe = urllib.request.Request(
+                    iframe_url,
+                    headers={
+                        "Sec-Fetch-Site": "same-site",
+                        "Sec-Fetch-Dest": "iframe",
+                        "Sec-Fetch-Mode": "navigate",
+                    },
+                )
+                with urllib.request.urlopen(req_iframe, timeout=5) as resp_iframe:
+                    self.assertEqual(resp_iframe.status, 200)
             finally:
                 srv.shutdown()
                 srv.server_close()

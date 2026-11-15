@@ -203,8 +203,8 @@ class BoundedWindowTest(unittest.TestCase):
 
     def test_bounds_are_refused_before_the_ledger_is_touched(self):
         for kwargs, reason in (
-            ({"duration_seconds": 601, "max_new_requests": 1}, "DURATION_OUT_OF_RANGE"),
-            ({"duration_seconds": 30, "max_new_requests": 5}, "REQUEST_CAP_OUT_OF_RANGE"),
+            ({"duration_seconds": living.MAX_WINDOW_SECONDS + 1, "max_new_requests": 1}, "DURATION_OUT_OF_RANGE"),
+            ({"duration_seconds": 30, "max_new_requests": living.MAX_WINDOW_REQUESTS + 1}, "REQUEST_CAP_OUT_OF_RANGE"),
             ({"duration_seconds": 0, "max_new_requests": 1}, "DURATION_OUT_OF_RANGE"),
         ):
             called = []
@@ -319,8 +319,8 @@ class SupervisorTest(unittest.TestCase):
     def test_start_window_refuses_out_of_range_before_spawning(self):
         supervisor = living.Supervisor(self.root, port=3831)
         for kwargs, reason in (
-            ({"duration_seconds": 601, "max_new_requests": 1}, "DURATION_OUT_OF_RANGE"),
-            ({"duration_seconds": 30, "max_new_requests": 5}, "REQUEST_CAP_OUT_OF_RANGE"),
+            ({"duration_seconds": living.MAX_WINDOW_SECONDS + 1, "max_new_requests": 1}, "DURATION_OUT_OF_RANGE"),
+            ({"duration_seconds": 30, "max_new_requests": living.MAX_WINDOW_REQUESTS + 1}, "REQUEST_CAP_OUT_OF_RANGE"),
         ):
             result = supervisor.start_window(**kwargs)
             self.assertFalse(result.get("ok"))

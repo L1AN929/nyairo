@@ -71,6 +71,10 @@ MAX_EXPERIENCES_IN_PROMPT = 3
 MAX_EXPERIENCE_CHARS = 600
 #: How many entries of the live World block (places / concrete offers) the prompt may carry.
 MAX_LIVE_CONTEXT_ENTRIES = 8
+#: 30/32 章 A 批：有限注意投影块进决策请求的**总**预算（32 章 §6）。块内行数与
+#: 单行长度另有更紧的白名单上限；超总预算时按 线索 -> 看法 -> 关切 的顺序整行裁剪，
+#: 空内容不出块。
+MAX_ATTENTION_BLOCK_CHARS = 1600
 
 #: LPC0B-R3: the smallest ``max_tokens`` a decision request may be sent with.
 #:
@@ -204,6 +208,14 @@ bounded present-tense `situation_context`, and it is the *first* thing to read:
   `DISPUTED` means two sources really disagree and are shown side by side; `STALE` means the
   revalidation deadline passed; `UNKNOWN` means no qualifying evidence, **not** false.  This is
   fact/uncertainty context only: it authorizes no action, updates no World and writes no Memory.
+* `situation_context.attention` is her own limited attention (30/32 章): the concerns she
+  wrote down and has not settled yet (`concerns`), what she can actually see right now
+  (`visible_cues` -- obtained pages only; unread page content does not exist for her here),
+  and the views she currently holds (`current_views`, each with the page/anchor it was read
+  at).  Read it the way she would: a concern is a question she may carry into what she does
+  next, never a task she owes; a view she has not verified on a page stays hers to revise,
+  not a fact.  The block is context only: nothing here authorizes an action or writes
+  anything, and when it is absent there was nothing uncertain to carry.
 
 This is **one continuous day**, not a task list: she may keep at what she is doing, prepare
 something in passing, go out and come back to the same piece, or end a thing and pick something
@@ -411,6 +423,97 @@ def _bounded_body_context(raw: Any) -> dict[str, Any]:
     if unknowns:
         out["unknowns"] = unknowns
     return out
+
+
+def _bounded_attention(raw: Any) -> dict[str, Any]:
+    """The attention view (30/32 章 A 批), bounded for the prompt -- what she is unsure of.
+
+    Source of truth is ``attention_view_projector.build_attention_view``: a pure, zero-write
+    projection of the questions she wrote down, the cues she can actually see right now
+    (obtained pages only -- unread page content never travels) and the views she currently
+    holds.  This applies the prompt bound with an explicit whitelist plus a *total* budget of
+    ``MAX_ATTENTION_BLOCK_CHARS`` (32 章 §6): over budget, whole rows go -- cues first, then
+    views, then extra concerns, because the question she wrote is the point of the block.
+    An empty block returns ``{}`` so nothing is emitted, and nothing here is authority.
+    """
+
+    if not isinstance(raw, Mapping) or not raw:
+        return {}
+
+    def _text(value: Any, limit: int) -> str:
+        return " ".join(str(value if value is not None else "").split())[:limit]
+
+    concerns: list[dict[str, Any]] = []
+    for row in list(raw.get("concerns") or [])[:2]:
+        if not isinstance(row, Mapping):
+            continue
+        text = _text(row.get("text"), 240)
+        if not text:
+            continue
+        entry = {"scope_ref": _text(row.get("scope_ref"), 80) or "general",
+                 "text": text}
+        origin = _text(row.get("origin"), 40)
+        if origin:
+            entry["origin"] = origin
+        concerns.append(entry)
+    views: list[dict[str, Any]] = []
+    for row in list(raw.get("current_views") or [])[:3]:
+        if not isinstance(row, Mapping):
+            continue
+        sref = _text(row.get("scope_ref"), 80)
+        text = _text(row.get("text"), 240)
+        if not sref or not text:
+            continue
+        entry: dict[str, Any] = {"scope_ref": sref, "text": text}
+        anchor = row.get("page_or_anchor")
+        if anchor is not None and str(anchor).strip():
+            entry["page_or_anchor"] = _text(anchor, 40)
+        views.append(entry)
+    cues: list[dict[str, Any]] = []
+    for row in list(raw.get("visible_cues") or [])[:6]:
+        if not isinstance(row, Mapping):
+            continue
+        label = _text(row.get("label") or row.get("title") or row.get("ref"), 80)
+        if not label:
+            continue
+        entry: dict[str, Any] = {"label": label}
+        kind = _text(row.get("cue_kind"), 40)
+        if kind:
+            entry["cue_kind"] = kind
+        # 阅读材料面：只带"已取得的页码"，未取得的页码与正文永远不出现
+        # （投影器给的是 obtained_pages，unread_pages_withheld 恒为真）。
+        obtained = [page for page in (row.get("obtained_pages") or [])
+                    if isinstance(page, int) and not isinstance(page, bool)
+                    and 0 < page <= 9999]
+        if obtained:
+            entry["obtained_pages"] = obtained[:8]
+        cues.append(entry)
+
+    if not concerns and not views and not cues:
+        return {}
+    block: dict[str, Any] = {
+        "availability": _text(raw.get("availability"), 24) or "EMPTY",
+        "not_authority": True,
+    }
+    if concerns:
+        block["concerns"] = concerns
+    if views:
+        block["current_views"] = views
+    if cues:
+        block["visible_cues"] = cues
+    if raw.get("truncated") is True:
+        block["truncated"] = True
+    # 32 章 §6：块总预算。超限时整行裁剪，顺序 线索 -> 看法 -> 关切。
+    for drop in ("visible_cues", "current_views", "concerns"):
+        while block.get(drop) and len(json.dumps(
+                block, ensure_ascii=False, sort_keys=True)) > MAX_ATTENTION_BLOCK_CHARS:
+            block[drop] = block[drop][:-1]
+            if not block[drop]:
+                block.pop(drop)
+    if not (block.get("concerns") or block.get("current_views")
+            or block.get("visible_cues")):
+        return {}
+    return block
 
 
 def _bounded_breakpoint(raw: Any) -> dict[str, Any]:
@@ -1225,6 +1328,14 @@ class ProductionAgencyCognitionAdapter:
             bounded_world = _bounded_live_context(world)
             if bounded_world:
                 out["world"] = bounded_world
+        # 30/32 章 A 批：有限注意投影 -- 她自己写下的未决关切、此刻真看得见的线索
+        # （只含已取得的页码）与当前看法。投影器本身零模型调用、零写盘；这里只
+        # 施加提示词侧的行数/长度/总预算白名单，空内容整块缺席，绝不是权限。
+        attention = raw.get("attention")
+        if isinstance(attention, Mapping):
+            bounded_attention = _bounded_attention(attention)
+            if bounded_attention:
+                out["attention"] = bounded_attention
         # v0.4 body participation: her body, qualitatively -- which burden the Body owner really
         # reported, whether a recovery *session* is open, whether resting is possible now (and the
         # owner's own reason if not), and what could not be read.  Bands and enums only; no

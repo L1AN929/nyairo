@@ -551,6 +551,7 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
             provision_instance: bool = False,
             allow_night_start: bool = False,
             logical_anchor: Optional[datetime] = None,
+            domain_id: Optional[str] = None,
             now: Optional[datetime] = None) -> dict[str, Any]:
     if not root.is_absolute():
         return {"ok": False, "reason_code": REASON_ROOT_REQUIRED,
@@ -656,7 +657,9 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
         ledger_run_id = expected_run_id
         provision = {}
 
-    domain = clockmod.domain_for(run_id)
+    #: ``domain_id`` 是给封闭入口用的可选身份覆盖；不传时与旧行为逐字节一致
+    #: （``fastday:<run>``）。它只改本实例时钟文件的域名字，不改任何安全时钟。
+    domain = str(domain_id or "").strip() or clockmod.domain_for(run_id)
     try:
         clockmod.create_clock(state_root, run_id=ledger_run_id, rate=rate,
                               logical_seconds=logical_seconds, domain_id=domain)
@@ -1061,6 +1064,8 @@ class FastDaySupervisor:
     def __init__(self, root: Path | str, *, poll_seconds: float = DEFAULT_POLL_SECONDS,
                  clock_only: bool = False, no_act: bool = False,
                  offline_scripted: bool = False,
+                 room_living: bool = False,
+                 ambient_events: bool = False,
                  sleeper: Optional[Callable[[float], None]] = None,
                  monotonic: Optional[Callable[[], float]] = None,
                  wall: Optional[Callable[[], datetime]] = None) -> None:
@@ -1069,6 +1074,11 @@ class FastDaySupervisor:
         self.clock_only = bool(clock_only)
         self.no_act = bool(no_act)
         self.offline_scripted = bool(offline_scripted)
+        #: 封闭入口的 run-time 开关；默认 False 与旧 supervisor 行为一致。room_living
+        #: 只是把既有的 ``demo.effective_features``/``_serve_feature_overrides`` 值同时
+        #: 传给本段的 World 子进程与 resident 环境，不写回 instance.json。
+        self.room_living = bool(room_living)
+        self.ambient_events = bool(ambient_events)
         if self.offline_scripted and not self.no_act:
             raise ValueError("offline_scripted 只能和 no_act 一起用")
         self._sleep = sleeper or time.sleep
@@ -1113,9 +1123,12 @@ class FastDaySupervisor:
         from components.phone import demo, service as phone_service
 
         generation = "fastday-%d-%d" % (int(time.time()), os.getpid())
+        gate = resolve_world_intent_gate(os.environ)
         children = demo.owner_children(
             self.root, generation=generation,
             writer_instance="fast-day:%d" % os.getpid(),
+            room_living=self.room_living, ambient_events=self.ambient_events,
+            world_intent_gate=(gate["value"] if gate.get("ok") else None),
             business_clock=clockmod.clock_path(state_root),
             clock_domain=str(mode.get("domain_id") or ""),
             clock_run_id=str(mode.get("ledger_run_id") or mode.get("run_id") or ""))
@@ -1175,7 +1188,11 @@ class FastDaySupervisor:
         nested = phone_life.read_nested_life(self.root)
         if nested is None:
             raise RuntimeError("NESTED_LIFE_INSTANCE_MISSING")
-        binding = phone_life.build_binding(phone, nested, base_env=dict(os.environ))
+        from components.phone import demo
+        overrides = demo._serve_feature_overrides(
+            room_living=self.room_living, ambient_events=self.ambient_events)
+        binding = phone_life.build_binding(phone, nested, base_env=dict(os.environ),
+                                           feature_overrides=overrides)
         env = dict(binding["environment"])
         run_id = str(env.get("CHIYO_AUTONOMOUS_RUN_ID") or "").strip()
         expected = str(mode.get("ledger_run_id") or "").strip()

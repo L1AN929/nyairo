@@ -283,19 +283,34 @@ class Handler(BaseHTTPRequestHandler):
         # Deliberately do not log content, resident names, query parameters, or secrets.
         print(f"HTTP {self.command} {args[1] if len(args) > 1 else ''}", flush=True)
 
-    def guard(self, mutation=False):
+    STATIC_ASSETS = {
+        "/": "index.html",
+        "/index.html": "index.html",
+        "/app.js": "app.js",
+        "/style.css": "style.css",
+        "/editor-state.mjs": "editor-state.mjs",
+        "/layout.mjs": "layout.mjs",
+        "/space.mjs": "space.mjs",
+    }
+
+    def guard(self, mutation=False, *, static_asset=False):
         allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
         if self.headers.get("Host") not in allowed:
             fail("仅允许通过本机地址访问编辑器。", "HOST", 403)
         origin = self.headers.get("Origin")
         if origin and origin not in {"http://" + x for x in allowed}:
             fail("来源不被允许。", "ORIGIN", 403)
-        if self.headers.get("Sec-Fetch-Site") not in (None, "", "same-origin", "none"):
+        allowed_sites = (
+            (None, "", "same-origin", "same-site", "none")
+            if (static_asset and not mutation)
+            else (None, "", "same-origin", "none")
+        )
+        if self.headers.get("Sec-Fetch-Site") not in allowed_sites:
             fail("不允许跨源访问。", "ORIGIN", 403)
         if mutation and self.headers.get("X-Nyairo-Editor") != "1":
             fail("操作需要编辑器请求标记。", "CSRF", 403)
 
-    def send(self, status, body, content_type="application/json; charset=utf-8", filename=None):
+    def send(self, status, body, content_type="application/json; charset=utf-8", filename=None, *, head_only=False):
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status)
@@ -306,18 +321,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' http://127.0.0.1:* http://localhost:*; base-uri 'none'; form-action 'self'")
         try:
             self.end_headers()
-            self.wfile.write(body)
+            if not head_only:
+                self.wfile.write(body)
         except ConnectionError:
             # A cancelled download or closed tab does not undo a committed write.
             pass
 
-    def route(self, mutation=False):
+    def route(self, mutation=False, *, head_only=False):
         try:
-            self.guard(mutation)
             path = urlparse(self.path).path
+            is_static = (not mutation) and (path in self.STATIC_ASSETS)
+            self.guard(mutation, static_asset=is_static)
             parts = path.strip("/").split("/")
             if mutation:
                 if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -377,16 +394,37 @@ class Handler(BaseHTTPRequestHandler):
                         self.server.exports[token] = (filename, payload)
                     return self.send(201, {"url": "/api/exports/" + token, "filename": filename, "local_file": "exports/" + local_name, "cover_file": "exports/" + cover_file if cover_file else None})
                 if path == "/api/nyairo/export":
-                    return self.send(200, nyairo_export(data, extra_roots=(self.store.path.parent,)))
+                    active_extra = (self.store.path.parent, getattr(self.server, "active_world_parent", None))
+                    return self.send(200, nyairo_export(data, extra_roots=active_extra))
                 if path == "/api/nyairo/interior":
                     return self.send(200, nyairo_interior(data))
                 if path == "/api/nyairo/perception":
-                    return self.send(200, nyairo_perception(data, extra_roots=(self.store.path.parent,)))
+                    active_extra = (self.store.path.parent, getattr(self.server, "active_world_parent", None))
+                    return self.send(200, nyairo_perception(data, extra_roots=active_extra))
                 if len(parts) == 4 and parts[:2] == ["api", "trials"] and parts[3] == "actions":
                     return self.send(200, self.store.execute(parts[2], data.get("execution_id"), data.get("revision"), data.get("command")))
             else:
                 if path == "/api/bootstrap":
-                    return self.send(200, {"draft": self.store.draft(), "trials": self.store.trials(), "workspace_id": self.store.workspace_id(), "themes": THEMES, "actions": templates(), "assets": ASSETS, "recoveries": self.store.recoveries()})
+                    active_info = getattr(self.server, "active_world", None)
+                    payload_boot = {
+                        "draft": self.store.draft(),
+                        "trials": self.store.trials(),
+                        "workspace_id": self.store.workspace_id(),
+                        "themes": THEMES,
+                        "actions": templates(),
+                        "assets": ASSETS,
+                        "recoveries": self.store.recoveries(),
+                    }
+                    if active_info is not None:
+                        payload_boot["active_world_dir"] = active_info["package_dir"]
+                        payload_boot["active_world_id"] = active_info["world_id"]
+                    return self.send(200, payload_boot)
+                if path == "/api/active-world":
+                    active_info = getattr(self.server, "active_world", None)
+                    if active_info is None:
+                        fail("当前未绑定活跃世界包目录。", "NOT_FOUND", 404)
+                    refreshed = _load_active_world_package(active_info["package_dir"]) or active_info
+                    return self.send(200, refreshed)
                 if path == "/api/example":
                     return self.send(200, validate_package(parse_json((ROOT / "examples" / "cafe.nyairo-world.json").read_bytes()))[0])
                 if len(parts) == 3 and parts[:2] == ["api", "trials"]:
@@ -400,35 +438,82 @@ class Handler(BaseHTTPRequestHandler):
                         fail("导出文件已过期，请重新点击导出。", "NOT_FOUND", 404)
                     return self.send(200, export[1], filename=export[0])
                 # Fixed static allowlist prevents traversal and accidental data disclosure.
-                names = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/editor-state.mjs": "editor-state.mjs", "/layout.mjs": "layout.mjs", "/space.mjs":"space.mjs"}
-                if path in names:
-                    filename = ROOT / "web" / names[path]
+                if path in self.STATIC_ASSETS:
+                    filename = ROOT / "web" / self.STATIC_ASSETS[path]
                     media = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html"}[filename.suffix]
-                    return self.send(200, filename.read_bytes(), media + "; charset=utf-8")
+                    return self.send(200, filename.read_bytes(), media + "; charset=utf-8", head_only=head_only)
             fail("页面或接口不存在。", "NOT_FOUND", 404)
         except WorldError as e:
-            self.send(e.status, {"error": str(e), "code": e.code})
+            self.send(e.status, {"error": str(e), "code": e.code}, head_only=head_only)
         except (TypeError, KeyError, OverflowError, RecursionError):
-            self.send(422, {"error": "内容含有无效的字段类型或结构，请检查导入文件。", "code": "INVALID"})
+            self.send(422, {"error": "内容含有无效的字段类型或结构，请检查导入文件。", "code": "INVALID"}, head_only=head_only)
         except sqlite3.Error:
-            self.send(503, {"error": "本地存储暂时不可用，请确认数据目录可写后重试。", "code": "STORAGE"})
+            self.send(503, {"error": "本地存储暂时不可用，请确认数据目录可写后重试。", "code": "STORAGE"}, head_only=head_only)
         except OSError:
-            self.send(503, {"error": "文件无法读取或保存，请确认数据目录有空间且可写后重试。", "code": "FILESYSTEM"})
+            self.send(503, {"error": "文件无法读取或保存，请确认数据目录有空间且可写后重试。", "code": "FILESYSTEM"}, head_only=head_only)
 
     def do_GET(self):
         self.route()
+
+    def do_HEAD(self):
+        self.route(head_only=True)
 
     def do_POST(self):
         self.route(True)
 
 
-def create_server(data_dir, port=0, example_file="cafe.nyairo-world.json"):
-    example = parse_json((ROOT / "examples" / example_file).read_bytes())
-    store = Store(Path(data_dir) / "editor.sqlite3", example)
+def _load_active_world_package(world_package_dir):
+    """Convert a valid WorldGen package directory (world.json + topology.json) into an editor v3 package."""
+    if world_package_dir is None or not str(world_package_dir).strip():
+        return None
+    try:
+        pkg_dir = Path(str(world_package_dir).strip()).expanduser().resolve()
+    except OSError:
+        return None
+    if not pkg_dir.is_dir() or not (pkg_dir / "world.json").is_file() or not (pkg_dir / "topology.json").is_file():
+        return None
+    repo_root = ROOT.parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    try:
+        from components.worldgen.editor_bridge import load as load_worldgen, to_editor_world
+        wg_pkg = load_worldgen(pkg_dir, verify=(pkg_dir / "MANIFEST.json").is_file())
+        ed_world = to_editor_world(wg_pkg)
+        bridge_warnings = list(ed_world.pop("_bridge_warnings", []))
+        validated, val_warnings = validate_package(ed_world)
+        return {
+            "package": validated,
+            "package_dir": str(pkg_dir),
+            "world_id": wg_pkg.world_id,
+            "warnings": bridge_warnings + list(val_warnings),
+        }
+    except Exception as exc:
+        print(f"Warning: failed to load active world package {pkg_dir}: {exc}", file=sys.stderr)
+        return None
+
+
+def create_server(data_dir, port=0, example_file="cafe.nyairo-world.json", world_package_dir=None):
+    cafe_example = parse_json((ROOT / "examples" / example_file).read_bytes())
+    active_world = _load_active_world_package(world_package_dir)
+    initial_example = active_world["package"] if active_world is not None else cafe_example
+    store = Store(Path(data_dir) / "editor.sqlite3", initial_example)
+    if active_world is not None:
+        cur = store.draft()
+        cafe_id = (cafe_example.get("meta") or {}).get("id")
+        cur_id = ((cur.get("package") or {}).get("meta") or {}).get("id")
+        if cur.get("revision") == 0 and cafe_id and cur_id == cafe_id and cur_id != (active_world["package"].get("meta") or {}).get("id"):
+            from model import canonical
+            with store.connection() as db:
+                db.execute(
+                    "UPDATE draft SET package=? WHERE id=1 AND revision=0",
+                    (canonical(active_world["package"]),),
+                )
     server = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, store=store))
     server.daemon_threads = True
     server.exports = {}
     server.exports_lock = threading.Lock()
+    server.active_world = active_world
+    server.active_world_parent = Path(active_world["package_dir"]).parent if active_world is not None else None
     return server
 
 
@@ -436,12 +521,15 @@ def main():
     parser = argparse.ArgumentParser(description="nyairo world editor — local creator tool")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--data-dir", type=Path, default=ROOT / "data")
+    parser.add_argument("--world-package", type=Path, default=None, help="Active WorldGen package directory")
     parser.add_argument("--open", action="store_true", help="Open the editor in your browser")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("port must be 0–65535")
+    env_wp = os.environ.get("NYAIRO_EDITOR_WORLD_PACKAGE", "").strip()
+    wp_dir = args.world_package if args.world_package is not None else (Path(env_wp) if env_wp else None)
     try:
-        server = create_server(args.data_dir.resolve(), args.port)
+        server = create_server(args.data_dir.resolve(), args.port, world_package_dir=wp_dir)
     except OSError as e:
         print(f"Cannot start editor: {e}. Try another port with --port 8767.", file=sys.stderr)
         return 1

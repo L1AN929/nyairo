@@ -98,7 +98,9 @@ class Services:
             switches=FeatureSwitches.all_on(),
             writer_instance="w05-test:%d" % os.getpid())
         self.server = LifeSupplySocketServer(str(self.socket_path), self.service)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self._thread.start()
+        self._closed = False
 
     @property
     def supply_path(self) -> Path:
@@ -109,9 +111,30 @@ class Services:
         return self.socket_path
 
     def stop(self) -> None:
+        """Normal owner shutdown, in the order ``run_service`` uses.
+
+        ``server.shutdown`` stops accepting, ``server_close`` closes the listening socket,
+        a bounded ``drain`` lets in-flight requests finish, and ``service.close`` releases
+        the writer fences.  The socket *path* is then dropped through the owner's own
+        ``prepare_socket_path`` guard: it refuses a live/foreign socket and only unlinks a
+        stale socket this process bound, so a same-directory reopen can bind again without
+        a bare unlink anywhere.
+        """
+
+        if self._closed:
+            return
         self.server.shutdown()
         self.server.server_close()
+        self.server.drain(5.0)
         self.service.close()
+        self._thread.join(timeout=5)
+        try:
+            from lifesupply.service.life_supply import prepare_socket_path
+
+            prepare_socket_path(Path(self.socket_path))
+        except Exception:
+            pass
+        self._closed = True
 
 
 WORLD_RUNTIME_ROOT = ROOT / "components" / "world"
@@ -162,6 +185,30 @@ class WorldGateway:
                 "NYAIRO_WORLD_BRIDGE_DIR": str(WORLD_BRIDGE_DIR)}
 
     def stop(self) -> None:
+        # The serve loop is blocked in ``selector.select(timeout=tick_seconds)``; the
+        # shutdown flag alone is not observed until that wait returns (an hour at the
+        # fixture's 3600 s tick).  Set the existing stop flag and wake the selector with
+        # one throwaway local connection through each bound path, then let the owner's
+        # own ``shutdown`` unlink the sockets and the loop notice the flag.  Without this
+        # a same-directory reopen could start a second service while the old loop still
+        # holds its listening sockets open.
+        try:
+            self.service._stop_requested = True
+            import socket as _socket
+            for path in (self.service.socket_path, self.service.gateway_socket_path):
+                wake = None
+                try:
+                    wake = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+                    wake.settimeout(0.5)
+                    wake.connect(str(path))
+                    wake.sendall(b"\n")
+                except OSError:
+                    pass
+                finally:
+                    if wake is not None:
+                        wake.close()
+        except Exception:
+            pass
         try:
             self.service.shutdown()
         except Exception:

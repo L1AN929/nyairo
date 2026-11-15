@@ -245,11 +245,18 @@ class DeletionAndReferenceTest(RoundtripTestBase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.package_dir, _ = self.make_world()
+        # coastal_town 模板在补入固定日常场所与核心场所保底后，seed=4 生成
+        # coastal_npc_bookstore_01 引用书店、车站无引用且书店仅有一条连向 street_1 的道路。
+        self.package_dir, _ = self.make_world(seed=4)
         self.view = self.edited_view(self.package_dir)
 
     def test_delete_referenced_location_refused_with_details(self) -> None:
         """删除被 NPC 引用的书店 → 明确列出冲突，不自动搬迁。"""
+        docs = schema.load_package(self.package_dir)
+        self.assertTrue(
+            any(npc["npc_id"] == "coastal_npc_bookstore_01" for npc in docs["npcs.json"]["npcs"]),
+            "测试前提：该种子书店有 coastal_npc_bookstore_01 引用",
+        )
         self.view["rooms"] = [r for r in self.view["rooms"] if r["id"] != "bookstore"]
         self.view["connections"] = [
             c for c in self.view["connections"]

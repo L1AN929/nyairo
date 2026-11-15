@@ -57,6 +57,8 @@ RESPONSE_KINDS: tuple[str, ...] = (KIND_NOTE, KIND_UNCLEAR, KIND_NO_CHANGE)
 MAX_TITLE_CHARS = 200
 DEFAULT_MAX_PAGE_CHARS = 6000
 DEFAULT_MAX_NOTE_CHARS = 1200
+#: 旧替身没声明自身输出上限时的回落值（与修复前的默认 512 一致）。
+DEFAULT_MAX_OUTPUT_TOKENS = 512
 
 #: B 提供的 context 只认这六个键：多一个键就多一条可能被送进模型的私人数据。
 CONTEXT_FIELDS: tuple[str, ...] = (
@@ -89,6 +91,28 @@ SYSTEM_PROMPT = SYSTEM_PROMPT_TEMPLATE % (MAX_TITLE_CHARS, DEFAULT_MAX_NOTE_CHAR
 
 class ReadingResponseError(RuntimeError):
     """这一次内容响应不可用。调用方必须把它当失败，不许用替身内容顶上。"""
+
+
+def _resolve_max_output_tokens(client: Any, explicit: Any) -> int:
+    """本次响应真正要发送的输出上限。
+
+    显式值优先（包括显式给 512 或更小）。没有显式值时**继承底层 client 自己的配置**
+    （正式装配建的是 ``AgencyModelClient(..., max_output_tokens=2048)``，外面再包一层透明的
+    ``BudgetedModelClient``；旧默认 512 会在真正的调用处把 2048 覆盖掉）。没有该属性的旧替身
+    沿用 512 回落。bool 与非整数一律不猜成有效上限：显式值非法、或 client 声明了一个非法值，
+    都按失败处理，而不是悄悄换一个数。
+    """
+
+    if explicit is not None:
+        if isinstance(explicit, bool) or not isinstance(explicit, int) or int(explicit) < 1:
+            raise ReadingResponseError("MAX_OUTPUT_TOKENS_INVALID")
+        return int(explicit)
+    configured = getattr(client, "max_output_tokens", None)
+    if configured is None:
+        return DEFAULT_MAX_OUTPUT_TOKENS
+    if isinstance(configured, bool) or not isinstance(configured, int) or int(configured) < 1:
+        raise ReadingResponseError("MAX_OUTPUT_TOKENS_INVALID")
+    return int(configured)
 
 
 def _require_text(value: Any, name: str) -> str:
@@ -235,11 +259,14 @@ class ModelReadingResponse:
     The client is injected exactly like the work writer's: anything with
     ``complete(system_prompt=..., user_prompt=..., timeout_s=..., max_output_tokens=...)``
     returning an object with ``text``.  Tests inject a fake; nothing here reaches a provider.
+
+    ``max_output_tokens=None`` means "用底层 client 自己配置的上限"；显式传值仍然优先。
+    这意味着正式装配里的 2048 会传到真正的发送边界，而不是被本类的旧默认 512 覆盖。
     """
 
     def __init__(self, client: Any, *, max_page_chars: int = DEFAULT_MAX_PAGE_CHARS,
                  max_note_chars: int = DEFAULT_MAX_NOTE_CHARS, timeout_s: float = 20,
-                 max_output_tokens: int = 512) -> None:
+                 max_output_tokens: Optional[int] = None) -> None:
         if client is None or not callable(getattr(client, "complete", None)):
             # No fallback content: without a model there is no response, and B reports
             # NOT_CONFIGURED instead of pretending she wrote something.
@@ -252,7 +279,8 @@ class ModelReadingResponse:
         self.max_page_chars = int(max_page_chars)
         self.max_note_chars = int(max_note_chars)
         self.timeout_s = float(timeout_s)
-        self.max_output_tokens = int(max_output_tokens)
+        #: The cap this response will really send: explicit wins, else the client's own config.
+        self.max_output_tokens = _resolve_max_output_tokens(client, max_output_tokens)
         #: Diagnostics only.  No private text is kept here: no raw output, no note body.
         self.call_count = 0
         self.last_kind: Optional[str] = None
@@ -363,6 +391,7 @@ class ModelReadingResponse:
 
 __all__ = [
     "DEFAULT_MAX_NOTE_CHARS",
+    "DEFAULT_MAX_OUTPUT_TOKENS",
     "DEFAULT_MAX_PAGE_CHARS",
     "KIND_NO_CHANGE",
     "KIND_NOTE",

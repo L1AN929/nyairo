@@ -69,6 +69,13 @@ FIXTURE_DECLARATIONS: dict[str, dict[str, Any]] = {
         "declared_source": "catalog:bedside_lamp",
         "label": "床头灯",
     },
+    "warm_floor_lamp": {
+        "catalog_item_id": "warm_floor_lamp",
+        "powerable": True,
+        "light_band": "moderate",
+        "declared_source": "catalog:warm_floor_lamp",
+        "label": "暖光落地灯",
+    },
 }
 
 

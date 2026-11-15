@@ -383,7 +383,7 @@ function renderInspector() {
     html+=`<button id="spawn-btn" class="dashed">${p.initial.room_id===item.id?'✓ 当前出生区域':'设为出生区域'}</button><button id="delete-item" class="danger">删除区域与其中的物件</button>`;
     $('inspector').innerHTML=html; bindFields(item,key=>{if(key==='visual.theme'){const theme=item.visual.theme;item.visual={theme,...Object.fromEntries(Object.entries(themes[theme]).filter(([k])=>k!=='name'))};touch({group:`room:${item.id}:visual.theme`});renderInspector();}});
     $('space-enabled').onchange=e=>{item.space.enabled=e.target.checked;touch();};
-    $('ai-interior-btn').onclick=async()=>{
+    $('ai-interior-btn').onclick=()=>run(async()=>{
       const existing=p.objects.filter(o=>o.room_id===item.id).length;
       if(!await confirm('生成室内布局？',`将替换「${item.name}」的室内空间与其中 ${existing} 件家具。生成结果可撤销（Ctrl+Z），保存后随世界包回写。`))return;
       const payload={room:{id:item.id,kind:item.kind,name:item.name},building:$('ai-building').value,seed:$('ai-seed').value,glm:!!localStorage.getItem('nyairo-glm')};
@@ -395,9 +395,22 @@ function renderInspector() {
       next.objects=next.objects.filter(o=>o.room_id!==item.id).concat(result.objects);
       applyPackage(next,new Set([ref('room',item.id)]));
       toast(`室内布局已生成：${result.building_label} · 家具 ${result.objects.length} 件 · 通行性 ${(result.passability.ratio*100).toFixed(0)}%。可撤销；保存草稿后随世界包回写。`);
-    $('ai-perception-btn').onclick=async()=>{const out=$('ai-perception-out');const remembered=localStorage.getItem('nyairo-original-dir')||'';const dir=prompt('查看 AI 感知需要 WorldGen 世界包目录（绝对路径）',remembered);if(dir===null||!dir.trim())return;localStorage.setItem('nyairo-original-dir',dir.trim());const instance=prompt('隔离实例目录（可选，提供则读取真实运行状态）','');const payload={package_dir:dir.trim(),place_id:item.id};if(instance&&instance.trim())payload.instance_home=instance.trim();const result=await api('/api/nyairo/perception',payload);const a=result.allowed_observation;const lines=['【允许观察】',`建筑：${a.building.name}`,`区域：${a.area.name}（${a.area.kind}）`,`家具：${a.furniture.map(f=>f.name).join('、')||'（无）'}`,`可通行：${a.adjacent_areas.map(x=>x.name).join('、')||'（无）'}`,`营业：${JSON.stringify(a.opening_rule)}`,a.ambient_facts.length?`环境事实：${a.ambient_facts.map(f=>f.summary).join('；')}`:null,'','【静态世界包】',`区域连接：${result.static_world_data.area_connections.join('，')||'（单区域）'}`,`本楼家具总数：${result.static_world_data.furniture_total_in_building}`,`常驻 NPC：${result.static_world_data.npcs_based_here.join('、')||'（无）'}`,'','【需运行时状态】',`当前位置：${JSON.stringify(result.runtime_dependent.current_position)}`,`数据来源：${result.source}`,result.note].filter(x=>x!==null);out.textContent=lines.join('
-');out.style.display='block';};
-    };
+    });
+    $('ai-perception-btn').onclick=()=>run(async()=>{
+      const out=$('ai-perception-out');
+      const remembered=localStorage.getItem('nyairo-original-dir')||'';
+      const dir=prompt('查看 AI 感知需要 WorldGen 世界包目录（绝对路径）',remembered);
+      if(dir===null||!dir.trim())return;
+      localStorage.setItem('nyairo-original-dir',dir.trim());
+      const instance=prompt('隔离实例目录（可选，提供则读取真实运行状态）','');
+      const payload={package_dir:dir.trim(),place_id:item.id};
+      if(instance&&instance.trim())payload.instance_home=instance.trim();
+      const result=await api('/api/nyairo/perception',payload);
+      const a=result.allowed_observation;
+      const lines=['【允许观察】',`建筑：${a.building.name}`,`区域：${a.area.name}（${a.area.kind}）`,`家具：${a.furniture.map(f=>f.name).join('、')||'（无）'}`,`可通行：${a.adjacent_areas.map(x=>x.name).join('、')||'（无）'}`,`营业：${JSON.stringify(a.opening_rule)}`,a.ambient_facts.length?`环境事实：${a.ambient_facts.map(f=>f.summary).join('；')}`:null,'','【静态世界包】',`区域连接：${result.static_world_data.area_connections.join('，')||'（单区域）'}`,`本楼家具总数：${result.static_world_data.furniture_total_in_building}`,`常驻 NPC：${result.static_world_data.npcs_based_here.join('、')||'（无）'}`,'','【需运行时状态】',`当前位置：${JSON.stringify(result.runtime_dependent.current_position)}`,`数据来源：${result.source}`,result.note].filter(x=>x!==null);
+      out.textContent=lines.join('\n');
+      out.style.display='block';
+    });
     $('hours-toggle').onchange=e=>{item.hours=e.target.checked?{open:8,close:22}:null;touch();renderInspector();};
     $('spawn-btn').onclick=()=>{p.initial.room_id=item.id;touch();renderInspector();};
     if($('connect-btn'))$('connect-btn').onclick=()=>{p.connections.push({from:item.id,to:$('connect-select').value});touch();renderInspector();};

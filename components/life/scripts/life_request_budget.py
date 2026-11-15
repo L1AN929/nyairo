@@ -33,6 +33,21 @@ Kinds
 -----
 ``decision`` / ``content`` / ``retry``.  All three are counted against both ceilings,
 which is what "total request ceiling" has to mean.
+
+The daily token budget (07 章 §四 / T3-wave2)
+---------------------------------------------
+A third, **parallel** ceiling: the per-business-day sum of the reservations' estimated
+token cost (``est_tokens``).  It is configured explicitly (``daily_token_budget``) --
+``None`` means "no ceiling of that kind", exactly like ``utc_day_max``/``run_window_max``,
+never "unlimited"; ``DEFAULT_DAILY_TOKEN_BUDGET`` (50_000, 07 章 §四 ``tokens_max``) is the
+module-level value a caller enables the dimension with.  A reservation without a
+ticket-supplied estimate is charged the conservative constant
+``DEFAULT_CONSERVATIVE_TOKEN_RESERVATION`` (50_000/24 ≈ 2083, rounded down to 2000, so 24
+constant-rate reservations still stay under the daily token budget and the *call* ceiling
+binds first).  The same iron laws apply unchanged: the reservation is persisted **before**
+the HTTP attempt, nothing is ever refunded (a timeout, a crash or a retry keeps its
+estimate), a corrupt ledger refuses everything, and a wall-clock rollback never resets the
+active day's token count.
 """
 from __future__ import annotations
 
@@ -41,7 +56,7 @@ import os
 import threading
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional
 
@@ -70,6 +85,13 @@ REASON_UTC_DAY_LIMIT = "REQUEST_BUDGET_UTC_DAY_LIMIT"
 REASON_RUN_WINDOW_LIMIT = "REQUEST_BUDGET_RUN_WINDOW_LIMIT"
 REASON_RUN_WINDOW_NOT_AUTHORIZED = "REQUEST_BUDGET_RUN_WINDOW_NOT_AUTHORIZED"
 REASON_UNREADABLE = "REQUEST_BUDGET_UNREADABLE"
+REASON_DAILY_TOKEN_BUDGET = "REQUEST_BUDGET_DAILY_TOKEN_BUDGET"
+
+#: 07 章 §四 DailyEnvelope.tokens_max：日 token 预算的默认值（显式启用该维度的调用方使用）。
+DEFAULT_DAILY_TOKEN_BUDGET = 50_000
+#: 无票 est（``est_tokens=None``）时的保守常数：50_000/24 ≈ 2083，向下取 2000，
+#: 24 次全按保守常数计（48_000）仍低于日 token 预算，调用上限先绑定。
+DEFAULT_CONSERVATIVE_TOKEN_RESERVATION = 2000
 
 #: How many finished run windows and days are retained in the ledger.
 MAX_WINDOWS = 32
@@ -79,7 +101,7 @@ MAX_TOKENS = 256
 
 _KEYS = frozenset({
     "schema_version", "kind", "active_day", "days", "windows", "run_id",
-    "tokens", "opened_at", "updated_at",
+    "tokens", "opened_at", "updated_at", "day_tokens",
 })
 
 
@@ -92,13 +114,56 @@ class RequestBudgetError(RuntimeError):
         self.detail = detail
 
 
+def _business_day_key_module() -> Any:
+    """业务日界的唯一权威：``components/world/scripts/business_day_key.py``（19 章 §一.4）。
+
+    世界侧的脚本目录不在 Life 进程的默认导入路径上，这里沿用仓库既有的跨目录
+    模式：先按名导入（测试与合设进程都把它放进过 ``sys.path``），失败就把该目录
+    补进 ``sys.path`` 再导入。预算日界与世界日界从此读同一个模块的同一个答案。
+    """
+
+    try:
+        import business_day_key  # noqa: F401  (世界侧 scripts 已在 sys.path 上)
+        return business_day_key
+    except ImportError:
+        pass
+    import sys
+
+    scripts_dir = str(Path(__file__).resolve().parents[2] / "world" / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import business_day_key
+
+    return business_day_key
+
+
+_bdk = _business_day_key_module()
+
+#: 与世界侧同源的默认业务时区（固定偏移 +08:00）与解析/裁决函数。原有的模块级
+#: 私有名全部保留为同一绑定的别名，调用方与测试的引用路径不变。
+DEFAULT_BUSINESS_TZ = _bdk.DEFAULT_BUSINESS_TZ
+DEFAULT_BUSINESS_TZ_LABEL = _bdk.DEFAULT_BUSINESS_TZ_LABEL
+_parse_business_tz = _bdk.parse_business_tz
+_format_tz_label = _bdk.format_tz_label
+_load_policy_tz = _bdk._load_policy_tz
+_resolve_default_business_tz = _bdk.resolve_default_business_tz
+_business_day = _bdk.business_day
+
+
 def _utc_day(moment: Optional[datetime] = None) -> str:
-    return (moment or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y-%m-%d")
+    """Resolve the active budget day in local business timezone (default +08:00)."""
+    return _business_day(moment)
+
+
+_DEFAULT_UTC_DAY_FN = _utc_day
 
 
 def _iso(moment: Optional[datetime] = None) -> str:
-    return (moment or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(
-        timespec="seconds")
+    if moment is None:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=_resolve_default_business_tz())
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def budget_path(state_root: Path | str) -> Path:
@@ -162,7 +227,7 @@ def _write_atomically(path: Path, payload: Mapping[str, Any]) -> None:
 
 def _empty() -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "kind": KIND, "active_day": "",
-            "days": {}, "windows": {}, "run_id": None, "tokens": [],
+            "days": {}, "windows": {}, "run_id": None, "tokens": [], "day_tokens": {},
             "opened_at": _iso(), "updated_at": _iso()}
 
 
@@ -277,6 +342,10 @@ def failure_category(value: Any) -> str:
         return "OUTPUT_TRUNCATED"
     if token == "LATE_RESULT_DISCARDED":
         return "LATE_RESULT_DISCARDED"
+    if token in {"STEP_REFUSED", "WORLD_ACTION_REJECTED", "OWNER_REJECTED"}:
+        # 0.7: the owner definitively refused the round's one World step (no unknown
+        # side effect).  It is a closed category of its own, carried by fixed code only.
+        return "STEP_REFUSED"
     if token in {"MODEL_TIMEOUT", "MODEL_CONNECTION", "TRANSPORT_TIMEOUT",
                  "TRANSPORT_CONNECTION", "MODEL_RATE_LIMITED", "MODEL_PROVIDER_ERROR",
                  "MODEL_AUTH_ERROR", "MODEL_UNAVAILABLE", "MODEL_REQUEST_REJECTED",
@@ -295,20 +364,49 @@ class LifeRequestBudget:
     one *run window* (one 24h run identity, which survives restarts).  Either may be
     ``None``, which means "no ceiling of that kind" -- never "unlimited": the other
     one still applies, and a budget with both ``None`` is refused by the caller, not
-    silently honoured here.
+    silently honoured here.  ``daily_token_budget`` is the third, parallel ceiling (the
+    per-business-day ``est_tokens`` sum); ``None`` means "not configured" and keeps the
+    historical call-only accounting byte-for-byte.
     """
 
     def __init__(self, state_root: Path | str, *, utc_day_max: Optional[int] = None,
                  run_window_max: Optional[int] = None, run_id: Optional[str] = None,
-                 failstop: bool = False, request_deadline: Optional[str] = None) -> None:
+                 failstop: bool = False, request_deadline: Optional[str] = None,
+                 daily_token_budget: Optional[int] = None,
+                 business_tz: Optional[tzinfo | str | int | float] = None) -> None:
         self.state_root = Path(state_root)
         self.utc_day_max = None if utc_day_max is None else max(0, int(utc_day_max))
         self.run_window_max = None if run_window_max is None else max(0, int(run_window_max))
+        self.daily_token_budget = None if daily_token_budget is None \
+            else max(0, int(daily_token_budget))
         self.run_id = str(run_id).strip() if run_id else None
         self._thread_lock = threading.RLock()
         self.failstop = bool(failstop)
         self.request_deadline = request_deadline
         self._failed_in_memory = False
+        self._explicit_business_tz = _parse_business_tz(business_tz)
+        if business_tz is not None and self._explicit_business_tz is None:
+            raise ValueError(f"invalid business_tz={business_tz!r}")
+
+    @property
+    def business_tz(self) -> tzinfo:
+        if self._explicit_business_tz is not None:
+            return self._explicit_business_tz
+        return _resolve_default_business_tz(self.state_root)
+
+    @property
+    def business_tz_label(self) -> str:
+        return _format_tz_label(self.business_tz)
+
+    def _resolve_day(self, moment: Optional[datetime] = None) -> str:
+        if _utc_day is not _DEFAULT_UTC_DAY_FN:
+            if moment is not None:
+                try:
+                    return _utc_day(moment)
+                except TypeError:
+                    return _utc_day()
+            return _utc_day()
+        return _business_day(moment, tz=self.business_tz)
 
     def check_failstop(self) -> None:
         if not self.failstop:
@@ -393,6 +491,8 @@ class LifeRequestBudget:
             raise RequestBudgetError(REASON_STATE_CORRUPT, "days/windows are not objects")
         if not isinstance(data.get("active_day"), str):
             raise RequestBudgetError(REASON_STATE_CORRUPT, "active_day is not a string")
+        if "day_tokens" in data and not isinstance(data.get("day_tokens"), dict):
+            raise RequestBudgetError(REASON_STATE_CORRUPT, "day_tokens is not an object")
         return data
 
     def _save_locked(self, data: dict[str, Any]) -> None:
@@ -400,6 +500,10 @@ class LifeRequestBudget:
         if len(days) > MAX_DAYS:
             keep = sorted(days)[-MAX_DAYS:]
             data["days"] = {key: days[key] for key in keep}
+        day_tokens = dict(data.get("day_tokens") or {})
+        if day_tokens:
+            keep_tokens = sorted(day_tokens)[-MAX_DAYS:]
+            data["day_tokens"] = {key: day_tokens[key] for key in keep_tokens}
         windows = dict(data.get("windows") or {})
         if len(windows) > MAX_WINDOWS:
             ordered = sorted(windows, key=lambda key: str(
@@ -418,25 +522,35 @@ class LifeRequestBudget:
 
     # -- view ----------------------------------------------------------------
 
-    def view(self) -> dict[str, Any]:
+    def view(self, *, now: Optional[datetime] = None) -> dict[str, Any]:
         """Read-only view.  Never raises for a corrupt ledger: it reports ``corrupt``."""
 
         try:
             with _exclusive(self.state_root):
                 data = self._load_locked()
         except RequestBudgetError as exc:
+            day = self._resolve_day(now)
             return {"state": STATE_CORRUPT, "reason_code": exc.reason_code,
                     "detail": exc.detail, "path": str(self.path),
-                    "utc_day": _utc_day(), "utc_day_calls": None,
+                    "utc_day": day, "business_day": day,
+                    "business_tz": self.business_tz_label,
+                    "utc_day_calls": None,
+                    "utc_day_tokens": None,
                     "run_id": self.run_id, "run_window_calls": None,
-                    "utc_day_max": self.utc_day_max, "run_window_max": self.run_window_max}
-        active = self._active_day(data)
+                    "utc_day_max": self.utc_day_max, "run_window_max": self.run_window_max,
+                    "daily_token_budget": self.daily_token_budget}
+        active = self._active_day(data, moment=now)
         return {
             "state": STATE_OK if data.get("days") or data.get("windows") else STATE_ABSENT,
             "path": str(self.path),
             "utc_day": active,
+            "business_day": active,
+            "business_tz": self.business_tz_label,
             "utc_day_calls": int((data.get("days") or {}).get(active) or 0),
             "utc_day_max": self.utc_day_max,
+            "utc_day_tokens": int((data.get("day_tokens") or {}).get(active) or 0),
+            "daily_token_budget": self.daily_token_budget,
+            "day_tokens": {key: int(value) for key, value in sorted((data.get("day_tokens") or {}).items())},
             "history": {key: int(value) for key, value in sorted((data.get("days") or {}).items())},
             "run_id": self.run_id,
             "run_window_calls": self._window_calls(data, self.run_id),
@@ -447,12 +561,11 @@ class LifeRequestBudget:
             "refund_policy": "no release API exists: a timeout, a crash or a retry keeps its reservation",
         }
 
-    @staticmethod
-    def _active_day(data: Mapping[str, Any]) -> str:
+    def _active_day(self, data: Mapping[str, Any], *, moment: Optional[datetime] = None) -> str:
         """The day the counters live in.  Monotonic: a rollback never resets them."""
 
         stored = str(data.get("active_day") or "")
-        today = _utc_day()
+        today = self._resolve_day(moment)
         return max(stored, today) if stored else today
 
     def _window_calls(self, data: Mapping[str, Any], run_id: Optional[str]) -> Optional[int]:
@@ -463,7 +576,8 @@ class LifeRequestBudget:
 
     # -- the window ----------------------------------------------------------
 
-    def ensure_window(self, *, allow_new: bool = False) -> dict[str, Any]:
+    def ensure_window(self, *, allow_new: bool = False,
+                      now: Optional[datetime] = None) -> dict[str, Any]:
         """Continue this run identity's window, or explicitly open a new one.
 
         A restart that carries the same ``run_id`` continues the same allowance.  A
@@ -487,16 +601,16 @@ class LifeRequestBudget:
                     REASON_RUN_WINDOW_NOT_AUTHORIZED,
                     "run window %r does not exist and this caller may not open one"
                     % self.run_id)
-            windows[self.run_id] = {"calls": 0, "opened_at": _iso(), "closed_at": None}
+            windows[self.run_id] = {"calls": 0, "opened_at": _iso(now), "closed_at": None}
             data["windows"] = windows
             data["run_id"] = self.run_id
-            data["active_day"] = self._active_day(data)
+            data["active_day"] = self._active_day(data, moment=now)
             self._save_locked(data)
             return {"state": "opened", "run_id": self.run_id, "calls": 0}
 
     # -- the reservation -----------------------------------------------------
 
-    def check(self) -> dict[str, Any]:
+    def check(self, *, now: Optional[datetime] = None) -> dict[str, Any]:
         """Is one more request allowed right now?  Read-only, and fail closed."""
 
         try:
@@ -504,64 +618,91 @@ class LifeRequestBudget:
                 data = self._load_locked()
         except RequestBudgetError as exc:
             return {"allowed": False, "reason_code": exc.reason_code, "detail": exc.detail}
-        return self._verdict(data)
+        return self._verdict(data, moment=now)
 
-    def _verdict(self, data: Mapping[str, Any]) -> dict[str, Any]:
-        day = self._active_day(data)
+    def _verdict(self, data: Mapping[str, Any], *,
+                 moment: Optional[datetime] = None) -> dict[str, Any]:
+        day = self._active_day(data, moment=moment)
         day_used = int((data.get("days") or {}).get(day) or 0)
         window_used = self._window_calls(data, self.run_id)
+        day_tokens_used = int((data.get("day_tokens") or {}).get(day) or 0)
+        base = {"utc_day": day, "business_day": day,
+                "business_tz": self.business_tz_label,
+                "utc_day_calls": day_used,
+                "utc_day_tokens": day_tokens_used,
+                "run_window_calls": window_used}
         if self.utc_day_max is not None and day_used >= self.utc_day_max:
-            return {"allowed": False, "reason_code": REASON_UTC_DAY_LIMIT,
-                    "detail": "utc day %s spent %s of %s" % (day, day_used, self.utc_day_max),
-                    "utc_day": day, "utc_day_calls": day_used,
-                    "run_window_calls": window_used}
+            return dict(base, allowed=False, reason_code=REASON_UTC_DAY_LIMIT,
+                        detail="business day %s (%s) spent %s of %s"
+                               % (day, self.business_tz_label, day_used, self.utc_day_max))
         if self.run_window_max is not None and window_used is not None \
                 and window_used >= self.run_window_max:
-            return {"allowed": False, "reason_code": REASON_RUN_WINDOW_LIMIT,
-                    "detail": "run window %s spent %s of %s"
-                              % (self.run_id, window_used, self.run_window_max),
-                    "utc_day": day, "utc_day_calls": day_used,
-                    "run_window_calls": window_used}
-        return {"allowed": True, "reason_code": "", "utc_day": day,
-                "utc_day_calls": day_used, "run_window_calls": window_used}
+            return dict(base, allowed=False, reason_code=REASON_RUN_WINDOW_LIMIT,
+                        detail="run window %s spent %s of %s"
+                               % (self.run_id, window_used, self.run_window_max))
+        if self.daily_token_budget is not None and day_tokens_used >= self.daily_token_budget:
+            return dict(base, allowed=False, reason_code=REASON_DAILY_TOKEN_BUDGET,
+                        detail="business day %s (%s) reserved %s of %s est tokens"
+                               % (day, self.business_tz_label, day_tokens_used,
+                                  self.daily_token_budget))
+        return dict(base, allowed=True, reason_code="")
 
     def reserve(self, kind: str = REQUEST_KIND_DECISION, *,
+                est_tokens: Optional[int] = None,
                 now: Optional[datetime] = None) -> dict[str, Any]:
         """Persist one attempt's reservation **before** the caller sends anything.
 
-        Raises :class:`RequestBudgetError` when the ceiling is reached or the ledger is
-        corrupt.  There is no path that gives a reservation back.
+        ``est_tokens`` is the reservation's estimated token cost -- the wake ticket's own
+        ``est_tokens`` when one exists (07 章 §二).  ``None`` charges the conservative
+        constant ``DEFAULT_CONSERVATIVE_TOKEN_RESERVATION``.  A given estimate must be a
+        non-negative int (booleans refused).  Raises :class:`RequestBudgetError` when any
+        ceiling is reached or the ledger is corrupt.  There is no path that gives a
+        reservation back -- the estimate keeps its reservation like the call does.
         """
 
         if kind not in REQUEST_KINDS:
             raise ValueError("unknown request kind %r" % (kind,))
+        if est_tokens is None:
+            est = DEFAULT_CONSERVATIVE_TOKEN_RESERVATION
+        else:
+            if isinstance(est_tokens, bool) or not isinstance(est_tokens, int) or est_tokens < 0:
+                raise ValueError("est_tokens must be a non-negative int, got %r" % (est_tokens,))
+            est = int(est_tokens)
         with self._thread_lock, _exclusive(self.state_root):
             self.check_failstop()
             data = self._load_locked()
-            verdict = self._verdict(data)
+            verdict = self._verdict(data, moment=now)
             if not verdict["allowed"]:
                 raise RequestBudgetError(verdict["reason_code"], verdict["detail"])
-            day = self._active_day(data)
+            day = self._active_day(data, moment=now)
             days = dict(data.get("days") or {})
             days[day] = int(days.get(day) or 0) + 1
+            day_tokens = dict(data.get("day_tokens") or {})
+            day_tokens[day] = int(day_tokens.get(day) or 0) + est
             windows = dict(data.get("windows") or {})
             if self.run_id:
-                window = dict(windows.get(self.run_id) or {"calls": 0, "opened_at": _iso(),
+                window = dict(windows.get(self.run_id) or {"calls": 0, "opened_at": _iso(now),
                                                            "closed_at": None})
                 window["calls"] = int(window.get("calls") or 0) + 1
                 windows[self.run_id] = window
             token = {"token": "lreq:%s" % uuid.uuid4().hex[:16], "kind": kind,
-                     "utc_day": day, "run_id": self.run_id, "at": _iso(now)}
+                     "utc_day": day, "business_day": day,
+                     "business_tz": self.business_tz_label,
+                     "run_id": self.run_id, "at": _iso(now),
+                     "est_tokens": est}
             data["days"] = days
+            data["day_tokens"] = day_tokens
             data["windows"] = windows
             data["active_day"] = day
             data["run_id"] = self.run_id
             data["tokens"] = list(data.get("tokens") or []) + [token]
             if not data.get("opened_at"):
-                data["opened_at"] = _iso()
+                data["opened_at"] = _iso(now)
             self._save_locked(data)
             return {"reservation": token, "utc_day": day,
+                    "business_day": day, "business_tz": self.business_tz_label,
                     "utc_day_calls": days[day],
+                    "utc_day_tokens": day_tokens[day],
                     "run_window_calls": self._window_calls(data, self.run_id)}
 
 
@@ -727,11 +868,14 @@ __all__ = [
     "BudgetedCognitionAdapter",
     "BudgetedModelClient",
     "CONTENT_WRITER_STAGES",
+    "DEFAULT_CONSERVATIVE_TOKEN_RESERVATION",
+    "DEFAULT_DAILY_TOKEN_BUDGET",
     "FAILURE_DIAGNOSTIC_KEYS",
     "FAILURE_STAGE_UNKNOWN",
     "KIND",
     "LOCK_FILENAME",
     "LifeRequestBudget",
+    "REASON_DAILY_TOKEN_BUDGET",
     "REASON_RUN_WINDOW_LIMIT",
     "REASON_RUN_WINDOW_NOT_AUTHORIZED",
     "REASON_STATE_CORRUPT",

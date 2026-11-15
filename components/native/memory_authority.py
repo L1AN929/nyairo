@@ -548,7 +548,9 @@ class MemoryDeletionAuthority:
 
     @staticmethod
     def _readonly(path: Path) -> sqlite3.Connection:
-        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
+        resolved = path.resolve()
+        query = "?mode=ro" if Path(f"{resolved}-wal").exists() else "?mode=ro&immutable=1"
+        connection = sqlite3.connect(resolved.as_uri() + query, uri=True, timeout=2)
         connection.row_factory = sqlite3.Row
         return connection
 

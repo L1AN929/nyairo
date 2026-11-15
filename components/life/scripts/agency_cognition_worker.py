@@ -354,8 +354,148 @@ class CognitionShadowHarness:
 
     # -- non-blocking hook path -------------------------------------------------------
 
+    @staticmethod
+    def _resolve_turn_request_spec(
+        *,
+        platform: str,
+        session_hash: str,
+        turn_hash: str,
+        event_kind: Optional[str] = None,
+        request_status: Optional[str] = None,
+        cognition_intent: Optional[str] = None,
+        target_refs: Optional[Any] = None,
+        semantic_request_key: Optional[str] = None,
+        cancelled_by_ref: Optional[str] = None,
+        turn_context: Optional[Mapping[str, Any]] = None,
+        candidate_hint: Optional[Mapping[str, Any]] = None,
+    ) -> dict[str, Any]:
+        ctx = dict(turn_context) if isinstance(turn_context, Mapping) else {}
+        hint = dict(candidate_hint) if isinstance(candidate_hint, Mapping) else {}
+
+        raw_kind = str(
+            event_kind
+            or ctx.get("event_kind")
+            or ctx.get("kind")
+            or hint.get("event_kind")
+            or ""
+        ).strip().upper()
+        raw_status = str(
+            request_status
+            or ctx.get("request_status")
+            or ctx.get("status")
+            or hint.get("request_status")
+            or ""
+        ).strip().upper()
+        explicit_intent = str(
+            cognition_intent
+            or ctx.get("cognition_intent")
+            or ctx.get("intent")
+            or hint.get("cognition_intent")
+            or hint.get("intent")
+            or ""
+        ).strip().upper()
+        hint_source_kind = str(hint.get("source_kind") or ctx.get("source_kind") or "").strip().upper()
+        hint_candidate_kind = str(hint.get("candidate_kind") or ctx.get("candidate_kind") or "").strip().upper()
+
+        epistemic_state = str(ctx.get("epistemic_state") or hint.get("epistemic_state") or "").strip().upper()
+        is_cancel = bool(
+            ctx.get("is_cancellation")
+            or hint.get("is_cancellation")
+            or raw_kind in {"REQUEST_CANCELLATION", "CANCEL_REQUEST", "USER_CANCEL", "WITHDRAW_REQUEST", "CO_PRESENCE_END"}
+            or explicit_intent in {"REQUEST_CANCELLATION", "CANCEL_REQUEST", "WITHDRAW_REQUEST", "STOP_REQUEST"}
+        )
+        is_explicit_req = bool(
+            ctx.get("is_explicit_request")
+            or hint.get("is_explicit_request")
+            or ctx.get("requires_engagement") is True
+            or raw_kind in {
+                "EXPLICIT_USER_REQUEST",
+                "USER_REQUEST",
+                "CLARIFICATION_REQUEST",
+                "PENDING_CLARIFICATION",
+                "CO_PRESENCE_INVITATION",
+                "SHARED_COMMITMENT_PROPOSAL",
+                "ACTION_REQUEST",
+            }
+            or explicit_intent in {
+                "EXPLICIT_USER_REQUEST",
+                "USER_REQUEST",
+                "CLARIFICATION_REQUEST",
+                "PENDING_CLARIFICATION",
+                "CO_PRESENCE_INVITATION",
+                "SHARED_COMMITMENT_PROPOSAL",
+                "ACTION_REQUEST",
+            }
+            or epistemic_state == "PENDING_CLARIFICATION"
+            or hint_source_kind == "USER_REQUEST"
+            or hint_candidate_kind == "RESPOND_USER_REQUEST"
+            or raw_status == "OPEN"
+        )
+
+        valid_statuses = {"OPEN", "CANCELLED", "WITHDRAWN", "EXPIRED", "FULFILLED", "NONE"}
+        if is_cancel:
+            ag0_kind = "REQUEST_CANCELLATION"
+            ag0_status = raw_status if raw_status in valid_statuses and raw_status != "NONE" else "CANCELLED"
+            resolved_intent = explicit_intent or raw_kind or "REQUEST_CANCELLATION"
+        elif is_explicit_req:
+            ag0_kind = "EXPLICIT_USER_REQUEST"
+            ag0_status = raw_status if raw_status in valid_statuses and raw_status != "NONE" else "OPEN"
+            resolved_intent = (
+                explicit_intent
+                or (raw_kind if raw_kind and raw_kind != "ORDINARY_COMMUNICATION" else "")
+                or (epistemic_state if epistemic_state == "PENDING_CLARIFICATION" else "")
+                or hint_candidate_kind
+                or "EXPLICIT_USER_REQUEST"
+            )
+        else:
+            ag0_kind = "ORDINARY_COMMUNICATION"
+            ag0_status = raw_status if raw_status in valid_statuses else "NONE"
+            resolved_intent = explicit_intent or "ORDINARY_COMMUNICATION"
+
+        default_target = f"comm:{platform}:{_sha(f'{session_hash}|{turn_hash}', 24)}"
+        raw_targets = target_refs or ctx.get("target_refs") or hint.get("target_refs")
+        cleaned_targets: list[str] = []
+        if isinstance(raw_targets, (list, tuple)):
+            for ref in raw_targets:
+                ref_s = str(ref or "").strip()
+                if ":" in ref_s and ref_s not in cleaned_targets:
+                    cleaned_targets.append(ref_s)
+        if not cleaned_targets:
+            cleaned_targets = [default_target]
+
+        sem_key = str(
+            semantic_request_key
+            or ctx.get("semantic_request_key")
+            or hint.get("semantic_request_key")
+            or ""
+        ).strip() or None
+        cancel_ref = str(
+            cancelled_by_ref
+            or ctx.get("cancelled_by_ref")
+            or hint.get("cancelled_by_ref")
+            or ""
+        ).strip() or None
+        if ag0_status == "CANCELLED" and cancel_ref is None and ag0_kind == "REQUEST_CANCELLATION":
+            cancel_ref = f"cevt:{_sha(f'{platform}|{session_hash}|{turn_hash}|cancel', 16)}"
+
+        return {
+            "event_kind": ag0_kind,
+            "request_status": ag0_status,
+            "cognition_intent": resolved_intent,
+            "target_refs": cleaned_targets,
+            "semantic_request_key": sem_key,
+            "cancelled_by_ref": cancel_ref,
+        }
+
     def observe_turn(self, *, session_hash: str, turn_hash: str, platform: str,
-                     observed_at: str) -> dict[str, Any]:
+                     observed_at: str, event_kind: Optional[str] = None,
+                     request_status: Optional[str] = None,
+                     cognition_intent: Optional[str] = None,
+                     target_refs: Optional[Any] = None,
+                     semantic_request_key: Optional[str] = None,
+                     cancelled_by_ref: Optional[str] = None,
+                     turn_context: Optional[Mapping[str, Any]] = None,
+                     candidate_hint: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
         """Called from the ``pre_llm_call`` hook.  Must be fast, must never raise."""
         started = time.monotonic()
         out: dict[str, Any] = {"enqueued": False, "reason": None}
@@ -381,16 +521,39 @@ class CognitionShadowHarness:
             import agency_decision_ag1 as ag1
             import candidate_sources_ag0 as ag0
 
-            # A Telegram turn is a typed ORDINARY_COMMUNICATION observation, NOT proof of an
-            # explicit request. AG-0 explicitly filters this event kind from USER_REQUEST
-            # candidates. Other independently grounded candidate sources remain eligible.
-            event_id = f"ureq:gw:{_sha(f'{platform}|{session_hash}|{turn_hash}', 24)}"
-            event = ag0.ObservedUserRequestEvent(
-                event_id=event_id, channel=platform, event_kind="ORDINARY_COMMUNICATION",
-                request_status="NONE", target_refs=[f"comm:{platform}:{_sha(f'{session_hash}|{turn_hash}', 24)}"],
-                occurred_at=observed_at, observed_at=observed_at, valid_from=observed_at,
+            req_spec = self._resolve_turn_request_spec(
+                platform=platform,
+                session_hash=session_hash,
+                turn_hash=turn_hash,
+                event_kind=event_kind,
+                request_status=request_status,
+                cognition_intent=cognition_intent,
+                target_refs=target_refs,
+                semantic_request_key=semantic_request_key,
+                cancelled_by_ref=cancelled_by_ref,
+                turn_context=turn_context,
+                candidate_hint=candidate_hint,
             )
+            event_id = f"ureq:gw:{_sha(f'{platform}|{session_hash}|{turn_hash}', 24)}"
+            event_kwargs: dict[str, Any] = {
+                "event_id": event_id,
+                "channel": platform,
+                "event_kind": req_spec["event_kind"],
+                "request_status": req_spec["request_status"],
+                "target_refs": req_spec["target_refs"],
+                "occurred_at": observed_at,
+                "observed_at": observed_at,
+                "valid_from": observed_at,
+            }
+            if req_spec["semantic_request_key"] is not None:
+                event_kwargs["semantic_request_key"] = req_spec["semantic_request_key"]
+            if req_spec["cancelled_by_ref"] is not None:
+                event_kwargs["cancelled_by_ref"] = req_spec["cancelled_by_ref"]
+            event = ag0.ObservedUserRequestEvent(**event_kwargs)
             self.runtime.user_request_source.ingest_typed_event(event)
+            out["event_kind"] = req_spec["event_kind"]
+            out["request_status"] = req_spec["request_status"]
+            out["cognition_intent"] = req_spec["cognition_intent"]
 
             cset = self.runtime.candidate_materializer.build_candidate_set(observed_at=observed_at)
             # A frozen CandidateSet carries candidate REFS, not records (chiyo.agency.candidate_set.v1).
@@ -415,11 +578,37 @@ class CognitionShadowHarness:
             # costs exactly one call.
             cset_id = getattr(cset, "candidate_set_id", None)
             source_event_refs: list[str] = []
+            candidate_rows: list[dict[str, Any]] = []
             for candidate_ref in candidate_refs:
-                candidate_row = self.runtime.candidate_read.get_candidate(candidate_ref) or {}
+                candidate_row = dict(self.runtime.candidate_read.get_candidate(candidate_ref) or {})
+                candidate_rows.append(candidate_row)
                 for ref in candidate_row.get("source_refs") or [candidate_row.get("source_ref")]:
                     if ref and str(ref) not in source_event_refs:
                         source_event_refs.append(str(ref))
+
+            has_user_request_candidate = any(
+                "USER_REQUEST" in (row.get("source_kinds") or [])
+                or row.get("source_kind") == "USER_REQUEST"
+                for row in candidate_rows
+            )
+            effective_intent = req_spec["cognition_intent"]
+            effective_status = req_spec["request_status"]
+            if req_spec["event_kind"] == "ORDINARY_COMMUNICATION" and req_spec["request_status"] == "NONE":
+                if has_user_request_candidate:
+                    if effective_intent == "ORDINARY_COMMUNICATION":
+                        effective_intent = "EXPLICIT_USER_REQUEST"
+                    effective_status = "OPEN"
+                elif candidate_rows and effective_intent == "ORDINARY_COMMUNICATION":
+                    first_kind = str(
+                        candidate_rows[0].get("candidate_kind")
+                        or candidate_rows[0].get("source_kind")
+                        or "CANDIDATE_EVALUATION"
+                    ).strip()
+                    if first_kind:
+                        effective_intent = first_kind
+            out["cognition_intent"] = effective_intent
+            out["request_status"] = effective_status
+
             stable_event_identity = "|".join(sorted(source_event_refs)) or f"UNATTRIBUTED:{session_hash}:{turn_hash}"
             content_fp = _sha("|".join([stable_event_identity, *sorted(candidate_refs)]), 24)
             epoch = f"{stable_event_identity}|{content_fp}"
@@ -428,11 +617,11 @@ class CognitionShadowHarness:
                 "request_key": request_key, "epoch": epoch, "trigger_ref": event_id,
                 "candidate_set_ref": cset_id, "candidate_set": cset, "observed_at": observed_at,
                 "turn_hash": turn_hash, "platform": platform, "candidate_count": len(candidate_refs),
-                "candidate_refs": candidate_refs, "candidate_set": cset,
-                "trigger_kind": ("USER_REQUEST_EVENT" if any(
-                    "USER_REQUEST" in ((self.runtime.candidate_read.get_candidate(cid) or {}).get("source_kinds") or [])
-                    or (self.runtime.candidate_read.get_candidate(cid) or {}).get("source_kind") == "USER_REQUEST"
-                    for cid in candidate_refs) else "CANDIDATE_SET_CHANGED"),
+                "candidate_refs": candidate_refs,
+                "event_kind": req_spec["event_kind"],
+                "cognition_intent": effective_intent,
+                "request_status": effective_status,
+                "trigger_kind": ("USER_REQUEST_EVENT" if has_user_request_candidate else "CANDIDATE_SET_CHANGED"),
                 "enqueued_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }
             with self._lock:

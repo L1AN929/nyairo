@@ -82,6 +82,24 @@ def resolve_world_home(environment=None, *, socket_path=None):
         if config.exists():
             settings = json.loads(config.read_text(encoding="utf-8"))
             socket_value = settings.get("world_body_socket")
+            if settings.get("world_home") and os.path.isdir(str(Path(settings["world_home"]).expanduser())):
+                return _absolute_home(settings["world_home"])
+            if not socket_value or not os.path.exists(str(Path(socket_value).expanduser())):
+                try:
+                    from .live_endpoints import resolve_live_endpoints
+                except ImportError:
+                    try:
+                        from chiyo_bundle.live_endpoints import resolve_live_endpoints
+                    except ImportError:
+                        from live_endpoints import resolve_live_endpoints
+                ep = resolve_live_endpoints(
+                    settings,
+                    world_socket=socket_value if isinstance(socket_value, str) else None,
+                )
+                if ep.get("world_home"):
+                    return _absolute_home(ep["world_home"])
+                if ep.get("world_socket"):
+                    socket_value = ep["world_socket"]
             if settings.get("world_home"):
                 return _absolute_home(settings["world_home"])
         if not socket_value:
@@ -119,7 +137,17 @@ def _label(location_id, world=None):
 
 def travel_context(environment=None, *, socket_path=None):
     """Optional read-only observation; never realizes arrivals in a chat read."""
-    env = os.environ if environment is None else environment
+    raw_env = os.environ if environment is None else environment
+    try:
+        from .live_endpoints import hydrate_world_move_env
+    except ImportError:
+        try:
+            from chiyo_bundle.live_endpoints import hydrate_world_move_env
+        except ImportError:
+            from live_endpoints import hydrate_world_move_env
+    env, explicitly_disabled = hydrate_world_move_env(raw_env)
+    if explicitly_disabled:
+        return ""
     if str(env.get("CHIYO_WORLD_TRAVEL_TIME_ENABLED", "")).strip().lower() not in {"1", "true", "yes", "on"}:
         return ""
     _, wtd = _world_modules()
@@ -236,7 +264,6 @@ def _submit_port(env):
         return None
 
 
-
 def _control_module():
     """持久暂停控制状态模块（懒加载）。"""
     _world_modules()
@@ -266,6 +293,7 @@ def _continuation_note(home, env, target, world):
                 f"到达后会自动继续前往{_label(target, world)}。")
     return (f"这是前往{_label(target, world)}的中转；旅程已持久保存，"
             "但没有已确认在线的后台推进器，需要后续推进（run/once）才会继续。")
+
 
 def _journey_result(projection, world, requested, home=None, env=None):
     """把旅程投影映射为既有 JSON 结构（字段兼容，新增 journey_id/status）。"""
@@ -346,7 +374,13 @@ def move_handler(args, **kwargs) -> str:
             if raw_home:
                 p_home = Path(str(raw_home)).expanduser()
                 if (p_home / "chiyo" / "config.json").is_file():
-                    from .companion_extras import record_world_move_receipt
+                    try:
+                        from .companion_extras import record_world_move_receipt
+                    except ImportError:
+                        try:
+                            from chiyo_bundle.companion_extras import record_world_move_receipt
+                        except ImportError:
+                            from companion_extras import record_world_move_receipt
                     record_world_move_receipt(p_home, str(args.get("location") or ""), doc)
     except Exception:
         pass
@@ -360,7 +394,21 @@ def _move_handler_inner(args, **kwargs) -> str:
         raw = args["location"]
         if not isinstance(raw, str) or not raw.strip() or len(raw) > 96:
             return _result(False, "rejected", "location 必须为有效地点名称。", reason_code="INVALID_LOCATION")
-        env = dict(os.environ if kwargs.get("environment") is None else kwargs["environment"])
+        try:
+            from .live_endpoints import hydrate_world_move_env
+        except ImportError:
+            try:
+                from chiyo_bundle.live_endpoints import hydrate_world_move_env
+            except ImportError:
+                from live_endpoints import hydrate_world_move_env
+        raw_env = kwargs.get("environment")
+        env, explicitly_disabled = hydrate_world_move_env(
+            raw_env, hermes_home=kwargs.get("hermes_home")
+        )
+        if explicitly_disabled:
+            return _result(False, "disabled", "世界移动功能已在配置中关闭。", reason_code="FEATURE_DISABLED")
+        if kwargs.get("hermes_home") and "HERMES_HOME" not in env:
+            env["HERMES_HOME"] = str(kwargs["hermes_home"])
         home = resolve_world_home(env)
         wls, wtd = _world_modules()
         if not wls.feature_enabled(env):

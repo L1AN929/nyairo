@@ -70,7 +70,8 @@ RUN = SCRATCH / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
 READING_PAGE_MARKER = "%%PAGE%%"
 READING_PAGES = ("第一页的正文内容。", "第二页的正文内容。", "第三页的正文内容。")
 READING_CONTENT = READING_PAGE_MARKER.join(READING_PAGES)
-READING_SOURCE = lwb.SOURCE_READING
+WORK_HEAD_SOURCE = lwb.SOURCE_WORK_HEAD
+READING_SOURCE = WORK_HEAD_SOURCE
 
 CLOSEOUT_REF_PREFIX = "closeout:"
 
@@ -242,14 +243,18 @@ class _ScriptedDecision:
 
 
 class _ContentWriter:
-    """内容替身：作品追加普通文本；阅读响应固定 ``no_change``（不写批注）。"""
+    """内容替身：作品追加普通文本；指定作品处于无新增停点时回 ``ModelNoChange``。"""
 
     def __init__(self) -> None:
         self.calls = 0
         self.response_calls = 0
+        self.no_change_ids: set[str] = set()
 
-    def next_content(self, point, *, observed_at: str) -> str:
+    def next_content(self, point, *, observed_at: str, **_kwargs) -> str:
         self.calls += 1
+        aid = _bare_identity(getattr(point, "artifact_id", ""))
+        if aid and aid in self.no_change_ids:
+            raise mcw.ModelNoChange("already at stop point for this head")
         return "%s\n\n（脚本替身追加）%s\n" % (getattr(point, "content", "") or "", observed_at)
 
     def respond(self, context, *, observed_at: str) -> dict:
@@ -357,6 +362,15 @@ def run_smoke(root=None) -> dict:
         })
         state_root = odl.life_state_root(instance)
         port = lap.LifeArtifactPort(str(services.supply_path), data["subject_id"])
+        created_a = port.create_artifact(
+            workspace_id=str(data["workspace_id"]),
+            title="作品 A（等待新版本的脚本夹具）",
+            content="作品 A 的第一句。\n",
+            grant_id=str(data["artifact_grant_id"]),
+            operation_key=lap.operation_key_for("reading-condition-new-head", "create-a", "a"))
+        _check(created_a.applied and bool(created_a.artifact_id),
+               "the owner did not create work A", created_a.to_dict())
+        reading_id = str(created_a.artifact_id)
         created_b = port.create_artifact(
             workspace_id=str(data["workspace_id"]),
             title="另一件作品（脚本夹具）",
@@ -389,7 +403,7 @@ def run_smoke(root=None) -> dict:
             cognition.policy = policy
             return cycle.evaluate_once(trigger_ref=trigger, observed_at=_iso(moment), act=True)
 
-        # 1. 正式 START 阅读 A，然后逐页 CONTINUE 到这一版真的读完
+        # 1. 正式 START 作品 A，随后在同一 head 上 CONTINUE 收到显式 no_change（真无步骤停点）
         first = _turn("start_reading", "evt:reading-cond:1", base)
         state = _canonical(runtime)
         active = _active_ids(state)
@@ -397,28 +411,22 @@ def run_smoke(root=None) -> dict:
         activity_a = str(active[0])
         _assert_single_execution(runtime, activity_a, where="round1-start-reading")
         _check(first.get("adoption_status") == "APPLIED",
-               "the reading START was not adopted", first)
+               "the work A START was not adopted", first)
         head_a1 = str((port.read_head(reading_id) or {}).get("version_id") or "")
-        _check(bool(head_a1), "the reading material has no committed head", {})
+        _check(bool(head_a1), "work A has no committed head", {})
 
-        read_pages = 0
-        for page in (2, 3):
-            out = _turn("continue_reading", "evt:reading-cond:read-%d" % page, base)
-            situation = cycle.private_material_situation(refresh=True) or {}
-            _check(out.get("outcome") in {"ACTED", "ALREADY_DONE"},
-                   "reading page %d was not acted" % page,
-                   {"outcome": out.get("outcome"), "decision": out.get("decision"),
-                    "detail": out.get("detail"), "state": situation.get("state")})
-            read_pages += 1
-        situation = cycle.private_material_situation(refresh=True) or {}
-        _check(str(situation.get("state") or "") == "EXHAUSTED",
-               "the material is not at its real stop point after the last page",
-               {"state": situation.get("state"),
-                "pages": situation.get("pages"),
-                "position": situation.get("position")})
-        summary["read"] = {"pages_read": read_pages + 1,
-                           "state": situation.get("state"),
-                           "material_pages": situation.get("pages")}
+        writer.no_change_ids.add(_bare_identity(reading_id))
+        no_change_round = _turn("continue_reading", "evt:reading-cond:no-change", base)
+        _check(no_change_round.get("outcome") == "NO_ACTION"
+               and bool((no_change_round.get("work_no_change") or {}).get("recorded")),
+               "work A did not record an explicit no_change on its baseline head", no_change_round)
+        readiness_a = cycle.step_readiness(act=True)
+        _check(readiness_a.available is False
+               and readiness_a.reason_code == "WORK_NO_CHANGE_CONFIRMED",
+               "work A is not at its real no_change stop point", readiness_a.to_dict())
+        summary["read"] = {"pages_read": 1,
+                           "state": readiness_a.reason_code,
+                           "material_pages": 1}
 
         # 2. 显式 offered head 依赖：PAUSE A -> 真 LR-2 暂停释放 + 真 LR-4 条件 PENDING
         fourth = _turn("pause_with_condition", "evt:reading-cond:pause-a", base)
@@ -643,7 +651,7 @@ def run_smoke(root=None) -> dict:
 
         summary["checks"] = {
             "reading_started": activity_a != activity_b,
-            "reading_reached_real_stop": str(situation.get("state")) == "EXHAUSTED",
+            "reading_reached_real_stop": readiness_a.reason_code == "WORK_NO_CHANGE_CONFIRMED",
             "pause_bound_pending_condition": (len(conditions) == 1
                                               and str(condition.get("status")) == "PENDING"),
             "pause_released_foreground": paused_a.get("foreground_released") is True,

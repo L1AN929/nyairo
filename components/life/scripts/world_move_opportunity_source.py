@@ -75,9 +75,32 @@ import candidate_sources_ag0 as ag0
 import life_body_action_targets as body_actions
 import life_daily_action_targets as daily_actions
 
+try:  # 18 章 §二 Day2：抑制理由码的唯一权威在世界经济 owner 那里。
+    from world_property_economy import ALREADY_OWNED_SUPPRESSED
+except ImportError:  # pragma: no cover - 世界脚本目录不在 sys.path 时按字面量比对
+    ALREADY_OWNED_SUPPRESSED = "ALREADY_OWNED_SUPPRESSED"
+
 #: How long one observation's opportunities stay valid.  Short on purpose: a
 #: stale "the street is reachable" is exactly what requirement 5 forbids acting on.
 DEFAULT_VALIDITY_SECONDS = 300
+
+#: How many MOVE destinations one observation may put in front of AG-1.  The cognition
+#: request itself is bounded at 16 candidates, and a hub street can honestly have more than a
+#: dozen neighbours; without a bound the whole round fails with CANDIDATE_EXPLOSION before any
+#: choice exists.  This is a *bound*, not a ranking: the owner's own selector order is kept.
+#:
+#: 0.7: the bound is seven, and an adjacent **street** the owner lists is reserved inside it
+#: (see ``observed_move_opportunities``).  Six was measured against a hub whose other
+#: candidates already fill the remaining budget; reserving the transit streets without giving
+#: back a slot pushed the round to 17.  Seven is the largest total that still leaves the
+#: default observation inside AG-1's sixteen, and the street reservation is what keeps a
+#: whole sub-graph (e.g. the coast behind street_3) from being permanently unreachable.
+MAX_MOVE_OPPORTUNITIES = 7
+
+#: 0.7：默认街区里必须始终留在移动名额内的浏览型地点。花店的唯一可执行停留是
+#: ``BROWSE_STORE``（只能逛），它是本人点名要保留的街区功能；经济店则由它自己的
+#: 营业投影单独保留。名单只决定"哪些地点不会被上限截掉"，不排序、不增加候选总数。
+RESERVED_BROWSE_PLACES = ("flower_shop",)
 
 #: The verbs this translation understands as *World owner* verbs with a single parameter.
 #: POSE and REST need two parameters each, so they travel as one encoded ``bodyact:`` target
@@ -92,6 +115,35 @@ TOILET_VERB = body_actions.TOILET_VERB
 #: target too (``life_daily_action_targets``) and the AR-0 payload shape is untouched.
 PICK_UP_VERB = daily_actions.PICK_UP_VERB
 PLACE_VERB = daily_actions.PLACE_VERB
+#: v0.4 room-living: the two furniture/fixture verbs.  Their whole parameter set also
+#: travels as one encoded ``dailyact:`` target, so they are translated exactly like the
+#: hand verbs -- only the owner verb differs.  Both are offered only from the owner's own
+#: availability verdict (owned+delivered+placed furniture / a declared fixture that is
+#: really in this area); nothing here decides what may be arranged or toggled.
+ARRANGE_VERB = daily_actions.ARRANGE_VERB
+TOGGLE_FIXTURE_VERB = daily_actions.TOGGLE_FIXTURE_VERB
+#: Bounds for the two new categories.  They are *offer* bounds inside the one round, not a
+#: ranking and not a default: home has two declared areas and (today) one lamp, so a real
+#: round emits one ARRANGE and, only where the fixture is present, one TOGGLE.  The cap
+#: keeps room-living from ever pushing AG-1's sixteen-candidate budget out of reach while
+#: still leaving the fixups of an ordinary home visible.
+MAX_ARRANGE_OPPORTUNITIES = 4
+MAX_TOGGLE_FIXTURE_OPPORTUNITIES = 4
+
+#: Total World opportunities one observation may emit.  AG-1 hard-fails the whole round at
+#: more than sixteen *allowed* candidates, and the other Life sources (a continuable artifact,
+#: its version, a closeout, the current-activity continuation) already fill the rest of that
+#: budget.  Twelve is the largest World count that still leaves those four guaranteed slots.
+#: When a home with furniture and a lamp crosses it, the *tail* of the largest flexible
+#: categories yields first (stays, then body poses, then moves, then the room-living pair) --
+#: every category keeps at least one entry, so nothing is silently deleted and the model is
+#: never handed an empty class of action.
+MAX_WORLD_OPPORTUNITIES = 12
+#: 0.7: 唯一一条**店内购买**目标。它不是 World 动词，也不是桥/网关的动词：价格、余额、
+#: 营业/在店判断和记账都属于既有 ``world_property_economy`` 经济 owner。Life 这一侧只把
+#: owner 当场给出的可买商品翻译成候选，target 里只装商品目录 id，绝不装价格或产权。
+PURCHASE_VERB = "PURCHASE"
+PURCHASE_REF_PREFIX = "buy:"
 #: I-r1: a non-productive stay is *not* a World verb.  No owner executes "stand here": the
 #: World owner's part is only the observation that she really is in this place, plus the
 #: opening/affordance facts the W catalog already projects.  ``STAY`` is therefore a
@@ -106,6 +158,10 @@ STAY_SECONDS_BY_AFFORDANCE = {
     "SIT": 300,
     "SIT_AT_CAFE": 300,
     "REST": 300,
+    # 0.7 C: 家具边的短停留；时长只是世界包声明的建议值，缺省时用这里的固定值。
+    "DESK_PAUSE": 300,
+    "WINDOW_PAUSE": 240,
+    "TEA_PAUSE": 300,
     "READ_HERE": 600,
     "READ": 600,
     "SELF_STUDY": 600,
@@ -133,6 +189,9 @@ STAY_SECONDS_BY_AFFORDANCE = {
 #: as their own candidate on a rotating turn instead of competing for the one slot above.
 STAY_DESCRIPTOR_PREFERENCE = (
     "SIT", "SIT_AT_CAFE", "REST", "READ_HERE", "READ", "SELF_STUDY", "USE_PHONE",
+    # 0.7 C: 家中家具边的自然小事。都只是「在某个家具边待一会儿」这一种既有
+    # ``stay_at_place`` 能力，标题不冒充整理/泡茶等没有端口的效果。
+    "DESK_PAUSE", "WINDOW_PAUSE", "TEA_PAUSE",
     "BROWSE_BOOKS", "BROWSE_STORE", "PRAY", "LOOK_AROUND", "WALK",
     "DAZE", "POTTER", "PEOPLE_WATCH",
 )
@@ -291,6 +350,9 @@ PLACEMENT_SURFACE = daily_actions.PLACEMENT_SURFACE
 #: report can name a number without importing a World module on every observation; the
 #: owner's value is authoritative and this copy must move with it.
 HAND_MANIPULATION_SECONDS = 2.0
+#: 一次柜台购买本身是一次瞬时 owner 记账（不是一段旅程）。沿用同一次手部操作的
+#: 2 秒负荷声明，只用于显示"这件事有多长"；真正的时间事实是经济 owner 的交付状态。
+PURCHASE_SECONDS = HAND_MANIPULATION_SECONDS
 #: The owner's own posture duration (``body_consequence.MOVEMENT_SECONDS_BY_ACTION["POSE"]``).
 POSTURE_SECONDS = 5.0
 #: Where a ``duration_seconds`` number came from, so an assumed/owner value never looks
@@ -324,12 +386,27 @@ def observed_move_opportunities(
     occurred_at: str,
     observed_at: str,
     valid_for_seconds: int = DEFAULT_VALIDITY_SECONDS,
+    place_kinds: Optional[Mapping[str, Any]] = None,
+    reserved_destinations: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
     """One opportunity per MOVE destination the observation supports.
 
     ``action_space`` must be the *selector-visible* projection (what a decision
     is actually allowed to choose from), not the raw gateway list: the point of
     the seam is that she can only consider what she could also pick.
+
+    ``place_kinds`` is the W catalog's own ``{location_id: kind}`` map.  It is used
+    for one structural rule only: a **street** the owner lists is the graph's transit
+    node, so it is never counted against ``MAX_MOVE_OPPORTUNITIES`` and every adjacent
+    street the owner offers stays in the round.  Without it the world's own order is
+    kept and the first N are used (the old behaviour); the venue cap itself is
+    unchanged, so a hub still cannot explode the decision's candidate set.
+
+    ``reserved_destinations`` (0.7) is the caller's own short list of places that must
+    survive the bound because a real owner action exists there right now -- today the
+    one physical store that is open and sells economy goods.  It is still only a
+    *reservation inside* ``MAX_MOVE_OPPORTUNITIES`` (never an extra candidate, never a
+    ranking), and a destination the owner's action space does not offer is ignored.
     """
 
     place = _place_of(observation)
@@ -340,9 +417,12 @@ def observed_move_opportunities(
 
     valid_from, valid_until = _validity_window(observed_at, valid_for_seconds)
     occurred = ag0._require_iso(occurred_at, "occurred_at")
+    reserved = {str(item) for item in (reserved_destinations or []) if str(item)}
 
-    opportunities: list[dict[str, Any]] = []
-    for candidate in action_space.get("candidates") or []:
+    # Emit in the owner's own order, tagging which rows are adjacent streets.  The
+    # order is what the final list keeps; the cap is a *selection*, not a ranking.
+    rows: list[tuple[int, dict[str, Any], bool]] = []
+    for index, candidate in enumerate(action_space.get("candidates") or []):
         if not isinstance(candidate, Mapping):
             continue
         if candidate.get("verb") != MOVE_VERB:
@@ -351,7 +431,8 @@ def observed_move_opportunities(
         destination = str(params.get("destination_location_id") or "").strip()
         if not destination:
             continue
-        opportunities.append({
+        is_street = str((place_kinds or {}).get(destination) or "") == "street"
+        rows.append((index, {
             "opportunity_id": "wopp:move:%s:r%s:%s" % (place, revision, destination),
             "perception_ref": "percept:gateway-snapshot:%s:r%s" % (place, revision),
             "world_revision_ref": "wrev:%s:r%s" % (world_id or "world", revision),
@@ -365,8 +446,18 @@ def observed_move_opportunities(
             "revision": 1,
             "subject_id": ag0.GLOBAL_SUBJECT_ID,
             "location_ref": "place:%s" % place,
-        })
-    return opportunities
+        }, is_street, destination in reserved))
+
+    reserved_rows = [row for row in rows if row[2] or row[3]]
+    venues = [row for row in rows if not (row[2] or row[3])]
+    # The transit streets (and the one open economy store) come first, then the owner's
+    # own venue order fills the rest.  The *total* stays at the bound, so the reservation
+    # never enlarges the offer.
+    room = MAX_MOVE_OPPORTUNITIES - len(reserved_rows)
+    kept = ((reserved_rows + venues[:room]) if room > 0
+            else reserved_rows[:MAX_MOVE_OPPORTUNITIES])
+    kept.sort(key=lambda row: row[0])  # the owner's own order survives the selection
+    return [row[1] for row in kept]
 
 
 def observed_consume_opportunities(
@@ -447,8 +538,11 @@ def observed_body_action_opportunities(
       With no snapshot orientation there is no POSE opportunity at all -- an invented
       orientation is exactly the second parameter this module must not make up.
     * ``REST`` -- one opportunity per direction the owner marks available
-      (``start_available`` / ``stop_available``), in ``rest`` mode only this round.
-      ``sleep_like`` is expressible but deliberately not offered.
+      (``start_available`` / ``stop_available``), in ``rest`` mode.  When the owner
+      additionally reports ``sleep_like_available`` (start available **and** lying
+      **and** a declared rest surface really here), a second ``start`` opportunity is
+      emitted with ``sleep_like``; the ordinary ``rest`` start stays.  Neither one is
+      a decision that she needs rest -- only the owner's availability verdict speaks.
 
     Failure is closed everywhere: an absent/refused entry, a pose list this encoding
     cannot name, or a snapshot that cannot answer produces no opportunity.  Nothing
@@ -520,6 +614,17 @@ def observed_body_action_opportunities(
             verb=REST_VERB, suffix=state,
             perception_ref="percept:gateway-available-actions:%s:r%s" % (place, revision),
         ))
+        # The night mode is a second, *narrower* owner verdict: the gateway says
+        # ``sleep_like_available`` only when a start is really available **and** she is
+        # already lying **and** a declared rest surface is placed here.  It never means
+        # "she should sleep"; it means the owner would accept this exact command now.
+        if state == "start" and rest_entry.get("sleep_like_available") is True:
+            opportunities.append(_emit(
+                body_actions.encode_rest_target("start", "sleep_like"),
+                verb=REST_VERB, suffix="start_sleep_like",
+                perception_ref=("percept:gateway-available-actions:%s:r%s"
+                                % (place, revision)),
+            ))
     return opportunities
 
 
@@ -710,6 +815,203 @@ def observed_daily_action_opportunities(
                     PLACE_VERB, target,
                     perception_ref="percept:gateway-snapshot:%s:r%s" % (place, revision)))
     return opportunities
+
+
+def _room_living_emit(verb: str, target: str, *, place: str, revision: Any,
+                      world_id: Any, observed_at: str, occurred_at: str,
+                      valid_from: str, valid_until: str,
+                      perception_ref: str) -> dict[str, Any]:
+    """One world opportunity row for an encoded ``dailyact:`` room-living target."""
+
+    return {
+        "opportunity_id": "wopp:%s:%s:r%s:%s"
+                          % (verb.lower(), place, revision,
+                             _daily_opportunity_suffix(target)),
+        "perception_ref": perception_ref,
+        "world_revision_ref": "wrev:%s:r%s" % (world_id or "world", revision),
+        "target_refs": [target],
+        "valid_from": valid_from,
+        "valid_until": valid_until,
+        "occurred_at": occurred_at,
+        "observed_at": valid_from,
+        "observed": True,
+        "status": "AVAILABLE",
+        "revision": 1,
+        "subject_id": ag0.GLOBAL_SUBJECT_ID,
+        "location_ref": "place:%s" % place,
+    }
+
+
+def observed_arrange_opportunities(
+    observation: Mapping[str, Any],
+    *,
+    available_actions: Optional[Mapping[str, Any]],
+    occurred_at: str,
+    observed_at: str,
+    valid_for_seconds: int = DEFAULT_VALIDITY_SECONDS,
+) -> list[dict[str, Any]]:
+    """One opportunity per legal room/surface destination for furniture she is WITH.
+
+    ``available_actions`` is the gateway's own verdict: an ARRANGE candidate is an
+    instance that is owned + delivered + relocatable and **already placed at home**.
+    The destination list is the owner's own ``rooms`` (declared home areas) plus the
+    instance's own declared surfaces -- never a place this module invents.
+
+    An ARRANGE is only executable where the furniture really is, so a candidate is only
+    offered while the body is in the same place as the placement (the Resolver would
+    answer ``NOT_HOME``/``FURNITURE_NOT_HOME`` otherwise).  The current destination is
+    skipped: a same-target arrange is the owner's own no-op, not an invitation to choose.
+    """
+
+    place = _place_of(observation)
+    revision = _revision_of(observation)
+    world_id = observation.get("world_id")
+    if place is None or revision is None or not isinstance(available_actions, Mapping):
+        return []
+
+    entry = next((row for row in available_actions.get("actions") or []
+                  if isinstance(row, Mapping) and row.get("verb") == ARRANGE_VERB), None)
+    if not entry or entry.get("available") is not True:
+        return []
+
+    valid_from, valid_until = _validity_window(observed_at, valid_for_seconds)
+    occurred = ag0._require_iso(occurred_at, "occurred_at")
+    rooms = [
+        {"location_id": str(room.get("location_id") or "").strip(),
+         "area_id": str(room.get("area_id") or "").strip()}
+        for room in entry.get("rooms") or []
+        if isinstance(room, Mapping)
+    ]
+    opportunities: list[dict[str, Any]] = []
+    for offered in entry.get("candidates") or []:
+        if not isinstance(offered, Mapping):
+            continue
+        object_id = str(offered.get("object_id") or "").strip()
+        if not object_id:
+            continue
+        placement = offered.get("placement")
+        if not isinstance(placement, Mapping):
+            continue
+        if str(placement.get("location_id") or "") != place:
+            # She is not where the furniture is: arranging it from here is not allowed.
+            continue
+        current_area = str(placement.get("area_id") or "")
+        current_surface = str(placement.get("surface_id") or "")
+        current_kind = str(placement.get("kind") or "")
+        destinations: list[dict[str, Any]] = []
+        for room in rooms:
+            if room["location_id"] != place or not room["area_id"]:
+                continue
+            if room["area_id"] == current_area:
+                continue
+            destinations.append({"kind": daily_actions.PLACEMENT_ROOM,
+                                 "location_id": place, "area_id": room["area_id"]})
+        for surface in offered.get("surfaces") or []:
+            surface_id = str(surface or "").strip()
+            if not surface_id:
+                continue
+            if current_kind == daily_actions.PLACEMENT_SURFACE and surface_id == current_surface:
+                continue
+            destinations.append({"kind": daily_actions.PLACEMENT_SURFACE,
+                                 "location_id": place, "surface_id": surface_id})
+        for destination in destinations:
+            try:
+                target = daily_actions.encode_daily_action_target(
+                    ARRANGE_VERB, {"object_id": object_id, "target": destination})
+            except daily_actions.DailyActionTargetError:
+                continue
+            opportunities.append(_room_living_emit(
+                ARRANGE_VERB, target, place=place, revision=revision, world_id=world_id,
+                observed_at=observed_at, occurred_at=occurred,
+                valid_from=valid_from, valid_until=valid_until,
+                perception_ref="percept:gateway-available-actions:%s:r%s"
+                               % (place, revision)))
+            if len(opportunities) >= MAX_ARRANGE_OPPORTUNITIES:
+                return opportunities
+    return opportunities
+
+
+def observed_toggle_fixture_opportunities(
+    observation: Mapping[str, Any],
+    *,
+    available_actions: Optional[Mapping[str, Any]],
+    occurred_at: str,
+    observed_at: str,
+    valid_for_seconds: int = DEFAULT_VALIDITY_SECONDS,
+) -> list[dict[str, Any]]:
+    """One opportunity per declared fixture the owner offers in this area.
+
+    The offered state is the **absolute opposite** of the recorded power, so the round can
+    never invite a blind toggle or a same-state write.  An *unknown* power is not assumed
+    to be ``off``: the offer is the definite ``off`` command (the owner records a real
+    ``off`` and only then does ``on`` become the opposite); a second round then offers
+    ``on``.  Nothing here decides that a light should be on.
+    """
+
+    place = _place_of(observation)
+    revision = _revision_of(observation)
+    world_id = observation.get("world_id")
+    if place is None or revision is None or not isinstance(available_actions, Mapping):
+        return []
+
+    entry = next((row for row in available_actions.get("actions") or []
+                  if isinstance(row, Mapping) and row.get("verb") == TOGGLE_FIXTURE_VERB), None)
+    if not entry or entry.get("available") is not True:
+        return []
+
+    valid_from, valid_until = _validity_window(observed_at, valid_for_seconds)
+    occurred = ag0._require_iso(occurred_at, "occurred_at")
+    opportunities: list[dict[str, Any]] = []
+    for offered in entry.get("candidates") or []:
+        if not isinstance(offered, Mapping):
+            continue
+        object_id = str(offered.get("object_id") or "").strip()
+        if not object_id:
+            continue
+        power = offered.get("power")
+        power = power.strip().lower() if isinstance(power, str) else None
+        # The opposite of a *known* power; an unknown power is commanded to the definite
+        # ``off`` (never folded into "it is off" -- the owner records a real off), and only
+        # then does ``on`` become the opposite.
+        wanted = "on" if power == "off" else "off"
+        try:
+            target = daily_actions.encode_daily_action_target(
+                TOGGLE_FIXTURE_VERB, {"object_id": object_id, "state": wanted})
+        except daily_actions.DailyActionTargetError:
+            continue
+        opportunities.append(_room_living_emit(
+            TOGGLE_FIXTURE_VERB, target, place=place, revision=revision, world_id=world_id,
+            observed_at=observed_at, occurred_at=occurred,
+            valid_from=valid_from, valid_until=valid_until,
+            perception_ref="percept:gateway-available-actions:%s:r%s" % (place, revision)))
+        if len(opportunities) >= MAX_TOGGLE_FIXTURE_OPPORTUNITIES:
+            return opportunities
+    return opportunities
+
+
+def _bound_world_opportunities(groups: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
+    """Trim the tail of the largest flexible categories until the World offer fits.
+
+    ``groups`` is ``[move, consume, stay, body, toilet, daily, arrange, toggle, purchase]``.
+    Only the tail of a group is ever dropped, and never a group's last entry, so each class of
+    action stays represented.  The order (stays, poses, moves, arrange, toggle) is the order in
+    which a place with many declared stays yields room to the harder-to-reach offers.
+    """
+
+    total = sum(len(group) for group in groups)
+    excess = total - MAX_WORLD_OPPORTUNITIES
+    if excess <= 0:
+        return groups
+    for index in (2, 3, 0, 6, 7):  # stay, body, move, arrange, toggle
+        if excess <= 0:
+            break
+        group = groups[index]
+        if len(group) <= 1:
+            continue
+        keep = max(1, len(group) - excess)
+        excess -= len(group) - keep
+        groups[index] = group[:keep]
+    return groups
 
 
 def _held_objects(observation: Mapping[str, Any]) -> list[str]:
@@ -1071,10 +1373,115 @@ def read_location_catalog(
     return result
 
 
+def read_store_projection(
+    environment: Optional[Mapping[str, str]],
+    now: Any,
+    *,
+    hermes_home: Optional[str],
+) -> dict[str, Any]:
+    """The physical counter's own read-only projection, or an honest absence.
+
+    The economy owner answers with the store's opening state, whether she is at the
+    counter, the catalogue it really sells and each item's affordability.  An unreadable
+    owner means "no store facts this round" -- never an assumed shelf and never an
+    assumed balance.  Nothing here writes, reserves or charges anything.
+    """
+
+    try:
+        import world_property_economy as economy
+    except Exception as error:  # noqa: BLE001 - a missing module is not a store fact
+        return {"status": "unavailable", "reason_code": "STORE_MODULE_UNAVAILABLE",
+                "detail": "%s: %s" % (type(error).__name__, error), "catalog": []}
+    try:
+        projection = economy.store_shop_projection(
+            hermes_home=hermes_home, environment=environment, now=now)
+    except Exception as error:  # noqa: BLE001 - same rule: report, never invent
+        return {"status": "unavailable", "reason_code": "STORE_READ_FAILED",
+                "detail": "%s: %s" % (type(error).__name__, error), "catalog": []}
+    if not isinstance(projection, Mapping):
+        return {"status": "unavailable", "reason_code": "STORE_SHAPE_INVALID",
+                "catalog": []}
+    return dict(projection)
+
+
+def observed_purchase_opportunities(
+    observation: Mapping[str, Any],
+    *,
+    projection: Optional[Mapping[str, Any]],
+    occurred_at: str,
+    observed_at: str,
+    valid_for_seconds: int = DEFAULT_VALIDITY_SECONDS,
+) -> list[dict[str, Any]]:
+    """One opportunity per item the economy owner says is really buyable *here, now*.
+
+    The facts are the owner's own: it must report the counter available (open) and
+    ``purchase_available`` true, the body must really be in the store's place, and each
+    item must be in the counter's catalogue and affordable.  Nothing is inferred from a
+    place title: a shop that only has ``BROWSE_STORE`` yields no purchase here, and a
+    closed counter or a different place yields none at all.
+
+    The target carries the **catalogue id only**.  Price, balance and ownership are
+    re-read by the owner inside the purchase itself, so nothing in a candidate can name
+    a price or a transaction.
+    """
+
+    place = _place_of(observation)
+    revision = _revision_of(observation)
+    world_id = observation.get("world_id")
+    if place is None or revision is None or not isinstance(projection, Mapping):
+        return []
+    if str(projection.get("status") or "") != "available":
+        return []
+    if projection.get("purchase_available") is not True:
+        return []
+    store_id = str(projection.get("store_id") or "").strip()
+    if not store_id or place != store_id:
+        return []
+
+    valid_from, valid_until = _validity_window(observed_at, valid_for_seconds)
+    occurred = ag0._require_iso(occurred_at, "occurred_at")
+    opportunities: list[dict[str, Any]] = []
+    for item in projection.get("catalog") or []:
+        if not isinstance(item, Mapping):
+            continue
+        item_id = str(item.get("catalog_item_id") or "").strip()
+        price = item.get("price")
+        if not item_id:
+            continue
+        if isinstance(price, bool) or not isinstance(price, int) or price < 0:
+            continue
+        if item.get("affordable") is not True:
+            # "Cannot pay for it right now" is not an offer.  The owner re-checks the
+            # balance under its own lock; this only keeps an unpayable shelf off the list.
+            continue
+        if item.get("suppress_reason_code") == ALREADY_OWNED_SUPPRESSED:
+            # 18 章 §二 Day2（A/B 闭环）：经济 owner 自己判定"已拥有同款"的固定家具
+            # 不再生成购买候选——证据是 owner 投影里的持有事实（OWNED 实例计数），
+            # 这里只过滤、不另算第二份所有权。
+            continue
+        opportunities.append({
+            "opportunity_id": "wopp:buy:%s:r%s:%s" % (place, revision, item_id),
+            "perception_ref": "percept:world-property-economy:%s:r%s" % (place, revision),
+            "world_revision_ref": "wrev:%s:r%s" % (world_id or "world", revision),
+            "target_refs": ["%s%s" % (PURCHASE_REF_PREFIX, item_id)],
+            "valid_from": valid_from,
+            "valid_until": valid_until,
+            "occurred_at": occurred,
+            "observed_at": valid_from,
+            "observed": True,
+            "status": "AVAILABLE",
+            "revision": 1,
+            "subject_id": ag0.GLOBAL_SUBJECT_ID,
+            "location_ref": "place:%s" % place,
+        })
+    return opportunities
+
+
 def opportunity_view(
     opportunities: list[dict[str, Any]],
     catalog: Optional[Mapping[str, Any]] = None,
     available_actions: Optional[Mapping[str, Any]] = None,
+    purchase_facts: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> list[dict[str, Any]]:
     """A richer, non-AG-0 view of the same opportunities, for reports and steps.
 
@@ -1116,6 +1523,8 @@ def opportunity_view(
         daily: Optional[dict[str, Any]] = None
         invalid_daily_reason: Optional[str] = None
         destination: Optional[dict[str, Any]] = None
+        fixture_state: Optional[str] = None
+        purchase: Optional[dict[str, Any]] = None
         if stay is not None:
             kind = STAY_VERB
             object_id = None
@@ -1164,20 +1573,31 @@ def opportunity_view(
                 kind = str(daily["verb"])
                 object_id = str(daily["object_id"])
                 params = dict(daily["params"])
-                destination = (dict(params["target"]) if kind == PLACE_VERB else None)
-                source = ("world_gateway_available_actions" if kind == PICK_UP_VERB
+                destination = (dict(params["target"])
+                               if kind in (PLACE_VERB, ARRANGE_VERB) else None)
+                fixture_state = (str(params["state"])
+                                 if kind == TOGGLE_FIXTURE_VERB else None)
+                source = ("world_gateway_available_actions"
+                          if kind in (PICK_UP_VERB, ARRANGE_VERB, TOGGLE_FIXTURE_VERB)
                           else "world_gateway_snapshot")
         elif target.startswith(OBJECT_REF_PREFIX):
             kind = CONSUME_VERB
             object_id = target[len(OBJECT_REF_PREFIX):]
             source = "world_gateway_available_actions"
             location = str(item.get("location_ref") or "")[len(PLACE_REF_PREFIX):]
+        elif target.startswith(PURCHASE_REF_PREFIX):
+            kind = PURCHASE_VERB
+            item_id = target[len(PURCHASE_REF_PREFIX):]
+            object_id = item_id
+            source = "world_property_economy.store_shop_projection"
+            location = str(item.get("location_ref") or "")[len(PLACE_REF_PREFIX):]
+            purchase = dict((purchase_facts or {}).get(item_id) or {})
         elif target.startswith(PLACE_REF_PREFIX):
             kind = MOVE_VERB
             object_id = None
             source = "world_gateway_selector_action_space"
             location = target[len(PLACE_REF_PREFIX):]
-        else:  # pragma: no cover - the four emitters above only produce these
+        else:  # pragma: no cover - the emitters above only produce these
             continue
         place_fact = by_location.get(location) or {}
         availability = (place_fact.get("availability") or {}) if place_fact else {}
@@ -1250,6 +1670,12 @@ def opportunity_view(
             # candidate offered -- never a value this module re-derived.
             "destination": destination,
             "slot_id": (params or {}).get("slot_id") if daily else None,
+            # v0.4 room-living: the absolute fixture state a TOGGLE target names (``None``
+            # for every other namespace), so a report reads the owner verb's own parameter.
+            "fixture_state": fixture_state,
+            # 0.7: the counter facts for a ``buy:`` target (name/price/currency/balance and
+            # the owner's own delivery state).  ``None`` for every other namespace.
+            "purchase": purchase,
             "owner_blocked_reason": blocked_reason,
         })
     return view
@@ -1313,8 +1739,8 @@ HANDS_USABLE_POSES = ("standing", "seated")
 #: payload as ``order_basis: kind_group_presentation``; it is not a ranking, not a score
 #: and not a default pick, and within a group the observation's own emission order holds.
 CONTEXT_KIND_ORDER = (
-    PICK_UP_VERB, PLACE_VERB, STAY_VERB, CONSUME_VERB, TOILET_VERB, MOVE_VERB,
-    POSE_VERB, REST_VERB,
+    PICK_UP_VERB, PLACE_VERB, ARRANGE_VERB, TOGGLE_FIXTURE_VERB, STAY_VERB,
+    CONSUME_VERB, TOILET_VERB, PURCHASE_VERB, MOVE_VERB, POSE_VERB, REST_VERB,
 )
 #: How many unknowns one context may name (a bounded list, not a log).
 MAX_CONTEXT_UNKNOWNS = 8
@@ -1612,6 +2038,10 @@ def _duration_seconds(entry: Mapping[str, Any]) -> tuple[Optional[float], Option
         return None, None
     if verb in (PICK_UP_VERB, PLACE_VERB, CONSUME_VERB, TOILET_VERB):
         return HAND_MANIPULATION_SECONDS, DURATION_SOURCE_OWNER
+    if verb == PURCHASE_VERB:
+        # 柜台购买本身是一次瞬时 owner 记账；交付时窗是经济 owner 的单独事实，
+        # 由 ``_context_opportunity`` 的 purchase facts 报出，不混进这段时长。
+        return PURCHASE_SECONDS, DURATION_SOURCE_OWNER
     if verb == POSE_VERB:
         return POSTURE_SECONDS, DURATION_SOURCE_OWNER
     return None, None
@@ -1640,6 +2070,14 @@ def _preparation_text(verb: str, facts: Mapping[str, Any]) -> str:
         if kind == daily_actions.PLACEMENT_ROOM:
             return "放的地方就是现在这间房"
         return "放的地方这一轮没有读到"
+    if verb == PURCHASE_VERB:
+        price = facts.get("price")
+        currency = facts.get("currency") or ""
+        balance = facts.get("balance")
+        if price is None:
+            return "价格这一轮没有读到"
+        return ("这件 %s %s；现在余额 %s %s" % (price, currency, balance, currency)
+                if balance is not None else "这件 %s %s" % (price, currency))
     if verb == MOVE_VERB:
         return "走过去这一趟要 %s" % facts.get("walk_seconds")
     if verb == STAY_VERB:
@@ -1726,6 +2164,13 @@ def _preparation(
     if verb == STAY_VERB:
         return {"place_availability": entry.get("availability"),
                 "affordance": entry.get("affordance")}
+    if verb == PURCHASE_VERB:
+        purchase = entry.get("purchase") or {}
+        return {"store": entry.get("location_id"),
+                "price": purchase.get("price"),
+                "currency": purchase.get("currency"),
+                "balance": purchase.get("balance"),
+                "delivery_status": purchase.get("delivery_status")}
     if verb == POSE_VERB:
         return {"current_pose": body.get("pose")}
     return {}
@@ -1754,6 +2199,10 @@ def _context_opportunity(
     object_id = entry.get("object_id")
     object_label = labels.get(str(object_id)) if object_id else None
     destination = entry.get("destination") or None
+    purchase = entry.get("purchase") or {}
+    store_name = None
+    if verb == PURCHASE_VERB:
+        store_name = place_names.get(str(entry.get("location_id") or "")) or None
     place_name = place_names.get(place_id) or None
     here = place_name or ("%s/%s" % (place_id, area_name) if area_name else place_id)
     slot_label = _hand_label(entry.get("slot_id") or params.get("slot_id"))
@@ -1779,6 +2228,35 @@ def _context_opportunity(
             label = "把「%s」放下" % (object_label or object_id or "它")
             description = "「%s」现在在手上；放下的地方就是%s这间房。" % (
                 object_label or object_id, here)
+    elif verb == ARRANGE_VERB:
+        if surface_label:
+            label = "把「%s」摆到%s上" % (object_label or object_id or "这件家具", surface_label)
+            description = "「%s」是她自己已经拥有、已经到家的家具；摆到它自己的%s上。" % (
+                object_label or object_id or "这件家具", surface_label)
+        else:
+            area_text = str((destination or {}).get("area_id") or "") or "另一处"
+            label = "把「%s」挪到%s" % (object_label or object_id or "这件家具", area_text)
+            description = ("「%s」是她自己已经拥有、已经到家的家具；在这个住处里换到%s。"
+                           % (object_label or object_id or "这件家具", area_text))
+    elif verb == TOGGLE_FIXTURE_VERB:
+        fixture_state = str(entry.get("fixture_state") or params.get("state") or "")
+        action_word = "打开" if fixture_state == "on" else "关掉"
+        label = "%s「%s」" % (action_word, object_label or object_id or "这盏灯")
+        description = ("绝对地把这盏灯的电源设为 %s（不是切换）；只有世界包声明过、"
+                       "并且就在这个区域里的灯具才可这样操作。" % (fixture_state or "未知"))
+    elif verb == PURCHASE_VERB:
+        item_name = (purchase.get("name") or object_label or object_id or "一件东西")
+        price = purchase.get("price")
+        currency = purchase.get("currency") or ""
+        price_text = ("%s %s" % (price, currency)).strip() if price is not None else "价格待定"
+        store = store_name or entry.get("location_id") or "店里"
+        label = "在%s买「%s」（%s）" % (store, item_name, price_text)
+        balance = purchase.get("balance")
+        balance_text = ("她现在的余额是 %s %s。" % (balance, currency)) if balance is not None else ""
+        delivery = purchase.get("delivery_status")
+        delivery_text = ("成交后交付状态：%s。" % delivery) if delivery else ""
+        description = ("「%s」是%s现在真的在卖的商品，价格由经济 owner 给出；"
+                       "买下后产权归她。%s%s" % (item_name, store, balance_text, delivery_text))
     elif verb == MOVE_VERB:
         label = "去%s" % (target_place_name or entry.get("location_id") or "另一个地方")
         walk = entry.get("walk_seconds")
@@ -1836,6 +2314,8 @@ def _context_opportunity(
         "preparation_facts": facts,
         "object_id": object_id,
         "object_label": object_label,
+        # 0.7: only a ``buy:`` target carries these; every other verb keeps ``None``.
+        "purchase": dict(purchase) if purchase else None,
         "slot_id": entry.get("slot_id") or params.get("slot_id"),
         "destination": dict(destination) if isinstance(destination, Mapping) else None,
         "location_id": entry.get("location_id"),
@@ -1965,6 +2445,7 @@ class WorldMoveOpportunityProvider:
         bridge_dir: Optional[str] = None,
         valid_for_seconds: int = DEFAULT_VALIDITY_SECONDS,
         catalog_reader: Any = None,
+        store_reader: Any = None,
         environment: Optional[Mapping[str, str]] = None,
         world_home: Optional[str] = None,
         now: Any = None,
@@ -1977,6 +2458,9 @@ class WorldMoveOpportunityProvider:
         #: Injected for tests; ``read_location_catalog`` by default.  Called with
         #: ``(environment, now, hermes_home=...)``.
         self.catalog_reader = catalog_reader or read_location_catalog
+        #: Injected for tests; ``read_store_projection`` by default.  Called with
+        #: ``(environment, now, hermes_home=...)`` and never writes anything.
+        self.store_reader = store_reader or read_store_projection
         self.environment = dict(environment) if environment is not None else None
         self.world_home = world_home
         self.now = now
@@ -1987,6 +2471,8 @@ class WorldMoveOpportunityProvider:
         self.last_action_space: Optional[dict[str, Any]] = None
         self.last_available_actions: Optional[dict[str, Any]] = None
         self.last_catalog: Optional[dict[str, Any]] = None
+        #: 0.7: the counter's own read-only projection this round (``None`` = not read).
+        self.last_store_projection: Optional[dict[str, Any]] = None
         self.last_opportunity_view: list[dict[str, Any]] = []
         #: v0.4 B: the instant this observation was taken at (ISO), and the owner's own
         #: projection of the surfaces present where she is.  Both are what
@@ -2042,12 +2528,24 @@ class WorldMoveOpportunityProvider:
             self.last_stay_definition_status = {
                 "status": "error", "reason_code": code, "definitions": []}
             raise StayDefinitionError(code, path)
+        # 0.7: one read-only counter projection this round.  It is used for two things
+        # only -- keeping the one open economy store inside the move bound, and offering
+        # the goods it really sells while she is standing at the counter.
+        self.last_store_projection = self._store()
         move = observed_move_opportunities(
             snapshot.data,
             action_space=visible,
             occurred_at=moment,
             observed_at=moment,
             valid_for_seconds=self.valid_for_seconds,
+            # The catalog's own kind per place: only used so an adjacent *street* is never
+            # dropped by the venue cap (a street is how the rest of the graph is reached).
+            place_kinds={
+                str(item.get("location_id")): item.get("kind")
+                for item in (self.last_catalog or {}).get("opportunities") or []
+                if isinstance(item, Mapping) and item.get("location_id")
+            },
+            reserved_destinations=self._reserved_destinations(),
         )
         consume = observed_consume_opportunities(
             snapshot.data,
@@ -2100,12 +2598,40 @@ class WorldMoveOpportunityProvider:
         self.last_destination_reason = (
             None if self.last_surfaces is not None
             else "SURFACES_NOT_EXPOSED_BY_OWNER")
+        # v0.4 room-living: furniture arrangement and absolute fixture power, offered only
+        # from the owner's own availability verdict and only where she really is.
+        arrange = observed_arrange_opportunities(
+            snapshot.data,
+            available_actions=available_actions,
+            occurred_at=moment,
+            observed_at=moment,
+            valid_for_seconds=self.valid_for_seconds,
+        )
+        toggle = observed_toggle_fixture_opportunities(
+            snapshot.data,
+            available_actions=available_actions,
+            occurred_at=moment,
+            observed_at=moment,
+            valid_for_seconds=self.valid_for_seconds,
+        )
+        # 0.7: the counter's goods, only when the owner says she is really there and it is
+        # really open with room to buy.  A closed shop or another place yields nothing.
+        purchase = observed_purchase_opportunities(
+            snapshot.data,
+            projection=self.last_store_projection,
+            occurred_at=moment,
+            observed_at=moment,
+            valid_for_seconds=self.valid_for_seconds,
+        )
         self.last_observed_at = moment
+        groups = _bound_world_opportunities(
+            [move, consume, stay, body, toilet, daily, arrange, toggle, purchase])
+        flat = [item for group in groups for item in group]
         self.last_opportunity_view = opportunity_view(
-            move + consume + stay + body + toilet + daily,
-            self.last_catalog, available_actions)
+            flat, self.last_catalog, available_actions,
+            purchase_facts=self._purchase_facts())
         self.last_reason = None
-        return move + consume + stay + body + toilet + daily
+        return flat
 
     # -- plumbing ----------------------------------------------------------
 
@@ -2164,6 +2690,92 @@ class WorldMoveOpportunityProvider:
             self.last_reason = "catalog_read_failed:%s" % type(error).__name__
             return None
         return dict(catalog) if isinstance(catalog, Mapping) else None
+
+    def _store(self) -> Optional[dict[str, Any]]:
+        """Read the counter's own projection once.  A failed read is no store fact."""
+
+        # A provider with neither a request environment nor a world home (a hand-built test
+        # double) has no instance to read; never fall back to the operator's own home.
+        if self.environment is None and not self.world_home:
+            return None
+        moment = self._moment()
+        try:
+            projection = self.store_reader(self.environment, moment,
+                                           hermes_home=self.world_home)
+        except TypeError:
+            try:
+                projection = self.store_reader(self.environment, moment)
+            except Exception as error:  # noqa: BLE001
+                self.last_reason = "store_read_failed:%s" % type(error).__name__
+                return None
+        except Exception as error:  # noqa: BLE001
+            self.last_reason = "store_read_failed:%s" % type(error).__name__
+            return None
+        return dict(projection) if isinstance(projection, Mapping) else None
+
+    def _reserved_destinations(self) -> list[str]:
+        """The places that must survive the move bound because they are really open.
+
+        Two narrow kinds: the default district's browse-only flower shop (a place the four
+        named everyday places include; whether it is open is still the stay layer's own
+        question), and the economy owner's own store (only while its own opening rule says it
+        is open).  A closed counter, a disabled economy or an unreadable projection reserves
+        no store, so the ordinary neighbourhood offer is exactly what it was.  The bound
+        itself is unchanged -- these only choose *which* places stay inside it.
+        """
+
+        reserved: list[str] = list(RESERVED_BROWSE_PLACES)
+        projection = self.last_store_projection or {}
+        store_id = str(projection.get("store_id") or "").strip()
+        availability = projection.get("availability")
+        if (store_id and isinstance(availability, Mapping)
+                and str(availability.get("status") or "") == "OPEN"):
+            reserved.append(store_id)
+        # v0.4 room-living: when she is away but really owns furniture placed at home, the
+        # owner offers ARRANGE there.  Home must not be squeezed out of the move bound by
+        # the street/store reservation, or the whole "walk back and use what you bought"
+        # chain would be unreachable from the very place she bought it.  It is still only a
+        # reservation *inside* the bound, and a home the owner does not offer is ignored.
+        arrange_entry = next(
+            (row for row in (self.last_available_actions or {}).get("actions") or []
+             if isinstance(row, Mapping) and row.get("verb") == ARRANGE_VERB), None)
+        if arrange_entry and arrange_entry.get("available"):
+            for offered in arrange_entry.get("candidates") or []:
+                placement = (offered or {}).get("placement") if isinstance(
+                    offered, Mapping) else None
+                home_place = str((placement or {}).get("location_id") or "").strip()
+                if home_place:
+                    reserved.append(home_place)
+                    break
+        return list(dict.fromkeys(reserved))
+
+    def _purchase_facts(self) -> dict[str, dict[str, Any]]:
+        """``{catalog_item_id: public counter facts}`` for this round's catalogue."""
+
+        projection = self.last_store_projection or {}
+        balance = projection.get("balance")
+        delivery = projection.get("delivery") if isinstance(
+            projection.get("delivery"), Mapping) else {}
+        facts: dict[str, dict[str, Any]] = {}
+        for item in projection.get("catalog") or []:
+            if not isinstance(item, Mapping):
+                continue
+            item_id = str(item.get("catalog_item_id") or "").strip()
+            if not item_id:
+                continue
+            facts[item_id] = {
+                "catalog_item_id": item_id,
+                "name": item.get("name"),
+                "description": item.get("description"),
+                "price": item.get("price"),
+                "currency": item.get("currency") or projection.get("currency"),
+                "affordable": item.get("affordable"),
+                "balance": balance,
+                "store_id": projection.get("store_id"),
+                "delivery_mode": delivery.get("mode"),
+                "delivery_seconds": delivery.get("duration_seconds"),
+            }
+        return facts
 
     def _catalog_definition_error(self) -> Optional[tuple[str, Optional[str]]]:
         """catalog 读取带出的定义错误；只有闭集 code 才向调用方抛出。"""
@@ -2430,6 +3042,7 @@ class WorldMoveOpportunityProvider:
 
 __all__ = [
     "AMBIENT_CONTEXT_SOURCE",
+    "ARRANGE_VERB",
     "BODY_ACTION_REF_PREFIX",
     "CONSUME_VERB",
     "CONTEXT_KIND_ORDER",
@@ -2441,7 +3054,10 @@ __all__ = [
     "HAND_MANIPULATION_SECONDS",
     "IDLE_STAY_AFFORDANCES",
     "MAX_AMBIENT_CONTEXT_EVENTS",
+    "MAX_ARRANGE_OPPORTUNITIES",
     "MAX_CONTEXT_UNKNOWNS",
+    "MAX_TOGGLE_FIXTURE_OPPORTUNITIES",
+    "MAX_WORLD_OPPORTUNITIES",
     "MOVE_VERB",
     "OBJECT_REF_PREFIX",
     "PICK_UP_VERB",
@@ -2451,6 +3067,10 @@ __all__ = [
     "PLACE_VERB",
     "POSE_VERB",
     "POSTURE_SECONDS",
+    "PURCHASE_REF_PREFIX",
+    "PURCHASE_SECONDS",
+    "PURCHASE_VERB",
+    "RESERVED_BROWSE_PLACES",
     "REST_VERB",
     "STAY_DESCRIPTOR_PREFERENCE",
     "STAY_DESCRIPTOR_QUIET",
@@ -2461,18 +3081,23 @@ __all__ = [
     "STAY_REF_PREFIX",
     "STAY_SECONDS_BY_AFFORDANCE",
     "STAY_VERB",
+    "TOGGLE_FIXTURE_VERB",
     "TOILET_VERB",
     "WorldMoveOpportunityProvider",
+    "observed_arrange_opportunities",
     "observed_body_action_opportunities",
     "observed_consume_opportunities",
     "observed_toilet_opportunities",
     "observed_daily_action_opportunities",
     "observed_move_opportunities",
+    "observed_toggle_fixture_opportunities",
+    "observed_purchase_opportunities",
     "observed_stay_opportunities",
     "stay_definition_status",
     "stay_definition_status_for",
     "opportunity_view",
     "parse_stay_target",
     "read_location_catalog",
+    "read_store_projection",
     "stay_target",
 ]

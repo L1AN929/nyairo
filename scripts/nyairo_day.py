@@ -30,11 +30,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -59,12 +62,20 @@ DEFAULT_PORT = 3831
 SCHEMA_RECORD = "nyairo.day.service.v1"
 SCHEMA_READY = "nyairo.day.ready.v1"
 SCHEMA_MANAGED = "nyairo.day.managed.v1"
+#: 日常自主运行（start / run-day）默认允许本地世界动作。旧版把 gate 默认关着，
+#: 于是即使世界给了可达地点她也出不了门；0.7 起日常入口默认 canonical，显式
+#: ``--world-gate off`` / ``--no-world-actions`` 仍然能把它关回去。实验入口
+#: （fast_day / g1_real_adoption）不受影响。
+DEFAULT_WORLD_GATE = "canonical"
+WORLD_GATES = ("off", "shadow", "canonical")
 RECORD_NAME = "nyairo-day.json"
 READY_NAME = "nyairo-day.ready.json"
 MANAGED_NAME = "nyairo-day.instance.json"
 LOG_NAME = "nyairo-day.log"
 MEMORY_OPERATION_KEY = "nyairo-day-memory-v1"
 READY_TIMEOUT_SECONDS = 90.0
+DEFAULT_V03_CLOCK_INTERVAL_SECONDS = 60.0
+ENV_V03_CLOCK_INTERVAL = "NYAIRO_V03_CLOCK_INTERVAL"
 
 #: reason code -> 一句人话。没有编新规则，只是把既有失败原因转成用户能懂的句子。
 HUMAN_REASONS = {
@@ -117,6 +128,9 @@ HUMAN_REASONS = {
     "NEED_NEW_ROOT_FOR_LIVED_NEEDS": "这个实例的虚拟身体档案已经定下（或从未启用）；改初始值要建一个新目录。",
     "LIVED_NEEDS_INVALID": "虚拟身体初值必须是 0 到 1 之间的数字（0 表示不渴不饿）。",
     "FOREGROUND_NEEDS_CTRL_C": "这个服务是在前台运行的；请回到那个窗口按 Ctrl-C 停止。",
+    "WORLD_CLOCK_MONOTONIC_VIOLATION": "给出的时间早于世界时钟上次提交点，单调时钟拒绝回拨（未改动数据，模型调用 0 次）。",
+    "NOW_ISO_INVALID": "时间格式不合法；请写带时区的 ISO-8601 时间（例如 2026-11-12T08:00:00+00:00）。",
+    "V03_CLOCK_INTERVAL_INVALID": "0.3 后台时钟推进间隔必须是合法数字（<= 0 表示关闭后台线程）。",
 }
 
 
@@ -153,15 +167,33 @@ def _is_managed(root: Path) -> bool:
     return _read_json(_managed_path(root)).get("schema") == SCHEMA_MANAGED
 
 
+def _managed_world_gate(record: Mapping[str, Any]) -> str:
+    """本实例记录的世界动作 gate；旧记录没有 ``world_gate`` 时按旧开关还原。
+
+    新实例在创建时写 ``world_gate: canonical``（日常默认）。旧记录若只有
+    ``world_actions``，保留它当时的选择（true→canonical，false→off），不在读取时
+    偷偷迁移；显式 ``--world-gate`` 仍可随时覆盖。
+    """
+
+    raw = str(record.get("world_gate") or "").strip().lower()
+    if raw in WORLD_GATES:
+        return raw
+    if "world_actions" in record:
+        return "canonical" if bool(record.get("world_actions")) else "off"
+    return DEFAULT_WORLD_GATE
+
+
 def _managed_config(root: Path) -> dict[str, Any]:
     """The entry's own bounded config: package identity, profile, run switches."""
 
     record = _read_json(_managed_path(root))
+    gate = _managed_world_gate(record)
     return {
         "world_package": dict(record.get("world_package") or {}),
         "lived_needs": dict(record.get("lived_needs") or {}),
         "room_living": bool(record.get("room_living")),
-        "world_actions": bool(record.get("world_actions")),
+        "world_gate": gate,
+        "world_actions": gate != "off",
         "ambient_events": bool(record.get("ambient_events")),
     }
 
@@ -207,14 +239,44 @@ def _resolve_run_switch(args: argparse.Namespace, name: str, stored: Any) -> boo
     return bool(value)
 
 
-def _persist_run_switches(root: Path, *, room_living: bool, world_actions: bool,
+def _resolve_world_gate(args: argparse.Namespace, stored: Any) -> str:
+    """World-action gate for one run: explicit flag wins, then the recorded choice.
+
+    ``--world-gate off|shadow|canonical`` is the direct spelling; the older
+    ``--world-actions`` / ``--no-world-actions`` remain as canonical/off aliases so an
+    existing command line keeps its meaning.  With neither, the entry's own daily default
+    is canonical -- an unset shell environment can no longer keep her indoors.
+    """
+
+    explicit = str(getattr(args, "world_gate", None) or "").strip().lower()
+    if explicit:
+        if explicit not in WORLD_GATES:
+            raise RuntimeError("WORLD_GATE_INVALID")
+        return explicit
+    legacy = getattr(args, "world_actions", None)
+    if legacy is not None:
+        return "canonical" if bool(legacy) else "off"
+    gate = str(stored or "").strip().lower()
+    return gate if gate in WORLD_GATES else DEFAULT_WORLD_GATE
+
+
+def _persist_run_switches(root: Path, *, room_living: bool,
+                          world_gate: Optional[str] = None,
+                          world_actions: Optional[bool] = None,
                           ambient_events: bool = False) -> None:
     path = _managed_path(root)
     record = _read_json(path)
     if not record:
         return
+    if world_gate is None and world_actions is not None:
+        gate = "canonical" if bool(world_actions) else "off"
+    else:
+        gate = str(world_gate or DEFAULT_WORLD_GATE).strip().lower()
+    if gate not in WORLD_GATES:
+        gate = DEFAULT_WORLD_GATE
     record.update({"room_living": bool(room_living),
-                   "world_actions": bool(world_actions),
+                   "world_gate": gate,
+                   "world_actions": gate != "off",
                    "ambient_events": bool(ambient_events)})
     _write_json(path, record)
 
@@ -400,7 +462,8 @@ def _is_instance(root: Path) -> bool:
 def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
                      run_id: Optional[str] = None,
                      world_package: Optional[str] = None,
-                     lived_needs: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+                     lived_needs: Optional[Mapping[str, Any]] = None,
+                     starter_reading: bool = False) -> dict[str, Any]:
     """Prepare exactly one new instance, or reuse the one already at ``root``.
 
     Package/profile are *creation* choices: an existing managed root accepts the
@@ -445,11 +508,14 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         raise RuntimeError("ROOT_EXISTS")
 
     reading = _package_reading_material(world_package)
+    # 包自带阅读材料优先；只有在明确 opt-in 且包没有声明时才用主题+seed 的本地分页读物。
+    starter = bool(starter_reading) and reading["content"] is None
     prepared = demo.prepare_demo(
         root, with_world=True,
         # 阅读材料只来自所选世界包自己的 content.json；没有声明就不预置。
         # 不预置占位作品：她的第一件作品由她自己产生，或由操作者 import 显式给。
         reading_title=reading["title"], reading_content=reading["content"],
+        starter_reading=starter,
         seed_work_artifact=False,
         run_id=run_id,
         world_package=world_package,
@@ -472,7 +538,8 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         "memory_authority": str(target_authority),
         "world_package": package_identity,
         "lived_needs": dict(lived_needs or {}),
-        "room_living": False, "world_actions": False, "ambient_events": False,
+        "room_living": False, "world_gate": DEFAULT_WORLD_GATE,
+        "world_actions": DEFAULT_WORLD_GATE != "off", "ambient_events": False,
         "note": "this instance was created by scripts/nyairo_day.py; foreign instances are never adopted",
     })
     memory = phone_life.enable_instance_memory(
@@ -546,7 +613,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         report = _ensure_instance(
             root, authority=authority, run_id=args.run_id,
             world_package=getattr(args, "world_package", None),
-            lived_needs=lived_needs)
+            lived_needs=lived_needs,
+            starter_reading=bool(getattr(args, "starter_reading", False)))
     except Exception as exc:
         return _refuse(_reason_of(exc), str(exc), as_json=bool(getattr(args, "json", False)))
     if str(report.get("reason") or "").startswith("INSTANCE_"):
@@ -657,8 +725,9 @@ def _config_lines(root: Path) -> list[str]:
         lines.append("虚拟身体：已启用%s" % (("（%s）" % bands_text) if bands_text else ""))
     else:
         lines.append("虚拟身体：未启用（v1，没有饿/渴/如厕）")
+    gate = str(config.get("world_gate") or DEFAULT_WORLD_GATE)
     lines.append("本地动作：%s；房间链：%s；环境事件：%s" % (
-        "显式开启" if config.get("world_actions") else "关闭（默认 gate off）",
+        ("关闭（显式 gate off）" if gate == "off" else "开启（gate %s）" % gate),
         "显式开启" if config.get("room_living") else "关闭",
         "显式开启" if config.get("ambient_events") else "关闭"))
     lines.append("手机工具：chiyo_phone 的 world / store / inventory / wallet（身体档位在 world 的 body.needs）")
@@ -706,12 +775,669 @@ def _start_text(root: Path, port: int, *, already: bool) -> str:
     return "\n".join(lines)
 
 
-def _serve_forever(root: Path, port: int, *, room_living: bool = False,
-                   world_actions: bool = False,
-                   ambient_events: bool = False) -> int:
-    """The child process: the existing ``demo.serve_instance`` plus a clean stop event."""
+def _resolve_v03_clock_interval(
+    explicit: Optional[float] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> float:
+    """Resolve background 0.3 clock interval seconds (``<= 0`` disables the thread)."""
 
-    import threading
+    if explicit is not None:
+        if isinstance(explicit, bool) or not isinstance(explicit, (int, float)):
+            raise RuntimeError("V03_CLOCK_INTERVAL_INVALID")
+        val = float(explicit)
+        if math.isnan(val) or math.isinf(val):
+            raise RuntimeError("V03_CLOCK_INTERVAL_INVALID")
+        return val if val > 0.0 else 0.0
+
+    env = os.environ if environment is None else environment
+    raw = str(env.get(ENV_V03_CLOCK_INTERVAL, "") or "").strip()
+    if not raw:
+        return DEFAULT_V03_CLOCK_INTERVAL_SECONDS
+    try:
+        val = float(raw)
+    except ValueError:
+        return DEFAULT_V03_CLOCK_INTERVAL_SECONDS
+    if math.isnan(val) or math.isinf(val):
+        return DEFAULT_V03_CLOCK_INTERVAL_SECONDS
+    return val if val > 0.0 else 0.0
+
+
+def _maybe_tick_v03_ecology(root_path: Path, now_iso: Optional[str]) -> Optional[dict[str, Any]]:
+    """Advance existing v03_ecology slow variables (illness recovery / expired DELIVERED notes).
+
+    Never creates ``v03_ecology.json`` when absent, never touches ``UNKNOWN`` outbound records,
+    and performs zero disk writes when healthy with no expired outbound notes.
+    """
+
+    try:
+        from components.world.scripts import v03_economy_illness_bridge as v03_eco
+    except Exception:  # pragma: no cover
+        import v03_economy_illness_bridge as v03_eco  # type: ignore[no-redef]
+
+    eco_path = v03_eco.ecology_state_path(root_path)
+    if eco_path.is_symlink() or not eco_path.exists() or not eco_path.is_file():
+        return None
+    eco_state, eco_reason = v03_eco.read_stored_ecology_zero_write(root_path)
+    if eco_reason is not None:
+        return None
+
+    try:
+        target_dt = v03_eco.parse_iso_moment(now_iso)
+    except v03_eco.V03EcologyError:
+        return None
+    effective_iso = v03_eco.format_wall_iso(target_dt)
+
+    ill = eco_state.get("illness") or {}
+    ill_phase = str(ill.get("phase") or "healthy")
+    has_illness_or_strain = (
+        ill_phase != "healthy"
+        or float(ill.get("strain_load") or 0.0) > 0.0
+        or float(ill.get("severity") or 0.0) > 0.0
+        or float(ill.get("sleep_debt_hours") or 0.0) > 0.0
+    )
+    last_eval_raw = ill.get("last_evaluated_at")
+    last_eval_dt = None
+    if isinstance(last_eval_raw, str) and last_eval_raw.strip():
+        try:
+            last_eval_dt = v03_eco.parse_iso_moment(last_eval_raw)
+        except v03_eco.V03EcologyError:
+            last_eval_dt = None
+    can_advance_illness = has_illness_or_strain and (last_eval_dt is None or target_dt > last_eval_dt)
+
+    can_record_neglect_strain = False
+    if ill_phase == "healthy":
+        upstream_som = v03_eco._read_upstream_somatic_and_body_zero_write(root_path, effective_iso)
+        raw_fatigue = upstream_som.get("body_fatigue")
+        neglect_active = (
+            upstream_som.get("damp_outerwear_worn") is True
+            and isinstance(raw_fatigue, (int, float))
+            and not isinstance(raw_fatigue, bool)
+            and float(raw_fatigue) >= 0.82
+        )
+        if neglect_active:
+            latest_strain_dt: Optional[datetime] = None
+            for s_ev in ill.get("strain_events") or []:
+                if not isinstance(s_ev, Mapping):
+                    continue
+                rec_raw = s_ev.get("recorded_at")
+                if isinstance(rec_raw, str) and rec_raw.strip():
+                    try:
+                        s_dt = v03_eco.parse_iso_moment(rec_raw)
+                        if latest_strain_dt is None or s_dt > latest_strain_dt:
+                            latest_strain_dt = s_dt
+                    except v03_eco.V03EcologyError:
+                        continue
+            if latest_strain_dt is None or (target_dt - latest_strain_dt).total_seconds() >= 1800.0:
+                if last_eval_dt is None or target_dt > last_eval_dt:
+                    can_record_neglect_strain = True
+            else:
+                # Cooldown active while neglect persists: avoid 60s disk-write spam.
+                can_advance_illness = False
+
+    rb = eco_state.get("reality_bridge") or {}
+    has_expired_outbound = False
+    for rec in rb.get("outbound_records") or []:
+        if isinstance(rec, Mapping) and rec.get("status") == "DELIVERED":
+            exp_raw = rec.get("expires_at")
+            if isinstance(exp_raw, str) and exp_raw.strip():
+                try:
+                    exp_dt = v03_eco.parse_iso_moment(exp_raw)
+                    if target_dt >= exp_dt:
+                        has_expired_outbound = True
+                        break
+                except v03_eco.V03EcologyError:
+                    continue
+
+    if not can_record_neglect_strain and not can_advance_illness and not has_expired_outbound:
+        return None
+
+    illness_rcpt: Optional[dict[str, Any]] = None
+    neglect_strain_recorded = False
+    withdrawn_ids: list[str] = []
+    try:
+        if can_record_neglect_strain:
+            strain_proj = v03_eco.record_strain_or_rest(
+                root_path,
+                event_kind="caught_in_rain",
+                intensity=0.40,
+                unchanged_damp_clothes=True,
+                now_iso=effective_iso,
+            )
+            illness_rcpt = dict(
+                strain_proj.get("receipt")
+                or strain_proj.get("last_receipt")
+                or ((strain_proj.get("data") or {}).get("illness") or {})
+            )
+            neglect_strain_recorded = True
+        elif can_advance_illness:
+            proj = v03_eco.advance_illness_recovery(root_path, effective_iso)
+            illness_rcpt = dict(
+                proj.get("receipt")
+                or proj.get("last_receipt")
+                or ((proj.get("data") or {}).get("illness") or {})
+            )
+        if has_expired_outbound:
+            out_proj = v03_eco.apply_v03_ecology_command(
+                root_path,
+                {"action": "withdraw_expired_outbound"},
+                actor_side="subject",
+                now_iso=effective_iso,
+            )
+            out_rcpt = dict(out_proj.get("receipt") or out_proj.get("last_receipt") or {})
+            withdrawn_ids = list(out_rcpt.get("withdrawn_ids") or [])
+    except v03_eco.V03EcologyError:
+        return None
+
+    if illness_rcpt is None and not withdrawn_ids:
+        return None
+
+    prev_phase = str(illness_rcpt.get("previous_phase") or ill_phase) if illness_rcpt else ill_phase
+    cur_phase = str(illness_rcpt.get("phase") or ill_phase) if illness_rcpt else ill_phase
+    return {
+        "illness_advanced": illness_rcpt is not None,
+        "neglect_strain_recorded": neglect_strain_recorded,
+        "previous_phase": prev_phase,
+        "phase": cur_phase,
+        "phase_changed": prev_phase != cur_phase,
+        "withdrawn_expired_outbound": withdrawn_ids,
+        "llm_calls": 0,
+    }
+
+
+def _maybe_tick_v04_neighborhood(
+    root_path: Path,
+    now_iso: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Advance existing v0.4 neighborhood processes (cloth drying, journey, holds, notices) with 0 LLM calls.
+
+    Strictly zero-write when ``world/v04_neighborhood_state.json`` is absent on disk.
+    """
+
+    nb_candidates = (
+        root_path / "world" / "v04_neighborhood_state.json",
+        root_path / "phone" / "v04_neighborhood_state.json",
+    )
+    if not any(p.exists() or p.is_symlink() for p in nb_candidates):
+        return None
+
+    try:
+        from components.world.scripts.v04_neighborhood_living import (
+            advance_v04_neighborhood_processes,
+        )
+    except Exception:  # pragma: no cover
+        try:
+            from v04_neighborhood_living import (  # type: ignore[no-redef]
+                advance_v04_neighborhood_processes,
+            )
+        except Exception:
+            return None
+
+    effective_iso = now_iso or _now_iso()
+    try:
+        report = advance_v04_neighborhood_processes(root_path, now_iso=effective_iso)
+    except Exception:
+        return None
+    if not isinstance(report, Mapping):
+        return None
+    out = dict(report)
+    out.setdefault("llm_calls", 0)
+    return out
+
+
+def _maybe_tick_autonomy_rhythm(
+    root_path: Path,
+    now_iso: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Promote due ``QUEUED_ON_PHONE`` deferred replies to ``READY_TO_REPLY`` with 0 LLM calls.
+
+    Strictly zero-write when ``phone/autonomy_rhythm.json`` is absent or has no due items.
+    """
+
+    rhythm_path = root_path / "phone" / "autonomy_rhythm.json"
+    if rhythm_path.is_symlink() or not rhythm_path.exists() or not rhythm_path.is_file():
+        return None
+
+    try:
+        from components.phone.autonomy_rhythm_view import tick_autonomy_rhythm_readiness
+    except Exception:  # pragma: no cover
+        return None
+
+    try:
+        return tick_autonomy_rhythm_readiness(root_path, now_iso=now_iso)
+    except Exception:
+        return None
+
+
+def _atomic_write_json_0600(path: Path, payload: Mapping[str, Any]) -> None:
+    if path.exists() and path.is_symlink():
+        raise RuntimeError("SYMLINK_FORBIDDEN")
+    parent = path.parent
+    if parent.exists() and parent.is_symlink():
+        raise RuntimeError("SYMLINK_FORBIDDEN")
+    encoded = (json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(parent))
+    tmp_path = Path(tmp_name)
+    try:
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
+def _parse_any_iso_utc(raw: Any) -> Optional[datetime]:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    txt = raw.strip()
+    if txt.endswith("Z"):
+        txt = txt[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(txt)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _maybe_tick_everyday_desires(
+    root_path: Path,
+    now_iso: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Advance TTL/decay on existing ``everyday_desires.json`` ONLY when already present & due.
+
+    Never creates ``everyday_desires.json`` when absent and performs zero disk writes when
+    no item has due TTL expiration or decay.
+    """
+
+    candidates = (
+        root_path / "phone" / "everyday_desires.json",
+        root_path / "life" / "everyday_desires.json",
+    )
+    existing_paths = [
+        p
+        for p in candidates
+        if not p.is_symlink()
+        and p.exists()
+        and p.is_file()
+        and not (p.parent.exists() and p.parent.is_symlink())
+    ]
+    if not existing_paths:
+        return None
+
+    effective_iso = now_iso or _now_iso()
+    now_dt = _parse_any_iso_utc(effective_iso)
+    if now_dt is None:
+        return None
+
+    total_faded = 0
+    total_decayed = 0
+    updated_paths: list[str] = []
+    last_rev = 0
+
+    for cand in existing_paths:
+        try:
+            raw_doc = json.loads(cand.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(raw_doc, dict):
+            continue
+
+        doc = json.loads(json.dumps(raw_doc))
+        file_faded = 0
+        file_decayed = 0
+
+        # 1. Standard everyday_desire_lifecycle.v1 turn_only_buffer TTL sweep
+        if isinstance(doc.get("turn_only_buffer"), list):
+            kept_buf: list[dict[str, Any]] = []
+            for item in doc["turn_only_buffer"]:
+                if not isinstance(item, Mapping):
+                    file_faded += 1
+                    continue
+                exp_dt = _parse_any_iso_utc(item.get("expires_at") or item.get("ttl_until"))
+                if exp_dt is not None and now_dt >= exp_dt:
+                    file_faded += 1
+                else:
+                    kept_buf.append(dict(item))
+            if file_faded > 0:
+                doc["turn_only_buffer"] = kept_buf
+                doc["naturally_faded_count"] = int(doc.get("naturally_faded_count") or 0) + file_faded
+
+        # 2. Optional TTL / decay sweep on recurring_pool / desires / items lists
+        for list_key in ("recurring_pool", "desires", "items", "active_desires"):
+            raw_list = doc.get(list_key)
+            if not isinstance(raw_list, list):
+                continue
+            next_list: list[Any] = []
+            for entry in raw_list:
+                if not isinstance(entry, Mapping):
+                    next_list.append(entry)
+                    continue
+                row = dict(entry)
+                st = str(row.get("status") or "active").strip().lower()
+                if st in ("faded", "expired", "resolved", "settled", "dropped"):
+                    next_list.append(row)
+                    continue
+                exp_dt = _parse_any_iso_utc(row.get("expires_at") or row.get("ttl_until"))
+                if exp_dt is not None and now_dt >= exp_dt:
+                    if list_key == "recurring_pool":
+                        file_faded += 1
+                        continue
+                    row["status"] = "faded"
+                    row["faded_at"] = effective_iso
+                    file_faded += 1
+                    next_list.append(row)
+                    continue
+                decay_rate = row.get("decay_per_hour")
+                intensity = row.get("intensity")
+                if (
+                    isinstance(decay_rate, (int, float))
+                    and not isinstance(decay_rate, bool)
+                    and float(decay_rate) > 0.0
+                    and isinstance(intensity, (int, float))
+                    and not isinstance(intensity, bool)
+                    and float(intensity) > 0.0
+                ):
+                    anchor_dt = _parse_any_iso_utc(
+                        row.get("updated_at") or row.get("created_at") or doc.get("updated_at")
+                    )
+                    if anchor_dt is not None and now_dt > anchor_dt:
+                        elapsed_h = (now_dt - anchor_dt).total_seconds() / 3600.0
+                        if elapsed_h > 0.0:
+                            new_int = round(max(0.0, float(intensity) - float(decay_rate) * elapsed_h), 4)
+                            if new_int != round(float(intensity), 4):
+                                row["intensity"] = new_int
+                                row["updated_at"] = effective_iso
+                                if new_int <= 0.0:
+                                    row["status"] = "faded"
+                                    row["faded_at"] = effective_iso
+                                    file_faded += 1
+                                else:
+                                    file_decayed += 1
+                next_list.append(row)
+            doc[list_key] = next_list
+            if list_key == "recurring_pool" and file_faded > 0 and "turn_only_buffer" not in raw_doc:
+                doc["naturally_faded_count"] = int(doc.get("naturally_faded_count") or 0) + file_faded
+
+        if file_faded > 0 or file_decayed > 0:
+            next_rev = int(doc.get("revision") or 0) + 1
+            doc["revision"] = next_rev
+            doc["updated_at"] = effective_iso
+            try:
+                _atomic_write_json_0600(cand, doc)
+            except Exception:
+                continue
+            total_faded += file_faded
+            total_decayed += file_decayed
+            updated_paths.append(str(cand))
+            last_rev = next_rev
+
+    if not updated_paths:
+        return None
+
+    return {
+        "ok": True,
+        "changed": True,
+        "faded_count": total_faded,
+        "decayed_count": total_decayed,
+        "updated_paths": updated_paths,
+        "revision": last_rev,
+        "updated_at": effective_iso,
+        "llm_calls": 0,
+    }
+
+
+def run_v03_background_clock_tick(
+    root: Path,
+    *,
+    now_iso: Optional[str] = None,
+    force_init: bool = False,
+) -> dict[str, Any]:
+    """Advance 0.3/v0.4 deterministic world clock & slow variables with ``llm_calls == 0``.
+
+    When ``force_init=False`` and ``v03_clock_state.json`` is absent on disk, no new
+    JSON state file is created so clean/uninitialized directories remain 100% zero-write.
+    """
+
+    try:
+        from components.life.scripts.v03_clock_evaporation import (
+            mutate_v03_clock_view,
+            v03_clock_state_path,
+        )
+    except Exception:  # pragma: no cover
+        from v03_clock_evaporation import (  # type: ignore[no-redef]
+            mutate_v03_clock_view,
+            v03_clock_state_path,
+        )
+
+    root_path = Path(root)
+    clock_path = v03_clock_state_path(root_path)
+    clock_exists = clock_path.exists() or clock_path.is_symlink()
+
+    if not force_init and not clock_exists:
+        eco_report = _maybe_tick_v03_ecology(root_path, now_iso)
+        nb_report = _maybe_tick_v04_neighborhood(root_path, now_iso)
+        rhythm_report = _maybe_tick_autonomy_rhythm(root_path, now_iso)
+        desire_report = _maybe_tick_everyday_desires(root_path, now_iso)
+        if (
+            eco_report is None
+            and nb_report is None
+            and rhythm_report is None
+            and desire_report is None
+        ):
+            return {
+                "ok": True,
+                "status": "skipped_uninitialized",
+                "root": str(root_path),
+                "llm_calls": 0,
+                "model_called": False,
+                "slices_ticked": [],
+                "settled_slow_vars": 0,
+                "evaporated_count": 0,
+                "faded_missing_notes": 0,
+                "unknown_actions_guessed": 0,
+                "cognitive_backfill_count": 0,
+            }
+        ticked_only: list[str] = []
+        settled_only = 0
+        if eco_report is not None:
+            ticked_only.append("v03_ecology")
+            settled_only += (
+                (1 if (eco_report.get("phase_changed") or eco_report.get("neglect_strain_recorded")) else 0)
+                + len(eco_report.get("withdrawn_expired_outbound") or [])
+            )
+        if nb_report is not None:
+            ticked_only.append("v04_neighborhood")
+            settled_only += int(nb_report.get("settled_count") or nb_report.get("changes_count") or (1 if nb_report.get("changed") else 0))
+        if rhythm_report is not None:
+            ticked_only.append("autonomy_rhythm")
+            settled_only += int(rhythm_report.get("promoted_count") or 1)
+        if desire_report is not None:
+            ticked_only.append("everyday_desires")
+            settled_only += int(
+                desire_report.get("faded_count")
+                or desire_report.get("decayed_count")
+                or 1
+            )
+        partial_out: dict[str, Any] = {
+            "ok": True,
+            "status": "ticked",
+            "http_status": 200,
+            "root": str(root_path),
+            "at": now_iso or _now_iso(),
+            "llm_calls": 0,
+            "model_called": False,
+            "slices_ticked": ticked_only,
+            "settled_slow_vars": settled_only,
+            "evaporated_count": 0,
+            "faded_missing_notes": 0,
+            "unknown_actions_guessed": 0,
+            "cognitive_backfill_count": 0,
+        }
+        if eco_report is not None:
+            partial_out["ecology_receipt"] = eco_report
+        if nb_report is not None:
+            partial_out["v04_neighborhood_receipt"] = nb_report
+        if rhythm_report is not None:
+            partial_out["autonomy_rhythm_receipt"] = rhythm_report
+        if desire_report is not None:
+            partial_out["everyday_desires_receipt"] = desire_report
+        return partial_out
+
+    http_status, clock_envelope = mutate_v03_clock_view(
+        root_path,
+        {"action": "advance_projection", "sync_v02": True},
+        actor_side="subject",
+        now_iso=now_iso,
+    )
+    if not clock_envelope.get("ok"):
+        reason_code = str(clock_envelope.get("reason_code") or "CLOCK_TICK_REJECTED")
+        return {
+            "ok": False,
+            "status": str(clock_envelope.get("status") or "rejected"),
+            "http_status": int(http_status),
+            "reason_code": reason_code,
+            "reason": reason_code,
+            "root": str(root_path),
+            "llm_calls": 0,
+            "model_called": False,
+            "slices_ticked": [],
+            "settled_slow_vars": 0,
+            "evaporated_count": 0,
+            "faded_missing_notes": 0,
+            "unknown_actions_guessed": 0,
+            "cognitive_backfill_count": 0,
+        }
+
+    clock_data = dict(clock_envelope.get("data") or {})
+    action_receipt = dict(clock_data.get("action_receipt") or {})
+    committed_at = str(
+        action_receipt.get("to_at")
+        or ((clock_data.get("clocks") or {}).get("wall_clock") or {}).get("now_iso")
+        or now_iso
+        or _now_iso()
+    )
+    slices_ticked = ["v03_clock"]
+    settled_slow_vars = int(action_receipt.get("settled_slow_vars") or 0)
+
+    eco_report = _maybe_tick_v03_ecology(root_path, committed_at)
+    if eco_report is not None:
+        slices_ticked.append("v03_ecology")
+        settled_slow_vars += (
+            (1 if (eco_report.get("phase_changed") or eco_report.get("neglect_strain_recorded")) else 0)
+            + len(eco_report.get("withdrawn_expired_outbound") or [])
+        )
+
+    nb_report = _maybe_tick_v04_neighborhood(root_path, committed_at)
+    if nb_report is not None:
+        slices_ticked.append("v04_neighborhood")
+        settled_slow_vars += int(
+            nb_report.get("settled_count")
+            or nb_report.get("changes_count")
+            or (1 if nb_report.get("changed") else 0)
+        )
+
+    rhythm_report = _maybe_tick_autonomy_rhythm(root_path, committed_at)
+    if rhythm_report is not None:
+        slices_ticked.append("autonomy_rhythm")
+        settled_slow_vars += int(rhythm_report.get("promoted_count") or 1)
+
+    desire_report = _maybe_tick_everyday_desires(root_path, committed_at)
+    if desire_report is not None:
+        slices_ticked.append("everyday_desires")
+        settled_slow_vars += int(
+            desire_report.get("faded_count")
+            or desire_report.get("decayed_count")
+            or 1
+        )
+
+    out: dict[str, Any] = {
+        "ok": True,
+        "status": "ticked",
+        "http_status": int(http_status),
+        "root": str(root_path),
+        "at": committed_at,
+        "revision": int(clock_data.get("revision") or 0),
+        "llm_calls": 0,
+        "model_called": False,
+        "slices_ticked": slices_ticked,
+        "elapsed_seconds": int(action_receipt.get("elapsed_seconds") or 0),
+        "settled_slow_vars": settled_slow_vars,
+        "evaporated_count": int(action_receipt.get("evaporated_count") or 0),
+        "faded_missing_notes": int(action_receipt.get("faded_missing_notes") or 0),
+        "ambient_date_switched": bool(action_receipt.get("ambient_date_switched", False)),
+        "unknown_actions_guessed": 0,
+        "cognitive_backfill_count": 0,
+        "cognitive_backfill_forbidden": True,
+        "pending_unknown_count": len(
+            ((clock_data.get("iron_laws") or {}).get("pending_unknown_actions") or [])
+        ),
+        "v02_synced_slices": list(
+            ((action_receipt.get("v02_sync") or {}).get("synced_slices") or [])
+        ),
+        "clock_receipt": action_receipt,
+    }
+    if eco_report is not None:
+        out["ecology_receipt"] = eco_report
+    if nb_report is not None:
+        out["v04_neighborhood_receipt"] = nb_report
+    if rhythm_report is not None:
+        out["autonomy_rhythm_receipt"] = rhythm_report
+    if desire_report is not None:
+        out["everyday_desires_receipt"] = desire_report
+    return out
+
+
+def _start_v03_clock_heartbeat(
+    root: Path,
+    stop: threading.Event,
+    interval_seconds: Optional[float] = None,
+) -> Optional[threading.Thread]:
+    """Start a lightweight zero-LLM background daemon thread gated on ``stop.wait(interval)``."""
+
+    interval = _resolve_v03_clock_interval(interval_seconds)
+    if interval <= 0.0 or stop.is_set():
+        return None
+
+    root_path = Path(root)
+
+    def _loop() -> None:
+        while not stop.wait(interval):
+            if stop.is_set():
+                break
+            try:
+                run_v03_background_clock_tick(root_path, force_init=False)
+            except Exception:
+                pass
+
+    worker = threading.Thread(
+        target=_loop,
+        name="nyairo-v03-clock-heartbeat",
+        daemon=True,
+    )
+    worker.start()
+    return worker
+
+
+def _serve_forever(root: Path, port: int, *, room_living: bool = False,
+                   world_gate: str = DEFAULT_WORLD_GATE,
+                   ambient_events: bool = False,
+                   v03_clock_interval: Optional[float] = None) -> int:
+    """The child process: the existing ``demo.serve_instance`` plus a clean stop event."""
 
     from components.phone import demo
 
@@ -740,19 +1466,27 @@ def _serve_forever(root: Path, port: int, *, room_living: bool = False,
             "root": str(root), "started_at": _now_iso(), "status": "RUNNING",
             "ready_at": _now_iso(), "url": announcement.get("url"),
             "model_enabled": False, "room_living": bool(room_living),
-            "world_actions": bool(world_actions), "ambient_events": bool(ambient_events),
+            "world_gate": str(world_gate), "world_actions": str(world_gate) != "off",
+            "ambient_events": bool(ambient_events),
             "foreground": True,
             "log": str(_log_path(root)),
         })
         sys.stdout.write("服务就绪，尚未开始自主活动。\n")
         sys.stdout.flush()
 
-    gate = "canonical" if world_actions else None
+    gate = str(world_gate or DEFAULT_WORLD_GATE).strip().lower()
+    if gate not in WORLD_GATES:
+        gate = DEFAULT_WORLD_GATE
+    heartbeat_thread: Optional[threading.Thread] = None
     try:
+        heartbeat_thread = _start_v03_clock_heartbeat(
+            root, stop, interval_seconds=v03_clock_interval
+        )
         demo.serve_instance(root, port=int(port), stop_event=stop, on_ready=_on_ready,
                             room_living=bool(room_living),
                             ambient_events=bool(ambient_events),
-                            # 本地工具动作只在显式要求时对**本进程树**开启；默认 off 不变。
+                            # 日常入口按自己的 gate 对**本进程树**开启本地世界动作；显式
+                            # off 会作为 off 传给子进程，不被外部环境或旧实例特征改回去。
                             world_intent_gate=gate,
                             # 用户入口允许“停止后立刻重新打开同一端口”：只放过 TIME_WAIT，
                             # 不会让第二个活着的服务抢同一端口。旧调用方默认仍是不复用。
@@ -769,6 +1503,9 @@ def _serve_forever(root: Path, port: int, *, room_living: bool = False,
         sys.stdout.flush()
         return EXIT_REFUSED
     finally:
+        stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=1.0)
         ready = _read_json(_ready_path(root))
         if str(ready.get("pid")) == str(os.getpid()):
             try:
@@ -786,20 +1523,22 @@ def _serve_forever(root: Path, port: int, *, room_living: bool = False,
 
 
 def _spawn_background(root: Path, port: int, *, room_living: bool = False,
-                      world_actions: bool = False,
-                      ambient_events: bool = False
+                      world_gate: str = DEFAULT_WORLD_GATE,
+                      ambient_events: bool = False,
+                      v03_clock_interval: Optional[float] = None
                       ) -> tuple[Optional[subprocess.Popen], str]:
     log_path = _log_path(root)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     handle = log_path.open("a", encoding="utf-8")
     command = [sys.executable, "-B", str(Path(__file__).resolve()), "_serve",
-               "--root", str(root), "--port", str(port)]
+               "--root", str(root), "--port", str(port),
+               "--world-gate", str(world_gate)]
     if room_living:
         command.append("--room-living")
-    if world_actions:
-        command.append("--world-actions")
     if ambient_events:
         command.append("--ambient-events")
+    if v03_clock_interval is not None:
+        command.extend(["--v03-clock-interval", str(float(v03_clock_interval))])
     try:
         child = subprocess.Popen(
             command,
@@ -810,7 +1549,8 @@ def _spawn_background(root: Path, port: int, *, room_living: bool = False,
     _write_json(_record_path(root), {
         "schema": SCHEMA_RECORD, "pid": child.pid, "port": int(port), "root": str(root),
         "started_at": _now_iso(), "status": "STARTING", "model_enabled": False,
-        "room_living": bool(room_living), "world_actions": bool(world_actions),
+        "room_living": bool(room_living), "world_gate": str(world_gate),
+        "world_actions": str(world_gate) != "off",
         "ambient_events": bool(ambient_events),
         "log": str(log_path),
     })
@@ -877,7 +1617,13 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     config = dict(prepared.get("config") or _managed_config(root))
     room_living = _resolve_run_switch(args, "room_living", config.get("room_living"))
-    world_actions = _resolve_run_switch(args, "world_actions", config.get("world_actions"))
+    try:
+        world_gate = _resolve_world_gate(args, config.get("world_gate"))
+        v03_clock_interval = getattr(args, "v03_clock_interval", None)
+        if v03_clock_interval is not None:
+            _resolve_v03_clock_interval(v03_clock_interval)
+    except RuntimeError as exc:
+        return _refuse(_reason_of(exc), str(exc), as_json=json_output)
     ambient_events = _resolve_run_switch(args, "ambient_events", config.get("ambient_events"))
 
     port = int(getattr(args, "port", None) or DEFAULT_PORT)
@@ -887,19 +1633,21 @@ def cmd_start(args: argparse.Namespace) -> int:
                        as_json=json_output)
     # The run switches are this entry's own small preference: record them before
     # serving so a same-root restart (including foreground Ctrl-C) keeps them.
-    _persist_run_switches(root, room_living=room_living, world_actions=world_actions,
+    _persist_run_switches(root, room_living=room_living, world_gate=world_gate,
                           ambient_events=ambient_events)
 
     if getattr(args, "foreground", False):
         sys.stdout.write("正在启动（前台；Ctrl-C 停止）…\n")
         sys.stdout.flush()
         return _serve_forever(root, port, room_living=room_living,
-                              world_actions=world_actions,
-                              ambient_events=ambient_events)
+                              world_gate=world_gate,
+                              ambient_events=ambient_events,
+                              v03_clock_interval=v03_clock_interval)
 
     child, log_path = _spawn_background(root, port, room_living=room_living,
-                                        world_actions=world_actions,
-                                        ambient_events=ambient_events)
+                                        world_gate=world_gate,
+                                        ambient_events=ambient_events,
+                                        v03_clock_interval=v03_clock_interval)
     if not _wait_ready(child, root, port):
         tail = _log_tail(log_path)
         record = _read_json(_record_path(root))
@@ -924,7 +1672,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     record.update({"status": "RUNNING", "ready_at": _now_iso(),
                    "url": _urls(port)["手机页面"], "model_enabled": False,
                    "room_living": bool(room_living),
-                   "world_actions": bool(world_actions),
+                   "world_gate": str(world_gate), "world_actions": str(world_gate) != "off",
                    "ambient_events": bool(ambient_events)})
     _write_json(_record_path(root), record)
     _emit(record, as_json=json_output, text=_start_text(root, port, already=False))
@@ -1468,10 +2216,16 @@ def cmd_run_day(args: argparse.Namespace) -> int:
 
     config = _managed_config(root) if _is_managed(root) else {}
     ambient_events = _resolve_run_switch(args, "ambient_events", config.get("ambient_events"))
-    if _is_managed(root) and getattr(args, "ambient_events", None) is not None:
+    try:
+        world_gate = _resolve_world_gate(args, config.get("world_gate"))
+    except RuntimeError as exc:
+        return _refuse(_reason_of(exc), str(exc), as_json=json_output)
+    if _is_managed(root) and (getattr(args, "ambient_events", None) is not None
+                              or getattr(args, "world_gate", None) is not None
+                              or getattr(args, "world_actions", None) is not None):
         _persist_run_switches(root,
                               room_living=bool(config.get("room_living")),
-                              world_actions=bool(config.get("world_actions")),
+                              world_gate=world_gate,
                               ambient_events=ambient_events)
 
     from components.phone import live_day
@@ -1483,8 +2237,9 @@ def cmd_run_day(args: argparse.Namespace) -> int:
         % (duration, requests))
     sys.stdout.flush()
     try:
-        _run_overrides = ({"WORLD_BODY_INTENT_MUTATION_GATE": "canonical"}
-                          if config.get("world_actions") else None)
+        # 显式 gate 值总传给真实的 serve/resident 环境：默认 canonical 让日常能出门，
+        # 显式 off 也必须真的覆盖，而不是只改父进程后又被实例特征改回去。
+        _run_overrides = {"WORLD_BODY_INTENT_MUTATION_GATE": world_gate}
         report = live_day.run_segment(
             root, duration_seconds=int(duration), max_new_requests=int(requests),
             poll_seconds=2, act=True, start_services=live_day.SERVICE_AUTO,
@@ -1508,6 +2263,53 @@ def cmd_run_day(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------------------------
+# one offline / manual deterministic 0.3 clock tick (zero LLM calls)
+# ---------------------------------------------------------------------------------------------
+
+
+def _clock_tick_text(report: Mapping[str, Any]) -> str:
+    if report.get("status") == "skipped_uninitialized":
+        return (
+            "0.3 时钟状态尚未初始化（磁盘上没有 v03_clock_state.json，本次未写入任何文件，模型调用 0 次）。\n"
+            "如果需要显式初始化并推进，请加上 --force-init。"
+        )
+    slices = ",".join(str(s) for s in (report.get("slices_ticked") or [])) or "none"
+    return (
+        "0.3 确定性时钟已推进至 %s（切片：%s）：结算慢变量 %s 项，自然蒸发闪念 %s 条，"
+        "未决动作猜测 %s 项（模型调用 0 次）。"
+        % (
+            report.get("at") or "-",
+            slices,
+            report.get("settled_slow_vars", 0),
+            report.get("evaporated_count", 0),
+            report.get("unknown_actions_guessed", 0),
+        )
+    )
+
+
+def cmd_clock_tick(args: argparse.Namespace) -> int:
+    root = Path(args.root).expanduser()
+    json_output = bool(getattr(args, "json", False))
+    if not root.is_absolute():
+        return _refuse("ROOT_NOT_ABSOLUTE", "实例目录要写绝对路径",
+                       as_json=json_output, extra={"llm_calls": 0})
+    if root.exists() and not root.is_dir():
+        return _refuse("ROOT_NOT_A_DIRECTORY", "这个路径不是目录",
+                       as_json=json_output, extra={"llm_calls": 0})
+    report = run_v03_background_clock_tick(
+        root,
+        now_iso=getattr(args, "now", None),
+        force_init=bool(getattr(args, "force_init", False)),
+    )
+    if not report.get("ok"):
+        reason = str(report.get("reason_code") or report.get("reason") or "CLOCK_TICK_REJECTED")
+        _emit(report, as_json=json_output, text=None if json_output else _human(reason))
+        return EXIT_REFUSED
+    _emit(report, as_json=json_output, text=None if json_output else _clock_tick_text(report))
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------------------------
 
@@ -1526,6 +2328,9 @@ def _add_creation_options(parser: argparse.ArgumentParser) -> None:
                         dest="lived_needs_thirst", help="explicit initial thirst 0..1 (default 0)")
     parser.add_argument("--lived-needs-toilet", type=float, default=None,
                         dest="lived_needs_toilet", help="explicit initial toilet 0..1 (default 0)")
+    parser.add_argument("--starter-reading", action="store_true", dest="starter_reading",
+                        help="when the package declares no reading material, give the new root "
+                             "a deterministic theme+seed starter reading (explicit opt-in)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1559,10 +2364,15 @@ def build_parser() -> argparse.ArgumentParser:
                        help="显式开启世界环境事件（同步传入 World/Phone 与后续 run-day）；默认沿用本实例上次选择")
     start.add_argument("--no-ambient-events", action="store_false", dest="ambient_events",
                        help="显式关闭世界环境事件")
+    start.add_argument("--world-gate", choices=WORLD_GATES, default=None, dest="world_gate",
+                       help="本地世界动作 gate（日常默认 canonical；off 显式关闭）")
     start.add_argument("--world-actions", action="store_true", dest="world_actions", default=None,
-                       help="显式允许本进程树的本地世界动作（临时 canonical；默认 gate off）")
+                       help="旧写法：等同于 --world-gate canonical")
     start.add_argument("--no-world-actions", action="store_false", dest="world_actions",
-                       help="显式关闭本地世界动作")
+                       help="旧写法：等同于 --world-gate off")
+    start.add_argument("--v03-clock-interval", type=float, default=None,
+                       dest="v03_clock_interval",
+                       help="0.3 后台确定性时钟推进间隔秒数（默认读 NYAIRO_V03_CLOCK_INTERVAL 或 60 秒；<=0 不启线程）")
     start.add_argument("--foreground", action="store_true", help="前台运行，Ctrl-C 停止")
     start.add_argument("--json", action="store_true")
     start.set_defaults(handler=cmd_start)
@@ -1596,6 +2406,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="显式为本次运行开启世界环境事件；不写时沿用本实例上次 start/run-day 的选择（默认关闭）")
     run.add_argument("--no-ambient-events", action="store_false", dest="ambient_events",
                      help="显式关闭世界环境事件")
+    run.add_argument("--world-gate", choices=WORLD_GATES, default=None, dest="world_gate",
+                     help="本次日常运行的世界动作 gate（默认 canonical）")
+    run.add_argument("--world-actions", action="store_true", dest="world_actions", default=None,
+                     help="旧写法：等同于 --world-gate canonical")
+    run.add_argument("--no-world-actions", action="store_false", dest="world_actions",
+                     help="旧写法：等同于 --world-gate off")
     run.add_argument("--json", action="store_true")
     run.set_defaults(handler=cmd_run_day)
 
@@ -1603,6 +2419,16 @@ def build_parser() -> argparse.ArgumentParser:
     stop.add_argument("--root", required=True)
     stop.add_argument("--json", action="store_true")
     stop.set_defaults(handler=cmd_stop)
+
+    clock_tick = sub.add_parser("clock-tick",
+                                help="单步推进一次 0.3 零模型调用确定性时钟（默认只推进已有状态文件）")
+    clock_tick.add_argument("--root", required=True)
+    clock_tick.add_argument("--now", default=None, dest="now",
+                            help="可选的带时区 ISO-8601 时间戳（默认当前 UTC 时间）")
+    clock_tick.add_argument("--force-init", action="store_true", dest="force_init",
+                            help="磁盘尚无 v03_clock_state.json 时显式初始化并推进")
+    clock_tick.add_argument("--json", action="store_true")
+    clock_tick.set_defaults(handler=cmd_clock_tick)
     return parser
 
 
@@ -1614,13 +2440,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         internal.add_argument("--root", required=True)
         internal.add_argument("--port", type=int, required=True)
         internal.add_argument("--room-living", action="store_true", dest="room_living")
-        internal.add_argument("--world-actions", action="store_true", dest="world_actions")
+        internal.add_argument("--world-gate", choices=WORLD_GATES, default=DEFAULT_WORLD_GATE,
+                              dest="world_gate")
         internal.add_argument("--ambient-events", action="store_true", dest="ambient_events")
+        internal.add_argument("--v03-clock-interval", type=float, default=None,
+                              dest="v03_clock_interval")
         parsed = internal.parse_args(arguments[1:])
         return _serve_forever(Path(parsed.root).expanduser(), int(parsed.port),
                               room_living=bool(parsed.room_living),
-                              world_actions=bool(parsed.world_actions),
-                              ambient_events=bool(parsed.ambient_events))
+                              world_gate=str(parsed.world_gate),
+                              ambient_events=bool(parsed.ambient_events),
+                              v03_clock_interval=parsed.v03_clock_interval)
     parser = build_parser()
     try:
         args = parser.parse_args(arguments)

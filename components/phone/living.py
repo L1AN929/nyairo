@@ -49,9 +49,12 @@ SCHEMA_WINDOW = "phone.living.window.v1"
 #: Fallback ceiling when the persisted LifeRequestBudget has no configured day/window ceiling.
 FUNCTION_REQUEST_CAP = 96
 #: One explicit window is bounded by both the order and ``live_day``'s own ceiling.
-MAX_WINDOW_SECONDS = 600
-MAX_WINDOW_REQUESTS = 4
+MAX_WINDOW_SECONDS = 3600
+MAX_WINDOW_REQUESTS = 12
+LOW_BUDGET_MAX_WINDOW_SECONDS = 300
+LOW_BUDGET_MAX_WINDOW_REQUESTS = 2
 DEFAULT_WINDOW_SECONDS = 120
+GOVERNANCE_DORMANT_PAUSE_REASON = "governance:dormant_no_cognition"
 
 WINDOW_FILENAME = "usable-window.json"
 SUPERVISOR_FILENAME = "usable-supervisor.json"
@@ -285,19 +288,140 @@ def _ledger_capacity(ledger: Mapping[str, Any],
     }
 
 
+def _governance_window_policy(root: Path | str, state_root: Optional[Path] = None) -> dict[str, Any]:
+    """Read v0.2 governance mode (DORMANT_NO_COGNITION / LOW_BUDGET_CONSERVATION) with zero writes."""
+    raw_root = Path(root)
+    p_root = phone_life.phone_root(raw_root)
+    candidates: list[Path] = [
+        raw_root / "phone" / "v02_runtime_migration.json",
+        raw_root / "v02_runtime_migration.json",
+        p_root / "v02_runtime_migration.json",
+        p_root / "phone" / "v02_runtime_migration.json",
+    ]
+    if p_root.name in ("phone", "phone_instance", "one-day"):
+        candidates.append(p_root.parent / "phone" / "v02_runtime_migration.json")
+        candidates.append(p_root.parent / "v02_runtime_migration.json")
+    if state_root is not None:
+        sr = Path(state_root)
+        candidates.append(sr / "v02_runtime_migration.json")
+        if sr.name in ("state", "life-state", "life_state"):
+            candidates.append(sr.parent / "phone" / "v02_runtime_migration.json")
+            if sr.parent.name == "life":
+                candidates.append(sr.parent.parent / "phone" / "v02_runtime_migration.json")
+
+    mode_token = "NORMAL"
+    budget_scale_pct = 100
+    for cand in candidates:
+        if cand.is_file():
+            doc = _read_json(cand)
+            mc = doc.get("mode_config") if isinstance(doc.get("mode_config"), Mapping) else {}
+            raw_mode = str(mc.get("mode") or doc.get("mode") or "NORMAL").strip().upper()
+            if raw_mode:
+                mode_token = raw_mode
+            scale_val = _int_or_none(mc.get("budget_scale_pct"))
+            if scale_val is not None:
+                budget_scale_pct = max(0, min(100, scale_val))
+            break
+
+    if mode_token in ("DORMANT", "DORMANT_NO_COGNITION"):
+        return {
+            "governance_mode": "DORMANT_NO_COGNITION",
+            "governance_paused": True,
+            "window_tightened": True,
+            "budget_scale_pct": 0,
+            "effective_max_window_seconds": 0,
+            "effective_max_window_requests": 0,
+            "reason": "DORMANT_NO_COGNITION_PAUSED",
+        }
+    if mode_token in ("LOW_BUDGET", "CONSERVATION", "LOW_BUDGET_CONSERVATION"):
+        return {
+            "governance_mode": "LOW_BUDGET_CONSERVATION",
+            "governance_paused": False,
+            "window_tightened": True,
+            "budget_scale_pct": budget_scale_pct,
+            "effective_max_window_seconds": LOW_BUDGET_MAX_WINDOW_SECONDS,
+            "effective_max_window_requests": LOW_BUDGET_MAX_WINDOW_REQUESTS,
+            "reason": None,
+        }
+    return {
+        "governance_mode": "NORMAL_AUTONOMY",
+        "governance_paused": False,
+        "window_tightened": False,
+        "budget_scale_pct": budget_scale_pct,
+        "effective_max_window_seconds": MAX_WINDOW_SECONDS,
+        "effective_max_window_requests": MAX_WINDOW_REQUESTS,
+        "reason": None,
+    }
+
+
+def sync_governance_mode(root: Path | str, mode: str, *, budget_scale_pct: int = 100,
+                         reason: str = "") -> dict[str, Any]:
+    """Synchronize v0.2 governance mode into living pause/tightened window controls."""
+    upper_mode = str(mode or "NORMAL").strip().upper()
+    _, state_root = _bound_environment(root, None)
+    if state_root is None:
+        # Also detect direct <day_root>/life/state or <day_root>/life-state when phone instance is unconfigured
+        raw_root = Path(root)
+        for cand_sr in (raw_root / "life" / "state", raw_root / "life-state"):
+            if cand_sr.is_dir():
+                state_root = cand_sr
+                break
+
+    pause_synced = False
+    if state_root is not None and state_root.is_dir():
+        try:
+            import life_pause
+
+            current_pause = dict(life_pause.read(state_root))
+            if upper_mode in ("DORMANT", "DORMANT_NO_COGNITION"):
+                life_pause.set_paused(state_root, True, reason=GOVERNANCE_DORMANT_PAUSE_REASON)
+                pause_synced = True
+            elif bool(current_pause.get("paused")) and str(
+                current_pause.get("reason") or ""
+            ).startswith(GOVERNANCE_DORMANT_PAUSE_REASON):
+                life_pause.set_paused(state_root, False, reason="governance:resumed_from_dormant")
+                pause_synced = True
+        except Exception:
+            pause_synced = False
+
+    policy = _governance_window_policy(root, state_root)
+    return {
+        "synced": True,
+        "pause_synced": pause_synced,
+        "governance_mode": policy["governance_mode"],
+        "governance_paused": policy["governance_paused"],
+        "window_tightened": policy["window_tightened"],
+        "effective_max_window_seconds": policy["effective_max_window_seconds"],
+        "effective_max_window_requests": policy["effective_max_window_requests"],
+        "reason_note": str(reason or "")[:120],
+    }
+
+
 def window_status(root: Path | str, *, environment: Optional[Mapping[str, str]] = None
                   ) -> dict[str, Any]:
     env, state_root = _bound_environment(root, environment)
     ledger = ledger_view(env, state_root)
     doc = _read_window_doc(root, state_root)
     cap_info = _ledger_capacity(ledger, env)
+    gov = _governance_window_policy(root, state_root)
+    eff_max_sec = int(gov["effective_max_window_seconds"])
+    eff_max_req = int(gov["effective_max_window_requests"])
+    remaining = 0 if gov["governance_paused"] else cap_info["remaining"]
+    reason = gov["reason"] or cap_info["reason"]
     return {
         "schema": SCHEMA_WINDOW,
         "function_cap": cap_info["cap"],
-        "max_window_seconds": MAX_WINDOW_SECONDS,
-        "max_window_requests": MAX_WINDOW_REQUESTS,
+        "max_window_seconds": eff_max_sec if gov["window_tightened"] else MAX_WINDOW_SECONDS,
+        "max_window_requests": eff_max_req if gov["window_tightened"] else MAX_WINDOW_REQUESTS,
+        "ceiling_window_seconds": MAX_WINDOW_SECONDS,
+        "ceiling_window_requests": MAX_WINDOW_REQUESTS,
+        "effective_max_window_seconds": eff_max_sec,
+        "effective_max_window_requests": eff_max_req,
+        "governance_mode": gov["governance_mode"],
+        "governance_paused": gov["governance_paused"],
+        "window_tightened": gov["window_tightened"],
         "used": cap_info["used"],
-        "remaining": cap_info["remaining"],
+        "remaining": remaining,
         "stored_high": _int_or_none(doc.get("used_high")) or 0,
         "calculated_from_ledger": cap_info["used"] if cap_info["readable"] else None,
         "baseline": _int_or_none(doc.get("ledger_baseline_run_window_calls")),
@@ -306,7 +430,7 @@ def window_status(root: Path | str, *, environment: Optional[Mapping[str, str]] 
         "windows": list(doc.get("windows") or [])[-8:],
         "last_window": doc.get("last_window"),
         "baseline_lost": False,
-        "reason": cap_info["reason"],
+        "reason": reason,
         "note": ("配额直接读取实例持久请求账本（当日与运行窗口上限），"
                  "重启不会清零，跨日按账本自然轮转；账本损坏读不到时拒绝启动"),
     }
@@ -365,17 +489,33 @@ def run_bounded_window(
 
     duration = _int_or_none(duration_seconds)
     requested = _int_or_none(max_new_requests)
-    if duration is None or duration <= 0 or duration > MAX_WINDOW_SECONDS:
+    gov_early = _governance_window_policy(root, None)
+    if gov_early["governance_paused"]:
+        return _refused("DORMANT_NO_COGNITION_PAUSED",
+                        "governance mode is DORMANT_NO_COGNITION; cognition windows are paused")
+    eff_sec_limit = int(gov_early["effective_max_window_seconds"])
+    eff_req_limit = int(gov_early["effective_max_window_requests"])
+    if duration is None or duration <= 0 or duration > eff_sec_limit:
         return _refused("DURATION_OUT_OF_RANGE", "duration_seconds must be 1..%d"
-                        % MAX_WINDOW_SECONDS)
-    if requested is None or requested <= 0 or requested > MAX_WINDOW_REQUESTS:
+                        % eff_sec_limit)
+    if requested is None or requested <= 0 or requested > eff_req_limit:
         return _refused("REQUEST_CAP_OUT_OF_RANGE", "max_new_requests must be 1..%d"
-                        % MAX_WINDOW_REQUESTS)
+                        % eff_req_limit)
 
     env, state_root = _bound_environment(root, environment)
     if state_root is None:
         return _refused("NESTED_LIFE_INSTANCE_MISSING",
                         "this phone root has no nested Life instance")
+    gov_bound = _governance_window_policy(root, state_root)
+    if gov_bound["governance_paused"]:
+        return _refused("DORMANT_NO_COGNITION_PAUSED",
+                        "governance mode is DORMANT_NO_COGNITION; cognition windows are paused")
+    if duration > int(gov_bound["effective_max_window_seconds"]):
+        return _refused("DURATION_OUT_OF_RANGE", "duration_seconds must be 1..%d"
+                        % int(gov_bound["effective_max_window_seconds"]))
+    if requested > int(gov_bound["effective_max_window_requests"]):
+        return _refused("REQUEST_CAP_OUT_OF_RANGE", "max_new_requests must be 1..%d"
+                        % int(gov_bound["effective_max_window_requests"]))
 
     try:
         with _window_lock(root):
@@ -598,13 +738,18 @@ class Supervisor:
                      max_new_requests: Any = 1) -> dict[str, Any]:
         duration = _int_or_none(duration_seconds)
         requested = _int_or_none(max_new_requests)
-        if duration is None or duration <= 0 or duration > MAX_WINDOW_SECONDS:
-            return _refused("DURATION_OUT_OF_RANGE", "duration_seconds must be 1..%d"
-                            % MAX_WINDOW_SECONDS)
-        if requested is None or requested <= 0 or requested > MAX_WINDOW_REQUESTS:
-            return _refused("REQUEST_CAP_OUT_OF_RANGE", "max_new_requests must be 1..%d"
-                            % MAX_WINDOW_REQUESTS)
         budget = window_status(self.root, environment=self.environment)
+        if budget.get("governance_paused"):
+            return _refused("DORMANT_NO_COGNITION_PAUSED",
+                            "governance mode is DORMANT_NO_COGNITION; cognition windows are paused")
+        eff_sec_limit = int(budget.get("effective_max_window_seconds") or MAX_WINDOW_SECONDS)
+        eff_req_limit = int(budget.get("effective_max_window_requests") or MAX_WINDOW_REQUESTS)
+        if duration is None or duration <= 0 or duration > eff_sec_limit:
+            return _refused("DURATION_OUT_OF_RANGE", "duration_seconds must be 1..%d"
+                            % eff_sec_limit)
+        if requested is None or requested <= 0 or requested > eff_req_limit:
+            return _refused("REQUEST_CAP_OUT_OF_RANGE", "max_new_requests must be 1..%d"
+                            % eff_req_limit)
         ledger = dict(budget.get("ledger") or {})
         if str(ledger.get("state") or "") not in ("ok", "absent"):
             return _refused("LEDGER_UNREADABLE",
@@ -706,7 +851,8 @@ def _stopped_reason(report: Mapping[str, Any]) -> tuple[bool, str]:
 
 def _phase(summary: Mapping[str, Any], report: Mapping[str, Any],
            pause: Mapping[str, Any], window: Mapping[str, Any],
-           foreground: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+           foreground: Optional[Mapping[str, Any]] = None,
+           governance: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
     running, run_reason = _stopped_reason(report)
     doing = dict(summary.get("doing") or {})
     pause_block = dict(doing.get("pause") or {})
@@ -716,6 +862,9 @@ def _phase(summary: Mapping[str, Any], report: Mapping[str, Any],
     status_word = str(doing.get("status_word") or "")
     child = dict(window.get("child") or {})
     child_alive = bool(child.get("alive"))
+    gov = dict(governance or {})
+    if gov.get("governance_paused"):
+        return {"key": "paused", "basis": "DORMANT_NO_COGNITION"}
     if paused is True:
         return {"key": "paused", "basis": "OPERATOR_PAUSE"}
     if running and status_word == "PAUSED":
@@ -761,6 +910,8 @@ def _sentence(phase: Mapping[str, Any], summary: Mapping[str, Any],
             return "她正在%s，有一件活动还在进行。" % place_text
         return "她有一件活动正在进行，但读不到她现在的位置。"
     if key == "paused":
+        if phase.get("basis") == "DORMANT_NO_COGNITION":
+            return "当前处于休眠托管档（DORMANT_NO_COGNITION）：后台认知与运行窗口已暂停，不补造经历。"
         if phase.get("basis") == "OPERATOR_PAUSE":
             return "运行已被明确暂停：不会开始新的决定，也不会发出新的请求。"
         if phase.get("basis") == "ACTIVITY_PAUSED_NOT_RUNNING":
@@ -827,8 +978,12 @@ def living_view(
     pause = (window.get("paused") if supervisor is not None else None) or pause_state(root_path)
     state_root = report.get("state_root")
     foreground = _foreground_activity(state_root)
-    phase = _phase(summary, report, pause, window, foreground)
     bound_env, _state_root = _bound_environment(root_path, environment)
+    governance = _governance_window_policy(
+        root,
+        Path(str(state_root)) if state_root else _state_root,
+    )
+    phase = _phase(summary, report, pause, window, foreground, governance)
     memory = _memory_block(service, bound_env)
     reading = _reading_block(service)
     stop = dict(summary.get("stop_point") or {})
@@ -881,8 +1036,9 @@ def living_view(
                 "reason": report.get("reason"),
             },
             "pause": pause,
+            "governance": governance,
             "window": window,
-            "capacity": window.get("windows") or window_status(root_path),
+            "capacity": window.get("windows") or window_status(root),
             "supervisor": {
                 "attached": bool(window.get("running")),
                 "pid": window.get("pid"),

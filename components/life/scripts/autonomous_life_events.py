@@ -217,29 +217,194 @@ class WorldOpportunityFeed:
                  "detail": "reachable set changed"}]
 
 
+def _resolve_day_root_from_feeds(feeds: Iterable[Any], explicit_day_root: Optional[Path | str]) -> Optional[Path]:
+    if explicit_day_root is not None:
+        return Path(explicit_day_root)
+    for feed in feeds:
+        if feed is None:
+            continue
+        mem = getattr(feed, "memory", None)
+        mem_path = getattr(mem, "path", None)
+        if isinstance(mem_path, Path):
+            state_dir = mem_path.parent
+            if state_dir.name == "state":
+                return state_dir.parent
+            return state_dir
+    return None
+
+
+def _build_default_wake_coalescer(
+    *,
+    hourly_wake_cap: Optional[int] = None,
+    daily_wake_cap: Optional[int] = None,
+    coalesce_window_seconds: Optional[int] = None,
+) -> Any:
+    try:
+        import v02_runtime_governance_migration as v02_rgm
+
+        kwargs: dict[str, Any] = {}
+        if hourly_wake_cap is not None:
+            kwargs["hourly_wake_cap"] = int(hourly_wake_cap)
+        if daily_wake_cap is not None:
+            kwargs["daily_wake_cap"] = int(daily_wake_cap)
+        if coalesce_window_seconds is not None:
+            kwargs["coalesce_window_seconds"] = int(coalesce_window_seconds)
+        return v02_rgm.SemanticWakeCoalescer(**kwargs)
+    except Exception:
+        return None
+
+
+def _sync_coalescer_governance_mode(coalescer: Any, day_root: Optional[Path]) -> None:
+    if coalescer is None or day_root is None:
+        return
+    mig_path = Path(day_root) / "state" / "v02_runtime_migration.json"
+    if not mig_path.is_file():
+        return
+    try:
+        raw = json.loads(mig_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(raw, Mapping):
+        return
+    mode_cfg = raw.get("mode_config")
+    if isinstance(mode_cfg, Mapping) and isinstance(getattr(coalescer, "state", None), dict):
+        target_cfg = coalescer.state.setdefault("mode_config", {})
+        if isinstance(target_cfg, dict):
+            for key in ("mode", "budget_scale_pct", "reason_cn", "dormant_since"):
+                if key in mode_cfg:
+                    target_cfg[key] = mode_cfg[key]
+
+
+def _classify_event_for_coalescer(item: Mapping[str, Any]) -> tuple[str, str, bool, str]:
+    kind = str(item.get("kind") or "").strip()
+    ref = str(item.get("ref") or "").strip()
+    detail = str(item.get("detail") or kind or "event_wake").strip()
+
+    if (
+        kind == EVENT_RESUME_ELIGIBILITY_OPENED
+        or bool(item.get("is_control", False))
+        or str(item.get("lane") or "").strip() == "control"
+    ):
+        family = str(item.get("family") or f"resume_eligibility:{ref or 'open'}")
+        return family, detail, True, "control"
+
+    lane = str(item.get("lane") or "background").strip() or "background"
+    if kind == EVENT_ARTIFACT_CHANGED:
+        artifact_id = ref.split(":", 1)[0] if ":" in ref else (ref or "unknown_artifact")
+        family = str(item.get("family") or f"artifact_changed:{artifact_id}")
+        return family, detail, False, lane
+
+    if kind == EVENT_WORLD_OPPORTUNITY:
+        family = str(item.get("family") or "world_opportunity")
+        return family, detail, False, lane
+
+    family = str(item.get("family") or (kind.lower() if kind else "ambient_generic"))
+    return family, detail, False, lane
+
+
 class EventFeedPoller:
-    """Runs the feeds and hands only the real, fresh events to the runner."""
+    """Runs the feeds and hands only the real, fresh, coalesced events to the runner."""
 
-    def __init__(self, feeds: Iterable[Any]) -> None:
+    def __init__(
+        self,
+        feeds: Iterable[Any],
+        *,
+        coalescer: Any = None,
+        enable_coalescer: bool = True,
+        day_root: Optional[Path | str] = None,
+        hourly_wake_cap: Optional[int] = None,
+        daily_wake_cap: Optional[int] = None,
+        coalesce_window_seconds: Optional[int] = None,
+    ) -> None:
         self.feeds = list(feeds)
+        self.enable_coalescer = bool(enable_coalescer)
+        self.day_root: Optional[Path] = _resolve_day_root_from_feeds(self.feeds, day_root)
+        self.coalescer: Any = (
+            coalescer
+            if coalescer is not None
+            else (
+                _build_default_wake_coalescer(
+                    hourly_wake_cap=hourly_wake_cap,
+                    daily_wake_cap=daily_wake_cap,
+                    coalesce_window_seconds=coalesce_window_seconds,
+                )
+                if self.enable_coalescer
+                else None
+            )
+        )
         self.last_errors: list[dict[str, Any]] = []
+        self.last_coalesced_events: list[dict[str, Any]] = []
+        self.last_routing_decisions: list[dict[str, Any]] = []
 
-    def poll(self) -> list[dict[str, Any]]:
-        events: list[dict[str, Any]] = []
+    def coalesce_events(
+        self,
+        raw_events: Iterable[Mapping[str, Any]],
+        *,
+        now_iso: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Deduplicate and backpressure wake events through SemanticWakeCoalescer."""
+        items = [dict(ev) for ev in raw_events if isinstance(ev, Mapping)]
+        self.last_coalesced_events = []
+        self.last_routing_decisions = []
+        if not self.enable_coalescer or self.coalescer is None:
+            return items
+
+        resolved_day_root = _resolve_day_root_from_feeds(self.feeds, self.day_root)
+        _sync_coalescer_governance_mode(self.coalescer, resolved_day_root)
+
+        admitted: list[dict[str, Any]] = []
+        for item in items:
+            family, summary_cn, is_control, lane = _classify_event_for_coalescer(item)
+            ev_now_iso = item.get("now_iso") or now_iso
+            if ev_now_iso is None:
+                occ = item.get("occurred_at")
+                if isinstance(occ, str) and occ.strip():
+                    ev_now_iso = occ.strip()
+            try:
+                decision = self.coalescer.route_event(
+                    family=family,
+                    summary_cn=summary_cn,
+                    is_control=is_control,
+                    lane=lane,
+                    now_iso=ev_now_iso,
+                )
+            except Exception:
+                # If a caller supplied a non-ISO occurred_at, fall back to wall-clock routing.
+                decision = self.coalescer.route_event(
+                    family=family,
+                    summary_cn=summary_cn,
+                    is_control=is_control,
+                    lane=lane,
+                    now_iso=now_iso,
+                )
+            self.last_routing_decisions.append(decision)
+            if bool(decision.get("effective_wake", True)):
+                admitted.append(item)
+            else:
+                suppressed = dict(item)
+                suppressed["wake_disposition"] = decision.get("wake_disposition")
+                suppressed["wake_reason"] = decision.get("wake_reason")
+                self.last_coalesced_events.append(suppressed)
+        return admitted
+
+    def poll(self, *, now_iso: Optional[str] = None) -> list[dict[str, Any]]:
+        raw_events: list[dict[str, Any]] = []
         self.last_errors = []
         for feed in self.feeds:
+            if feed is None:
+                continue
             for item in feed.poll():
                 if item.get("kind") == "FEED_UNAVAILABLE":
                     self.last_errors.append(item)
                     continue
-                events.append(item)
-        return events
+                raw_events.append(item)
+        return self.coalesce_events(raw_events, now_iso=now_iso)
 
-    def wake(self, runner: Any, *, act: bool = True) -> list[Any]:
-        """Hand each fresh event to the runner.  The runner's own dedupe still applies."""
+    def wake(self, runner: Any, *, act: bool = True, now_iso: Optional[str] = None) -> list[Any]:
+        """Hand each fresh, coalesced event to the runner.  The runner's own dedupe still applies."""
 
         records = []
-        for event in self.poll():
+        for event in self.poll(now_iso=now_iso):
             records.append(runner.wake_on_event(event, act=act))
         return records
 
@@ -253,7 +418,8 @@ def feeds_from_environment(environment: Mapping[str, str], *, coordinator: Any =
     Supply owner has no artifact feed, and that is the honest state of affairs.
     """
 
-    root = Path(state_root or environment.get("CHIYO_LIFE_INSTALL_ROOT") or "./data/life") / "state"
+    base_root = Path(state_root or environment.get("CHIYO_LIFE_INSTALL_ROOT") or "./data/life")
+    root = base_root / "state"
     feeds: list[Any] = []
     if coordinator is not None:
         feeds.append(ResumeEligibilityFeed(coordinator, root))
@@ -262,7 +428,7 @@ def feeds_from_environment(environment: Mapping[str, str], *, coordinator: Any =
                                         subject_id=environment.get("NYA02_SUBJECT")))
     if world_provider is not None:
         feeds.append(WorldOpportunityFeed(world_provider, root))
-    return EventFeedPoller(feeds)
+    return EventFeedPoller(feeds, day_root=base_root)
 
 
 __all__ = [

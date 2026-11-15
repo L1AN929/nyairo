@@ -56,10 +56,10 @@ class ReadingConditionSameHeadRunnerTest(unittest.TestCase):
 
     def test_reading_paused_and_another_work_holds_the_slot(self) -> None:
         read = self.summary["read"]
-        self.assertEqual(read["state"], "EXHAUSTED", read)
+        self.assertEqual(read["state"], "WORK_NO_CHANGE_CONFIRMED", read)
         pause = self.summary["pause_a"]
         self.assertEqual(pause["decision"], "PAUSE", pause)
-        self.assertEqual(pause["offered_source"], "READING_MATERIAL_NEXT_VERSION", pause)
+        self.assertEqual(pause["offered_source"], "WORK_HEAD_AFTER_NO_CHANGE", pause)
         self.assertEqual(pause["condition_status"], "PENDING", pause)
         self.assertEqual(pause["eligibilities"], 0, pause)
         start_b = self.summary["start_b"]

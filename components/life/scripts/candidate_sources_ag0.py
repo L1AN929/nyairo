@@ -108,6 +108,128 @@ VALID_CANDIDATE_SOURCE_KINDS = frozenset(
     }
 )
 
+#: Deterministic tie-break order for the global round cap.  It is a *reading order*
+#: over the same authoritative set above (continuity and the subject's own work
+#: first), never a priority: every non-empty source takes one turn per round, so
+#: the order only decides who gets the last seat when the cap cuts a round short.
+#: If a source is ever added to ``VALID_CANDIDATE_SOURCE_KINDS`` without being
+#: listed here, it is appended in sorted order by ``candidate_source_round_order``
+#: rather than silently dropped.
+CANDIDATE_SOURCE_KIND_ORDER = (
+    SOURCE_CURRENT_ACTIVITY,
+    SOURCE_RESUME_ELIGIBLE,
+    SOURCE_BLOCKED_ACTIVITY,
+    SOURCE_USER_REQUEST,
+    SOURCE_COMMITMENT,
+    SOURCE_EXPLICIT_GOAL,
+    SOURCE_PERSONAL_OPPORTUNITY,
+    SOURCE_WORLD_OPPORTUNITY,
+)
+
+
+def candidate_source_round_order() -> tuple[str, ...]:
+    """The authority set in a stable order, with any new member appended sorted."""
+
+    ordered = list(CANDIDATE_SOURCE_KIND_ORDER)
+    ordered.extend(sorted(VALID_CANDIDATE_SOURCE_KINDS - set(ordered)))
+    return tuple(ordered)
+
+
+#: The World owner's own target namespaces.  Used *only* to keep one representative of each
+#: non-empty action category when the round cap has to cut inside the World bucket, and to
+#: decide which category's *surplus* yields first.  It is not a ranking and not a priority: a
+#: category is read from the candidate's own target ref, and a category the round did not
+#: offer is never synthesized.
+WORLD_ACTION_CATEGORY_PREFIXES = (
+    "dailyact:arrange:",
+    "dailyact:toggle_fixture:",
+    "dailyact:pick_up:",
+    "dailyact:place:",
+    "bodyact:pose:",
+    "bodyact:rest:",
+    "stay:",
+    "place:",
+    "object:",
+    "buy:",
+)
+
+#: Which category a World cut yields room from first, read from the *least droppable* end.
+#: This is the same substitutability policy the World offer already uses when it must bound
+#: itself (``world_move_opportunity_source._bound_world_opportunities`` trims stays, then
+#: poses, then moves, then arrange, then toggle): a quiet stay and a posture are interchangeable
+#: flavours of "being here", while a destination, a purchase or the one fixture toggle are not.
+#: A resource-bound order -- never a value ranking: the same set of choices stays offered, only
+#: the surplus of the most substitutable category is what a cap cut takes.
+WORLD_ACTION_CATEGORY_KEEP_ORDER = (
+    "buy:",
+    "object:",
+    "bodyact:rest:",
+    "dailyact:place:",
+    "dailyact:pick_up:",
+    "dailyact:toggle_fixture:",
+    "dailyact:arrange:",
+    "place:",
+    "bodyact:pose:",
+    "stay:",
+)
+
+
+def candidate_action_category(candidate: "CandidateRecord") -> str:
+    """The action category one CandidateRecord belongs to (for intra-source fair truncation).
+
+    A WORLD_OPPORTUNITY candidate names the World owner's own verb namespace in its target
+    ref (``dailyact:toggle_fixture:``, ``dailyact:arrange:``, ``stay:``, ``place:`` ...), so
+    that namespace *is* its category.  Every other source keeps one category per
+    ``(source_kind, candidate_kind)`` pair -- an Artifact continuation and a due future item
+    are different offers even though they share one source.  A World candidate whose
+    namespace is not in the table is its own ``world:`` bucket rather than being silently
+    folded into another category.
+    """
+
+    if str(getattr(candidate, "source_kind", "")) == SOURCE_WORLD_OPPORTUNITY:
+        for ref in getattr(candidate, "target_refs", ()) or ():
+            for prefix in WORLD_ACTION_CATEGORY_PREFIXES:
+                if str(ref).startswith(prefix):
+                    return prefix
+        return "world:other"
+    return "%s:%s" % (
+        getattr(candidate, "source_kind", ""),
+        getattr(candidate, "candidate_kind", ""),
+    )
+
+
+def category_fair_order(candidates: Sequence["CandidateRecord"]) -> list["CandidateRecord"]:
+    """Order one source's members so a cap cut keeps every non-empty category's first member.
+
+    Every category's first member (in ``candidate_id`` order) is placed ahead of any second
+    member, so a category that offered a single candidate can never be erased while another
+    category keeps several.  The *surplus* members follow in the fixed World keep order
+    (``WORLD_ACTION_CATEGORY_KEEP_ORDER``, most substitutable last; other sources fall back
+    to the sorted category key), so when a source has to give up members it is the tail of the
+    most substitutable category that yields -- never a destination, a purchase or the only
+    fixture toggle while a quiet stay still has spares.  Deterministic: it depends only on the
+    set, never on input order.
+    """
+
+    if not candidates:
+        return []
+    buckets: dict[str, list[CandidateRecord]] = {}
+    for candidate in candidates:
+        buckets.setdefault(candidate_action_category(candidate), []).append(candidate)
+    for bucket in buckets.values():
+        bucket.sort(key=lambda item: item.candidate_id)
+
+    firsts = [buckets[key][0] for key in sorted(buckets)]
+    keep_rank = {key: index for index, key in enumerate(WORLD_ACTION_CATEGORY_KEEP_ORDER)}
+    surplus_keys = sorted(
+        (key for key, bucket in buckets.items() if len(bucket) > 1),
+        key=lambda key: (keep_rank.get(key, len(keep_rank)), key),
+    )
+    extras: list[CandidateRecord] = []
+    for key in surplus_keys:
+        extras.extend(buckets[key][1:])
+    return firsts + extras
+
 # Deferred or permanently forbidden Candidate Sources in AG-0 (Sections 3-6, 48-51, 76)
 FORBIDDEN_CANDIDATE_SOURCE_KINDS = frozenset(
     {
@@ -1659,7 +1781,13 @@ class ResumeEligibleCandidateSource(CandidateSourceAdapter):
 
     @classmethod
     def _artifact_target_refs(cls, act: Mapping[str, Any]) -> list[str]:
-        """The Artifact refs the Activity itself binds, in the same fields ``materialize`` reads."""
+        """The Artifact refs the Activity itself binds, in the same fields ``materialize`` reads.
+
+        A reading Activity's checkpoint is ``artifact:<doc>:page:<n>`` -- a *position*, not the
+        owner's artifact id -- so it must not be handed to ``read_artifact`` as if it were one.
+        Only an id-shaped ref (``artifact:<segment>``) is treated as a source-existence question;
+        the remaining refs are still carried by ``materialize`` for the candidate itself.
+        """
 
         refs: list[str] = []
         for field in ("subject_refs", "target_ref", "checkpoint_ref"):
@@ -1667,9 +1795,15 @@ class ResumeEligibleCandidateSource(CandidateSourceAdapter):
             values = raw if isinstance(raw, (list, tuple)) else [raw]
             for value in values:
                 text = str(value or "")
-                if text.startswith(cls.ARTIFACT_TARGET_PREFIX) and text not in refs:
-                    refs.append(text)
+                if not text.startswith(cls.ARTIFACT_TARGET_PREFIX) or text in refs:
+                    continue
+                if field == "checkpoint_ref" and not cls._ARTIFACT_ID_SHAPED.fullmatch(text):
+                    continue
+                refs.append(text)
         return refs
+
+    #: ``artifact:<one segment>`` -- the owner's own id shape; ``:page:2``/``:v3`` are not ids.
+    _ARTIFACT_ID_SHAPED = re.compile(r"^artifact:[A-Za-z0-9_.-]+$")
 
     def _target_source_refusal(self, act: Mapping[str, Any]) -> Optional[str]:
         """Can the owner still prove this Activity's Artifact target is there?
@@ -3130,6 +3264,59 @@ class CandidateMaterializer:
                     )
         return invalidated_now
 
+    @staticmethod
+    def bounded_candidates_by_source(
+        candidates: Sequence[CandidateRecord], cap: int
+    ) -> list[CandidateRecord]:
+        """Fit the global round cap without letting one source erase every other.
+
+        ``candidates`` is already deduplicated and deterministically sorted.  When it
+        fits, it is returned unchanged.  Otherwise each non-empty ``source_kind`` --
+        the authoritative set ``VALID_CANDIDATE_SOURCE_KINDS``, in the stable reading
+        order ``candidate_source_round_order()`` -- takes one turn per round until the
+        cap is reached.  A source with nothing this round contributes nothing (no
+        synthetic filler), and if the number of non-empty sources ever exceeds the cap
+        the result degrades to a deterministic prefix rather than pretending every
+        source is guaranteed a seat.
+
+        Inside a source the same fairness applies one level down: its members are
+        ordered by ``category_fair_order``, so when the cap cuts a source that offered
+        several *action categories* -- a World observation really offers stays, a move,
+        poses, pick-up, arrange and a fixture toggle at once -- the dropped tail is the
+        surplus of the most substitutable category, never a category's only
+        representative.  Without this, a whole category (e.g. the one ``TOGGLE_FIXTURE``
+        opportunity in an otherwise full home round) could vanish from a round purely
+        because its ``candidate_id`` hash happened to sort last.
+
+        The round-robin decides *which* candidates fit; the returned list is sorted by
+        ``candidate_id`` again so serialization, hashing and equality stay independent
+        of the take-turn order.
+        """
+
+        if len(candidates) <= cap:
+            return list(candidates)
+
+        buckets: dict[str, list[CandidateRecord]] = {}
+        for candidate in candidates:
+            buckets.setdefault(str(candidate.source_kind), []).append(candidate)
+        for source_kind, bucket in buckets.items():
+            buckets[source_kind] = category_fair_order(bucket)
+
+        order = candidate_source_round_order()
+        selected: list[CandidateRecord] = []
+        longest = max((len(bucket) for bucket in buckets.values()), default=0)
+        for round_index in range(longest):
+            for source_kind in order:
+                bucket = buckets.get(source_kind)
+                if not bucket or round_index >= len(bucket):
+                    continue
+                selected.append(bucket[round_index])
+                if len(selected) >= cap:
+                    selected.sort(key=lambda item: item.candidate_id)
+                    return selected
+        selected.sort(key=lambda item: item.candidate_id)
+        return selected
+
     def build_candidate_set(
         self,
         *,
@@ -3160,9 +3347,12 @@ class CandidateMaterializer:
         deduped, target_index = self.deduplicate_candidates(raw_candidates)
         self._target_provenance_index = target_index
 
-        # 4. Enforce global cap (Section 38 & 80: resource cap only, never value ranking)
+        # 4. Enforce global cap (Section 38 & 80: resource cap only, never value ranking).
+        # The cap is a resource bound, so the seats are shared deterministically across
+        # the admitted sources instead of one prolific source (for example the World's
+        # many local opportunities) taking every seat from continuity/resume.
         global_truncated = len(deduped) > self.global_cap
-        bounded_candidates = deduped[: self.global_cap]
+        bounded_candidates = self.bounded_candidates_by_source(deduped, self.global_cap)
 
         # 5. Store active candidates and mark any previously OPEN candidate not in current valid set as STALE
         current_open_ids = {c.candidate_id for c in bounded_candidates}
@@ -3408,6 +3598,7 @@ __all__ = [
     "SOURCE_BLOCKED_ACTIVITY",
     "CANDIDATE_KIND_BLOCKED_ACTIVITY",
     "CANDIDATE_KIND_CONSIDER_PERSONAL_OPPORTUNITY",
+    "CANDIDATE_SOURCE_KIND_ORDER",
     "ADAPTER_STATUS_DISABLED",
     "ADAPTER_STATUS_PARTIAL",
     "ADAPTER_STATUS_READY",
@@ -3437,6 +3628,9 @@ __all__ = [
     "CandidateReadService",
     "CandidateRecord",
     "CandidateReplayVerifier",
+    "candidate_action_category",
+    "candidate_source_round_order",
+    "category_fair_order",
     "CandidateSet",
     "CandidateSourceAdapter",
     "CandidateSourceError",

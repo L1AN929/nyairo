@@ -23,10 +23,14 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+#: 业务日界唯一权威（19 章 §一.4）：与世界日历/预算同源的业务时区标签来源。
+import business_day_key as _bdk
+
 CHIYO_WORLD_PACKAGE_ENV = "CHIYO_WORLD_PACKAGE"
 
 SHIOMI_WORLD_ID = "shiomi_city"
-SHIOMI_TIMEZONE = "Asia/Tokyo"
+#: 业务日界唯一权威（19 章 §一.4）：与世界日历/预算同源的业务时区标签。
+SHIOMI_TIMEZONE = _bdk.DEFAULT_BUSINESS_TZ_LABEL
 SHIOMI_ROUTE_REVISION = "shiomi-walk-v1"
 SHIOMI_HOME_LOCATION_ID = "home"
 SHIOMI_HOME_AREA_ID = "bedroom"

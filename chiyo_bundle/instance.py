@@ -10,13 +10,15 @@ def install_paths():
         sys.path.insert(0,str(p))
 
 class Instance:
-    def __init__(self,state,*,owner='local-owner',memory=False,life=False,tools=False,host_llm=None,cognition_shadow=False,world_socket=None,supply_socket=None,supply_subject=None,environment=None):
+    def __init__(self,state,*,owner='local-owner',memory=False,life=False,tools=False,host_llm=None,cognition_shadow=False,world_socket=None,supply_socket=None,supply_subject=None,environment=None,discovery_cfg=None,discovery_home=None):
         if not isinstance(owner,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}',owner):raise ValueError('owner must be a 1–128 character ASCII identifier, starting with a letter or digit')
         if memory and tools:raise ValueError('memory profiles cannot enable arbitrary host tools')
         self.environment=dict(os.environ if environment is None else environment)
         self.state=Path(state).expanduser().resolve();self.state.mkdir(parents=True,exist_ok=True,mode=0o700)
         os.chmod(self.state,0o700)
         self.owner=owner;self.memory=memory;self.life=life;self.counter=0;self.supply_subject=supply_subject
+        self._discovery_cfg=dict(discovery_cfg) if isinstance(discovery_cfg,dict) else {}
+        self._discovery_home=Path(discovery_home).expanduser().resolve() if discovery_home else None
         self.requests=None;self.life_wrapper=None
         try:
             self._assemble(tools=tools,host_llm=host_llm,cognition_shadow=cognition_shadow,
@@ -92,8 +94,25 @@ class Instance:
         else:env['CHIYO_NATIVE_LIFE_ENABLED']='false'
         if supply_socket:
             sys.path.insert(0,str(ROOT/'components/life/scripts'))
-            from life_supply_candidate_source import LifeSupplyReadClient
-            self.native._life_supply_client=LifeSupplyReadClient(str(Path(supply_socket).expanduser().resolve()),timeout=0.3)
+            from life_supply_candidate_source import LifeSupplyReadClient,LifeSupplyUnavailable
+            refresher=self.refresh_live_endpoints
+            class _HotReconnectSupplyClient(LifeSupplyReadClient):
+                def __init__(self,socket_path,timeout=0.3):
+                    super().__init__(socket_path,timeout=timeout)
+                    self._refresh_callback=refresher
+                def list_personal_opportunities(self,subject):
+                    if not os.path.exists(str(self.socket_path)):
+                        try:refresher()
+                        except Exception:pass
+                    try:
+                        return super().list_personal_opportunities(subject)
+                    except LifeSupplyUnavailable:
+                        try:refreshed=bool(refresher(force=True))
+                        except Exception:refreshed=False
+                        if refreshed:
+                            return super().list_personal_opportunities(subject)
+                        raise
+            self.native._life_supply_client=_HotReconnectSupplyClient(str(Path(supply_socket).expanduser().resolve()),timeout=0.3)
         self.runtime,self.life_wrapper=wire_runtime(self.native,environment=env)
         if self.life_wrapper and self.life_wrapper.load_error:raise RuntimeError('Life could not acquire its independent owner')
         # E11.1: the read-only life projection the chat turn may use.  It reads only through
@@ -110,9 +129,40 @@ class Instance:
                 self.life_projection=life_projection_from_paths(
                     runtime=life_runtime,supply_socket=supply_socket,subject_id=supply_subject,
                     evidence_db=paths['m0_db'],controls_db=str(control))
+                ap=getattr(self.life_projection,'artifact_port',None)
+                if ap is not None and callable(getattr(ap,'_call',None)):
+                    orig_ap_call=ap._call
+                    def _hot_ap_call(request,_orig=orig_ap_call,_ap=ap,_ref=self.refresh_live_endpoints):
+                        if not os.path.exists(str(_ap.socket_path)):
+                            try:_ref()
+                            except Exception:pass
+                        try:
+                            return _orig(request)
+                        except Exception:
+                            try:refreshed=bool(_ref(force=True))
+                            except Exception:refreshed=False
+                            if refreshed:
+                                return _orig(request)
+                            raise
+                    ap._call=_hot_ap_call
                 self.native.life_projection=self.life_projection
             except Exception:
                 self.life_projection=None
+        wb=getattr(self.native,'world_body',None)
+        if wb is not None and callable(getattr(wb,'_call_once',None)):
+            orig_wb_call=wb._call_once
+            def _hot_wb_call(command,argument=None,*,timeout=None,_orig=orig_wb_call,_wb=wb,_ref=self.refresh_live_endpoints):
+                if not os.path.exists(str(_wb.socket_path)):
+                    try:_ref()
+                    except Exception:pass
+                res=_orig(command,argument,timeout=timeout)
+                if getattr(res,'outcome',None)=='UNAVAILABLE' and getattr(res,'reason',None) in ('socket_missing','connect_refused','socket_error'):
+                    try:refreshed=bool(_ref(force=True))
+                    except Exception:refreshed=False
+                    if refreshed:
+                        return _orig(command,argument,timeout=timeout)
+                return res
+            wb._call_once=_hot_wb_call
         if cognition_shadow:
             if not self.life_wrapper:raise RuntimeError('Cognition Shadow requires the Life owner')
             adapter=self.life_wrapper._adapter
@@ -130,6 +180,54 @@ class Instance:
                         if datetime.fromisoformat(item['valid_until'])>datetime.now(timezone.utc):
                             adapter._RUNTIME.user_request_source.ingest_typed_event(ObservedUserRequestEvent(**item))
                     except (ValueError,KeyError,TypeError):pass
+
+    def refresh_live_endpoints(self,cfg=None,*,force=False):
+        from .live_endpoints import resolve_live_endpoints
+        active_cfg=dict(self._discovery_cfg)
+        if self._discovery_home is not None:
+            cfg_file=self._discovery_home/'chiyo/config.json'
+            if cfg_file.is_file():
+                try:
+                    loaded=json.loads(cfg_file.read_text(encoding='utf8'))
+                    if isinstance(loaded,dict):active_cfg=loaded
+                except Exception:
+                    pass
+        if isinstance(cfg,dict):
+            active_cfg=dict(cfg)
+            self._discovery_cfg=dict(cfg)
+        cur_supply=str(getattr(getattr(self.native,'_life_supply_client',None),'socket_path','') or '') or None
+        wb=getattr(self.native,'world_body',None)
+        cur_world=str(wb.socket_path) if wb is not None and getattr(wb,'socket_path',None) else None
+        ep=resolve_live_endpoints(active_cfg,supply_socket=cur_supply,
+            supply_subject=self.supply_subject,world_socket=cur_world,prefer_instance=bool(force))
+        changed=False
+        if not self.supply_subject and ep.get('supply_subject'):
+            self.supply_subject=ep['supply_subject']
+            changed=True
+        new_supply=ep.get('supply_socket')
+        supply_alive=False
+        if new_supply:
+            resolved_supply=str(Path(new_supply).expanduser().resolve())
+            supply_alive=os.path.exists(resolved_supply)
+            client=getattr(self.native,'_life_supply_client',None)
+            if client is not None and str(client.socket_path)!=resolved_supply:
+                client.socket_path=resolved_supply
+                changed=True
+            ap=getattr(getattr(self,'life_projection',None),'artifact_port',None)
+            if ap is not None and str(ap.socket_path)!=resolved_supply:
+                ap.socket_path=resolved_supply
+                changed=True
+        new_world=ep.get('world_socket')
+        world_alive=False
+        if new_world and wb is not None:
+            resolved_world=Path(new_world).expanduser().resolve()
+            world_alive=os.path.exists(str(resolved_world))
+            if Path(wb.socket_path)!=resolved_world:
+                wb.socket_path=resolved_world
+                if isinstance(getattr(wb,'environment',None),dict):
+                    wb.environment['WORLD_BODY_SOCKET']=str(resolved_world)
+                changed=True
+        return bool(changed or (force and (supply_alive or world_alive)))
 
     def form_evidence(self):
         # Conservative episodic organisation costs no model call and invents no understanding.

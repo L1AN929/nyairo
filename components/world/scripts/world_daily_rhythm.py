@@ -8,15 +8,18 @@ import json
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any, Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import world_runtime_data as wrd
+#: 业务日界唯一权威（19 章 §一.4）：默认时区与预算同源（固定偏移 +08:00，可配置）。
+#: 19 章 §一.4 之前这里硬编码 ``Asia/Tokyo``，与 ``life_request_budget`` 的业务日界
+#: 在 23:00-24:00（UTC+8）之间错位一个日；现统一引用 ``business_day_key``。
+import business_day_key as _bdk
 
 FEATURE_ENV = "CHIYO_WORLD_DAILY_RHYTHM_ENABLED"
 WORLD_ID = "shiomi_city"
-WORLD_TIMEZONE = "Asia/Tokyo"
+WORLD_TIMEZONE = _bdk.DEFAULT_BUSINESS_TZ_LABEL
 SCHEMA_VERSION = "world.daily.rhythm.v1"
 
 
@@ -71,13 +74,14 @@ def feature_enabled(environment: Optional[Mapping[str, str]] = None) -> bool:
     return _truthy((environment or os.environ).get(FEATURE_ENV))
 
 
-def _zone(timezone_name: str) -> ZoneInfo:
+def _zone(timezone_name: str) -> tzinfo:
     if not isinstance(timezone_name, str) or not timezone_name.strip():
         raise DailyRhythmError("timezone_name must be a non-empty string")
-    try:
-        return ZoneInfo(timezone_name.strip())
-    except ZoneInfoNotFoundError as exc:
-        raise DailyRhythmError("unknown timezone") from exc
+    # 业务日界共享解析（偏移拼写与 IANA 名都接受）；未知拼写仍然 fail closed。
+    zone = _bdk.resolve_zone(timezone_name.strip())
+    if zone is None:
+        raise DailyRhythmError("unknown timezone")
+    return zone
 
 
 def _local(now: Optional[datetime], timezone_name: str) -> datetime:
@@ -334,7 +338,7 @@ def _opening_unavailable(
 
 
 def _hourly_window(
-    as_of: datetime, rule: Mapping[str, Any], zone: ZoneInfo
+    as_of: datetime, rule: Mapping[str, Any], zone: tzinfo
 ) -> Optional[dict[str, Any]]:
     """按 ``location_availability`` 同一小时语义找当前/下一次窗口。
 
@@ -408,8 +412,9 @@ def location_opening_expectation(
     不给“可能开着”的默认值，也不另造一套营业事实。
 
     ``now`` 必须是 timezone-aware（naive 直接抛 ``DailyRhythmError``）；
-    ``timezone_name`` 省略时用活动世界的时区。室内区域节点（``place/area``）委托
-    到所属地点的规则，返回的 ``location_id`` 是地点 id。
+    ``timezone_name`` 省略时用共享业务日界默认时区（19 章 §一.4，与预算同源的
+    ``+08:00``）。室内区域节点（``place/area``）委托到所属地点的规则，返回的
+    ``location_id`` 是地点 id。
     """
     try:
         world = wrd.active_world(environment)
@@ -419,6 +424,8 @@ def location_opening_expectation(
         return _opening_unavailable("WORLD_DATA_UNAVAILABLE")
 
     world_id = getattr(world, "world_id", None)
+    #: 世界包自己声明的时区，只进报告（``world_timezone`` 字段）；默认日界不跟它走。
+    world_timezone = getattr(world, "timezone_name", WORLD_TIMEZONE)
     source = _opening_source(world)
     if not isinstance(location_id, str) or not location_id.strip():
         return _opening_unavailable(
@@ -450,12 +457,14 @@ def location_opening_expectation(
             source=source,
         )
 
-    world_timezone = getattr(world, "timezone_name", WORLD_TIMEZONE)
-    requested_timezone = timezone_name
+    # 19 章 §一.4：调用方没有显式给时区时的默认与 ``location_availability`` 保持
+    # 同源（共享业务日界 +08:00），"同一小时语义"这条文档承诺才始终成立；
+    # 世界包自己的时区由调用方（如 ``world_daily_opportunities``）显式传入。
+    requested_timezone = timezone_name or WORLD_TIMEZONE
     effective_timezone = (
         requested_timezone
         if isinstance(requested_timezone, str) and requested_timezone.strip()
-        else world_timezone
+        else WORLD_TIMEZONE
     )
     try:
         zone = _zone(effective_timezone)
@@ -510,9 +519,12 @@ def location_opening_expectation(
         world_id or "", place_id, effective_timezone, rule
     )
     horizon_end = as_of + timedelta(days=MAX_EXPECTATION_HORIZON_DAYS)
-    timezone_source = (
-        "caller_override" if effective_timezone != world_timezone else "world"
-    )
+    # 19 章 §一.4：默认时区来自共享业务日界（与预算同源）；调用方显式传入世界包
+    # 自己的时区时，来源才记作 "caller_override"。
+    if isinstance(timezone_name, str) and timezone_name.strip():
+        timezone_source = "caller_override"
+    else:
+        timezone_source = "business_day_key"
     base: dict[str, Any] = {
         "kind": OPENING_KIND,
         "schema_version": OPENING_SCHEMA_VERSION,

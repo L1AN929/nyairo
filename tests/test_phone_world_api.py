@@ -410,7 +410,7 @@ class PhoneWorldActTest(PhoneWorldAPIBase):
         code, doc = self.act("PICK_UP", {"object_id": "home_bed01", "slot_id": "left_hand"},
                              "api-world-pick-%d" % int(time.time() * 1000))
         self.assertEqual((code, doc["status"]), (409, "rejected"), doc)
-        self.assertIn(doc["reason_code"], {"NOT_REACHABLE", "NOT_TAKEABLE"}, doc)
+        self.assertIn(doc["reason_code"], {"NOT_REACHABLE", "NOT_TAKEABLE", "NOT_PORTABLE"}, doc)
         self.assertEqual(self.snapshot_body()["pose"] != "lying", True)
         code, doc = self.act("PLACE", {"object_id": "home_bed01",
                                        "target": {"kind": "room", "location_id": "home",

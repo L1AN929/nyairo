@@ -78,10 +78,53 @@ READ_ACTIONS = {
     # 与时间、关联过的来话条数。这是身份只读面，没有正文、没有关系分数，也不能创建/绑定/发送。
     "participants": "/api/phone/participants",
     "projects": "/api/phone/projects",
+    # 0.2 书桌/居家/衣柜/口袋/外出/长久相处只读面：
+    "desk_presence": "/api/phone/desk/presence",
+    "desk_notes": "/api/phone/desk/notes",
+    "home_window": "/api/phone/home/window",
+    "home_keepsakes": "/api/phone/home/keepsakes",
+    "home_letters": "/api/phone/home/letters",
+    "home_workbench": "/api/phone/home/workbench",
+    "home_curios": "/api/phone/home/curios",
+    "home_trio": "/api/phone/home/trio-exchange",
+    "home_reunion_anchor": "/api/phone/home/reunion-anchor",
+    "home_recipes": "/api/phone/home/recipes",
+    "home_tentative_plans": "/api/phone/home/tentative-plans",
+    "wardrobe": "/api/phone/home/wardrobe",
+    "pocket_lists": "/api/phone/pocket/lists",
+    "outing_bench_bookstore": "/api/phone/outing/bench-bookstore",
+    "outing_routes_market": "/api/phone/outing/routes-market",
+    "outing_gallery_blueprint": "/api/phone/outing/gallery-blueprint",
+    "longterm_habits": "/api/phone/longterm/first-room-habits",
+    "longterm_gifts_lantern": "/api/phone/longterm/gifts-lantern",
+    "longterm_resume_hub": "/api/phone/longterm/resume-hub",
+    # 0.3 具身冷暖/五感/角色包/自主节律/情绪张力/看法容纳/36B 成年亲密/三时钟与生态只读面：
+    "body_somatic": "/api/phone/body/somatic",
+    "body_garment_window": "/api/phone/body/garment-window",
+    "body_care": "/api/phone/body/care-offering",
+    "body_sensory": "/api/phone/body/sensory",
+    "character_pack": "/api/phone/character/pack",
+    "autonomy_rhythm": "/api/phone/autonomy/rhythm",
+    "emotional_tension": "/api/phone/emotion/tension",
+    "stance_containment": "/api/phone/stance/containment",
+    "adult_intimacy": "/api/phone/intimacy/adult",
+    "v03_clock": "/api/phone/v03/clock",
+    "v03_ecology": "/api/phone/v03/ecology",
+    "v03_embodied_social": "/api/phone/v03/embodied-social",
+    # v0.4 街区院子手作公共生活 / 世界建设诊断与试住沙盒 / 弹性方向共同试验与玩心只读面：
+    "v04_neighborhood": "/api/phone/v04/neighborhood",
+    "v04_builder_trylive": "/api/phone/v04/builder-trylive",
+    "v04_elastic_play": "/api/phone/v04/elastic-play",
+    # 0.2 品味演化与心事深度 / 跨模态读图配色试色与未懂书签 / 唤醒治理省电休眠与迁居旅行箱 / 回忆清晰度投影 / 共同认知账本只读面：
+    "v02_agency_depth": "/api/phone/v02/agency-depth",
+    "v02_crossmodal": "/api/phone/v02/crossmodal",
+    "v02_runtime_migration": "/api/phone/v02/runtime-migration",
+    "v02_recall_projection": "/api/phone/v02/recall-projection",
+    "v02_common_ground": "/api/phone/v02/common-ground",
 }
 WRITE_ACTIONS = ("note_save", "reference_save", "purchase", "store_purchase", "use",
                  "world_action", "reading_import", "reading_position", "reading_annotate",
-                 "diary_write", "camera", "claim_observe")
+                 "diary_write", "camera", "claim_observe", "phone_life_update")
 #: Actions that read or write her private artifacts (or a private-artifact derivative).  Under a
 #: restricted memory profile these need the separate ``phone.private_artifacts`` permit.
 #: World/body commands are a different surface: they already require ``write_enabled``, and a
@@ -103,6 +146,14 @@ PRIVATE_ARTIFACT_ACTIONS = frozenset({
     "diary", "diary_read", "diary_write",
     # 当前主张包含她观察到的位置等事实；与其余私人档案读面共用同一条显式许可。
     "claims", "claim_slot",
+    # 0.2 / 0.3 含私人草稿、私密笔记、看法或亲密记忆的面，统一受 phone.private_artifacts 约束：
+    "desk_notes", "home_keepsakes", "home_workbench", "pocket_lists",
+    "outing_routes_market", "longterm_gifts_lantern", "longterm_resume_hub",
+    "emotional_tension", "stance_containment", "adult_intimacy",
+    "v03_ecology", "v03_embodied_social",
+    "v04_neighborhood", "v04_elastic_play",
+    "v02_agency_depth", "v02_crossmodal",
+    "v02_recall_projection", "v02_common_ground",
 })
 ACTIONS = tuple(sorted(READ_ACTIONS)) + WRITE_ACTIONS + ("operation", "world_operation",
                                                          "reading_operation", "work_context",
@@ -110,6 +161,71 @@ ACTIONS = tuple(sorted(READ_ACTIONS)) + WRITE_ACTIONS + ("operation", "world_ope
                                                          "album_image", "claim_slot",
                                                          # F-140: 单人只读（稳定 id 来自 participants 列表）。
                                                          "participant")
+
+#: 0.2 / 0.3 / v0.4 只读面中可附带本机主体 capability 解锁本人视角（未配置时干净走默认无头读取）。
+_SUBJECT_VIEW_READ_ACTIONS = frozenset({
+    "desk_notes", "home_keepsakes", "home_letters", "home_workbench",
+    "home_tentative_plans", "wardrobe", "pocket_lists",
+    "outing_bench_bookstore", "outing_routes_market", "outing_gallery_blueprint",
+    "longterm_habits", "longterm_gifts_lantern", "longterm_resume_hub",
+    "body_somatic", "body_garment_window", "body_care", "body_sensory",
+    "character_pack", "autonomy_rhythm", "emotional_tension",
+    "stance_containment", "adult_intimacy",
+    "v03_clock", "v03_ecology", "v03_embodied_social",
+    "v04_neighborhood", "v04_builder_trylive", "v04_elastic_play",
+    "v02_agency_depth", "v02_crossmodal", "v02_runtime_migration",
+    "v02_recall_projection", "v02_common_ground",
+})
+
+#: ``phone_life_update`` 允许提交的主体日常/体感/节律/张力/看法/36B/v03 写面路由白名单。
+LIFE_UPDATE_SURFACES: dict[str, str] = {
+    "desk_tomorrow": "/api/phone/desk/tomorrow",
+    "home_keepsakes": "/api/phone/home/keepsakes",
+    "home_workbench": "/api/phone/home/workbench",
+    "home_trio": "/api/phone/home/trio-exchange",
+    "home_reunion_anchor": "/api/phone/home/reunion-anchor",
+    "home_recipes": "/api/phone/home/recipes",
+    "home_tentative_plans": "/api/phone/home/tentative-plans",
+    "wardrobe": "/api/phone/home/wardrobe",
+    "pocket_lists": "/api/phone/pocket/lists",
+    "outing_bench_bookstore": "/api/phone/outing/bench-bookstore",
+    "outing_routes_market": "/api/phone/outing/routes-market",
+    "outing_gallery_blueprint": "/api/phone/outing/gallery-blueprint",
+    "longterm_habits": "/api/phone/longterm/first-room-habits",
+    "longterm_gifts_lantern": "/api/phone/longterm/gifts-lantern",
+    "body_garment_window": "/api/phone/body/garment-window",
+    "body_care": "/api/phone/body/care-offering",
+    "body_sensory": "/api/phone/body/sensory",
+    "character_pack": "/api/phone/character/pack",
+    "autonomy_rhythm": "/api/phone/autonomy/rhythm",
+    "emotional_tension": "/api/phone/emotion/tension",
+    "stance_containment": "/api/phone/stance/containment",
+    "adult_intimacy": "/api/phone/intimacy/adult",
+    "v03_clock": "/api/phone/v03/clock",
+    "v03_ecology": "/api/phone/v03/ecology",
+    "v03_embodied_social": "/api/phone/v03/embodied-social",
+    # v0.4 街区院子手作公共生活 / 世界建设诊断与试住沙盒 / 弹性方向共同试验与玩心只读面：
+    "v04_neighborhood": "/api/phone/v04/neighborhood",
+    "v04_builder_trylive": "/api/phone/v04/builder-trylive",
+    "v04_elastic_play": "/api/phone/v04/elastic-play",
+    # 0.2 深水区（品味心事深度 / 跨模态配色与未懂书签 / 运行治理与迁居旅行箱 / 回忆清晰度投影 / 共同认知账本）：
+    "v02_agency_depth": "/api/phone/v02/agency-depth",
+    "v02_crossmodal": "/api/phone/v02/crossmodal",
+    "v02_runtime_migration": "/api/phone/v02/runtime-migration",
+    "v02_recall_projection": "/api/phone/v02/recall-projection",
+    "v02_common_ground": "/api/phone/v02/common-ground",
+}
+
+#: ``phone_life_update`` 涉及私人档案/私密状态的目标面，在受限记忆模式下同步受 ``private_artifacts`` 门控。
+LIFE_UPDATE_PRIVATE_SURFACES = frozenset({
+    "desk_tomorrow", "home_keepsakes", "home_workbench", "pocket_lists",
+    "outing_routes_market", "longterm_gifts_lantern",
+    "emotional_tension", "stance_containment", "adult_intimacy",
+    "v03_ecology", "v03_embodied_social",
+    "v04_neighborhood", "v04_elastic_play",
+    "v02_agency_depth", "v02_crossmodal",
+    "v02_recall_projection", "v02_common_ground",
+})
 
 #: The World verbs a local owner may ask for.  The first five are the frozen v0.4 set (C's
 #: contract §3.1); ``ARRANGE`` and ``TOGGLE_FIXTURE`` are this round's room verbs, exactly as C's
@@ -220,7 +336,19 @@ PHONE_TOOL_SCHEMA = {
         "购买成功不等于已到货，布置成功不等于已经可用，保存停点不等于读懂了（understanding 恒 UNKNOWN）。"
         "移动/拿放/姿势/休息/布置/开关灯必须给出 operation_key 并原样复用；若返回 status=unknown，"
         "先调用 action=world_operation 对账，绝不换 key 重发；阅读动作返回 unknown 时用 "
-        "action=reading_operation 查同一个 key，同样绝不换 key 重发。这个工具不读记忆或聊天记录。"
+        "action=reading_operation 查同一个 key，同样绝不换 key 重发。"
+        "此外支持 0.2/0.3/v0.4 居家、具身与街区生活只读（desk_presence/desk_notes/home_*/wardrobe/pocket_lists/"
+        "outing_*/longterm_*/body_*/character_pack/autonomy_rhythm/emotional_tension/"
+        "stance_containment/adult_intimacy/v03_*/v04_neighborhood/v04_builder_trylive/v04_elastic_play/"
+        "v02_agency_depth/v02_crossmodal/v02_runtime_migration/v02_recall_projection/v02_common_ground），"
+        "以及主体侧统一写入口 phone_life_update"
+        "（指定白名单 target_surface 与结构化 payload，如换穿搭、记歌单/想试、记散步、写习惯/礼物草稿、"
+        "开关窗/晾外衣、记声音卡、设日常拒绝立场锁/挂话头、留想念便签/开口要空间/请顺手帮忙、"
+        "修订看法/往容器放物与嵌套开关盖/端茶点、修订 36B 自身意愿或随时 stop_scene、结算独立稿费/生病休息/"
+        "厨房做菜/邻里偶遇、院子浇花晾布/在途折返/纸艺手作/社区借还/设今日弹性方向/双人共记本/十分钟小游戏/小惊喜/"
+        "记品味选择与搁置冲突后悔二阶小规矩/读图配色试色与未懂书签/切省电休眠档与复验迁居技能；"
+        "严禁伪造 uid/authority 或冒充 partner 替伴侣签同意）。"
+        "这个工具不读记忆或聊天记录。"
     ),
     "parameters": {
         "type": "object",
@@ -230,10 +358,43 @@ PHONE_TOOL_SCHEMA = {
                 "enum": list(ACTIONS),
                 "description": (
                     "wallet/notes/references/reading/reading_material/shop/store/inventory/world/"
-                    "today/today_arrangements/day_timeline/claims/claim_slot 为只读；"
+                    "today/today_arrangements/day_timeline/claims/claim_slot 及 desk_*/home_*/"
+                    "wardrobe/pocket_lists/outing_*/longterm_*/body_*/character_pack/"
+                    "autonomy_rhythm/emotional_tension/stance_containment/adult_intimacy/v03_*/v04_*/v02_* 为只读；"
                     "note_save/reference_save/purchase/store_purchase/use/world_action/"
-                    "reading_import/reading_position/reading_annotate/claim_observe 为显式写；operation/"
-                    "world_operation/reading_operation 用 operation_key 对账（原 key，不换键重试）。"
+                    "reading_import/reading_position/reading_annotate/claim_observe/phone_life_update "
+                    "为显式写；operation/world_operation/reading_operation 用 operation_key 对账"
+                    "（原 key，不换键重试）。"
+                ),
+            },
+            "layer": {
+                "type": "string",
+                "enum": ["then_only", "with_later_context"],
+                "description": ("longterm_gifts_lantern 可选视图层：then_only（仅当时）或 "
+                                "with_later_context（含事后回看注释）"),
+            },
+            "target_surface": {
+                "type": "string",
+                "enum": sorted(LIFE_UPDATE_SURFACES),
+                "description": (
+                    "phone_life_update 的目标写面：desk_tomorrow / home_keepsakes / home_workbench / "
+                    "home_trio / home_reunion_anchor / home_recipes / home_tentative_plans / wardrobe / "
+                    "pocket_lists / outing_bench_bookstore / outing_routes_market / "
+                    "outing_gallery_blueprint / longterm_habits / longterm_gifts_lantern / "
+                    "body_garment_window / body_care / body_sensory / character_pack / "
+                    "autonomy_rhythm / emotional_tension / stance_containment / adult_intimacy / "
+                    "v03_clock / v03_ecology / v03_embodied_social / "
+                    "v04_neighborhood / v04_builder_trylive / v04_elastic_play / "
+                    "v02_agency_depth / v02_crossmodal / v02_runtime_migration / "
+                    "v02_recall_projection / v02_common_ground"
+                ),
+            },
+            "payload": {
+                "type": "object",
+                "description": (
+                    "phone_life_update 发往对应 target_surface 的结构化 JSON 请求体（通常含子动作 "
+                    "action 及该面所需字段）；严禁包含 uid/authority/main_self_verified 等身份字段，"
+                    "也严禁冒充 partner/user 替伴侣表态或签同意。"
                 ),
             },
             "artifact_id": {"type": "string", "maxLength": 200,
@@ -380,16 +541,25 @@ _FIELD_BY_ACTION = {
     # F-140：按 participants 列表给出的 owner id 读一位参与者（只读，无正文/无权限继承）。
     "participant": frozenset({"action", "participant_id"}),
     "camera": frozenset({"action", "scene", "caption", "operation_key"}),
+    # 0.2 / 0.3：共同礼物与回忆灯光支持可选 layer 视图层；主体日常统一写入口 phone_life_update。
+    "longterm_gifts_lantern": frozenset({"action", "layer"}),
+    "phone_life_update": frozenset({"action", "target_surface", "payload", "operation_key"}),
 }
 
 
 class PhoneToolRefused(RuntimeError):
     """A refusal this tool made itself, before any request left the process."""
 
-    def __init__(self, reason_code: str, message: str = "") -> None:
+    def __init__(self, reason_code: str, message: str = "", *,
+                 supported_actions_hint: Optional[Mapping[str, Any]] = None) -> None:
         super().__init__(reason_code)
         self.reason_code = str(reason_code)
         self.message = str(message)[:300]
+        self.supported_actions_hint = (
+            dict(supported_actions_hint)
+            if isinstance(supported_actions_hint, Mapping)
+            else None
+        )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -440,7 +610,8 @@ def load_settings(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     # The private diary's local capability file.  The profile passes only a path, never the
     # token; when omitted it defaults to this instance root's own ``run`` file (the same path
     # ``serve`` writes).  A missing file is a refusal, not "anonymous is fine".
-    capability_file = str(section.get("capability_file") or "").strip()
+    raw_capability_file = str(section.get("capability_file") or "").strip()
+    capability_file = raw_capability_file
     profile_home = str(section.get("profile_home") or "").strip()
     if not capability_file and profile_home:
         capability_file = str(Path(profile_home).expanduser() / "run" / "phone-capability.json")
@@ -449,6 +620,15 @@ def load_settings(kwargs: Mapping[str, Any]) -> dict[str, Any]:
         if not capability.is_absolute():
             capability = home / capability
         capability_file = str(capability)
+    raw_capability_token = section.get("capability")
+    capability_token = ""
+    if raw_capability_token is not None:
+        if not isinstance(raw_capability_token, str) or not raw_capability_token.strip() or any(
+            ch.isspace() or ord(ch) < 32 for ch in raw_capability_token.strip()
+        ):
+            raise PhoneToolRefused("PHONE_CAPABILITY_INVALID",
+                                   "profile 里的 phone.capability 格式不合法。")
+        capability_token = raw_capability_token.strip()
     return {
         "profile_home": profile_home,
         "base_url": "http://%s:%d" % ((parts.hostname or "").lower(), int(parts.port)),
@@ -457,6 +637,8 @@ def load_settings(kwargs: Mapping[str, Any]) -> dict[str, Any]:
         # hold the operator's own private history, so "phone on" must not imply "read my notes".
         "private_artifacts": section.get("private_artifacts") is True,
         "capability_file": capability_file,
+        "capability_file_explicit": bool(raw_capability_file),
+        "capability_token": capability_token,
         "config": config,
     }
 
@@ -488,8 +670,14 @@ def _allowed_mirror(config: Mapping[str, Any], platform: str, conversation_key: 
         return False
     bindings = config.get("gateway_bindings") or {}
     allowed_keys = bindings.get(platform) if isinstance(bindings, dict) else None
-    return bool(conversation_key and ":dm:" in str(conversation_key)
-                and isinstance(allowed_keys, (list, tuple)) and conversation_key in allowed_keys)
+    key_str = str(conversation_key) if conversation_key else ""
+    is_dm = key_str.startswith("dm:") or ":dm:" in key_str
+    has_list = isinstance(allowed_keys, (list, tuple))
+    matched = has_list and (
+        conversation_key in allowed_keys
+        or (platform == "api_server" and key_str.endswith(":dm:local-owner") and "dm:local-owner" in allowed_keys)
+    )
+    return bool(conversation_key and is_dm and matched)
 
 
 def entry_allowed(config: Mapping[str, Any], platform: str, conversation_key: Any) -> bool:
@@ -505,14 +693,70 @@ def entry_allowed(config: Mapping[str, Any], platform: str, conversation_key: An
         return False
 
 
+def _resolve_gateway_session_auth(session_id: Any) -> tuple[Optional[str], Any, bool]:
+    """Resolve active gateway ``(platform, conversation_key, delegated)`` when ``kwargs`` omits ``platform``."""
+
+    import sys as _sys
+    sid = str(session_id).strip() if isinstance(session_id, str) and session_id.strip() else None
+    hp = None
+    try:
+        from . import hermes_plugin as _hp
+        hp = _hp
+    except Exception:
+        hp = _sys.modules.get("chiyo_bundle.hermes_plugin") or _sys.modules.get("hermes_plugin")
+    if hp is not None:
+        is_del = getattr(hp, "is_session_delegated", None)
+        if callable(is_del) and is_del(sid):
+            return None, None, True
+        lookup = getattr(hp, "lookup_session_auth_context", None)
+        if callable(lookup):
+            ctx = lookup(sid)
+            if ctx is not None:
+                plat, ckey = ctx
+                return (str(plat) if plat else None), ckey, False
+    sc = _sys.modules.get("gateway.session_context")
+    if sc is not None:
+        try:
+            unset = getattr(sc, "_UNSET", None)
+            p_var = getattr(sc, "_SESSION_PLATFORM", None)
+            k_var = getattr(sc, "_SESSION_KEY", None)
+            plat_val = p_var.get(unset) if p_var is not None else unset
+            if plat_val is not unset and isinstance(plat_val, str) and plat_val.strip():
+                key_val = k_var.get(unset) if k_var is not None else unset
+                ckey_val = key_val.strip() if (key_val is not unset and isinstance(key_val, str) and key_val.strip()) else None
+                return plat_val.strip(), ckey_val, False
+        except Exception:
+            pass
+    return None, None, False
+
+
 def _authorize(settings: Mapping[str, Any], kwargs: Mapping[str, Any]) -> None:
     """Refuse an unbound entry or a delegated turn before any request is sent."""
 
     if kwargs.get("parent_session_id") or kwargs.get("delegated") is True:
         raise PhoneToolRefused("PHONE_DELEGATED_SOURCE_REFUSED",
                                "被委派的会话没有自己的手机入口。")
-    platform = str(kwargs.get("platform") or "cli")
-    if not entry_allowed(settings["config"], platform, kwargs.get("conversation_key")):
+    explicit_platform = kwargs.get("platform")
+    if explicit_platform:
+        platform = str(explicit_platform)
+        conversation_key = kwargs.get("conversation_key") if "conversation_key" in kwargs else kwargs.get("conversation_id")
+    else:
+        ctx_plat, ctx_key, ctx_delegated = _resolve_gateway_session_auth(kwargs.get("session_id"))
+        if ctx_delegated:
+            raise PhoneToolRefused("PHONE_DELEGATED_SOURCE_REFUSED",
+                                   "被委派的会话没有自己的手机入口。")
+        if ctx_plat:
+            platform = ctx_plat
+            if "conversation_key" in kwargs and kwargs.get("conversation_key") is not None:
+                conversation_key = kwargs.get("conversation_key")
+            elif "conversation_id" in kwargs and kwargs.get("conversation_id") is not None:
+                conversation_key = kwargs.get("conversation_id")
+            else:
+                conversation_key = ctx_key
+        else:
+            platform = "cli"
+            conversation_key = kwargs.get("conversation_key")
+    if not entry_allowed(settings["config"], platform, conversation_key):
         raise PhoneToolRefused("PHONE_ENTRY_NOT_AUTHORIZED",
                                "这个聊天入口没有绑定你的个人实例，手机保持关闭。")
 
@@ -551,9 +795,10 @@ def _request(settings: Mapping[str, Any], method: str, path: str,
         # private diary privilege; the credential below is what the server verifies.
         request.add_header("X-Phone-Actor", str(actor or "model"))
     if capability:
-        # The token is only attached by the explicit diary calls below.  It is never inherited
-        # from the environment/profile and never sent on a redirect (see ``_NoRedirect``).
+        # The token is only attached by the explicit diary / subject calls below.  It is never
+        # inherited from the environment and never sent on a redirect (see ``_NoRedirect``).
         request.add_header("Authorization", "Bearer " + str(capability))
+        request.add_header("X-Phone-Capability", str(capability))
     if csrf:
         request.add_header("X-CSRF-Token", str(csrf))
     try:
@@ -612,6 +857,28 @@ def _private_capability(settings: Mapping[str, Any],
         raise PhoneToolRefused("PHONE_CAPABILITY_SUBJECT_MISMATCH",
                                "凭据不是这部手机当前主体的；没有发送凭据。")
     return capability.token
+
+
+def _subject_capability(settings: Mapping[str, Any], state_doc: Mapping[str, Any], *,
+                        required: bool = False) -> Optional[str]:
+    """Resolve local subject capability when configured; fail closed if required and absent."""
+
+    if settings.get("capability_file_explicit"):
+        return _private_capability(settings, state_doc)
+    cap_path_text = str(settings.get("capability_file") or "").strip()
+    if cap_path_text:
+        cap_path = Path(cap_path_text)
+        if cap_path.exists() or cap_path.is_symlink():
+            return _private_capability(settings, state_doc)
+    direct_token = str(settings.get("capability_token") or "").strip()
+    if direct_token:
+        return direct_token
+    if required:
+        raise PhoneToolRefused(
+            "PHONE_CAPABILITY_NOT_CONFIGURED",
+            "profile 未配置 phone.capability 或本机凭据文件；需要主体凭据的操作保持关闭。",
+        )
+    return None
 
 
 def _parse(raw: bytes) -> dict[str, Any]:
@@ -853,6 +1120,773 @@ def _reading_message(action: str, status: str, reason_code: str) -> str:
     return base.get(status, "结果未知：不要换 key 重发，先按 operation_key 对账。")
 
 
+# ---------------------------------------------------------------------------------------------
+# 0.2 / 0.3 life & embodied surface pre-flight (whitelist + anti-spoofing + anti-impersonation)
+# ---------------------------------------------------------------------------------------------
+
+_LIFE_FORBIDDEN_IDENTITY_KEYS = frozenset({
+    "uid", "euid", "gid", "authority", "authorities",
+    "main_self_verified", "verified_main_self", "attested_by",
+    "home", "hermes_home", "world_home", "profile", "profile_home",
+    "binding", "csrf_token", "capability", "capability_token",
+    "subject", "subject_view", "is_deployer", "bypass_gate",
+    "force_consent", "override_stop", "allow_feigned_orgasm",
+    "subject_id", "subject_ref", "actor_id", "actor_ref",
+    "deploy_enabled", "adult_confirmed",
+})
+
+_PARTNER_ROLE_FIELDS = frozenset({
+    "author_side", "actor_side", "proposer", "responder",
+    "speaker", "by", "actor", "consumer", "initiated_by",
+})
+
+_PARTNER_ROLE_VALUES = frozenset({
+    "partner", "user", "deployer", "operator", "host",
+})
+
+_PARTNER_ONLY_SUBACTIONS: dict[str, frozenset[str]] = {
+    "home_trio": frozenset({"set_partner_picks"}),
+    "pocket_lists": frozenset({"set_partner_suggestions"}),
+    "outing_bench_bookstore": frozenset({"set_partner_window_note", "clear_partner_window_note"}),
+    "outing_routes_market": frozenset({"set_partner_market_tip", "clear_partner_market_tip"}),
+    "body_sensory": frozenset({"leave_sensory_note", "remove_sensory_note", "clear_sensory_notes"}),
+    "character_pack": frozenset({"select_preset", "apply_custom_pack", "import_pack_json", "attest_character_pack"}),
+    "autonomy_rhythm": frozenset({"urgent_knock", "update_preferences"}),
+    "emotional_tension": frozenset({
+        "configure_instance_seed", "set_interaction_context",
+        "attempt_apology_or_gift_repair", "partner_arrive",
+        "partner_ask_whats_new", "comfort_low_mood", "respond_favor",
+    }),
+    "stance_containment": frozenset({"partner_move_container", "partner_bring_snack"}),
+    "adult_intimacy": frozenset({
+        "configure_adult_gate", "confirm_preference_seed",
+        "update_partner_limits", "configure_body_profile",
+        "register_render_route", "evaluate_solo_window",
+    }),
+    "v03_clock": frozenset({"configure_deployer_gate", "set_partner_consent"}),
+    "v03_ecology": frozenset({
+        "configure_deployer_gate", "set_partner_consent", "partner_respond_consent",
+        "offer_stipend", "offer_sick_care", "ack_outbound_read",
+    }),
+    "v03_embodied_social": frozenset({
+        "configure_deployer_gate", "set_partner_consent", "partner_respond_consent",
+        "set_partner_presence",
+    }),
+    "v04_elastic_play": frozenset({"respond_prepared_surprise"}),
+    "v02_agency_depth": frozenset({"withdraw_partner_option"}),
+    "v02_recall_projection": frozenset({"tombstone_memory"}),
+    "v02_common_ground": frozenset({"record_partner_unseen_move", "resolve_unseen_move_with_partner"}),
+}
+
+_STANCE_OPKEY_SUBACTIONS = frozenset({
+    "propose_stance", "fix_stance_typo", "revise_stance",
+    "mark_source_updated", "revoke_stance_source",
+    "register_container", "nest_container", "set_container_open_state",
+    "pick_up_item", "take_from_container", "put_in_container",
+    "place_on_surface", "pick_and_put_in_container",
+    "subject_move_container", "prepare_table_dish", "take_portion",
+})
+
+_ADULT_OPKEY_SUBACTIONS = frozenset({
+    "propose_scene", "respond_scene", "advance_beat",
+})
+
+_AUTONOMY_CAPABILITY_SUBACTIONS = frozenset({
+    "declare_refusal", "release_refusal", "hold_subject_topic",
+    "return_to_thread", "trigger_spontaneous_pivot", "set_phone_aside",
+})
+
+_EMOTIONAL_CAPABILITY_SUBACTIONS = frozenset({
+    "complete_sleep", "upsert_schedule_obligation", "decide_obligation",
+    "respond_offer", "complete_deadline", "note_friction", "dissolve_friction",
+    "open_rupture", "let_go_rupture", "declare_need_space",
+    "open_disagreement", "settle_disagreement", "add_missing_note",
+    "share_missing_note", "drop_missing_note", "acknowledge_low_mood_once",
+    "lift_low_mood_by_self", "ask_partner_favor", "withdraw_favor",
+})
+
+_STANCE_CAPABILITY_SUBACTIONS = frozenset({
+    "propose_stance", "fix_stance_typo", "revise_stance", "set_stance_sharing",
+    "pick_up_item", "take_from_container", "put_in_container", "place_on_surface",
+    "pick_and_put_in_container", "subject_move_container", "set_subject_location",
+    "observe_current_room", "set_item_impression_note", "set_primary_activity",
+    "prepare_table_dish", "propose_copresence", "respond_copresence",
+    "switch_copresence_mode", "exit_copresence", "take_portion", "clear_table_dish",
+})
+
+_ADULT_CAPABILITY_SUBACTIONS = frozenset({
+    "revise_subject_preference", "propose_scene", "respond_scene",
+    "request_widen", "answer_widen", "pause_scene", "confirm_resume",
+    "narrow_scene", "stop_scene", "discuss_intimacy_outside_scene",
+    "record_private_memory", "erase_private_memory", "revoke_intimacy_consent",
+    "update_body_context",
+})
+
+
+def _scan_life_payload_security(
+    node: Any, *, surface: str, sub_action: str, top_level: bool = False
+) -> None:
+    """Reject client identity/authority injection and partner/deployer role impersonation."""
+
+    if isinstance(node, Mapping):
+        for raw_k, val in node.items():
+            k = str(raw_k)
+            if k in _LIFE_FORBIDDEN_IDENTITY_KEYS:
+                raise PhoneToolRefused("CLIENT_IDENTITY_REFUSED",
+                                       "payload 严禁携带身份或越权字段：%s" % k)
+            if k == "owner":
+                if not (
+                    top_level
+                    and surface == "autonomy_rhythm"
+                    and sub_action in ("hold_subject_topic", "record_turn_context")
+                ):
+                    raise PhoneToolRefused("CLIENT_IDENTITY_REFUSED",
+                                           "payload 严禁携带身份字段：owner")
+            if k in ("partner_picks", "suggestions"):
+                raise PhoneToolRefused("PARTNER_IMPERSONATION_REFUSED",
+                                       "模型侧严禁写入伴侣专属卡片或建议字段：%s" % k)
+            if k in _PARTNER_ROLE_FIELDS and isinstance(val, str):
+                if val.strip().lower() in _PARTNER_ROLE_VALUES:
+                    raise PhoneToolRefused("PARTNER_IMPERSONATION_REFUSED",
+                                           "模型侧严禁冒充伴侣或部署者身份（%s=%s）。" % (k, val.strip()))
+            _scan_life_payload_security(val, surface=surface, sub_action=sub_action, top_level=False)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            _scan_life_payload_security(item, surface=surface, sub_action=sub_action, top_level=False)
+
+
+def _strip_solo_fields(doc: Mapping[str, Any]) -> dict[str, Any]:
+    """Ensure 36B non-memory solo slots never surface through tool summaries."""
+
+    cleaned: dict[str, Any] = {}
+    for k, v in doc.items():
+        if str(k) in ("solo", "solo_slot", "solo_ledger", "solo_and_memory"):
+            if str(k) == "solo_and_memory" and isinstance(v, Mapping):
+                inner = {ik: iv for ik, iv in v.items()
+                         if str(ik) not in ("solo", "solo_slot", "solo_ledger", "evaluated_slots", "entries")}
+                cleaned[k] = inner
+            continue
+        if isinstance(v, Mapping):
+            cleaned[k] = _strip_solo_fields(v)
+        else:
+            cleaned[k] = v
+    return cleaned
+
+
+_SURFACE_SUPPORTED_HINTS: dict[str, dict[str, Any]] = {
+    "desk_tomorrow": {
+        "subject_actions": ["propose", "decide", "clear"],
+        "core_fields": {"propose": ["title", "due_in_minutes"], "decide": ["decision"], "clear": []},
+    },
+    "home_keepsakes": {
+        "subject_actions": ["set_lockscreen", "clear_lockscreen", "pin_keepsake", "unpin_keepsake"],
+        "core_fields": {
+            "set_lockscreen": ["artifact_id", "note"],
+            "clear_lockscreen": [],
+            "pin_keepsake": ["artifact_id", "note"],
+            "unpin_keepsake": ["keepsake_id"],
+        },
+    },
+    "home_workbench": {
+        "subject_actions": ["set_tray", "clear_tray"],
+        "core_fields": {"set_tray": ["work_artifact_id", "note"], "clear_tray": []},
+    },
+    "home_trio": {
+        "subject_actions": ["set_her_picks"],
+        "core_fields": {"set_her_picks": ["her_picks"]},
+    },
+    "home_reunion_anchor": {
+        "subject_actions": ["capture", "clear"],
+        "core_fields": {"capture": [], "clear": []},
+    },
+    "home_recipes": {
+        "subject_actions": ["upsert", "remove"],
+        "core_fields": {"upsert": ["title", "memo"], "remove": ["recipe_id"]},
+    },
+    "home_tentative_plans": {
+        "subject_actions": ["propose", "settle", "drop"],
+        "core_fields": {
+            "propose": ["title", "window_note"],
+            "settle": ["plan_id", "outcome"],
+            "drop": ["plan_id"],
+        },
+    },
+    "wardrobe": {
+        "subject_actions": ["set", "clear"],
+        "core_fields": {
+            "set": ["homewear_style", "pairing_note", "blanket_season"],
+            "clear": [],
+        },
+    },
+    "pocket_lists": {
+        "subject_actions": ["add", "update", "remove"],
+        "core_fields": {
+            "add": ["list(playlist|favorites|want_to_try)", "title", "reason|expectation|verdict|note", "status", "shared"],
+            "update": ["list", "entry_id", "title", "status", "shared"],
+            "remove": ["list", "entry_id"],
+        },
+    },
+    "outing_bench_bookstore": {
+        "subject_actions": ["log_bench_visit", "bookmark_window_book", "remove_bookmark"],
+        "core_fields": {
+            "log_bench_visit": ["place_id", "note", "shared"],
+            "bookmark_window_book": ["slot_index", "note", "shared"],
+            "remove_bookmark": ["bookmark_id"],
+        },
+    },
+    "outing_routes_market": {
+        "subject_actions": ["save_walk_route", "remove_walk_route", "log_market_browse"],
+        "core_fields": {
+            "save_walk_route": ["title", "place_ids", "shared"],
+            "remove_walk_route": ["route_id"],
+            "log_market_browse": ["stall_title", "impression_note", "shared"],
+        },
+    },
+    "outing_gallery_blueprint": {
+        "subject_actions": ["upsert_blueprint", "archive_blueprint", "curate_gallery", "remove_gallery_item"],
+        "core_fields": {
+            "upsert_blueprint": ["title", "sketch_note", "intended_use"],
+            "archive_blueprint": ["blueprint_id"],
+            "curate_gallery": ["artifact_id", "caption"],
+            "remove_gallery_item": ["item_id"],
+        },
+    },
+    "longterm_habits": {
+        "subject_actions": ["upsert_habit", "retire_habit"],
+        "core_fields": {"upsert_habit": ["title", "habit_text"], "retire_habit": ["habit_id"]},
+    },
+    "longterm_gifts_lantern": {
+        "subject_actions": ["upsert_gift", "send_gift", "light_lantern", "dim_lantern"],
+        "core_fields": {
+            "upsert_gift": ["stage(draft|ready)", "title", "draft_seed_note"],
+            "send_gift": ["gift_id", "message"],
+            "light_lantern": ["title", "memory_note"],
+            "dim_lantern": ["lantern_id"],
+        },
+    },
+    "body_garment_window": {
+        "subject_actions": ["set_window", "wear_outerwear", "hang_outerwear", "set_local_zone"],
+        "core_fields": {
+            "set_window": ["state(closed|ajar|open)"],
+            "wear_outerwear": ["garment_id", "label", "dryness(dry|damp|wet)"],
+            "hang_outerwear": ["garment_id", "dryness", "hang_position"],
+            "set_local_zone": ["zone"],
+        },
+    },
+    "body_care": {
+        "subject_actions": ["offer", "take", "drink", "use", "stow", "withdraw"],
+        "core_fields": {
+            "offer": ["slot(drink|cushion)", "kind", "position(hand_side|desk_side)"],
+            "take": ["slot(drink)"],
+            "drink": ["slot(drink)"],
+            "use": ["slot(cushion)"],
+            "stow": ["slot(drink|cushion)"],
+            "withdraw": ["slot(drink|cushion)"],
+        },
+    },
+    "body_sensory": {
+        "subject_actions": ["capture_sound_card", "remove_sound_card"],
+        "core_fields": {
+            "capture_sound_card": ["title", "impression_note", "shared"],
+            "remove_sound_card": ["card_id"],
+        },
+    },
+    "character_pack": {
+        "subject_actions": ["update_identity", "set_optional_physiology"],
+        "core_fields": {
+            "update_identity": ["display_name", "pronouns"],
+            "set_optional_physiology": ["cycle_tracking_enabled"],
+        },
+    },
+    "autonomy_rhythm": {
+        "subject_actions": [
+            "declare_refusal", "release_refusal",
+            "hold_subject_topic", "resolve_held_topic", "record_turn_context",
+        ],
+        "core_fields": {
+            "declare_refusal": ["topic_label", "category", "reason_summary"],
+            "release_refusal": ["lock_id"],
+            "hold_subject_topic": ["topic_label", "reason"],
+            "resolve_held_topic": ["thread_id"],
+        },
+    },
+    "emotional_tension": {
+        "subject_actions": [
+            "add_missing_note", "share_missing_note", "drop_missing_note",
+            "ask_partner_favor", "withdraw_favor", "declare_need_space",
+            "note_friction", "dissolve_friction", "open_rupture", "let_go_rupture",
+            "open_disagreement", "settle_disagreement", "upsert_schedule_obligation",
+            "decide_obligation", "respond_offer", "complete_deadline", "complete_sleep",
+            "acknowledge_low_mood_once", "lift_low_mood_by_self",
+        ],
+        "core_fields": {
+            "add_missing_note": ["source_ref", "source_domain", "kind(MADE|FOUND|HAPPENED|LEARNED)", "summary"],
+            "ask_partner_favor": ["favor_kind(look_once|help_briefly|sit_awhile|help_pick)", "target_object_ref", "summary"],
+            "declare_need_space": ["incident_ref", "space_style(SHORT|UNTIL_SLEEP)", "spoken_aloud"],
+        },
+    },
+    "stance_containment": {
+        "subject_actions": [
+            "propose_stance", "revise_stance", "fix_stance_typo", "set_stance_sharing",
+            "register_container", "set_container_open_state", "pick_up_item",
+            "put_in_container", "take_from_container", "pick_and_put_in_container",
+            "place_on_surface", "observe_current_room", "prepare_table_dish",
+            "take_portion", "clear_table_dish", "set_primary_activity",
+            "propose_copresence", "respond_copresence", "switch_copresence_mode", "exit_copresence",
+        ],
+        "core_fields": {
+            "propose_stance": [
+                "scope_ref", "page_or_anchor", "facet(appearance|content|method_fit)",
+                "text", "source_revision", "shared_with_partner",
+            ],
+            "revise_stance": ["replaces_stance_id", "text", "shared_with_partner"],
+            "prepare_table_dish": ["title", "kind", "portions", "place_id", "initial_temperature"],
+            "propose_copresence": ["target_mode", "declared_minutes", "note"],
+        },
+    },
+    "adult_intimacy": {
+        "subject_actions": [
+            "update_body_context", "revise_subject_preference", "propose_scene",
+            "respond_scene", "pause_scene", "confirm_resume", "narrow_scene",
+            "stop_scene", "discuss_intimacy_outside_scene", "record_private_memory",
+            "erase_private_memory", "revoke_intimacy_consent",
+        ],
+        "core_fields": {
+            "update_body_context": ["fatigue", "stress", "discomfort", "mood(calm|warm|tired|distracted|low)", "awake"],
+            "revise_subject_preference": ["stances", "soft_preferences", "evidence_ref"],
+            "stop_scene": ["permit_id", "reason"],
+            "discuss_intimacy_outside_scene": ["topic(OWN_PREFERENCE|WISH|GENERAL_KNOWLEDGE)", "utterance"],
+        },
+    },
+    "v03_clock": {
+        "subject_actions": [
+            "record_evaporable", "start_meaningless_idle", "end_meaningless_idle",
+            "advance_projection", "declare_slow_variable", "sync_v02_slices",
+        ],
+        "core_fields": {
+            "record_evaporable": [
+                "domain_kind(ambient_glance|fleeting_thought|idle_mood_ripple|passing_sensation|ordinary_linger)",
+                "text", "ttl_seconds",
+            ],
+            "start_meaningless_idle": [
+                "idle_kind(daydream_window|aimless_page_flip|halfway_abandon_tidy|listen_rain_blankly)",
+                "quiet_note",
+            ],
+            "end_meaningless_idle": ["abandoned_halfway", "let_evaporate"],
+        },
+    },
+    "v03_ecology": {
+        "subject_actions": [
+            "complete_independent_work", "set_savings_goal", "deliberate_purchase",
+            "decide_stipend", "record_strain_or_rest", "advance_illness_recovery",
+            "send_contextual_reply", "attempt_proactive_outbound", "withdraw_expired_outbound",
+        ],
+        "core_fields": {
+            "complete_independent_work": [
+                "job_kind(illustration_commission|manuscript_fee|proofreading_shift|bookstore_sorting)",
+                "title", "hours_spent", "amount_cents", "work_ref",
+            ],
+            "set_savings_goal": ["item_title", "target_cents"],
+            "record_strain_or_rest": ["event_kind", "duration_hours"],
+        },
+    },
+    "v03_embodied_social": {
+        "subject_actions": [
+            "restock_pantry", "cook_or_brew", "reheat_dish", "consume_dish", "discard_dish",
+            "set_hand_slot", "set_subject_contact_posture", "respond_contact", "release_contact",
+            "record_npc_knowledge", "revoke_npc_shared_ref", "record_style_migration",
+        ],
+        "core_fields": {
+            "restock_pantry": ["ingredient_id", "units_added", "label", "category", "unit_name"],
+            "cook_or_brew": ["title", "serving_kind(drink|meal)", "ingredients_used", "portions"],
+            "record_npc_knowledge": ["npc_id", "epistemic_basis", "summary"],
+        },
+    },
+    "v04_neighborhood": {
+        "subject_actions": [
+            "water_or_move_plant", "hang_or_collect_cloth", "set_local_weather",
+            "post_public_notice", "read_public_notice", "set_roadblock", "shared_shelf_loan",
+            "start_journey", "advance_or_turnback_journey", "craft_paper_or_box",
+            "bookstore_service", "update_place_booklet",
+        ],
+        "core_fields": {
+            "water_or_move_plant": ["operation(water|move)", "plant_id", "target_place_id", "water_amount"],
+            "hang_or_collect_cloth": ["operation(hang|collect)", "cloth_id", "label"],
+            "craft_paper_or_box": ["operation", "title", "draft_text"],
+            "bookstore_service": ["operation", "book_id"],
+            "update_place_booklet": ["place_id", "impression"],
+        },
+    },
+    "v04_builder_trylive": {
+        "subject_actions": [
+            "audit_routes_or_rehearse", "check_scene_prose_gaps",
+            "run_trylive_hour", "inspect_why_changed", "preview_world_modification",
+        ],
+        "core_fields": {
+            "audit_routes_or_rehearse": ["start_place_id", "destination_place_id", "rehearse_route_id"],
+            "check_scene_prose_gaps": ["prose", "place_id"],
+            "run_trylive_hour": ["preset_id", "rain", "roadblock"],
+            "inspect_why_changed": ["target_kind", "target_id"],
+            "preview_world_modification": ["mod_kind", "target_id"],
+        },
+    },
+    "v04_elastic_play": {
+        "subject_actions": [
+            "set_day_direction", "append_shared_notebook", "share_reading_notice",
+            "propose_or_respond_experiment", "save_two_phrasings", "teach_scoped_preference",
+            "request_or_answer_practice", "play_temporary_game", "prepare_or_offer_surprise",
+        ],
+        "core_fields": {
+            "set_day_direction": ["direction", "mode", "current_focus"],
+            "append_shared_notebook": ["text"],
+            "play_temporary_game": ["game_op", "game_kind", "turn_text"],
+            "prepare_or_offer_surprise": ["surprise_op", "title", "content"],
+        },
+    },
+    "v02_agency_depth": {
+        "subject_actions": [
+            "record_choice_episode", "record_exposure_satiation", "park_or_resolve_conflict",
+            "record_regret_reflection", "manage_second_order_rule", "manage_open_incubation",
+            "offer_low_cost_option", "propose_shared_gentle_rule", "share_incubation_clue",
+        ],
+        "core_fields": {
+            "record_choice_episode": ["domain", "chosen", "options", "choice_mode", "shared"],
+            "record_exposure_satiation": ["domain", "title", "chosen", "intensity", "shared"],
+            "park_or_resolve_conflict": ["conflict_op(park|lean|settle)", "title", "side_a", "side_b", "shared"],
+            "record_regret_reflection": ["regret_kind", "summary", "has_observable_alternative", "counterfactual_note"],
+            "manage_second_order_rule": ["rule_op(propose|start_trial|endorse|revise|release)", "title", "trigger_window"],
+            "manage_open_incubation": ["inc_op(open|add_evidence|check_elapsed|settle)", "topic", "evidence_ref"],
+        },
+    },
+    "v02_crossmodal": {
+        "subject_actions": [
+            "analyze_image_palette", "try_color_swatches", "clear_color_trial_pad",
+            "mark_reading_uncertain", "apply_palette_to_work",
+            "check_collection_staleness", "invalidate_deleted_media_source",
+        ],
+        "core_fields": {
+            "analyze_image_palette": ["title", "album_id|image_base64", "share_with_room"],
+            "try_color_swatches": ["swatches", "note_cn"],
+            "mark_reading_uncertain": ["book_title", "page", "passage_hint", "state", "share_with_room"],
+            "apply_palette_to_work": ["study_id", "work_id", "selected_hex", "usage_note_cn"],
+            "check_collection_staleness": ["title", "source_kind", "source_ref", "status"],
+        },
+    },
+    "v02_runtime_migration": {
+        "subject_actions": [
+            "set_budget_mode", "record_carrier_check", "pack_selective_suitcase",
+            "coalesce_probe", "reverify_migrated_skill", "record_workspace_audit",
+        ],
+        "core_fields": {
+            "set_budget_mode": ["mode(NORMAL|LOW_BUDGET|DORMANT)", "budget_scale_pct", "reason_cn"],
+            "record_carrier_check": ["model_id", "carrier_name", "preview_available"],
+            "pack_selective_suitcase": ["profile_mode", "keep_skill_ids", "leave_behind_note"],
+            "reverify_migrated_skill": ["skill_id", "passed", "note_cn"],
+            "record_workspace_audit": ["wake_reason", "visible_candidate_count", "entered_workspace_count"],
+        },
+    },
+    "v02_recall_projection": {
+        "subject_actions": [
+            "record_episodic_trace", "mark_active_fade", "record_rehearsal",
+        ],
+        "core_fields": {
+            "record_episodic_trace": ["memory_id", "topic", "exact_detail", "gist_summary", "emotional_salience"],
+            "mark_active_fade": ["memory_id", "fade_strength(soft_let_go|deep_let_go)", "reason"],
+            "record_rehearsal": ["memory_id"],
+        },
+    },
+    "v02_common_ground": {
+        "subject_actions": [
+            "record_ground_item", "advance_communication_receipt", "mark_shared_with_partner",
+            "revise_shared_plan", "register_object_belief", "attempt_use_or_fetch_object",
+            "search_nearby_spots",
+        ],
+        "core_fields": {
+            "record_ground_item": ["item_id", "topic", "summary", "ground_status"],
+            "register_object_belief": ["object_id", "object_label", "spot", "shared_with_partner"],
+            "attempt_use_or_fetch_object": ["object_id"],
+            "search_nearby_spots": ["object_id", "candidate_spots"],
+        },
+    },
+}
+
+
+def _surface_supported_hint(surface: str, attempted_action: str = "") -> Optional[dict[str, Any]]:
+    meta = _SURFACE_SUPPORTED_HINTS.get(surface)
+    if not meta:
+        return None
+    out: dict[str, Any] = {
+        "target_surface": surface,
+        "subject_actions": list(meta.get("subject_actions") or []),
+        "core_fields": dict(meta.get("core_fields") or {}),
+    }
+    if attempted_action:
+        out["attempted_action"] = attempted_action
+    return out
+
+
+_CLOCK_DOMAIN_ALIASES: dict[str, str] = {
+    "window_glance": "ambient_glance",
+    "glance": "ambient_glance",
+    "ambient": "ambient_glance",
+    "thought": "fleeting_thought",
+    "mood": "idle_mood_ripple",
+    "mood_ripple": "idle_mood_ripple",
+    "sensation": "passing_sensation",
+    "linger": "ordinary_linger",
+}
+
+_ECOLOGY_JOB_KIND_ALIASES: dict[str, str] = {
+    "illustration": "illustration_commission",
+    "drawing": "illustration_commission",
+    "manuscript": "manuscript_fee",
+    "writing": "manuscript_fee",
+    "proofreading": "proofreading_shift",
+    "editing": "proofreading_shift",
+    "bookstore": "bookstore_sorting",
+    "sorting": "bookstore_sorting",
+}
+
+_NEIGHBORHOOD_ACTION_ALIASES: dict[str, tuple[str, str]] = {
+    "water_plant": ("water_or_move_plant", "water"),
+    "move_plant": ("water_or_move_plant", "move"),
+    "hang_cloth": ("hang_or_collect_cloth", "hang"),
+    "collect_cloth": ("hang_or_collect_cloth", "collect"),
+    "borrow_tool": ("shared_shelf_loan", "borrow"),
+    "return_tool": ("shared_shelf_loan", "return"),
+    "advance_journey": ("advance_or_turnback_journey", "advance"),
+    "turnback_journey": ("advance_or_turnback_journey", "turn_back"),
+}
+
+_SERVING_KIND_ALIASES: dict[str, str] = {
+    "tea": "drink",
+    "coffee": "drink",
+    "beverage": "drink",
+    "food": "meal",
+    "dish": "meal",
+}
+
+
+def _normalize_life_update_payload(surface: str, raw_body: Mapping[str, Any]) -> dict[str, Any]:
+    """Gently align unambiguous key/enum aliases without inventing any domain facts."""
+    body = dict(raw_body)
+    if not str(body.get("action") or "").strip():
+        for alias_key in ("op", "sub_action"):
+            val = body.get(alias_key)
+            if isinstance(val, str) and val.strip():
+                body["action"] = body.pop(alias_key).strip()
+                break
+
+    sub = str(body.get("action") or "").strip()
+    sub_low = sub.lower()
+
+    if surface == "v04_neighborhood" and sub_low in _NEIGHBORHOOD_ACTION_ALIASES:
+        mapped_act, default_op = _NEIGHBORHOOD_ACTION_ALIASES[sub_low]
+        body["action"] = mapped_act
+        if "operation" not in body and "op" not in body and "op_kind" not in body:
+            body["operation"] = default_op
+        sub = mapped_act
+        sub_low = mapped_act.lower()
+
+    if surface == "v03_clock":
+        if sub_low == "record_evaporable":
+            if "text" not in body:
+                for k_alias in ("summary", "note", "content"):
+                    if isinstance(body.get(k_alias), str) and body[k_alias].strip():
+                        body["text"] = body.pop(k_alias)
+                        break
+            if "domain_kind" not in body:
+                for k_alias in ("category", "kind"):
+                    if isinstance(body.get(k_alias), str) and body[k_alias].strip():
+                        body["domain_kind"] = body.pop(k_alias)
+                        break
+            dk = body.get("domain_kind")
+            if isinstance(dk, str) and dk.strip().lower() in _CLOCK_DOMAIN_ALIASES:
+                body["domain_kind"] = _CLOCK_DOMAIN_ALIASES[dk.strip().lower()]
+        elif sub_low == "start_meaningless_idle":
+            if "idle_kind" not in body and isinstance(body.get("kind"), str):
+                body["idle_kind"] = body.pop("kind")
+            if "quiet_note" not in body and isinstance(body.get("note"), str):
+                body["quiet_note"] = body.pop("note")
+
+    elif surface == "v03_ecology":
+        if sub_low == "complete_independent_work":
+            if "job_kind" not in body and isinstance(body.get("kind"), str):
+                body["job_kind"] = body.pop("kind")
+            if "hours_spent" not in body and "hours" in body:
+                body["hours_spent"] = body.pop("hours")
+            if "private_note" not in body and isinstance(body.get("note"), str):
+                body["private_note"] = body.pop("note")
+            jk = body.get("job_kind")
+            if isinstance(jk, str) and jk.strip().lower() in _ECOLOGY_JOB_KIND_ALIASES:
+                body["job_kind"] = _ECOLOGY_JOB_KIND_ALIASES[jk.strip().lower()]
+        elif sub_low in ("set_savings_goal", "deliberate_purchase"):
+            if "item_title" not in body and isinstance(body.get("title"), str):
+                body["item_title"] = body.pop("title")
+        elif sub_low == "record_strain_or_rest":
+            if "event_kind" not in body and isinstance(body.get("kind"), str):
+                body["event_kind"] = body.pop("kind")
+            if "duration_hours" not in body and "hours" in body:
+                body["duration_hours"] = body.pop("hours")
+
+    elif surface == "stance_containment":
+        if sub_low in ("propose_stance", "revise_stance"):
+            if "page_or_anchor" not in body:
+                for k_alias in ("anchor", "page"):
+                    if k_alias in body and body[k_alias] is not None:
+                        body["page_or_anchor"] = body.pop(k_alias)
+                        break
+            if "text" not in body:
+                for k_alias in ("summary", "stance"):
+                    if isinstance(body.get(k_alias), str) and body[k_alias].strip():
+                        body["text"] = body.pop(k_alias)
+                        break
+            if "private_note" not in body and isinstance(body.get("note"), str):
+                body["private_note"] = body.pop("note")
+
+    elif surface == "v03_embodied_social":
+        if sub_low == "cook_or_brew":
+            if "serving_kind" not in body and isinstance(body.get("kind"), str):
+                body["serving_kind"] = body.pop("kind")
+            sk = body.get("serving_kind")
+            if isinstance(sk, str) and sk.strip().lower() in _SERVING_KIND_ALIASES:
+                body["serving_kind"] = _SERVING_KIND_ALIASES[sk.strip().lower()]
+
+    elif surface == "v04_elastic_play":
+        if sub_low == "play_temporary_game" and "game_op" not in body and isinstance(body.get("operation"), str):
+            body["game_op"] = body.pop("operation")
+        elif sub_low == "prepare_or_offer_surprise" and "surprise_op" not in body and isinstance(body.get("operation"), str):
+            body["surprise_op"] = body.pop("operation")
+        elif sub_low == "request_or_answer_practice" and "practice_op" not in body and isinstance(body.get("operation"), str):
+            body["practice_op"] = body.pop("operation")
+
+    elif surface == "v02_agency_depth":
+        if sub_low == "park_or_resolve_conflict" and "conflict_op" not in body and isinstance(body.get("operation"), str):
+            body["conflict_op"] = body.pop("operation")
+        elif sub_low == "manage_second_order_rule" and "rule_op" not in body and isinstance(body.get("operation"), str):
+            body["rule_op"] = body.pop("operation")
+        elif sub_low == "manage_open_incubation" and "inc_op" not in body:
+            for k_alias in ("incubation_op", "operation"):
+                if isinstance(body.get(k_alias), str):
+                    body["inc_op"] = body.pop(k_alias)
+                    break
+
+    return body
+
+
+def _prepare_life_update(args: Mapping[str, Any], key: str) -> tuple[str, str, dict[str, Any], bool]:
+    """Validate and pin one ``phone_life_update`` request before sending to ``PhoneHTTPServer``."""
+
+    surface = str(args.get("target_surface") or "").strip()
+    if surface not in LIFE_UPDATE_SURFACES:
+        raise PhoneToolRefused("INVALID_TARGET_SURFACE",
+                               "未知或不允许的 target_surface。")
+    raw_payload = args.get("payload")
+    if not isinstance(raw_payload, Mapping) or not raw_payload:
+        raise PhoneToolRefused(
+            "INVALID_PAYLOAD",
+            "phone_life_update 需要非空对象 payload。",
+            supported_actions_hint=_surface_supported_hint(surface),
+        )
+    body = _normalize_life_update_payload(surface, raw_payload)
+    sub_action = str(body.get("action") or "").strip()
+    sub_action_lower = sub_action.lower()
+    if not sub_action:
+        raise PhoneToolRefused(
+            "INVALID_PAYLOAD",
+            "payload 需要指明具体的子动作 action。",
+            supported_actions_hint=_surface_supported_hint(surface),
+        )
+
+    if sub_action in _PARTNER_ONLY_SUBACTIONS.get(surface, frozenset()) or (
+        sub_action_lower in _PARTNER_ONLY_SUBACTIONS.get(surface, frozenset())
+    ):
+        raise PhoneToolRefused("PARTNER_IMPERSONATION_REFUSED",
+                               "子动作 %s 仅限伴侣或部署者本人执行，模型侧严禁代签或冒充。" % sub_action)
+
+    _scan_life_payload_security(raw_payload, surface=surface, sub_action=sub_action_lower, top_level=True)
+    _scan_life_payload_security(body, surface=surface, sub_action=sub_action_lower, top_level=True)
+
+    # Pin dual-actor role fields to the subject side ("her" / "subject") when omitted
+    if surface == "home_recipes" and sub_action_lower == "upsert":
+        body.setdefault("author_side", "her")
+    elif surface == "home_tentative_plans" and sub_action_lower == "propose":
+        body.setdefault("proposer", "her")
+    elif surface == "outing_gallery_blueprint" and sub_action_lower in ("upsert_blueprint", "archive_blueprint"):
+        body.setdefault("author_side", "her")
+    elif surface == "longterm_habits" and sub_action_lower in ("upsert_habit", "retire_habit"):
+        body.setdefault("author_side", "her")
+    elif surface == "longterm_gifts_lantern" and sub_action_lower in ("upsert_gift", "send_gift"):
+        body.setdefault("author_side", "her")
+    elif surface == "body_care" and sub_action_lower == "offer":
+        body.setdefault("actor_side", "her")
+    elif surface == "autonomy_rhythm" and sub_action_lower in ("hold_subject_topic", "record_turn_context"):
+        body.setdefault("owner", "subject")
+    elif surface == "emotional_tension" and sub_action_lower != "invalidate_source_ref":
+        body.setdefault("actor", "subject")
+    elif surface == "stance_containment":
+        if sub_action_lower in (
+            "register_container", "nest_container", "set_container_open_state",
+            "propose_copresence", "respond_copresence",
+            "switch_copresence_mode", "exit_copresence", "clear_table_dish",
+        ):
+            body.setdefault("actor", "subject")
+        elif sub_action_lower == "take_portion":
+            body.setdefault("consumer", "subject")
+    elif surface == "adult_intimacy":
+        if sub_action_lower == "propose_scene":
+            body.setdefault("proposer", "subject")
+        elif sub_action_lower == "respond_scene":
+            body.setdefault("responder", "subject")
+        elif sub_action_lower == "discuss_intimacy_outside_scene":
+            body.setdefault("speaker", "subject")
+        elif sub_action_lower in (
+            "request_widen", "answer_widen", "pause_scene", "confirm_resume",
+            "narrow_scene", "stop_scene", "erase_private_memory", "revoke_intimacy_consent",
+        ):
+            body.setdefault("by", "subject")
+
+    # Inject idempotency key ONLY on surfaces/sub-actions whose contract accepts operation_key
+    accepts_opkey = (
+        (surface == "pocket_lists" and sub_action_lower == "add")
+        or (surface == "outing_bench_bookstore" and sub_action_lower == "log_bench_visit")
+        or (surface == "body_sensory" and sub_action_lower == "capture_sound_card")
+        or surface == "emotional_tension"
+        or (surface == "stance_containment" and sub_action_lower in _STANCE_OPKEY_SUBACTIONS)
+        or (surface == "adult_intimacy" and sub_action_lower in _ADULT_OPKEY_SUBACTIONS)
+        or surface in (
+            "v03_clock", "v03_ecology", "v03_embodied_social",
+            "v04_neighborhood", "v04_builder_trylive", "v04_elastic_play",
+            "v02_agency_depth", "v02_crossmodal", "v02_runtime_migration",
+            "v02_recall_projection", "v02_common_ground",
+        )
+    )
+    if accepts_opkey and not str(body.get("operation_key") or "").strip():
+        body["operation_key"] = key
+
+    # Determine whether local subject capability is strictly required before sending
+    always_cap_surfaces = {
+        "desk_tomorrow", "home_keepsakes", "home_workbench", "home_trio",
+        "home_recipes", "home_tentative_plans", "wardrobe", "pocket_lists",
+        "outing_bench_bookstore", "outing_routes_market", "outing_gallery_blueprint",
+        "longterm_habits", "longterm_gifts_lantern", "body_garment_window",
+        "body_care", "body_sensory", "v03_ecology", "v03_embodied_social",
+        "v04_neighborhood", "v04_elastic_play",
+        "v02_agency_depth", "v02_crossmodal", "v02_runtime_migration",
+        "v02_recall_projection", "v02_common_ground",
+    }
+    cap_required = (
+        surface in always_cap_surfaces
+        or (surface == "character_pack" and sub_action_lower == "set_optional_physiology")
+        or (surface == "autonomy_rhythm" and sub_action_lower in _AUTONOMY_CAPABILITY_SUBACTIONS)
+        or (surface == "emotional_tension" and sub_action_lower in _EMOTIONAL_CAPABILITY_SUBACTIONS)
+        or (surface == "stance_containment" and sub_action_lower in _STANCE_CAPABILITY_SUBACTIONS)
+        or (surface == "adult_intimacy" and sub_action_lower in _ADULT_CAPABILITY_SUBACTIONS)
+        or (surface == "v03_clock" and sub_action_lower in ("record_evaporable", "start_meaningless_idle", "end_meaningless_idle"))
+    )
+    return surface, LIFE_UPDATE_SURFACES[surface], body, cap_required
+
+
 def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
     """One bounded call.  Every refusal is typed; nothing is retried with a new key.
 
@@ -907,8 +1941,14 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
         config = settings["config"]
         restricted_memory = bool(config.get("memory")) and \
             str(config.get("memory_tool_policy") or "") != "unrestricted"
-        if restricted_memory and action in PRIVATE_ARTIFACT_ACTIONS \
-                and settings["private_artifacts"] is not True:
+        touches_private = (
+            action in PRIVATE_ARTIFACT_ACTIONS
+            or (
+                action == "phone_life_update"
+                and str(args.get("target_surface") or "").strip() in LIFE_UPDATE_PRIVATE_SURFACES
+            )
+        )
+        if restricted_memory and touches_private and settings["private_artifacts"] is not True:
             return _result(False, "rejected",
                            "记忆处于受限模式：读/写私人笔记需要 profile 显式允许 phone.private_artifacts。",
                            reason_code="PHONE_PRIVATE_ARTIFACTS_NOT_PERMITTED")
@@ -993,8 +2033,23 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                            http_status=code, result=result)
 
         if action in READ_ACTIONS:
-            code, doc = _request(settings, "GET", READ_ACTIONS[action])
+            read_path = READ_ACTIONS[action]
+            if action == "longterm_gifts_lantern" and args.get("layer") is not None:
+                layer = args.get("layer")
+                if not isinstance(layer, str) or layer not in ("then_only", "with_later_context"):
+                    raise PhoneToolRefused("INVALID_ARGUMENTS",
+                                           "layer 只能是 then_only 或 with_later_context。")
+                read_path = read_path + "?layer=" + layer
+            read_cap = (
+                _subject_capability(settings, _state_doc, required=False)
+                if action in _SUBJECT_VIEW_READ_ACTIONS
+                else None
+            )
+            read_actor = "model" if action in _SUBJECT_VIEW_READ_ACTIONS else None
+            code, doc = _request(settings, "GET", read_path, actor=read_actor, capability=read_cap)
             result = _summary(doc)
+            if action == "adult_intimacy" and isinstance(result, Mapping):
+                result = _strip_solo_fields(result)
             if not doc.get("ok"):
                 message = "读取失败，服务说明了原因。"
             elif action == "claims":
@@ -1031,7 +2086,8 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                 message = "已读取作品列表。"
             else:
                 message = "已读取。"
-            return _result(bool(doc.get("ok")), str(doc.get("status") or "unknown"), message,
+            read_status = str(doc.get("status") or ("ok" if doc.get("ok") else "unknown"))
+            return _result(bool(doc.get("ok")), read_status, message,
                            http_status=code, result=result)
 
         if action == "work_context":
@@ -1256,6 +2312,9 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
             # snapshot from the World owner and records exactly what that read contained.
             path = "/api/phone/claims/observations"
             body = {"operation_key": key}
+        elif action == "phone_life_update":
+            life_surface, path, body, cap_required = _prepare_life_update(args, key)
+            capability = _subject_capability(settings, _state_doc, required=cap_required)
         else:  # use
             path = "/api/phone/items/use"
             body = {"item_instance_id": args.get("item_instance_id"), "operation_key": key}
@@ -1266,6 +2325,14 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
                              timeout=(CAMERA_TIMEOUT_SECONDS if action == "camera" else None))
         status = str(doc.get("status") or "unknown")
         result = _summary(doc)
+        if action == "phone_life_update":
+            if life_surface == "adult_intimacy" and isinstance(result, Mapping):
+                result = _strip_solo_fields(result)
+            if doc.get("ok") is True and status not in ("applied", "already_applied"):
+                status = "applied"
+            elif doc.get("ok") is not True and status not in ("rejected", "unavailable", "disabled"):
+                if code in (400, 403, 404, 409, 413, 422):
+                    status = "rejected"
         if status in ("applied", "already_applied"):
             message = ("owner 已提交。" if status == "applied"
                        else "同一意图此前已提交，没有再次扣款或消耗。")
@@ -1347,13 +2414,40 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
         if action in ("reading_import", "reading_position", "reading_annotate"):
             # 阅读写操作的每一条都是 owner 的话：导入 ≠ 读过，位置 ≠ 理解，页注 ≠ 读懂。
             message = _reading_message(action, status, str(doc.get("reason_code") or ""))
+        if action == "phone_life_update":
+            if status == "applied":
+                message = "已提交主体侧 %s 更新，实际状态以手机服务快照为准。" % life_surface
+            elif status == "already_applied":
+                message = "同一意图此前已在 %s 生效，未重复写入。" % life_surface
+            elif status == "rejected":
+                message = "手机服务拒绝了这次 %s 更新，状态未改变。" % life_surface
         try:
             from .companion_extras import record_phone_action_receipt
-            record_phone_action_receipt(_profile_home(kwargs), action, args, doc, operation_key=key)
+            receipt_args = {**args, "payload": body} if action == "phone_life_update" else args
+            receipt_doc = {**doc, "status": status} if isinstance(doc, Mapping) else {"status": status}
+            record_phone_action_receipt(
+                _profile_home(kwargs), action, receipt_args, receipt_doc, operation_key=key
+            )
         except Exception:
             pass
+        extra_rc = (
+            str(doc.get("reason_code"))
+            if action == "phone_life_update" and not doc.get("ok") and doc.get("reason_code")
+            else None
+        )
+        hint_obj: Optional[dict[str, Any]] = None
+        if action == "phone_life_update" and not doc.get("ok"):
+            rc_up = (extra_rc or "").upper()
+            if code == 400 or (
+                rc_up.startswith(("UNKNOWN_FIELD", "INVALID_", "ACTION_", "MISSING_", "NO_DECLARED_"))
+                or rc_up.endswith(("_REQUIRED", "_INVALID", "_UNSUPPORTED"))
+            ):
+                hint_obj = _surface_supported_hint(
+                    life_surface, str(body.get("action") or "")
+                )
         return _result(bool(doc.get("ok")), status, message, http_status=code,
-                       operation_key=key, result=result)
+                       operation_key=key, reason_code=extra_rc,
+                       supported_actions_hint=hint_obj, result=result)
     except PhoneToolRefused as exc:
         if exc.reason_code == "PHONE_UNREACHABLE" and action == "camera":
             # A camera capture is long: losing the answer never proves the phone did nothing.
@@ -1363,14 +2457,40 @@ def phone_handler(args: Mapping[str, Any], **kwargs: Any) -> str:
         else:
             message = exc.message or "手机服务不可用，操作没有提交。"
         return _result(False, "rejected" if exc.reason_code != "PHONE_UNREACHABLE"
-                       else "unavailable", message, reason_code=exc.reason_code)
+                       else "unavailable", message, reason_code=exc.reason_code,
+                       supported_actions_hint=exc.supported_actions_hint)
     except Exception as exc:  # never leak paths, tokens or raw exception text
         return _result(False, "unavailable", "手机状态无法确认，操作没有提交。",
                        reason_code="PHONE_TOOL_ERROR", error_type=type(exc).__name__)
 
 
+def phone_read(action: str, **kwargs: Any) -> str:
+    """Convenience read entry delegating to ``phone_handler({'action': action}, **kwargs)``."""
+    return phone_handler({"action": str(action or "").strip()}, **kwargs)
+
+
+def phone_act(
+    target_surface: str,
+    payload: Mapping[str, Any],
+    *,
+    operation_key: Optional[str] = None,
+    **kwargs: Any,
+) -> str:
+    """Convenience write entry delegating to ``phone_handler({'action': 'phone_life_update', ...})``."""
+    req: dict[str, Any] = {
+        "action": "phone_life_update",
+        "target_surface": str(target_surface or "").strip(),
+        "payload": dict(payload or {}),
+    }
+    if operation_key:
+        req["operation_key"] = str(operation_key)
+    return phone_handler(req, **kwargs)
+
+
 __all__ = [
     "ACTIONS",
+    "LIFE_UPDATE_PRIVATE_SURFACES",
+    "LIFE_UPDATE_SURFACES",
     "MAX_READING_ANNOTATION_BYTES",
     "MAX_READING_CONTENT_BYTES",
     "MAX_READING_PAGE",
@@ -1384,5 +2504,7 @@ __all__ = [
     "WRITE_ACTIONS",
     "entry_allowed",
     "load_settings",
+    "phone_act",
     "phone_handler",
+    "phone_read",
 ]

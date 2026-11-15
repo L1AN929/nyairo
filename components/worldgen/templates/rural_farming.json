@@ -633,6 +633,64 @@
       "weekdays_only": false,
       "weight": 1,
       "zone": "market"
+    },
+    {
+      "affordances": [
+        [
+          "READ_HERE",
+          "在书店读这本书",
+          {
+            "execution": {
+              "mechanism": "stay_at_place"
+            },
+            "suggested_seconds": 600,
+            "title": "在书店读一本书"
+          }
+        ]
+      ],
+      "close_hour": [
+        18,
+        19
+      ],
+      "descriptions": [
+        "集市边的小书店，农事历和小说摆在同一个柜台上，门帘是旧布缝的，进门前要先跺掉鞋上的土。"
+      ],
+      "id": "bookstore",
+      "kind": "store",
+      "names": [
+        "{world_name}书屋",
+        "穗原书铺",
+        "田埂书房"
+      ],
+      "open_hour": 10,
+      "reading": "《田间手记》翻开一页：「插秧那几天，村子里没有人是按时吃饭的。日头到头顶之前要把秧苗插完，早上出门带的那壶茶会在田埂上晒温。书里夹着一张褪色的纸，是往年的节气表，有人用铅笔画了个圈，旁边写着『这天之前把水放干』。」",
+      "slot": "bookstore",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "market"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在店里看看日用杂货"
+        ]
+      ],
+      "close_hour": 19,
+      "descriptions": [
+        "卖锄头、灯泡和日用品的杂货铺，柜台后堆着成捆的麻绳和一排铁皮水桶。"
+      ],
+      "id": "home_goods_store",
+      "kind": "store",
+      "names": [
+        "{world_name}杂货店",
+        "穗原五金杂货"
+      ],
+      "open_hour": 9,
+      "slot": "home_goods_store",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "market"
     }
   ],
   "street_names": [

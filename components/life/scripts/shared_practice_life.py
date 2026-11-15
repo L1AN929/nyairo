@@ -896,7 +896,20 @@ class LifeSourceVerifier:
     def get_adoption_by_id(self, adoption_id: str) -> Optional[dict[str, Any]]:
         if self.adoption_reader is None:
             return None
-        return self.adoption_reader.get_adoption_by_id(adoption_id)
+        getter = getattr(self.adoption_reader, "get_adoption_by_id", None)
+        if callable(getter):
+            return getter(adoption_id)
+        # AG-2's owner-side read port exposes ``read_state()`` (the same maps the adoption
+        # coordinator itself reads); a port without the narrow getter is still a real owner
+        # read, so use its own state instead of declaring every adoption unreadable.  This
+        # is a read-only lookup -- no id is invented and nothing is written.
+        read_state = getattr(self.adoption_reader, "read_state", None)
+        if callable(read_state):
+            state = read_state() or {}
+            records = state.get("adoptions_by_id") if isinstance(state, Mapping) else None
+            record = (records or {}).get(str(adoption_id)) if isinstance(records, Mapping) else None
+            return dict(record) if isinstance(record, Mapping) else None
+        return None
 
 
 __all__ = [

@@ -101,7 +101,7 @@ curl -fsSL https://nyairo.com/install.sh | bash
 
 nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 
-- **程序核心**：`~/.local/share/nyairo/releases/v0.5.1`（只读程序包，更新时整体切换）
+- **程序核心**：`~/.local/share/nyairo/releases/v0.6.0`（只读程序包，更新时整体切换）
 - **个人数据**：`~/.nyairo`（完全独立的本地目录，包含人设、数据库、记忆、密钥与配置）
 - **命令入口**：`~/.local/bin/nyairo`（系统 PATH 启动项）
 
@@ -116,7 +116,7 @@ nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 - **Telegram 官方频道**：[https://t.me/nyairoai](https://t.me/nyairoai)
 - **快速起步上手指南**：[https://nyairo.com/#quickstart](https://nyairo.com/#quickstart)
 - **版本更新动态与说明**：[https://nyairo.com/#changelog](https://nyairo.com/#changelog)
-- **最新 Release 下载与校验包**：[GitHub Releases v0.5.1](https://github.com/L1AN929/nyairo/releases/tag/v0.5.1)（旧 v0.4.0、v0.3.0、v0.2.0-rc3 仍在 Releases 页面）
+- **最新 Release 下载与校验包**：[GitHub Releases v0.6.0](https://github.com/L1AN929/nyairo/releases/tag/v0.6.0)（旧 v0.5.1、v0.4.0、v0.3.0、v0.2.0-rc3 仍在 Releases 页面）
 
 ---
 

@@ -273,18 +273,26 @@ class CustomWorldRuntimeTest(WorldGenTestCase):
         at_closed = wednesday.replace(hour=at_closed_hour, minute=5)
         if at_closed <= at_open:
             at_closed = wednesday.replace(hour=23, minute=5)
+        # 19 章 §一.4：rhythm 函数的默认时区已是共享业务日界（+08:00）；本用例的
+        # 时刻按世界包自己的时区构造，所以显式传包时区——被测语义是"按世界包规则"。
         open_status = wdr.location_availability(
-            target, at_open, environment=self.env_a
+            target, at_open, timezone_name=self.world_a.timezone_name,
+            environment=self.env_a
         )
         closed_status = wdr.location_availability(
-            target, at_closed, environment=self.env_a
+            target, at_closed, timezone_name=self.world_a.timezone_name,
+            environment=self.env_a
         )
         self.assertEqual(open_status["status"], "OPEN")
         self.assertEqual(closed_status["status"], "CLOSED")
         # 营业中有活动，打烊后无活动。
-        self.assertTrue(wdr.affordances_for_location(target, at_open, environment=self.env_a))
+        self.assertTrue(wdr.affordances_for_location(
+            target, at_open, timezone_name=self.world_a.timezone_name,
+            environment=self.env_a))
         self.assertEqual(
-            wdr.affordances_for_location(target, at_closed, environment=self.env_a), []
+            wdr.affordances_for_location(
+                target, at_closed, timezone_name=self.world_a.timezone_name,
+                environment=self.env_a), []
         )
 
     def test_social_presence_follows_package_npcs(self) -> None:

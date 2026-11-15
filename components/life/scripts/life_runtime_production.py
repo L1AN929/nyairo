@@ -773,6 +773,11 @@ class ProductionLifeRuntime:
             self.candidate_registry,
             capability=self.candidate_capability,
             audit_journal=self.candidate_audit_journal,
+            # AG-0 already owns a bounded *global* candidate budget; bind it to AG-1's own hard
+            # limit (deterministic by candidate id, explicitly not a priority).  Without this a
+            # real round where the practice/review seam is wired can hand AG-1 more candidates
+            # than it accepts and fail the whole decision as CANDIDATE_EXPLOSION.
+            global_cap=ag1.MAX_COGNITIVE_CANDIDATES,
         )
         self.candidate_read = ag2.CandidateReadService(self.candidate_materializer)
 

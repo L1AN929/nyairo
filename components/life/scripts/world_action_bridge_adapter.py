@@ -66,7 +66,8 @@ WORLD_BRIDGE_DIR_ENV = "NYAIRO_WORLD_BRIDGE_DIR"
 #: one encoded ``dailyact:`` target (``life_daily_action_targets``).  This adapter decodes
 #: both at submission time -- the AR-0 payload keeps its single-target shape, and no verb
 #: ever gains a free-form ``params`` mapping that the caller could fill in.
-SUPPORTED_VERBS = ("MOVE", "CONSUME", "POSE", "REST", "PICK_UP", "PLACE", "TOILET")
+SUPPORTED_VERBS = ("MOVE", "CONSUME", "POSE", "REST", "PICK_UP", "PLACE", "TOILET",
+                   daily_actions.ARRANGE_VERB, daily_actions.TOGGLE_FIXTURE_VERB)
 
 #: Verbs whose whole parameter set lives inside the encoded target.
 BODY_ACTION_VERBS = body_actions.BODY_ACTION_VERBS
@@ -560,8 +561,24 @@ class WorldBridgeResolver:
                                           "placement": None}
         else:
             details["daily_placement"] = self._placement_view(snapshot, object_id)
-        details["placement_fact"] = daily_actions.daily_action_observed_fact(parsed, snapshot)
+        # The two room-living verbs publish the fact (current placement / recorded power)
+        # in the owner's own availability read, so pass it through; the hand verbs ignore
+        # it.  A failed read is ``None`` and the reader answers ``unknown`` honestly.
+        details["placement_fact"] = daily_actions.daily_action_observed_fact(
+            parsed, snapshot, available_actions=self._fresh_available_actions())
         return details
+
+    def _fresh_available_actions(self) -> Optional[dict[str, Any]]:
+        """One ``get_available_actions`` read, or ``None`` -- never a raise."""
+
+        try:
+            _, _, wbc = self._bridge()
+            probe = self.client.get_available_actions()
+        except Exception:  # noqa: BLE001 - an unreachable World is not an observation
+            return None
+        if probe.outcome != wbc.OK or not isinstance(probe.data, dict):
+            return None
+        return dict(probe.data)
 
     def _record(self, idempotency_key: str, entry: dict[str, Any]) -> dict[str, Any]:
         self.by_idem_key[idempotency_key] = copy.deepcopy(entry)

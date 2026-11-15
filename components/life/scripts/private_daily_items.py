@@ -1188,8 +1188,15 @@ class PrivateDailyItems:
         return row
 
     def items(self, item_type: Optional[str] = None) -> list[dict[str, Any]]:
-        """Metadata rows.  Never contains private text."""
-        document = self.load()
+        """Metadata rows, read from the owner's **current** head.  Never contains private text.
+
+        A metadata read is how a long-lived adapter (the Life assembly's question provider is
+        one) asks "what does she have now"; answering from the first read in this process would
+        hide an item she added after that read.  Refreshing here keeps the owner the source of
+        truth without changing any write path (``_commit`` still re-reads and CASes its own
+        expected head).
+        """
+        document = self.load(refresh=True)
         rows = _ordered_items(document)
         if item_type is not None:
             rows = [i for i in rows if i.get("item_type") == item_type]
@@ -1197,8 +1204,10 @@ class PrivateDailyItems:
 
     def metadata_view(self) -> dict[str, Any]:
         """The default read: structure, provenance and state, with **no** private text."""
-        document = self.load()
+        # ``items`` refreshes the cached document from the owner; read it first so this view
+        # describes the same head its rows came from.
         rows = self.items()
+        document = self.load()
         counts = {name: 0 for name in ITEM_TYPES}
         for row in rows:
             counts[str(row.get("item_type"))] = counts.get(str(row.get("item_type")), 0) + 1

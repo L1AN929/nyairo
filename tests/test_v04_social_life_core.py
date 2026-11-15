@@ -566,6 +566,8 @@ class SocialLifeChainTest(DScenarioBase):
             # Read owners at the exact boundary: end itself has not resumed anything.
             self.assertEqual(self.activity(runtime, joint_ref)["status"], "COMPLETED")
             self.assertEqual(self.activity(runtime, reading_ref)["status"], "WAITING")
+            self.assertEqual(self.activity(runtime, reading_ref)["checkpoint_ref"],
+                             baseline["checkpoint_ref"])
             rights = [row for row in self.eligibilities(runtime)
                       if row.get("activity_id") == reading_ref and row.get("status") == "OPEN"]
             self.assertEqual(len(rights), 1, rights)
@@ -589,7 +591,8 @@ class SocialLifeChainTest(DScenarioBase):
         self.assertTrue(any(row.get("decision") == "RESUME" and row.get("status") == "ACTED"
                             for row in wakes), wakes)
         self.assertEqual(self.activity(runtime, reading_ref)["status"], "ACTIVE")
-        self.assertEqual(self.activity(runtime, reading_ref)["checkpoint_ref"], baseline["checkpoint_ref"])
+        self.assertEqual(self.activity(runtime, reading_ref)["checkpoint_ref"],
+                         baseline["checkpoint_ref"].replace(":page:1", ":page:2"))
         self.assertEqual(self._reading_page(fixture), 2)
 
     # -- 2. refusing costs nothing ---------------------------------------------------------

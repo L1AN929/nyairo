@@ -7,6 +7,7 @@ read and no paid call is made.
 import io
 import json
 import runpy
+import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -37,4 +38,13 @@ def test_cognition_reliability_suite_reports_no_failed_checks():
     assert payload["gates"]["LATE_RESULT_PROMOTION"] == 0
     assert payload["gates"]["canonical_activity_revision"] == 0
     assert rc == 0
+
+
+class CognitionReliabilitySuiteTest(unittest.TestCase):
+    def test_suite_reports_no_failed_checks(self) -> None:
+        test_cognition_reliability_suite_reports_no_failed_checks()
+
+
+if __name__ == "__main__":
+    unittest.main()
 

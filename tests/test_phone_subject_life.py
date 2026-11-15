@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import socket
@@ -44,11 +45,15 @@ posix_only = unittest.skipIf(os.name == "nt", "需要 POSIX fcntl/AF_UNIX（在 
 BASE = Path(os.environ.get("NYAIRO_RC1_LIFE_ROOT") or tempfile.gettempdir())
 
 
+_UNIQUE_SEQ = itertools.count(1)
+
+
 def unique_root(prefix: str) -> Path:
     """A retained, unique fixture root.  Nothing here ever deletes one."""
 
     BASE.mkdir(parents=True, exist_ok=True)
-    root = BASE / (prefix + "%d-%d" % (os.getpid(), int(time.time() * 1000) % 1000000))
+    root = BASE / (prefix + "%d-%d-%d" % (os.getpid(), int(time.time() * 1000) % 1000000,
+                                          next(_UNIQUE_SEQ)))
     if root.exists():
         raise AssertionError("fixture root already exists: %s" % root)
     return root
