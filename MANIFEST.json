@@ -939,7 +939,7 @@
     "docs/engineering/rc1-thinking-decision-invalid-json-result.md": "20c030f070d2e46e8b1562800cc700099e8011c16bb5f3391ccac90560962dec",
     "docs/engineering/rc1-world-body-parent-acceptance.md": "d21570c15f9e081dc31ee4f5a9bde39c5e4ebbab9e065e8059e07e070e85640c",
     "docs/engineering/release-readiness-20261101.md": "537bc7ab06a73b4c4f41e5461284adf74e02361ac46f0a6bbe579972415533ea",
-    "docs/engineering/release-readiness-20261115.md": "71f9f8080a3fb33e8f698284267ea355987576b45822248493711965532486c4",
+    "docs/engineering/release-readiness-20261115.md": "9af11f8a7d173d8ffbe9aef58d080554766a30f139ff46b6b1e3a18ac0299e52",
     "docs/engineering/revocable-disclosure-contract-20261029.md": "7b2e08ff54cf68b91b0054cd565c5fb3bd47f89bdfeddf8d7b824a0e4fe284e0",
     "docs/engineering/runtime-health-distinction-20261029.md": "15d7412017736d6e4cd18edbb67ae501197384751eef485e51707131d50af338",
     "docs/engineering/s05-minimal-episode-summary-proposal-20261027.md": "5423ad7065aa0ffabfaac141779b829a45c285ddc62c01a7a2804bd58efeec1f",
@@ -13642,7 +13642,7 @@
     "website/style.css": "b862dd0d2f85a716a040836b1be2df2b9d6e6c3e0a07f9743890eb8d4f748412",
     "website/title-lab.html": "2daba0a736677c469a631cdea8e1f73d9e92da9b8701cca474c19462c2cd287f"
   },
-  "tree_sha256": "498696e6c1ceceecc0a332d7a11d10231fe9abc47a8bb1406a580043b4a03c1f",
+  "tree_sha256": "f031043a0f4ec5e19769b16f78e6ba22d6eef056ac0af00138c597bbdab7307c",
   "tree_recipe": "SHA256(sorted UTF-8 lines: sha256 + two spaces + POSIX relative path + LF); MANIFEST.json excluded",
   "release_gate": "Bounded backend milestone: 慢变量孵化与因果边动力学、反骚扰配额与慢信冷静期、attention 决策接线与处境指纹、WakeTicket 与日 token 预算接线、成年亲密共在与 S07 Affect owner",
   "project_name": "nyairo",
