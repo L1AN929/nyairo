@@ -1,5 +1,5 @@
 /**
- * nyairo Official Website Controller (v0.6.0 — Enhanced Motion Edition)
+ * nyairo Official Website Controller (v0.7.0 — Enhanced Motion Edition)
  * - Circular clip-path View Transition theme switcher (Dark <-> Light)
  * - Dual-layer Header Nav physics (hover magnetic pill + scrollspy spring lamp + scroll progress)
  * - Smooth container height morphing & directional slide transitions
@@ -108,32 +108,32 @@ const STAGE_WORLD_PRESETS = {
   nagiura: {
     label: '凪浦 · 海滨小镇',
     title: '街区与房间 · 凪浦',
-    dark: 'assets/screenshots/desktop-world-dark.webp?v=20261113-v060-13',
-    light: 'assets/screenshots/desktop-world-light.webp?v=20261113-v060-15',
+    dark: 'assets/screenshots/desktop-world-dark.webp?v=20261115-v070-13',
+    light: 'assets/screenshots/desktop-world-light.webp?v=20261115-v070-15',
     alt: 'nyairo 桌面端：凪浦海滨小镇街区总图',
     desc: '默认临海小镇「凪浦」含 17 处海湾与坡道地点，支持桌面端按 4 种地形种子生成新小镇或用离线编辑器自由布置（零配置全自动生成规划中）。'
   },
   onsawa: {
     label: '汤川 · 山间温泉',
     title: '街区与房间 · 汤川',
-    dark: 'assets/screenshots/desktop-world-onsawa-dark.webp?v=20261113-v060-20',
-    light: 'assets/screenshots/desktop-world-onsawa-light.webp?v=20261113-v060-20',
+    dark: 'assets/screenshots/desktop-world-onsawa-dark.webp?v=20261115-v070-20',
+    light: 'assets/screenshots/desktop-world-onsawa-light.webp?v=20261115-v070-20',
     alt: 'nyairo 桌面端：汤川山间温泉小镇街区总图与翠泽汤屋详情',
     desc: '山间温泉小镇「汤川」含 15 处山坡地点与露天翠泽汤屋，出门沿登山道步行真实耗时，桌面端可随时热切换体验不同地貌。'
   },
   inobe: {
     label: '穗村 · 田园乡野',
     title: '街区与房间 · 穗村',
-    dark: 'assets/screenshots/desktop-world-inobe-dark.webp?v=20261113-v060-20',
-    light: 'assets/screenshots/desktop-world-inobe-light.webp?v=20261113-v060-20',
+    dark: 'assets/screenshots/desktop-world-inobe-dark.webp?v=20261115-v070-20',
+    light: 'assets/screenshots/desktop-world-inobe-light.webp?v=20261115-v070-20',
     alt: 'nyairo 桌面端：穗村田园乡野小镇街区总图与水车公园路线',
     desc: '田园农庄村落「穗村」含 14 处水渠、农田与水车公园节点，每段田埂步程均按路网距离真实计时。'
   },
   wakaba: {
     label: '栞泽 · 日常街区',
     title: '街区与房间 · 栞泽',
-    dark: 'assets/screenshots/desktop-world-wakaba-dark.webp?v=20261113-v060-20',
-    light: 'assets/screenshots/desktop-world-wakaba-light.webp?v=20261113-v060-20',
+    dark: 'assets/screenshots/desktop-world-wakaba-dark.webp?v=20261115-v070-20',
+    light: 'assets/screenshots/desktop-world-wakaba-light.webp?v=20261115-v070-20',
     alt: 'nyairo 桌面端：栞泽日常街区总图与栞泽书店陈设',
     desc: '日常居住街区「栞泽」含 16 处近郊商店街、向阳咖啡店与栞泽书店，桌面端支持一键切换或导入编辑器按心意改建。'
   }
@@ -143,16 +143,16 @@ const STAGE_SCENES_META = [
   {
     title: '实机演示',
     kind: 'video',
-    dark: 'assets/screenshots/desktop-demo-dark.mp4?v=20261113-v060-14',
-    light: 'assets/screenshots/desktop-demo-light.mp4?v=20261113-v060-15',
-    stillDark: 'assets/screenshots/desktop-overview-dark.webp?v=20261113-v060-13',
-    stillLight: 'assets/screenshots/desktop-overview-light.webp?v=20261113-v060-15'
+    dark: 'assets/screenshots/desktop-demo-dark.mp4?v=20261115-v070-14',
+    light: 'assets/screenshots/desktop-demo-light.mp4?v=20261115-v070-15',
+    stillDark: 'assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13',
+    stillLight: 'assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15'
   },
-  { title: '状态总览', dark: 'assets/screenshots/desktop-overview-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-overview-light.webp?v=20261113-v060-15' },
-  { title: '街区与房间', dark: 'assets/screenshots/desktop-world-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-world-light.webp?v=20261113-v060-15' },
-  { title: '流式交谈', dark: 'assets/screenshots/desktop-talk-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-talk-light.webp?v=20261113-v060-15' },
-  { title: '文稿与共读', dark: 'assets/screenshots/desktop-notes-dark.webp?v=20261113-v060-13', light: 'assets/screenshots/desktop-notes-light.webp?v=20261113-v060-15' },
-  { title: '地图编辑', dark: 'assets/screenshots/desktop-editor.webp?v=20261113-v060-26', light: 'assets/screenshots/desktop-editor.webp?v=20261113-v060-26' }
+  { title: '状态总览', dark: 'assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15' },
+  { title: '街区与房间', dark: 'assets/screenshots/desktop-world-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-world-light.webp?v=20261115-v070-15' },
+  { title: '流式交谈', dark: 'assets/screenshots/desktop-talk-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-talk-light.webp?v=20261115-v070-15' },
+  { title: '文稿与共读', dark: 'assets/screenshots/desktop-notes-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-notes-light.webp?v=20261115-v070-15' },
+  { title: '地图编辑', dark: 'assets/screenshots/desktop-editor.webp?v=20261115-v070-26', light: 'assets/screenshots/desktop-editor.webp?v=20261115-v070-26' }
 ];
 
 const layoutSyncFns = [];
@@ -1983,13 +1983,13 @@ function initCommandPalette() {
   const quickCommands = [
     {
       group: '快捷操作',
-      title: '下载 Windows 桌面客户端 (v0.6.0 · 5.10 MB)',
-      summary: '直接获取 nyairo-0.6.0-setup.exe 安装包（免管理员权限）',
+      title: '下载 Windows 桌面客户端 (v0.7.0 · 5.6 MB)',
+      summary: '直接获取 nyairo-0.7.0-setup.exe 安装包（免管理员权限）',
       badge: '下载',
       run: () => {
         const a = document.createElement('a');
-        a.href = 'downloads/nyairo-0.6.0-setup.exe';
-        a.download = 'nyairo-0.6.0-setup.exe';
+        a.href = 'downloads/nyairo-0.7.0-setup.exe';
+        a.download = 'nyairo-0.7.0-setup.exe';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -2035,7 +2035,7 @@ function initCommandPalette() {
     },
     {
       group: '常用文档',
-      title: 'v0.6.0 版本动态与更新说明',
+      title: 'v0.7.0 版本动态与更新说明',
       summary: '查看日常相处回执、未来问题、双人共读及当前公开测试版边界说明',
       badge: 'NEW',
       href: '#changelog-v0-6-0'

@@ -1,7 +1,7 @@
-# nyairo 中文使用指南（v0.6.0）
+# nyairo 中文使用指南（v0.7.0）
 
 > 在线阅读与桌面端下载：[https://nyairo.com/](https://nyairo.com/)  
-> 当前公开测试版本：**v0.6.0**（GitHub prerelease，提供原生 Windows 桌面端与 Linux / WSL 一行命令安装）
+> 当前公开测试版本：**v0.7.0**（GitHub prerelease，提供原生 Windows 桌面端与 Linux / WSL 一行命令安装）
 
 ---
 
@@ -42,10 +42,24 @@
 
 ## 02 · 版本动态与更新说明
 
-如实记录每一版的改动、修补与当前还没做完的边界。当前最新公开测试版为 v0.6.0，旧版标签与安装包均保留在 GitHub Releases。
+如实记录每一版的改动、修补与当前还没做完的边界。当前最新公开测试版为 v0.7.0，旧版标签与安装包均保留在 GitHub Releases。
 
 > **版本说明**
-> 当前最新发布包为 **v0.6.0**（GitHub prerelease 公开测试版，尚非正式稳定版），同时提供原生 Windows 桌面安装器（`nyairo-0.6.0-setup.exe`）。此前发布的 `v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 等历史标签与压缩包均原样保留。升级前建议先备份自己的 `~/.nyairo` 目录。
+> 当前最新发布包为 **v0.7.0**（GitHub prerelease 公开测试版，尚非正式稳定版），同时提供原生 Windows 桌面安装器（`nyairo-0.7.0-setup.exe`）。此前发布的 `v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 等历史标签与压缩包均原样保留。升级前建议先备份自己的 `~/.nyairo` 目录。
+
+### v0.7.0 · 生活自主动力学与反骚扰对齐（GitHub prerelease）
+
+公开测试版 · 慢变量孵化、因果边耦合与节奏收敛
+
+这一版把生活节奏的慢变量、因果联动和反骚扰边界收敛成可预期的日常：
+
+- **慢变量与因果**：新增慢变量孵化内核（六相、因果边、显形队列、冷却族，零随机数），因果边动力学耦合（rule 带、witnessed 脉冲、inferred 零动力学），支持多 POI 绑定与营业时段 hold。
+- **反骚扰对齐**：周配额按设计值收敛，慢信 72 小时冷静期、摩擦淡去 48 小时、话题悬挂 20 分钟。
+- **决策与预算**：attention_view 进入正式决策请求、处境指纹含身体状态；WakeTicket 持久票与对账投影，新增按日 token 预算维度（默认 50k，可用环境变量关闭）。
+- **成年亲密**：接入共在（私密亲密场景、活动断点、跨日重确认）。
+- **桌面端 0.7.0**：安装包与引导脚本同步，行李箱网关互斥、压缩包成员预检、安装与启动失败如实上报。
+
+相关链接：[GitHub Release v0.7.0](https://github.com/L1AN929/nyairo/releases/tag/v0.7.0) · [Windows 桌面端安装](https://nyairo.com/#windows)
 
 ### v0.6.0 · 日常相处回执、未来问题与共读体验（GitHub prerelease）
 
@@ -182,7 +196,7 @@
 
 开始前只需要准备好一台能上网的电脑，以及一个大模型 API Key（例如 DeepSeek、OpenAI 等）。按你的系统二选一：
 
-- **如果你用 Windows 10 / 11（推荐）**：直接下载约 5 MB 的 [**Windows 桌面端安装包**](https://nyairo.com/downloads/nyairo-0.6.0-setup.exe)，双击安装后会自动检测 WSL 2 并引导配好后台环境，不需要自己记终端命令。安装步骤见 [在 Windows 上安装](https://nyairo.com/#windows)，界面用法见 [桌面客户端使用指南](https://nyairo.com/#desktop-guide)。
+- **如果你用 Windows 10 / 11（推荐）**：直接下载约 5 MB 的 [**Windows 桌面端安装包**](https://nyairo.com/downloads/nyairo-0.7.0-setup.exe)，双击安装后会自动检测 WSL 2 并引导配好后台环境，不需要自己记终端命令。安装步骤见 [在 Windows 上安装](https://nyairo.com/#windows)，界面用法见 [桌面客户端使用指南](https://nyairo.com/#desktop-guide)。
 
 - **如果你用 Linux，或习惯纯终端操作**：继续看下面的一行命令安装步骤即可。
 
@@ -196,7 +210,7 @@
 curl -fsSL https://nyairo.com/install.sh | bash
 ```
 
-不用提前装 Python 或 Git。脚本会自动下载并校验官方 `v0.6.0` 发行包，配好 Python 3.13 运行环境，并在 `~/.nyairo` 下建好你的个人数据目录。
+不用提前装 Python 或 Git。脚本会自动下载并校验官方 `v0.7.0` 发行包，配好 Python 3.13 运行环境，并在 `~/.nyairo` 下建好你的个人数据目录。
 
 看到终端提示 `[5/5] 程序安装完成` 后，会自动进入模型配置向导：
 
@@ -235,7 +249,7 @@ nano "$HOME/.nyairo/SOUL.md"
 
 ### 支持哪些操作系统
 
-- **Windows 10 / 11**：提供原生桌面客户端（`nyairo-0.6.0-setup.exe`），生活与记忆后端运行在 Windows 官方自带的 WSL 2（Ubuntu）里。操作步骤见 [在 Windows 上安装](https://nyairo.com/#windows)。
+- **Windows 10 / 11**：提供原生桌面客户端（`nyairo-0.7.0-setup.exe`），生活与记忆后端运行在 Windows 官方自带的 WSL 2（Ubuntu）里。操作步骤见 [在 Windows 上安装](https://nyairo.com/#windows)。
 
 - **Linux 桌面或服务器**：在 Ubuntu / Debian 环境下验证最完整，直接运行一行引导命令即可。其他发行版需自行安装基础解压与编译工具。
 
@@ -245,7 +259,7 @@ nano "$HOME/.nyairo/SOUL.md"
 
 为了避免升级软件时误伤你的聊天记录，nyairo 把「程序文件」和「个人数据」彻底分在两个目录里：
 
-- **程序目录**：Linux / WSL 下位于 `~/.local/share/nyairo/releases/v0.6.0`（Windows 桌面端界面程序位于 `%LOCALAPPDATA%\Programs\nyairo`），升级时只替换这一块；
+- **程序目录**：Linux / WSL 下位于 `~/.local/share/nyairo/releases/v0.7.0`（Windows 桌面端界面程序位于 `%LOCALAPPDATA%\Programs\nyairo`），升级时只替换这一块；
 
 - **个人数据目录**：位于 `~/.nyairo`，里面放着你的人设（`SOUL.md`）、模型配置、聊天记录和本地 SQLite 长期记忆数据库。
 
@@ -269,11 +283,11 @@ nano "$HOME/.nyairo/SOUL.md"
 
 Windows 10 / 11 用户可以直接装原生桌面端（约 5 MB，装在当前用户目录下，不会弹管理员权限框）：
 
-1. 下载安装包：[**nyairo-0.6.0-setup.exe**](https://nyairo.com/downloads/nyairo-0.6.0-setup.exe)（SHA256：`01e0a8c01f85300760f0e63192c42a3c0c3a6776caff6bf9f1513ea0bbc2747e`）；
+1. 下载安装包：[**nyairo-0.7.0-setup.exe**](https://nyairo.com/downloads/nyairo-0.7.0-setup.exe)（SHA256：`174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8`）；
 
 2. 双击完成安装并打开 **nyairo**，程序图标会常驻在屏幕右下角系统托盘；
 
-3. 首次启动时，客户端走两步引导：**第一步自动准备环境**（下载校验 `v0.6.0` 发行包 → 装好 Python 依赖 → 建立独立个人目录 → 生成本机通信密钥 → 启动网关 → 探活验证）；**第二步填配置**（当场设置怎么称呼 TA、代词、模型名与 API Key，不用再去翻设置页）；
+3. 首次启动时，客户端走两步引导：**第一步自动准备环境**（下载校验 `v0.7.0` 发行包 → 装好 Python 依赖 → 建立独立个人目录 → 生成本机通信密钥 → 启动网关 → 探活验证）；**第二步填配置**（当场设置怎么称呼 TA、代词、模型名与 API Key，不用再去翻设置页）；
 
 4. 点「完成，开始使用」即可进入主界面。各页面的具体功能与快捷操作见 [桌面客户端使用指南](https://nyairo.com/#desktop-guide)。
 
@@ -343,21 +357,21 @@ uv python install 3.13
 
 ### 路线 A：通过 Git 标签克隆安装
 
-路线 A 和路线 B 选一种就行。使用 Git 时，请固定检出已发布的 `v0.6.0` 标签（不要直接装正在变动中的开发分支）：
+路线 A 和路线 B 选一种就行。使用 Git 时，请固定检出已发布的 `v0.7.0` 标签（不要直接装正在变动中的开发分支）：
 
 ```bash
 mkdir -p "$HOME/apps"
-git clone --branch v0.6.0 --depth 1 \
-  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.6.0"
-cd "$HOME/apps/nyairo-v0.6.0"
+git clone --branch v0.7.0 --depth 1 \
+  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.7.0"
+cd "$HOME/apps/nyairo-v0.7.0"
 bash scripts/bootstrap.sh
 ```
 
 检出固定标签时 Git 提示 `detached HEAD` 是正常现象。安装完成后，可以跑一遍清单自检确认所有文件完整无缺：
 
 ```bash
-~/.local/share/nyairo/releases/v0.6.0/vendor/hermes/.venv/bin/python -B \
-  ~/.local/share/nyairo/releases/v0.6.0/scripts/verify_manifest.py
+~/.local/share/nyairo/releases/v0.7.0/vendor/hermes/.venv/bin/python -B \
+  ~/.local/share/nyairo/releases/v0.7.0/scripts/verify_manifest.py
 ```
 
 输出中包含 `"valid": true` 即代表文件校验完全一致。
@@ -368,20 +382,20 @@ bash scripts/bootstrap.sh
 
 ```bash
 mkdir -p "$HOME/apps" && cd "$HOME/apps"
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.6.0/nyairo-v0.6.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.6.0/nyairo-v0.6.0.zip.sha256
-sha256sum -c nyairo-v0.6.0.zip.sha256
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
+sha256sum -c nyairo-v0.7.0.zip.sha256
 ```
 
-确认屏幕输出 `nyairo-v0.6.0.zip: OK` 后，解压并调用包内安装器：
+确认屏幕输出 `nyairo-v0.7.0.zip: OK` 后，解压并调用包内安装器：
 
 ```bash
-python3 -m zipfile -e nyairo-v0.6.0.zip "$HOME/apps/nyairo-v0.6.0"
-cd "$HOME/apps/nyairo-v0.6.0"
+python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
+cd "$HOME/apps/nyairo-v0.7.0"
 bash scripts/bootstrap.sh
 ```
 
-如果 ZIP 是你在 Windows 浏览器里提前下载好的，WSL 里可以通过 `/mnt/c/Users/你的Windows用户名/Downloads/nyairo-v0.6.0.zip` 访问它。
+如果 ZIP 是你在 Windows 浏览器里提前下载好的，WSL 里可以通过 `/mnt/c/Users/你的Windows用户名/Downloads/nyairo-v0.7.0.zip` 访问它。
 
 ### 机器上已经装过 Hermes 怎么办
 
@@ -407,12 +421,12 @@ bash scripts/bootstrap.sh
 点击代码块右上角的「复制」，原样发给你的 AI 助手即可：
 
 ```text
-请帮我在这台电脑上安装 NyAiro（v0.6.0）。请严格按 https://nyairo.com/AGENT_INSTALL.zh-CN.md 的规范执行，每一步用中文告诉我你在做什么，不要跳过检查，也不要假装成功：
+请帮我在这台电脑上安装 NyAiro（v0.7.0）。请严格按 https://nyairo.com/AGENT_INSTALL.zh-CN.md 的规范执行，每一步用中文告诉我你在做什么，不要跳过检查，也不要假装成功：
 
 1. 【只读检查，先别安装】检查系统环境（需 Linux 或 WSL 2）、磁盘剩余空间（建议 ≥ 3 GB）、能否连上 github.com 与 astral.sh；检查当前 HOME 是否已有 ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1，以及是否有正在运行的 m0_writer_worker 或 gateway 进程。若发现已有实例，必须立刻停下来汇报并建议换独立 Linux 用户或独立 HOME，绝不能覆盖已有数据，也绝不能终止已有实例的进程。
-2. 【征求确认】向我说明即将创建的目录（~/.local/share/nyairo/releases/v0.6.0、~/.nyairo、~/.local/bin/nyairo），涉及 sudo 或新建系统用户必须先等我同意。
-3. 【校验安装】从 https://github.com/L1AN929/nyairo/releases/download/v0.6.0/ 下载 nyairo-v0.6.0.zip 与同名 .sha256，执行 sha256sum -c 校验通过后解压，运行包内 bash scripts/bootstrap.sh（无交互终端可加 --no-setup --no-launch）。
-4. 【实机核验】检查 ~/.local/state/nyairo/install.json 版本为 v0.6.0，用包内 Python 运行 scripts/verify_manifest.py 确认输出 "valid": true，执行一次 ~/.local/bin/nyairo -z "安装自检" 并确认新实例无残留进程。我未填密钥前，模型与外部通道一律如实标为「尚未验证」。
+2. 【征求确认】向我说明即将创建的目录（~/.local/share/nyairo/releases/v0.7.0、~/.nyairo、~/.local/bin/nyairo），涉及 sudo 或新建系统用户必须先等我同意。
+3. 【校验安装】从 https://github.com/L1AN929/nyairo/releases/download/v0.7.0/ 下载 nyairo-v0.7.0.zip 与同名 .sha256，执行 sha256sum -c 校验通过后解压，运行包内 bash scripts/bootstrap.sh（无交互终端可加 --no-setup --no-launch）。
+4. 【实机核验】检查 ~/.local/state/nyairo/install.json 版本为 v0.7.0，用包内 Python 运行 scripts/verify_manifest.py 确认输出 "valid": true，执行一次 ~/.local/bin/nyairo -z "安装自检" 并确认新实例无残留进程。我未填密钥前，模型与外部通道一律如实标为「尚未验证」。
 5. 【中文交付】用简明中文告诉我启动（nyairo）、配模型（nyairo setup model）、接微信/Telegram、更新与备份方法。全程绝不要让我把 API Key 或密码发到聊天框里。
 ```
 
@@ -430,7 +444,7 @@ bash scripts/bootstrap.sh
 
 AI 汇报「安装完成」后，你可以顺手看一眼这三件事确认没被糊弄：
 
-1. `cat ~/.local/state/nyairo/install.json` 里的 `version` 确实是 `v0.6.0`（注：直接敲 `nyairo --version` 显示的是底层宿主 Hermes 的版本号，看 nyairo 自身版本以 `install.json` 为准）；
+1. `cat ~/.local/state/nyairo/install.json` 里的 `version` 确实是 `v0.7.0`（注：直接敲 `nyairo --version` 显示的是底层宿主 Hermes 的版本号，看 nyairo 自身版本以 `install.json` 为准）；
 
 2. `~/.nyairo` 目录下已经生成了 `SOUL.md`、`config.yaml` 和 `chiyo/config.json`；
 
@@ -565,7 +579,7 @@ nyairo gateway setup
 如果你用的是一行命令默认安装（数据在 `~/.nyairo`），运行下面这段脚本，按提示输入你的纯数字私聊 User ID，它会算出对应的会话标识：
 
 ```bash
-REL="$HOME/.local/share/nyairo/releases/v0.6.0"
+REL="$HOME/.local/share/nyairo/releases/v0.7.0"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" -c '
 from gateway.config import Platform
 from gateway.session import SessionSource, build_session_key
@@ -753,7 +767,7 @@ nyairo gateway run
 仓库 `components/world-editor/` 内置了一套纯本地运行的可视化空间编辑器（只监听本机 `127.0.0.1`，无需联网、不耗模型额度）。你可以从桌面端「街区」页进入，也可以在终端直接启动它：
 
 ```bash
-cd ~/.local/share/nyairo/releases/v0.6.0/components/world-editor
+cd ~/.local/share/nyairo/releases/v0.7.0/components/world-editor
 python3 server.py --port 8766
 ```
 
@@ -767,12 +781,12 @@ python3 server.py --port 8766
 
 ### 桌面端一键生成与命令行种子生成
 
-在 `v0.6.0` Windows 桌面端里，打开「**街区 → 生成新小镇**」即可免命令行可视化生成新世界：支持在「临海坡道小镇（`coastal_town`）」「山间温泉町（`mountain_town`）」「近郊住宅街（`residential_town`）」「田园农庄（`rural_farming`）」四种风貌中选择，自定义镇名、英文代号或随机种子，并支持「生成后立即热切换生效」。
+在 `v0.7.0` Windows 桌面端里，打开「**街区 → 生成新小镇**」即可免命令行可视化生成新世界：支持在「临海坡道小镇（`coastal_town`）」「山间温泉町（`mountain_town`）」「近郊住宅街（`residential_town`）」「田园农庄（`rural_farming`）」四种风貌中选择，自定义镇名、英文代号或随机种子，并支持「生成后立即热切换生效」。
 
 如果你在 Linux / WSL 终端使用，也可以直接调用 `components.worldgen` 工具输入任意数字种子生成新的世界包：
 
 ```bash
-REL="$HOME/.local/share/nyairo/releases/v0.6.0"
+REL="$HOME/.local/share/nyairo/releases/v0.7.0"
 cd "$REL"
 # 用自定义种子生成一个山城世界包并校验、输出本地预览地图
 "$REL/vendor/hermes/.venv/bin/python" -m components.worldgen generate \
@@ -873,7 +887,7 @@ TA 会返回当前各模块的真实状态：
 在 **Windows 桌面端** 中，街区寻路、室内房间走动与灯具控制已经自动配好（可视化改图教程见 [地图编辑器与世界包](https://nyairo.com/#world-editor)）。如果你使用的是**纯手动命令行安装**，只想单独跑一个轻量只读的位置与姿态服务，可以手动初始化并运行：
 
 ```bash
-REL="$HOME/.local/share/nyairo/releases/v0.6.0"
+REL="$HOME/.local/share/nyairo/releases/v0.7.0"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \
   -m chiyo_bundle.world_read_service init --home "$HOME/.nyairo-world"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \
@@ -918,7 +932,7 @@ PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \
 
 ### 升级前先检查与备份
 
-nyairo 把程序装在 `~/.local/share/nyairo`，把你的个人数据（`SOUL.md`、模型密钥、聊天数据库与记忆）单独放在 `~/.nyairo`。正常升级不会改写个人数据，但由于当前 `v0.6.0` 仍处于快速迭代的公开测试阶段，**升级前请先退出正在运行的聊天和网关进程，顺手打个备份包**：
+nyairo 把程序装在 `~/.local/share/nyairo`，把你的个人数据（`SOUL.md`、模型密钥、聊天数据库与记忆）单独放在 `~/.nyairo`。正常升级不会改写个人数据，但由于当前 `v0.7.0` 仍处于快速迭代的公开测试阶段，**升级前请先退出正在运行的聊天和网关进程，顺手打个备份包**：
 
 ```bash
 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo
@@ -934,10 +948,10 @@ tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo
 nyairo update --check
 ```
 
-确认要升级时（公开测试版频道需指定版本号，例如 `v0.6.0`），运行：
+确认要升级时（公开测试版频道需指定版本号，例如 `v0.7.0`），运行：
 
 ```bash
-nyairo update --version v0.6.0
+nyairo update --version v0.7.0
 ```
 
 程序会自动下载官方压缩包、核对 SHA256 与文件清单、配好新版环境并切换入口。
@@ -991,7 +1005,7 @@ tar -tzf "$bkp" >/dev/null && echo "备份包完整性检查通过：$bkp"
 
 1. 在**旧电脑**上彻底退出 nyairo 和网关进程，按上面的命令把 `~/.nyairo` 打包成 `.tar.gz`；
 
-2. 在**新电脑**上先装好相同版本（`v0.6.0`）的 nyairo，先不要启动网关；
+2. 在**新电脑**上先装好相同版本（`v0.7.0`）的 nyairo，先不要启动网关；
 
 3. 通过 U 盘或局域网把备份包传到新电脑（WSL 环境），解压覆盖到新电脑的 `~/.nyairo`；
 
@@ -1086,9 +1100,9 @@ WantedBy=multi-user.target
 
 ## 19 · 已完成与未完成清单
 
-不画饼、不掺水：一页看清当前 v0.6.0 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。
+不画饼、不掺水：一页看清当前 v0.7.0 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。
 
-### 已经跑通、直接可用的功能（v0.6.0）
+### 已经跑通、直接可用的功能（v0.7.0）
 
 - **本地长期记忆闭环**：跨会话自动沉淀重要事实进本机 SQLite，支持 `/chiyo_memory list` 查看、`correct` 纠错与 `delete` 停止召回。
 
@@ -1100,7 +1114,7 @@ WantedBy=multi-user.target
 
 - **相册、双人共读与文稿对比**：支持旅途相册查看、导入读物或示范书同步记录页码批注，以及文稿多版本历史快照与差异比对。
 
-- **多端入口**：提供免管理员 Windows 原生桌面端（`nyairo-0.6.0-setup.exe`）、Linux / WSL 命令行，支持手机微信扫码直连与 Telegram 机器人绑定。
+- **多端入口**：提供免管理员 Windows 原生桌面端（`nyairo-0.7.0-setup.exe`）、Linux / WSL 命令行，支持手机微信扫码直连与 Telegram 机器人绑定。
 
 - **平滑升级与回滚**：支持 `nyairo update` 整包更新与 `--rollback` 保留新聊天记录回退。
 
@@ -1132,13 +1146,13 @@ WantedBy=multi-user.target
 
 ### 发行包来源与验证说明
 
-当前公开测试版源码与校验压缩包均发布在 [GitHub Releases v0.6.0](https://github.com/L1AN929/nyairo/releases/tag/v0.6.0)，Windows 桌面安装器由官网同源分发并附 SHA256 校验文件。历史版本（`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 等）保留原样供对比或回退。各版本具体跑过哪些测试、没跑哪些测试，详见 [测试范围与发行说明](https://nyairo.com/#testing)。
+当前公开测试版源码与校验压缩包均发布在 [GitHub Releases v0.7.0](https://github.com/L1AN929/nyairo/releases/tag/v0.7.0)，Windows 桌面安装器由官网同源分发并附 SHA256 校验文件。历史版本（`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 等）保留原样供对比或回退。各版本具体跑过哪些测试、没跑哪些测试，详见 [测试范围与发行说明](https://nyairo.com/#testing)。
 
 ---
 
 ## 20 · 未来规划：我们在做与想做的事
 
-当前公开测试版已推进至 v0.6.0（附带默认示例世界与原生 Windows 桌面端）。这里如实写清接下来想做的方向——特别是为每个人随机生成不同的专属世界与跨设备无损搬家。
+当前公开测试版已推进至 v0.7.0（附带默认示例世界与原生 Windows 桌面端）。这里如实写清接下来想做的方向——特别是为每个人随机生成不同的专属世界与跨设备无损搬家。
 
 ### 做这个项目的初衷
 
@@ -1155,7 +1169,7 @@ WantedBy=multi-user.target
 ### 规划方向 · 随机生成专属世界（尚未实现）
 
 > **当前状态：桌面端已支持 4 种风貌按种子生成，零配置免模板全自动生成尚在规划中**
-> 目前公开测试版（`v0.6.0`）已内置凪浦、汤川、穗村、栞泽等 7 套示例世界（外加 `nagiura-edited`），并在桌面端提供了「生成新小镇」按 4 种预设地形与自定义种子即时热切换，支持离线编辑器手动改墙面、门窗和家具；**摆脱固定模板束缚、首次打开无需配置即全自动生成专属世界尚未实现**，以下是接下来的设计方向。
+> 目前公开测试版（`v0.7.0`）已内置凪浦、汤川、穗村、栞泽等 7 套示例世界（外加 `nagiura-edited`），并在桌面端提供了「生成新小镇」按 4 种预设地形与自定义种子即时热切换，支持离线编辑器手动改墙面、门窗和家具；**摆脱固定模板束缚、首次打开无需配置即全自动生成专属世界尚未实现**，以下是接下来的设计方向。
 
 我们觉得虚拟世界没必要死定一个模板——既然每个人都是独一无二的，第一次相遇时推门看到的那片街区，也应该是专属于你们的：
 
@@ -1189,9 +1203,9 @@ WantedBy=multi-user.target
 
 - 接通按路网距离计时的移动工具，并打通手机微信私聊。
 
-### 走过的路 · 连续日常与桌面端 (v0.3 – v0.6.0)
+### 走过的路 · 连续日常与桌面端 (v0.3 – v0.7.0)
 
-从 `v0.3.0` 到现在的 `v0.6.0`，一步步把空间动作补成了连贯的起居日常：
+从 `v0.3.0` 到现在的 `v0.7.0`，一步步把空间动作补成了连贯的起居日常：
 
 - 实现多段连贯寻路、半路暂停续走、多任务挂起恢复与跨天街区见闻；
 
@@ -1253,11 +1267,11 @@ WantedBy=multi-user.target
 
 - **发行包完整性校验**：每次发布的 GitHub Release ZIP 均附带 `MANIFEST.json` 清单与 `.sha256` 哈希校验，确保安装落盘的每一个脚本与组件字节与打包时完全一致。
 
-- **Windows 桌面端与官网实机核验**：`nyairo-0.6.0-setup.exe` 安装包、桌面端各功能视图（总览、流式对话、地图、文稿版本对比）及官网桌面/移动端交互均在本机环境实测核对通过。
+- **Windows 桌面端与官网实机核验**：`nyairo-0.7.0-setup.exe` 安装包、桌面端各功能视图（总览、流式对话、地图、文稿版本对比）及官网桌面/移动端交互均在本机环境实测核对通过。
 
 ### 明确尚未覆盖的范围
 
-- **未做 `v0.6.0` 连续 24 小时以上真实大模型挂机长测**：自动化测试主要使用确定性替身与受控时钟来验证逻辑正确性，不能代替真实商业大模型跑上好几天后的自然表现验收。
+- **未做 `v0.7.0` 连续 24 小时以上真实大模型挂机长测**：自动化测试主要使用确定性替身与受控时钟来验证逻辑正确性，不能代替真实商业大模型跑上好几天后的自然表现验收。
 
 - **未启用云端自动 GitHub Actions 功能门禁**：仓库 `ci/templates/` 下存放的是供参考的测试工作流模板，尚未在 GitHub 云端开启每次提交自动跑全量测试，因此我们不挂虚假的 CI Passing 徽章。
 
@@ -1279,7 +1293,7 @@ nyairo 项目新增的自研代码（含记忆账本、虚拟世界与身体节�
 
 - 公开仓库地址为 [github.com/L1AN929/nyairo](https://github.com/L1AN929/nyairo)，只收录程序源码、中性模板、测试与文档，绝不包含任何个人聊天库、私钥或内部服务器地址。
 
-- 普通用户安装与升级始终以固定的 **GitHub Release 标签**（当前为 `v0.6.0`）及校验包为准，不直接拉取开发中的分支，以免装到半成品。
+- 普通用户安装与升级始终以固定的 **GitHub Release 标签**（当前为 `v0.7.0`）及校验包为准，不直接拉取开发中的分支，以免装到半成品。
 
 ### 许可证署名细节
 
