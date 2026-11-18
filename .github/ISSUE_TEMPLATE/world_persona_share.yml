@@ -1,0 +1,68 @@
+name: 世界包与人设底板分享 (World & Persona Share)
+description: 分享你生成的随机小镇种子、离线地图编辑器改建作品、街角店铺设定或通用中性 SOUL.md 底板
+title: "[Share]: "
+labels: ["community-share"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎把你搭建的街区世界包、种子配方或去隐私化的通用 `SOUL.md` 写作模板分享给社区伙伴。
+        - 请确认分享内容为你本人创作，且愿意按仓库同源的 **Apache-2.0** 许可证公开供大家体验；
+        - 请勿夹带任何私人聊天记录、真实个人身份信息或模型密钥。
+
+  - type: dropdown
+    id: share_category
+    attributes:
+      label: 分享内容类型
+      options:
+        - 离线地图编辑器改建世界包 (World Editor)
+        - 免选风貌全随机世界 / 主题风格种子配方 (WorldGen Seed)
+        - 街区店铺开放柜台菜单与室内家具物态设计
+        - 通用中性 SOUL.md 相处语气底板（不含个人隐私）
+    validations:
+      required: true
+
+  - type: input
+    id: target_version
+    attributes:
+      label: 基于哪个 nyairo 版本制作
+      value: v0.7.0
+    validations:
+      required: true
+
+  - type: input
+    id: world_meta
+    attributes:
+      label: 世界名称、生成模式或种子编号（选填）
+      placeholder: 例如：procedural 全随机模式 + seed 20261118，或基于凪浦 (nagiura) 改建
+    validations:
+      required: false
+
+  - type: textarea
+    id: highlights
+    attributes:
+      label: 风貌特色、动线设计与日常亮点介绍
+      description: 介绍一下这片街区的地貌组合、特色小店营业作息、住宅房间格局或相处氛围
+      placeholder: |
+        - 地貌与路网：运河水巷混搭山麓溪谷，环街回路...
+        - 特色小店与物件：街角旧书店与夜归关东煮柜台，窗边留有记事本...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_or_files
+    attributes:
+      label: 生成命令、配置片段或公开链接
+      description: 可粘贴 components.worldgen 生成参数、脱敏后的 JSON / Markdown 片段或 GitHub Gist / 仓库地址
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: license_privacy_check
+    attributes:
+      label: 许可与脱敏确认
+      options:
+        - label: 我确认所分享的世界结构或文本底板为本人原创，同意以 Apache-2.0 兼容方式供社区使用与改建
+          required: true
+        - label: 我已检查分享内容中不含任何私人记忆库、API 密钥、本机账号路径或受第三方版权限制的书稿正文
+          required: true

@@ -1,0 +1,91 @@
+name: 问题反馈 (Bug Report)
+description: 报告安装引导、桌面端、日常起居节律、街区移动或消息网关中的异常行为
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢帮助打磨 nyairo。提交前请留意：
+        - Windows 桌面端用户可直接在「设置 -> 环境与诊断」一键导出已自动脱敏的诊断摘要；
+        - **切勿在公开 Issue 中粘贴任何 API Key（如 `sk-...`）、Telegram Bot Token、个人 Chat ID 或未经脱敏的 `~/.nyairo` 原始会话数据库。**
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 运行环境与操作系统
+      description: 请选择出现问题时使用的运行形态
+      options:
+        - Windows 10 / 11 原生桌面端 + WSL 2 (Ubuntu)
+        - Windows WSL 2 纯命令行终端 (Ubuntu)
+        - Linux 桌面或服务器 (Ubuntu / Debian)
+        - 其他 Linux 发行版或手动源码部署
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 当前 nyairo 版本号
+      description: 桌面端可在「设置 -> 环境与诊断」查看；命令行可查看 ~/.local/state/nyairo/install.json 中的 version 字段
+      placeholder: v0.7.0
+      value: v0.7.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: model_provider
+    attributes:
+      label: 模型服务商与接入方式
+      description: 请选择当前连接的模型接口类型
+      options:
+        - DeepSeek 开放平台 (api.deepseek.com)
+        - 本地 Ollama (127.0.0.1:11434)
+        - OpenAI / Claude 官方接口
+        - Qwen (通义千问) 或其他兼容 OpenAI 协议接口
+        - 安装或环境准备阶段报错（尚未填写模型配置）
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro_steps
+    attributes:
+      label: 触发步骤与复现方式
+      description: 请按顺序说明做了什么操作（例如点击了哪个页面按钮、输入了哪条命令，或 TA 当时处于什么街区/房间状态）
+      placeholder: |
+        1. 打开桌面端「街区」页面，点击前往便利店...
+        2. 在途期间发送消息询问...
+        3. 界面或终端出现如下报错...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_vs_actual
+    attributes:
+      label: 预期表现与实际现象
+      description: 本来应该发生什么，实际发生了什么？
+      placeholder: |
+        预期：...
+        实际：...
+    validations:
+      required: true
+
+  - type: textarea
+    id: sanitized_logs
+    attributes:
+      label: 脱敏后的关键日志或报错片段（选填）
+      description: 粘贴关键报错行或脱敏诊断包摘要即可，请确认已隐去个人系统用户名与密钥
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy_check
+    attributes:
+      label: 隐私脱敏确认
+      description: 提交前请逐项核对，保护你自己的账号与本地记忆安全
+      options:
+        - label: 我已检查并打码所有 API Key（sk-...）、Bot Token、微信绑定码、个人数字 ID 及真实本机路径
+          required: true
+        - label: 我没有上传未经脱敏的 ~/.nyairo 原始聊天数据库、SOUL.md 私人设定或完整 config.yaml
+          required: true

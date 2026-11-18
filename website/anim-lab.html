@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NyAiro 核心视觉动画实验室 · Visual Animation Lab</title>
+  <meta name="robots" content="noindex, nofollow">
+  <title>nyairo 视觉动画实验室 · Visual Animation Lab</title>
+  <link rel="icon" href="assets/favicon.ico" sizes="any">
   <style>
     :root {
       color-scheme: dark;
@@ -226,7 +228,7 @@
   <div class="container">
     <header class="lab-header">
       <div class="lab-title-group">
-        <h1>NYAIRO · 核心视觉动画探索实验室</h1>
+        <h1>nyairo · 核心视觉动画探索实验室</h1>
         <div class="lab-subtitle">三套纯实时物理演算动画 · 告别死板文字特效 · 赋予生命感</div>
       </div>
       <button type="button" class="theme-toggle-btn" onclick="toggleTheme()">
@@ -258,7 +260,7 @@
         <div class="canvas-stage" id="stage-nebula">
           <canvas id="canvas-nebula"></canvas>
           <div class="hero-overlay-text">
-            <h2>给 AI 一个世界<br>让它拥有自己的日常</h2>
+            <h2>给 AI 一个世界<br>让 TA 拥有自己的日常</h2>
             <p>虚拟世界承载经历，身体连接感知，记忆延续过往。</p>
           </div>
         </div>
@@ -306,7 +308,7 @@
         <div class="canvas-stage" id="stage-celestial">
           <canvas id="canvas-celestial"></canvas>
           <div class="hero-overlay-text">
-            <h2>给 AI 一个世界<br>让它拥有自己的日常</h2>
+            <h2>给 AI 一个世界<br>让 TA 拥有自己的日常</h2>
             <p>同心时轨无声咬合旋转，光锥扫过晨曦与深夜，记录生命不可逆的起居。</p>
           </div>
         </div>
@@ -524,7 +526,7 @@
         const y1 = sh * 0.38;
         const y2 = sh * 0.56;
         octx.fillText("给 AI 一个世界", sw * 0.5, y1);
-        octx.fillText("让它拥有自己的日常", sw * 0.5, y2);
+        octx.fillText("让 TA 拥有自己的日常", sw * 0.5, y2);
 
         const img = octx.getImageData(0, 0, sw, sh).data;
         const pts = [];

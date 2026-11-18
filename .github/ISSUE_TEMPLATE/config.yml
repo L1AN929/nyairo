@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 官方使用指南与常见问题排查 (nyairo.com)
+    url: https://nyairo.com/#troubleshooting
+    about: 查阅 Windows SmartScreen 放行图解、5 元配好 DeepSeek 密钥 / 本地 Ollama 教程与常见报错排查
+  - name: 隐私与安全边界说明
+    url: https://nyairo.com/#privacy
+    about: 若发现可能涉及密钥泄露或权限边界的安全隐患，请勿在公开 Issue 贴出利用步骤，先阅读说明并私下联系维护者
+  - name: Telegram 官方频道 (@nyairoai)
+    url: https://t.me/nyairoai
+    about: 获取版本更新通知与公开测试版动态

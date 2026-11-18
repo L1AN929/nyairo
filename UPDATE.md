@@ -1,12 +1,12 @@
 # 更新 nyairo 和配套 Hermes
 
-从 rc6 开始，Linux 和 Windows 的 Ubuntu / WSL 可以使用统一更新入口。它更新整套 nyairo，包括发行版里经过适配的 Hermes；不会另外去拉 Hermes 的开发分支。
+Windows 原生桌面端用户可在应用内「设置 → 更新」检查并一键下载更新（只替换 `%LOCALAPPDATA%\Programs\nyairo` 下的客户端文件，不动 WSL 2 内的 `~/.nyairo` 个人数据）。Linux 与 Windows WSL 2 命令行用户可使用统一更新入口 `nyairo update`，整包更新 nyairo 及随包适配的内置 Hermes，不会单独拉取上游未适配的开发分支。
 
-## 当前预发布版本：v0.3.0
+## 当前预发布版本：v0.7.0
 
-`v0.3.0`（后端连续生活版）是 GitHub prerelease，不是稳定版。默认频道 `candidate` 会选到它；`--channel stable` 会跳过所有预发布，目前仍没有可用的稳定包。旧 `v0.2.0-rc3` 的标签、ZIP 与备份都保留原处；要固定旧版，用 `~/.local/bin/nyairo update --version v0.2.0-rc3`。
+`v0.7.0` 是当前 GitHub prerelease 公开测试版（不是正式稳定版）。默认频道 `candidate` 会选到最新公开测试版；`--channel stable` 会跳过预发布版本。历史版本（`v0.6.0`、`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3`）标签、ZIP 与安装包保持原样归档；如需固定安装某一历史版本，可使用 `~/.local/bin/nyairo update --version v0.6.0`。
 
-本次发行只更新版本与说明：隔离新装与 v0.2.0-rc3 升级/回滚链已有验证，未对现有实例/生产升级或真实模型一天/24h 验收。升级前先按下面「更新过程中会保留什么」一节备份个人目录，装好后自己确认聊天、记忆与个人数据仍然正常。
+升级前请先按下面「更新过程中会保留什么」一节备份 `~/.nyairo` 个人数据目录（或在桌面端导出便携旅行箱 `.nyairo-suitcase.zip`），升级完成后确认聊天、人设与长期记忆正常可用。
 
 ## 已经装好 rc6：以后只输入这一条
 
@@ -49,7 +49,7 @@ bash scripts/update.sh --migrate-from "$HOME/apps/chiyo-v0.1"
 
 旧源码必须能通过其发行清单校验；测试缓存和自己的源码修改都会使严格校验拒绝迁移。不要为了通过校验删除个人数据。有源码修改时先保留自己的整个程序目录，再使用手动升级方式核对改动。
 
-rc4 和更早版本还涉及隐私授权调整，没有自动迁移承诺，请先按 [隐私修复说明](PRIVACY_REVIEW.md) 升级到 rc5，或使用手动升级方式。macOS 与原生 Windows 尚未完成统一更新验证，继续按原来的手动方式操作。
+rc4 和更早版本还涉及隐私授权调整，没有自动迁移承诺，请先按 [隐私修复说明](docs/audits/PRIVACY_REVIEW.md) 升级到 rc5，或使用手动升级方式。macOS 与原生 Windows 尚未完成统一更新验证，继续按原来的手动方式操作。
 
 ## 更新过程中会保留什么
 

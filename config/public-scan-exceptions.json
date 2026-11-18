@@ -960,6 +960,12 @@
       "pattern": "redacted_infra_host",
       "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",
       "reason": "Official site footer friend link; maintainer approved making this host public (2026-11-15)"
+    },
+    {
+      "path": "website/en/index.html",
+      "pattern": "redacted_infra_host",
+      "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",
+      "reason": "Official site footer friend link; maintainer approved making this host public (2026-11-15)"
     }
   ],
   "public_data_files": [

@@ -1,0 +1,49 @@
+name: 功能建议与日常体验想法 (Feature Request)
+description: 提出关于街区店铺、日常相处分寸、物态包袋、共读文稿或桌面端交互的改进想法
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎分享你在日常陪伴与使用中冒出的想法。可以先看一眼 [已完成与未完成清单](https://nyairo.com/#status-matrix) 与 [未来规划](https://nyairo.com/#roadmap)，了解当前的架构原则与防打扰边界。
+
+  - type: dropdown
+    id: module_area
+    attributes:
+      label: 涉及模块范围
+      options:
+        - 街区路网、12 类店铺点单与离线地图编辑器
+        - 日常节律、自主拒绝边界与真实日程异步回信
+        - 随身包袋嵌套收纳与冷热干湿物态细节
+        - 本地长期记忆、双层回忆灯与无损搬家旅行箱
+        - 双人共读、受管随笔文稿与旅途相册
+        - Windows 桌面客户端、安装向导与模型配置
+        - 微信 / Telegram / QQ 消息网关与命令行工具
+    validations:
+      required: true
+
+  - type: textarea
+    id: daily_context
+    attributes:
+      label: 你在什么日常场景下遇到了不便或产生了这个念头？
+      description: 具体描述平时跟 TA 相处或操作界面时的真实场景，比抽象术语更有参考价值
+      placeholder: 例如：在桌面端和 TA 一起读长篇书稿时，希望能按书签快速筛选之前的批注...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_experience
+    attributes:
+      label: 你希望呈现怎样的交互或日常体验？
+      description: 描述你理想中的运作方式或界面表现
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints_notes
+    attributes:
+      label: 边界与开销考量（选填）
+      description: 例如该设计是否可以在零额外大模型 Token 开销的确定性底座上完成，或是否涉及隐私与防打扰边界
+    validations:
+      required: false
