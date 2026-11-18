@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>未找到该页面 · Page Not Found · nyairo</title>
+  <link rel="icon" href="/assets/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-theme', saved);
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0b0c;
+      --card: #161618;
+      --line: #26262a;
+      --line-2: #34343a;
+      --fg: #f2f2f3;
+      --fg-2: #b3b3ba;
+      --muted: #7a7a82;
+      --btn: #f2f2f3;
+      --btn-ink: #0b0b0c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 20px 60px -20px rgba(0, 0, 0, 0.8);
+    }
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #fafafa;
+      --card: #ffffff;
+      --line: #e4e4e7;
+      --line-2: #d4d4d8;
+      --fg: #111112;
+      --fg-2: #4a4a50;
+      --muted: #85858c;
+      --btn: #111112;
+      --btn-ink: #fafafa;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 40px -12px rgba(0, 0, 0, 0.16);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      min-height: 100vh;
+      background-color: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .on-light { display: none; }
+    .on-dark { display: block; }
+    html[data-theme="light"] .on-dark { display: none; }
+    html[data-theme="light"] .on-light { display: block; }
+    .card {
+      width: 100%;
+      max-width: 520px;
+      padding: 36px 32px 30px;
+      border-radius: 16px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 18px;
+      color: var(--fg);
+      text-decoration: none;
+      font-weight: 640;
+      font-size: 1rem;
+      letter-spacing: -0.015em;
+    }
+    .brand img {
+      width: 24px;
+      height: 23px;
+      object-fit: contain;
+    }
+    .code-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      margin-bottom: 14px;
+      border-radius: 999px;
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.74rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 1.32rem;
+      font-weight: 660;
+      letter-spacing: -0.018em;
+      color: var(--fg);
+    }
+    p {
+      margin: 0 0 10px;
+      font-size: 0.92rem;
+      line-height: 1.7;
+      color: var(--fg-2);
+    }
+    .sub-en {
+      margin: 0 0 24px;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 38px;
+      padding: 0 16px;
+      border-radius: 10px;
+      font-size: 0.86rem;
+      font-weight: 560;
+      text-decoration: none;
+      transition: opacity 0.15s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.15s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .btn:focus-visible, .brand:focus-visible {
+      outline: 2px solid var(--fg);
+      outline-offset: 3px;
+    }
+    .btn-primary {
+      background: var(--btn);
+      color: var(--btn-ink);
+      border: 1px solid var(--btn);
+    }
+    .btn-primary:hover {
+      opacity: 0.88;
+    }
+    .btn-secondary {
+      background: transparent;
+      color: var(--fg-2);
+      border: 1px solid var(--line);
+    }
+    .btn-secondary:hover {
+      color: var(--fg);
+      border-color: var(--line-2);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div>
+      <a href="/" class="brand" aria-label="nyairo 首页">
+        <img class="on-dark" src="/assets/nyairo-icon-light-66.webp" alt="" width="24" height="23">
+        <img class="on-light" src="/assets/nyairo-icon-66.webp" alt="" width="24" height="23">
+        <span>nyairo</span>
+      </a>
+    </div>
+    <div class="code-pill">404 · NOT FOUND</div>
+    <h1>海风吹散了这页路牌</h1>
+    <p>你要访问的地址可能已经改名或移走。可以从下方返回中 / 英 / 日文首页，或浏览使用文档。</p>
+    <p class="sub-en" lang="en">The page you requested may have moved. / お探しのページは見つかりませんでした。</p>
+    <div class="actions">
+      <a href="/" class="btn btn-primary">中文首页</a>
+      <a href="/en/" class="btn btn-secondary" lang="en">English</a>
+      <a href="/ja/" class="btn btn-secondary" lang="ja">日本語</a>
+      <a href="/?doc=quickstart" class="btn btn-secondary">使用文档</a>
+    </div>
+  </main>
+</body>
+</html>

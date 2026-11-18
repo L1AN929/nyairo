@@ -4,15 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>nyairo · 以虚拟世界为核心的 AI 个体框架</title>
-  <meta name="description" content="以虚拟世界为核心的开源 AI 个体框架。支持自定名字、称呼（她 / 他 / TA）与性格设定，提供原生 Windows 桌面端与 Linux/WSL 命令行，拥有本地长期记忆与按真实时间流动的日常。">
-  <meta name="keywords" content="nyairo, AI个体框架, 虚拟世界, 长期记忆, Windows桌面端, AI生活状态, 数字个体, AI伙伴, 开源AI, Agent, CHIYO, 本地记忆">
+  <meta name="description" content="以虚拟世界为核心的开源 AI 个体框架。支持自定名字、称呼（默认 TA，可自定任意代词）与性格设定，提供原生 Windows 桌面端与 Linux/WSL 命令行，拥有本地长期记忆与按真实时间流动的日常。">
+  <meta name="keywords" content="nyairo, AI个体框架, 虚拟世界, 长期记忆, Windows桌面端, AI生活状态, 数字个体, AI伙伴, 开源AI, Agent, 本地记忆">
   <meta name="author" content="nyairo contributors">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" id="canonical-link" href="https://nyairo.com/">
+  <link rel="alternate" hreflang="zh-CN" href="https://nyairo.com/">
+  <link rel="alternate" hreflang="en" href="https://nyairo.com/en/">
+  <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://nyairo.com/">
   <meta name="msvalidate.01" content="BA37E6CB8803A769BBD113FAD6A65095">
   <meta name="baidu-site-verification" content="codeva-x6HPLpgjNM">
-  <meta name="theme-color" content="#141518">
-  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#eceef2">
+  <meta name="theme-color" id="meta-theme-color" content="#0b0b0c">
 
   <script>
     (function () {
@@ -20,11 +23,13 @@
         var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
         if (saved === 'light' || saved === 'dark') {
           document.documentElement.setAttribute('data-theme', saved);
+          var metaTheme = document.getElementById('meta-theme-color');
+          if (metaTheme) metaTheme.setAttribute('content', saved === 'light' ? '#fafafa' : '#0b0b0c');
         }
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261115-v070-26">
+  <link rel="stylesheet" href="style.css?v=20261118-v070-41">
   <link rel="icon" href="assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
@@ -34,21 +39,21 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="nyairo">
   <meta property="og:title" content="nyairo · 以虚拟世界为核心的 AI 个体框架">
-  <meta property="og:description" content="给 AI 一个世界，让它拥有自己的日常。本地长期记忆、虚拟街区与身体节律、Windows 原生桌面客户端。">
+  <meta property="og:description" content="给 AI 一个世界，让 TA 拥有自己的日常。本地长期记忆、虚拟街区与身体节律、Windows 原生桌面客户端。">
   <meta property="og:url" content="https://nyairo.com/">
-  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261115-v070-26">
+  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="nyairo · 给 AI 一个世界，让它拥有自己的日常。">
+  <meta property="og:image:alt" content="nyairo · 给 AI 一个世界，让 TA 拥有自己的日常。">
   <meta property="og:locale" content="zh_CN">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="nyairo · 以虚拟世界为核心的 AI 个体框架">
-  <meta name="twitter:description" content="给 AI 一个世界，让它拥有自己的日常。本地长期记忆、虚拟空间与 Windows 桌面客户端。">
-  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261115-v070-26">
-  <meta name="twitter:image:alt" content="nyairo · 给 AI 一个世界，让它拥有自己的日常。">
+  <meta name="twitter:description" content="给 AI 一个世界，让 TA 拥有自己的日常。本地长期记忆、虚拟空间与 Windows 桌面客户端。">
+  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta name="twitter:image:alt" content="nyairo · 给 AI 一个世界，让 TA 拥有自己的日常。">
 
   <!-- Schema.org JSON-LD -->
   <script type="application/ld+json">
@@ -87,7 +92,7 @@
       },
       {
         "@type": "FAQPage",
-        "@id": "https://nyairo.com/#faq",
+        "@id": "https://nyairo.com/#home-faq",
         "mainEntity": [
           {
             "@type": "Question",
@@ -118,7 +123,7 @@
             "name": "它和普通的本地 AI 聊天软件有什么实际区别？",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "在 nyairo 里，数字个体住在有明确房间与路网距离的街区里，出门按距离真实计时，半路问起会如实说正在路上，做到一半的事能挂起保留，关掉窗口后依然接在真实流动的时间线上。"
+              "text": "在 nyairo 里，数字个体住在有明确房间、12 类街区商铺与路网距离的小镇里：出门买关东煮按距离真实计时，专注或外出时按真实日程隔几小时异步回信，遇到不想帮的杂活有明确的日常自主拒绝边界，随身物件还具备冷热干湿物态变化。"
             }
           },
           {
@@ -126,7 +131,7 @@
             "name": "所有人进去都是同一个小镇吗？能自己改房间和地图吗？",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "当前 v0.7.0 随包内置 7 套不同地貌的世界包（如海滨「凪浦」、温泉镇「汤川」、田园「穗村」、生活街区「栞泽」等），桌面端支持按 4 种风貌与自定义种子一键生成新小镇，并内置离线地图编辑器可随时改房间与家具；脱离固定模板、首次打开零配置全自动生成专属世界的体验目前尚未实现，正在后续规划中推进。"
+              "text": "随包内置 7 套不同地貌的世界包（如海滨「凪浦」、温泉镇「汤川」、田园「穗村」、生活街区「栞泽」等），支持免选风貌的全随机专属世界一键生成（自动混搭 6 类地貌、4 种异构街网与多房间住居），也可按 4 种主题加自定义种子生成新小镇，并内置离线地图编辑器随时画墙摆家具。"
             }
           },
           {
@@ -163,8 +168,8 @@
 
         <a href="#home" class="site-brand" id="brand-link">
           <span class="brand-logo">
-            <img class="on-dark" src="assets/nyairo-icon-light-66.webp" alt="" width="22" height="22">
-            <img class="on-light" src="assets/nyairo-icon-66.webp" alt="" width="22" height="22">
+            <img class="on-dark" src="assets/nyairo-icon-light-66.webp" alt="" width="22" height="21">
+            <img class="on-light" src="assets/nyairo-icon-66.webp" alt="" width="22" height="21">
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
@@ -177,13 +182,14 @@
         <nav class="header-nav" id="header-nav" aria-label="主导航">
           <span class="nav-hover-pill" id="nav-hover-pill" aria-hidden="true"></span>
           <span class="nav-active-lamp" id="nav-active-lamp" aria-hidden="true"></span>
-          <a href="#home" class="nav-link active" id="nav-home" data-home-scroll="top">首页</a>
+          <a href="#home" class="nav-link active" id="nav-home" data-home-scroll="top">← 返回首页</a>
           <a href="#home-preview" class="nav-link" id="nav-preview" data-home-scroll="home-preview">实机预览</a>
+          <a href="#home-tryout" class="nav-link" id="nav-tryout" data-home-scroll="home-tryout">在线试玩</a>
           <a href="#home-arch" class="nav-link" id="nav-arch" data-home-scroll="home-arch">核心机制</a>
-          <a href="#home-capabilities" class="nav-link" id="nav-capabilities" data-home-scroll="home-capabilities">已装功能</a>
-          <a href="#home-faq" class="nav-link" id="nav-faq" data-home-scroll="home-faq">常见问题</a>
-          <a href="#intro" class="nav-link" id="nav-docs">文档与教程</a>
-          <a href="#roadmap" class="nav-link" id="nav-roadmap">未来规划</a>
+          <a href="#home-capabilities" class="nav-link" id="nav-capabilities" data-home-scroll="home-capabilities">功能</a>
+          <a href="#home-gallery" class="nav-link" id="nav-gallery" data-home-scroll="home-gallery">展厅</a>
+          <a href="#home-faq" class="nav-link" id="nav-faq" data-home-scroll="home-faq">问答</a>
+          <a href="#intro" class="nav-link" id="nav-docs">文档</a>
         </nav>
       </div>
 
@@ -193,9 +199,33 @@
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <span>搜索文档</span>
+          <span>搜索</span>
           <kbd class="search-kbd">Ctrl K</kbd>
         </button>
+
+        <div class="lang-dropdown" id="lang-dropdown">
+          <button type="button" class="icon-btn lang-btn" id="lang-btn" aria-expanded="false" aria-haspopup="true" title="切换语言 / Language / 言語" aria-label="切换语言">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </button>
+          <div class="lang-menu" id="lang-menu" role="menu" hidden>
+            <a href="./" lang="zh-CN" role="menuitem" aria-current="page" class="is-current">
+              <span>中文</span>
+              <svg class="lang-check-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </a>
+            <a href="en/" lang="en" hreflang="en" role="menuitem"><span>English</span></a>
+            <a href="ja/" lang="ja" hreflang="ja" role="menuitem"><span>日本語</span></a>
+          </div>
+        </div>
+
+        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub 仓库" aria-label="GitHub 仓库">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+          </svg>
+        </a>
 
         <button id="theme-toggle" class="icon-btn" type="button" title="切换亮色 / 暗色模式" aria-label="切换亮色 / 暗色模式">
           <svg id="theme-icon" class="theme-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -214,11 +244,7 @@
           </svg>
         </button>
 
-        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub 仓库" aria-label="GitHub 仓库">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
-          </svg>
-        </a>
+        <a href="#home-downloads" class="header-dl-btn" data-home-scroll="home-downloads">下载</a>
       </div>
     </div>
   </header>
@@ -227,110 +253,44 @@
        视图 1: 首页视图 (#view-home)
        ====================================================================== -->
   <section id="view-home" class="home-view">
-    <!-- 凪浦昼夜海岸氛围与远景灯塔轮廓 -->
-    <div class="ambient-backdrop" aria-hidden="true">
-      <div class="ambient-grid"></div>
-      <div class="ambient-orb orb-sea"></div>
-      <div class="ambient-orb orb-lamp"></div>
-      <div class="ambient-orb orb-mist"></div>
-      <svg class="ambient-coast-svg" viewBox="0 0 1440 520" preserveAspectRatio="xMidYMax slice" fill="none">
-        <defs>
-          <linearGradient id="coast-hill-far" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="currentColor" stop-opacity="0.14"/>
-            <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
-          </linearGradient>
-          <linearGradient id="coast-hill-near" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="currentColor" stop-opacity="0.22"/>
-            <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
-          </linearGradient>
-          <radialGradient id="coast-beacon-glow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#f2b979" stop-opacity="0.72"/>
-            <stop offset="45%" stop-color="#f2b979" stop-opacity="0.22"/>
-            <stop offset="100%" stop-color="#f2b979" stop-opacity="0"/>
-          </radialGradient>
-          <linearGradient id="coast-beam-grad" x1="0" y1="0.5" x2="1" y2="0.5">
-            <stop offset="0%" stop-color="#f2b979" stop-opacity="0.20"/>
-            <stop offset="55%" stop-color="#f2b979" stop-opacity="0.06"/>
-            <stop offset="100%" stop-color="#f2b979" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-
-        <!-- 夜空星点（仅深色模式显现） -->
-        <g class="coast-stars">
-          <circle cx="190" cy="86" r="1.4" class="star-twinkle"/>
-          <circle cx="340" cy="52" r="1.1"/>
-          <circle cx="485" cy="118" r="1.3"/>
-          <circle cx="965" cy="74" r="1.5" class="star-twinkle delay-1"/>
-          <circle cx="1140" cy="48" r="1.1"/>
-          <circle cx="1285" cy="108" r="1.4" class="star-twinkle delay-2"/>
-          <circle cx="780" cy="64" r="1.0"/>
-        </g>
-
-        <!-- 远岸海岬山影 -->
-        <path d="M-40 398 C 160 356, 340 374, 520 392 C 740 412, 920 364, 1140 342 C 1270 328, 1380 344, 1480 356 L1480 520 L-40 520 Z" fill="url(#coast-hill-far)" class="coast-land-far"/>
-        <path d="M-40 424 C 120 388, 280 414, 460 430 C 690 450, 960 404, 1210 374 C 1320 362, 1410 374, 1480 386 L1480 520 L-40 520 Z" fill="url(#coast-hill-near)" class="coast-land-near"/>
-
-        <!-- 海湾水平波纹细线 -->
-        <path d="M0 442 Q 260 434, 540 444 T 1080 440 T 1440 444" stroke="currentColor" stroke-width="1" stroke-opacity="0.16" stroke-dasharray="6 10"/>
-        <path d="M90 468 Q 360 460, 680 470 T 1280 466" stroke="currentColor" stroke-width="1" stroke-opacity="0.10" stroke-dasharray="3 8"/>
-
-        <!-- 右侧海角小灯塔剪影与暖灯微光 -->
-        <g transform="translate(1214, 336)">
-          <polygon points="6,5.5 186,-28 186,26" fill="url(#coast-beam-grad)" class="coast-beacon-beam"/>
-          <circle cx="6" cy="4" r="28" fill="url(#coast-beacon-glow)" class="coast-beacon-aura"/>
-          <path d="M2 38 L4 8 L8 8 L10 38 Z" fill="currentColor" fill-opacity="0.24"/>
-          <rect x="3" y="4" width="6" height="4" rx="1" fill="currentColor" fill-opacity="0.3"/>
-          <circle cx="6" cy="5.5" r="2.2" fill="#f2b979" class="coast-beacon-core"/>
-          <line x1="-18" y1="68" x2="26" y2="68" stroke="currentColor" stroke-width="1" stroke-opacity="0.16" stroke-linecap="round"/>
-          <line x1="-6" y1="76" x2="18" y2="76" stroke="#f2b979" stroke-width="1" stroke-opacity="0.24" stroke-linecap="round"/>
-        </g>
-      </svg>
-    </div>
-
     <div class="home-container" id="main-focus" tabindex="-1">
 
-      <!-- 第 1 屏：Flagship Hero（核心价值 + Windows 直下 + 实机窗口首屏即见） -->
+      <!-- 第 1 屏：Magpie 风格左对齐大字排版 Hero -->
       <div class="hero-section">
         <div class="hero-copy-stage" id="hero-copy-stage">
-          <div class="hero-emblem-row hero-stagger" style="--stagger: 0">
-            <div class="hero-brand-tile" aria-hidden="true">
-              <img class="on-dark" src="assets/nyairo-icon-light.png" alt="" width="34" height="34">
-              <img class="on-light" src="assets/nyairo-icon.png" alt="" width="34" height="34">
-            </div>
-            <a href="#changelog-v0-7-0" class="release-pill" title="查看 v0.7.0 更新内容">
-              <span class="status-dot status-dot-pulse" aria-hidden="true"></span>
-              <span class="release-ver font-mono">v0.7.0</span>
-              <span class="release-sep">·</span>
-              <span>日常相处回执、多套风貌小镇、双人共读与桌面端</span>
-              <svg class="arrow-nudge" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-                <polyline points="12 5 19 12 12 19"></polyline>
-              </svg>
-            </a>
-          </div>
-
-          <h1 class="hero-title hero-stagger" style="--stagger: 1">
-            给 AI 一个<span class="accent-word">世界</span>，<br>让它拥有自己的<span class="accent-word">日常</span>。
+          <h1 class="hero-title hero-stagger" style="--stagger: 0">
+            给 AI 一个世界，<br><span class="ink-muted">让 TA 拥有自己的日常。</span>
           </h1>
 
-          <p class="hero-subtitle hero-stagger" style="--stagger: 2">
-            离开聊天窗口后，TA 的时间不会静止——名字、称呼（她 / 他 / TA）与性格完全由你来定，拥有自己的房间与生活街区、存在本机的长期记忆，以及随昼夜流转的起居节律。
+          <p class="hero-subtitle hero-stagger" style="--stagger: 1">
+            离开聊天窗口后，TA 的时间不会静止——名字、称呼（默认 TA，可自定任意代词）与性格完全由你来定，拥有可走动的房间与生活街区、存在本机的长期记忆，以及随昼夜流转的起居节律。
           </p>
+
+          <div class="hero-chips hero-stagger" style="--stagger: 2" aria-label="核心日常特征">
+            <span class="hero-chip"><strong>7 套小镇</strong> <span class="hero-chip-arrow">→</span> 免选风貌全随机生成</span>
+            <span class="hero-chip"><strong>12 类街坊小店</strong> <span class="hero-chip-arrow">→</span> 开放柜台自由点单</span>
+            <span class="hero-chip"><strong>纯本机记忆</strong> <span class="hero-chip-arrow">→</span> DeepSeek / Ollama 直连</span>
+          </div>
 
           <div class="hero-cta-wrap hero-stagger" style="--stagger: 3">
             <div class="hero-cta-row">
               <a href="downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe" class="hero-primary-btn" id="win-download-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M3 5.5L10.5 4.4V11.3H3V5.5ZM11.5 4.25L21 2.8V11.3H11.5V4.25ZM3 12.4H10.5V19.3L3 18.2V12.4ZM11.5 12.4H21V20.9L11.5 19.5V12.4Z"/>
                 </svg>
-                <span>下载 Windows 桌面端</span>
-                <span class="hero-btn-meta font-mono">约 5 MB</span>
+                <span>下载 Windows 版</span>
               </a>
               <a href="#home-downloads" class="hero-secondary-btn" data-home-scroll="home-downloads">
-                <span>Linux / AI 安装与其他方式</span>
-                <span class="arrow-nudge">↓</span>
+                <span>用终端安装</span>
+              </a>
+              <a href="#home-tryout" class="hero-secondary-btn" data-home-scroll="home-tryout">
+                <span>30 秒免装试玩 ↓</span>
               </a>
             </div>
+
+            <p class="hero-meta-line">
+              版本 0.7.0 · 约 5.6 MB 免管理员 · <a href="#changelog-v0-7-0">v0.7.0 更新说明</a> · <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer">Apache-2.0 开源</a> · Windows 10/11 &amp; Linux / WSL2
+            </p>
 
             <div class="win-dl-feedback hero-dl-feedback" id="win-dl-feedback" hidden>
               <span class="win-dl-dot" aria-hidden="true"></span>
@@ -340,34 +300,28 @@
         </div>
       </div>
 
-      <!-- 第 2 屏：桌面端交互展台（紧随 Hero 进入首屏视野） -->
+      <!-- 第 2 屏：桌面端交互展台（与 Hero 呼吸连贯成同一首屏舞台） -->
       <section class="section-block section-preview-lead" id="home-preview" aria-labelledby="preview-heading">
-        <div class="section-head section-head-compact" data-reveal>
-          <div>
-            <div class="section-eyebrow">桌面日常</div>
-            <h2 class="section-title" id="preview-heading">住进桌面，推窗即是日常街区</h2>
-          </div>
-          <p class="section-desc section-desc-inline">同一扇窗口里看 TA 在哪间房、切换 4 种内置风貌小镇散步、引用对话或共读手记。</p>
-        </div>
+        <h2 class="sr-only" id="preview-heading">住进桌面，推窗即是日常街区</h2>
 
-        <div class="app-stage-halo" id="app-stage-halo">
+        <div class="app-stage-halo hero-stagger" id="app-stage-halo" style="--stagger: 4">
         <div class="app-stage" id="app-stage">
           <div class="app-stage-toolbar">
             <div class="stage-window-dots" aria-hidden="true">
               <span></span><span></span><span></span>
             </div>
             <div class="seg-bar" id="stage-seg" role="tablist" aria-label="桌面端场景">
-              <div class="seg-thumb" aria-hidden="true"><span class="stage-auto-bar" id="stage-auto-bar"></span></div>
-              <button type="button" class="seg-btn is-active" role="tab" aria-selected="true" data-scene="0">实机演示</button>
-              <button type="button" class="seg-btn" role="tab" aria-selected="false" data-scene="1">状态总览</button>
-              <button type="button" class="seg-btn" role="tab" aria-selected="false" data-scene="2">街区与房间</button>
-              <button type="button" class="seg-btn" role="tab" aria-selected="false" data-scene="3">流式交谈</button>
-              <button type="button" class="seg-btn" role="tab" aria-selected="false" data-scene="4">文稿与共读</button>
-              <button type="button" class="seg-btn" role="tab" aria-selected="false" data-scene="5">地图编辑</button>
+              <div class="seg-thumb" aria-hidden="true"></div>
+              <button type="button" class="seg-btn is-active" role="tab" aria-selected="true" tabindex="0" data-scene="0">实机演示</button>
+              <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="1">状态总览</button>
+              <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="2">街区与房间</button>
+              <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="3">流式交谈</button>
+              <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="4">文稿与共读</button>
+              <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="5">地图编辑</button>
             </div>
             <div class="stage-toolbar-actions">
               <span class="stage-pause-pill" id="stage-pause-pill" aria-hidden="true">已暂停</span>
-              <button type="button" class="stage-zoom-btn" id="stage-zoom-btn" title="放大查看高清实机截图">
+              <button type="button" class="stage-zoom-btn notranslate" id="stage-zoom-btn" translate="no" title="放大查看高清实机截图">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="15 3 21 3 21 9"></polyline>
                   <polyline points="9 21 3 21 3 15"></polyline>
@@ -377,50 +331,48 @@
                 <span>放大</span>
               </button>
             </div>
+            <span class="stage-auto-bar" id="stage-auto-bar" aria-hidden="true"></span>
           </div>
 
           <div class="stage-screen-wrap" id="stage-screen-wrap" role="button" tabindex="0" aria-label="点击放大查看桌面端实机截图">
             <!-- Scene 0: Silent 60fps Walkthrough Video -->
             <div class="stage-scene is-active" data-scene-panel="0">
-              <video id="stage-video-dark" class="stage-video on-dark" muted loop playsinline preload="none" poster="assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13" width="1280" height="800" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比">
-                <source src="assets/screenshots/desktop-demo-dark.mp4?v=20261115-v070-14" type="video/mp4">
-              </video>
-              <video id="stage-video-light" class="stage-video on-light" muted loop playsinline preload="none" poster="assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15" width="1280" height="800" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比">
-                <source src="assets/screenshots/desktop-demo-light.mp4?v=20261115-v070-15" type="video/mp4">
-              </video>
-              <img class="stage-reduced-still on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="1280" height="800" loading="eager">
-              <img class="stage-reduced-still on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="1280" height="800" loading="eager">
+              <video id="stage-video-dark" class="stage-video on-dark" autoplay muted loop playsinline preload="auto" src="assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比"></video>
+              <video id="stage-video-light" class="stage-video on-light" muted loop playsinline preload="metadata" src="assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比"></video>
+              <img class="stage-reduced-still on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="eager">
+              <img class="stage-reduced-still on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="eager">
             </div>
             <!-- Scene 1: Overview -->
             <div class="stage-scene" data-scene-panel="1">
-              <img class="on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="1280" height="800" loading="lazy">
-              <img class="on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="1280" height="800" loading="lazy">
+              <img class="on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="lazy">
+              <img class="on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="lazy">
             </div>
             <!-- Scene 2: World & Multi-Town Switcher -->
             <div class="stage-scene" data-scene-panel="2">
-              <img id="stage-world-img-dark" class="on-dark" src="assets/screenshots/desktop-world-dark.webp?v=20261115-v070-13" alt="nyairo 桌面端：凪浦海滨小镇街区总图" width="1280" height="800" loading="lazy">
-              <img id="stage-world-img-light" class="on-light" src="assets/screenshots/desktop-world-light.webp?v=20261115-v070-15" alt="nyairo 桌面端：凪浦海滨小镇街区总图" width="1280" height="800" loading="lazy">
+              <img id="stage-world-img-dark" class="on-dark" src="assets/screenshots/desktop-world-dark.webp?v=20261118-v070-35" alt="nyairo 桌面端：凪浦海滨小镇街区总图" width="2560" height="1600" loading="lazy">
+              <img id="stage-world-img-light" class="on-light" src="assets/screenshots/desktop-world-light.webp?v=20261118-v070-35" alt="nyairo 桌面端：凪浦海滨小镇街区总图" width="2560" height="1600" loading="lazy">
             </div>
             <!-- Scene 3: Streaming Talk & Quote -->
             <div class="stage-scene" data-scene-panel="3">
-              <img class="on-dark" src="assets/screenshots/desktop-talk-dark.webp?v=20261115-v070-13" alt="nyairo 桌面端：流式对话、消息引用追问与历史会话" width="1280" height="800" loading="lazy">
-              <img class="on-light" src="assets/screenshots/desktop-talk-light.webp?v=20261115-v070-15" alt="nyairo 桌面端：流式对话、消息引用追问与历史会话" width="1280" height="800" loading="lazy">
+              <img class="on-dark" src="assets/screenshots/desktop-talk-dark.webp?v=20261118-v070-35" alt="nyairo 桌面端：流式对话、消息引用追问与历史会话" width="2560" height="1600" loading="lazy">
+              <img class="on-light" src="assets/screenshots/desktop-talk-light.webp?v=20261118-v070-35" alt="nyairo 桌面端：流式对话、消息引用追问与历史会话" width="2560" height="1600" loading="lazy">
             </div>
             <!-- Scene 4: Managed Projects & Version Diff -->
             <div class="stage-scene" data-scene-panel="4">
-              <img class="on-dark" src="assets/screenshots/desktop-notes-dark.webp?v=20261115-v070-13" alt="nyairo 桌面端：受管文稿、历史版本快照与差异对比" width="1280" height="800" loading="lazy">
-              <img class="on-light" src="assets/screenshots/desktop-notes-light.webp?v=20261115-v070-15" alt="nyairo 桌面端：受管文稿、历史版本快照与差异对比" width="1280" height="800" loading="lazy">
+              <img class="on-dark" src="assets/screenshots/desktop-notes-dark.webp?v=20261118-v070-35" alt="nyairo 桌面端：受管文稿、历史版本快照与差异对比" width="2560" height="1600" loading="lazy">
+              <img class="on-light" src="assets/screenshots/desktop-notes-light.webp?v=20261118-v070-35" alt="nyairo 桌面端：受管文稿、历史版本快照与差异对比" width="2560" height="1600" loading="lazy">
             </div>
             <!-- Scene 5: Offline Visual World Editor -->
             <div class="stage-scene" data-scene-panel="5">
-              <img class="on-dark stage-editor-still" src="assets/screenshots/desktop-editor.webp?v=20261115-v070-26" alt="nyairo 离线世界编辑器：可视化画墙、开门窗、摆放家具并导出世界包" width="1280" height="800" loading="lazy">
-              <img class="on-light stage-editor-still" src="assets/screenshots/desktop-editor.webp?v=20261115-v070-26" alt="nyairo 离线世界编辑器：可视化画墙、开门窗、摆放家具并导出世界包" width="1280" height="800" loading="lazy">
+              <img class="on-dark stage-editor-still" src="assets/screenshots/desktop-editor-dark.webp?v=20261118-v070-37" alt="nyairo 离线世界编辑器：可视化画墙、开门窗、摆放家具并导出世界包" width="2880" height="1800" loading="lazy">
+              <img class="on-light stage-editor-still" src="assets/screenshots/desktop-editor-light.webp?v=20261118-v070-37" alt="nyairo 离线世界编辑器：可视化画墙、开门窗、摆放家具并导出世界包" width="2880" height="1800" loading="lazy">
             </div>
           </div>
 
           <div class="stage-world-strip" id="stage-world-strip" hidden>
             <span class="stage-world-label">内置风貌实机截图</span>
             <div class="stage-world-bar" id="stage-world-bar" role="group" aria-label="切换内置小镇实机截图">
+              <span class="world-pill-thumb" id="world-pill-thumb" aria-hidden="true"></span>
               <button type="button" class="stage-world-pill is-active" data-world="nagiura" aria-pressed="true">凪浦 · 海滨小镇</button>
               <button type="button" class="stage-world-pill" data-world="onsawa" aria-pressed="false">汤川 · 山间温泉</button>
               <button type="button" class="stage-world-pill" data-world="inobe" aria-pressed="false">穗村 · 田园乡野</button>
@@ -449,6 +401,192 @@
         </div>
       </section>
 
+      <!-- 第 2.2 屏：30 秒免安装网页试玩小窗（迷你双栏客户端 · 纯本地确定性沙盒） -->
+      <section class="section-block" id="home-tryout" aria-labelledby="tryout-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">30 秒在线试玩</div>
+            <h2 class="section-title" id="tryout-heading">不用下载也不用填密钥，直接在小窗里推窗、泡茶、跟 TA 搭句话</h2>
+            <p class="section-desc">左半边是正在运转的房间与街区状态，右半边是即时对话窗。试着推窗淋雨、出门买关东煮途中发消息、或者催 TA 代写周报。</p>
+          </div>
+        </div>
+
+        <div class="ny-live-box" id="ny-live-box" data-reveal>
+          <div class="ny-live-titlebar">
+            <div class="ny-live-title-left">
+              <div class="ny-live-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <span class="ny-live-appname">nyairo · 凪浦 临海住居</span>
+              <span class="ny-live-clock-pill" id="ny-live-clock">19:15 · 小雨</span>
+            </div>
+            <div class="ny-live-title-right">
+              <span class="ny-live-engine-tag">离线实机规则沙盒 · 0 Token</span>
+              <button type="button" class="ny-live-reset-btn" id="ny-live-reset">重置状态</button>
+            </div>
+          </div>
+
+          <div class="ny-live-body">
+            <!-- Left Pane: Walkable Floorplan, Direct Actions & Matter Ledger -->
+            <div class="ny-live-world">
+              <div class="ny-live-map-wrap">
+                <svg class="ny-live-svg" viewBox="0 0 460 220" fill="none" role="img" aria-label="临海住居书房与青叶便利店实时状态图">
+                  <!-- Room box -->
+                  <rect x="14" y="16" width="248" height="188" rx="9" class="ny-svg-wall"/>
+                  <text x="26" y="190" class="ny-svg-kicker">STUDY · 书房物态</text>
+
+                  <!-- North sliding window -->
+                  <rect x="82" y="16" width="112" height="10" rx="2" class="ny-window-track"/>
+                  <rect x="84" y="17.5" width="54" height="7" rx="1.5" class="ny-window-sash"/>
+                  <text x="138" y="42" text-anchor="middle" class="ny-svg-muted" id="ny-svg-win-lbl">北窗：关严</text>
+
+                  <!-- Rain streaks & damp breeze -->
+                  <g class="ny-rain-lines">
+                    <line x1="98" y1="4" x2="93" y2="14"/>
+                    <line x1="122" y1="3" x2="117" y2="13"/>
+                    <line x1="148" y1="4" x2="143" y2="14"/>
+                    <line x1="172" y1="3" x2="167" y2="13"/>
+                  </g>
+                  <g class="ny-damp-breeze">
+                    <path d="M114 30 C118 52, 102 76, 94 108"/>
+                    <path d="M158 30 C162 54, 146 78, 134 108"/>
+                  </g>
+
+                  <!-- Oak Desk -->
+                  <rect x="44" y="114" width="188" height="56" rx="7" class="ny-svg-desk"/>
+                  <text x="138" y="160" text-anchor="middle" class="ny-svg-kicker">OAK DESK · 书桌</text>
+
+                  <!-- Paper Note -->
+                  <g transform="translate(62, 121)">
+                    <rect x="0" y="0" width="38" height="28" rx="3" class="ny-note-sheet"/>
+                    <circle cx="30" cy="8" r="6" class="ny-note-stain"/>
+                    <line x1="7" y1="8" x2="29" y2="8" class="ny-note-ink"/>
+                    <line x1="7" y1="14" x2="26" y2="14" class="ny-note-ink"/>
+                    <line x1="7" y1="20" x2="21" y2="20" class="ny-note-ink"/>
+                  </g>
+
+                  <!-- Barley Tea Mug -->
+                  <g class="ny-tea-group" transform="translate(174, 120)">
+                    <g class="ny-tea-steam">
+                      <path d="M9 -2 C7 -7, 11 -10, 9 -14"/>
+                      <path d="M16 -1 C14 -6, 18 -9, 16 -13"/>
+                      <path d="M23 -2 C21 -7, 25 -10, 23 -14"/>
+                    </g>
+                    <rect x="4" y="3" width="24" height="22" rx="4.5" fill="var(--card)" stroke="var(--line-2)" stroke-width="1.2"/>
+                    <path d="M28 9 H31.5 A4.5 4.5 0 0 1 31.5 18 H28" stroke="var(--line-2)" stroke-width="1.2"/>
+                    <rect x="7" y="6.5" width="18" height="8" rx="2" class="ny-tea-liquid"/>
+                  </g>
+
+                  <!-- Road Network Box -->
+                  <rect x="274" y="16" width="172" height="188" rx="9" class="ny-svg-roadbox"/>
+                  <text x="286" y="34" class="ny-svg-kicker">ROAD GRAPH · 120m</text>
+                  <path d="M304 162 L360 114 L414 66" class="ny-road-line"/>
+                  <path d="M304 162 L360 114 L414 66" class="ny-road-line-active"/>
+
+                  <circle cx="304" cy="162" r="4.5" fill="var(--card)" stroke="var(--fg-2)" stroke-width="1.4"/>
+                  <text x="304" y="182" text-anchor="middle" class="ny-svg-label">住居</text>
+
+                  <circle cx="360" cy="114" r="4" fill="var(--card)" stroke="var(--fg-2)" stroke-width="1.3"/>
+                  <text x="370" y="132" text-anchor="start" class="ny-svg-muted">浪打道</text>
+
+                  <circle cx="414" cy="66" r="5" fill="var(--card)" stroke="var(--fg)" stroke-width="1.4"/>
+                  <text x="404" y="55" text-anchor="end" class="ny-svg-label">青叶便利店</text>
+
+                  <!-- Moving Companion Dot -->
+                  <g id="ny-actor-marker" class="ny-actor-marker" transform="translate(138, 88)">
+                    <circle r="10" fill="var(--accent-soft)" stroke="var(--fg-2)" stroke-width="1"/>
+                    <circle r="4.2" fill="var(--fg)"/>
+                  </g>
+                </svg>
+              </div>
+
+              <div class="ny-live-controls" role="group" aria-label="房间与街区动作控制">
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-window" aria-pressed="false">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                    <line x1="12" y1="3" x2="12" y2="21"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label" id="ny-lbl-window">推开北窗</span>
+                    <span class="ny-ctrl-state" id="ny-sub-window">当前：关严</span>
+                  </span>
+                </button>
+
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-tea">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M17 8h1a4 4 0 1 1 0 8h-1"></path>
+                    <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"></path>
+                    <line x1="6" y1="2" x2="6" y2="4"></line>
+                    <line x1="10" y1="2" x2="10" y2="4"></line>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label" id="ny-lbl-tea">泡热麦茶</span>
+                    <span class="ny-ctrl-state" id="ny-sub-tea">无饮品 · 62°C</span>
+                  </span>
+                </button>
+
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-time">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label">时间 +30 分钟</span>
+                    <span class="ny-ctrl-state" id="ny-sub-time">观察自然降温</span>
+                  </span>
+                </button>
+
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-walk">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="5" r="2"></circle>
+                    <path d="m9 20 3-6 3 6"></path>
+                    <path d="M12 10v4"></path>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label" id="ny-lbl-walk">买热关东煮</span>
+                    <span class="ny-ctrl-state" id="ny-sub-walk">在书房 · 随时出门</span>
+                  </span>
+                </button>
+              </div>
+
+              <div class="ny-live-ledger" aria-live="polite">
+                <div class="ny-ledger-row">
+                  <span class="ny-ledger-key">室内空气</span>
+                  <span class="ny-ledger-val" id="ny-led-air">54% RH · 关窗干爽</span>
+                </div>
+                <div class="ny-ledger-row">
+                  <span class="ny-ledger-key">书桌物态</span>
+                  <span class="ny-ledger-val" id="ny-led-desk">便签清晰 · 无饮品</span>
+                </div>
+                <div class="ny-ledger-row">
+                  <span class="ny-ledger-key">随身帆布包</span>
+                  <span class="ny-ledger-val" id="ny-led-bag">零钱包 ¥680 · 折叠伞（干爽）</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Pane: Authentic Streaming Conversation Stream -->
+            <div class="ny-live-chat">
+              <div class="ny-chat-head">
+                <span class="ny-chat-who">
+                  <span class="ny-chat-dot" aria-hidden="true"></span>
+                  <span>TA · 默认中立住客</span>
+                </span>
+                <span class="ny-chat-activity" id="ny-chat-activity">书房窗边 · 在屋翻书</span>
+              </div>
+
+              <div class="ny-chat-log" id="ny-chat-log" aria-live="polite"></div>
+
+              <div class="ny-chat-chips" id="ny-chat-chips" role="group" aria-label="快捷试玩发话"></div>
+
+              <form class="ny-chat-form" id="ny-chat-form">
+                <input type="text" class="ny-chat-input" id="ny-chat-input" placeholder="直接打一句话试试（比如：帮我写份周报 / 茶凉了吗 / 在哪儿）..." autocomplete="off">
+                <button type="submit" class="ny-chat-send">发送</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- 第 2.5 屏：同一句话两种接法（真实对比）与人设起手模板 -->
       <section class="section-block" id="home-contrast" aria-labelledby="contrast-heading">
         <div class="section-head" data-reveal>
@@ -463,17 +601,19 @@
         <div class="contrast-shell spotlight-surface" data-reveal>
           <div class="contrast-topbar">
             <div class="contrast-tabs" id="contrast-tabs" role="tablist" aria-label="切换日常对话对比场景">
-              <button type="button" class="contrast-tab is-active" role="tab" aria-selected="true" data-contrast="0">晚间刚回到家</button>
-              <button type="button" class="contrast-tab" role="tab" aria-selected="false" data-contrast="1">出门用微信约散步</button>
-              <button type="button" class="contrast-tab" role="tab" aria-selected="false" data-contrast="2">隔天重开接着聊</button>
+              <span class="seg-thumb contrast-seg-thumb" aria-hidden="true"></span>
+              <button type="button" class="contrast-tab is-active" role="tab" aria-selected="true" tabindex="0" data-contrast="0">晚间刚回到家</button>
+              <button type="button" class="contrast-tab" role="tab" aria-selected="false" tabindex="-1" data-contrast="1">出门用微信约散步</button>
+              <button type="button" class="contrast-tab" role="tab" aria-selected="false" tabindex="-1" data-contrast="2">隔天重开接着聊</button>
             </div>
-            <div class="contrast-prompt-echo">
+            <div class="contrast-prompt-echo" id="contrast-prompt-echo">
               <span class="contrast-channel-pill" id="contrast-channel">桌面对话</span>
               <span class="contrast-prompt-text" id="contrast-user-msg">「刚下班回到家，外面风有点硬」</span>
             </div>
           </div>
 
-          <div class="contrast-grid">
+          <div class="contrast-grid-viewport" id="contrast-grid-viewport">
+          <div class="contrast-grid" id="contrast-grid">
             <div class="contrast-card is-plain">
               <div class="contrast-card-head">
                 <span class="contrast-role-pill">普通 AI 聊天框</span>
@@ -491,6 +631,7 @@
               <p class="contrast-reply" id="contrast-nyairo-reply">「我刚好也快走到住居门口了，海边风道确实吹得挺硬。先把外套脱了喝口温水，昨晚一起留记号的《海风手记》还摊在桌上，歇会儿接着翻？」</p>
               <div class="contrast-card-foot is-accent" id="contrast-nyairo-note">接住路网位置、共读书签进度与本机长期记忆，像一直住在一起的伙伴。</div>
             </div>
+          </div>
           </div>
 
           <div class="persona-starter-bar">
@@ -567,26 +708,31 @@
                 <circle r="10" class="topo-runner-halo">
                   <animateMotion dur="7.5s" repeatCount="indefinite" path="M68 88 L186 64 L308 82 L396 42" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.42 0 0.58 1"/>
                 </circle>
-                <!-- 街区节点 -->
-                <g transform="translate(68,88)">
-                  <circle r="5" class="node-home"/>
+                <!-- 街区可交互节点 -->
+                <g transform="translate(68,88)" class="topo-stop" data-stop="home" data-status="临海住居 · 在房间窗边歇脚">
+                  <circle r="16" class="topo-hit"/>
+                  <circle r="5" class="node-home node-dot"/>
                   <text y="20" text-anchor="middle" class="node-lbl">临海住居</text>
                 </g>
-                <g transform="translate(186,64)">
-                  <circle r="4" class="node-mid"/>
+                <g transform="translate(186,64)" class="topo-stop" data-stop="road" data-status="浪打道 · 沿海坡步行中（约 4 分钟）">
+                  <circle r="16" class="topo-hit"/>
+                  <circle r="4" class="node-mid node-dot"/>
                   <text y="-12" text-anchor="middle" class="node-lbl">浪打道</text>
                 </g>
-                <g transform="translate(238,28)">
-                  <circle r="3.5" class="node-dim"/>
-                  <text x="10" y="4" class="node-lbl-dim">海鸥咖啡</text>
+                <g transform="translate(238,28)" class="topo-stop" data-stop="cafe" data-status="海鸥咖啡 · 靠窗喝杯温手冲">
+                  <circle r="16" class="topo-hit"/>
+                  <circle r="3.5" class="node-dim node-dot"/>
+                  <text x="10" y="4" class="node-lbl-dim node-lbl">海鸥咖啡</text>
                 </g>
-                <g transform="translate(308,82)">
-                  <circle r="4.5" class="node-mid"/>
+                <g transform="translate(308,82)" class="topo-stop" data-stop="bookstore" data-status="文浜堂书店 · 挑新到的画册">
+                  <circle r="16" class="topo-hit"/>
+                  <circle r="4.5" class="node-mid node-dot"/>
                   <text y="20" text-anchor="middle" class="node-lbl">文浜堂书店</text>
                 </g>
-                <g transform="translate(396,42)">
+                <g transform="translate(396,42)" class="topo-stop is-selected" data-stop="pier" data-status="散步途中 · 距栈桥约 3 分钟">
+                  <circle r="16" class="topo-hit"/>
                   <circle r="5" class="node-dest-pulse"/>
-                  <circle r="5" class="node-dest"/>
+                  <circle r="5" class="node-dest node-dot"/>
                   <text y="-12" text-anchor="middle" class="node-lbl active">凪浦栈桥</text>
                 </g>
               </svg>
@@ -601,10 +747,10 @@
 
             <div class="bento-copy">
               <h3 class="bento-title">
-                <a href="#world-editor" class="bento-card-link">内置 7 套风貌小镇，走路按路网真实计时</a>
+                <a href="#world-editor" class="bento-card-link">内置 7 套风貌与全随机专属世界，走路按路网真实计时</a>
               </h3>
               <p class="bento-desc">
-                随包内置凪浦（海滨）、汤川（温泉）、穗村（田园）、栞泽（街区）等 7 套世界，桌面端支持按 4 种地形与种子一键生成或离线编辑器改造；零配置全自动生成仍在规划中。出门按路网距离真实计时，途中问起会如实说「正在路上」。
+                随包内置凪浦（海滨）、汤川（温泉）、穗村（田园）、栞泽（街区）等 7 套世界，支持免选风貌的全随机专属世界一键生成（混搭 6 类地貌与异构街网）及离线地图编辑；12 类商铺开放柜台自由点单，出门按距离真实计时。
               </p>
             </div>
           </article>
@@ -741,7 +887,7 @@
               <span class="eco-kicker">自由定制 · 本地优先</span>
               <h3 class="eco-title">名字人称与私人记忆全留在本机</h3>
             </div>
-            <p class="eco-desc">名字、称呼（她 / 他 / TA）、性格设定与长期记忆全存于本机 <code>~/.nyairo</code>，卸载不删回忆，手机与桌面共享同一状态。</p>
+            <p class="eco-desc">名字、称呼（默认 TA，可自定任意代词）、性格设定与长期记忆全存于本机 <code>~/.nyairo</code>，卸载不删回忆，手机与桌面共享同一状态。</p>
             <div class="eco-chips" aria-label="支持的交互通道">
               <span class="eco-chip">自定义名字与称呼</span>
               <span class="eco-chip">原生桌面端</span>
@@ -752,13 +898,13 @@
         </div>
       </section>
 
-      <!-- 已实装功能目录（v0.7.0 双栏六大块能力矩阵） -->
+      <!-- 已实装功能目录（v0.7.0 双栏八大块能力矩阵） -->
       <section class="section-block" id="home-capabilities" aria-labelledby="cap-heading">
         <div class="section-head" data-reveal>
           <div>
             <div class="section-eyebrow">已实装能力目录</div>
-            <h2 class="section-title" id="cap-heading">v0.7.0 目前已经做完的六大块功能</h2>
-            <p class="section-desc">每一栏标明了桌面端或命令行里的具体位置与当前可用能力，装好打开即可上手。</p>
+            <h2 class="section-title" id="cap-heading">目前已落地的八大块日常与世界能力</h2>
+            <p class="section-desc">每一栏标明了桌面端或命令行里的具体入口与实装细节，装好打开即可直接体验。</p>
           </div>
           <a href="#status-matrix" class="btn-outline">已完成 / 未完成对照 <span class="arrow-nudge">→</span></a>
         </div>
@@ -770,113 +916,300 @@
             </span>
             <div class="cap-card-body">
               <div class="cap-card-top">
-                <h3>流式对话与动作回执</h3>
+                <h3>流式对话、异步回信与动作回执</h3>
                 <a href="#desktop-guide" class="cap-where-link">桌面「总览 / 对话」页 →</a>
               </div>
-              <p class="cap-card-desc">回答逐字出现，支持划句引用、原地重试与动作跳转胶囊，设好接口可当场测速排错。</p>
+              <p class="cap-card-desc">平时回答逐字浮现并带动作跳转胶囊；熟睡、外出或专注时将非紧急来信收入待回匣，按真实日程隔几小时异步回信。</p>
               <div class="cap-chips">
                 <span class="cap-chip">划句引用追问</span>
-                <span class="cap-chip">散步 / 写稿动作跳转胶囊</span>
-                <span class="cap-chip">一键导出记录</span>
+                <span class="cap-chip">按日程隔几小时异步回信</span>
+                <span class="cap-chip">急事敲门即时唤醒</span>
                 <span class="cap-chip">模型接口直连测速</span>
               </div>
             </div>
           </article>
 
-          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 50ms">
+          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 40ms">
             <span class="cap-icon-box" aria-hidden="true">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
             </span>
             <div class="cap-card-body">
               <div class="cap-card-top">
-                <h3>自定义身份与本机长期记忆</h3>
-                <a href="#cli-reference" class="cap-where-link">设置 · 记忆（常驻 / 默契） →</a>
+                <h3>去工具人化的日常自主拒绝边界</h3>
+                <a href="#configuration" class="cap-where-link">相处分寸 · SOUL.md →</a>
               </div>
-              <p class="cap-card-desc">名字、称呼与 <code>SOUL.md</code> 性格由你定，重要往事沉淀在本机且可搜、可改错、可停用召回。</p>
+              <p class="cap-card-desc">TA 是住在小镇里的独立个体而非随叫随到的客服——不想帮的杂活打死也不帮，干脆拒绝不滑跪道歉，转头也不记仇。</p>
               <div class="cap-chips">
-                <span class="cap-chip">自由定名与称呼</span>
-                <span class="cap-chip">SOUL.md 防误覆盖</span>
-                <span class="cap-chip">关键词检索 / 纠错</span>
-                <span class="cap-chip">未来问题与习惯话头</span>
+                <span class="cap-chip">不想帮的忙打死也不帮</span>
+                <span class="cap-chip">零客服式滑跪道歉</span>
+                <span class="cap-chip">有界按需协作</span>
+                <span class="cap-chip">自由定名与代词 TA</span>
               </div>
             </div>
           </article>
 
-          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 100ms">
+          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 80ms">
             <span class="cap-icon-box" aria-hidden="true">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
             </span>
             <div class="cap-card-body">
               <div class="cap-card-top">
-                <h3>7 套风貌小镇与离线地图编辑</h3>
-                <a href="#world-editor" class="cap-where-link">桌面「街区 / 商店」· 编辑器 →</a>
+                <h3>7 套内置世界与全随机专属小镇</h3>
+                <a href="#world-editor" class="cap-where-link">桌面「街区 → 生成新小镇」 →</a>
               </div>
-              <p class="cap-card-desc">内置 7 套风貌世界并可按 4 种骨架加种子一键新生成，室外真实步行耗时，进屋还能开关灯具。</p>
+              <p class="cap-card-desc">内置 7 套风貌小镇，支持免选模板的全随机专属世界一键生成（混搭 6 类地貌与 4 种异构街网），并带同款离线地图编辑器。</p>
               <div class="cap-chips">
-                <span class="cap-chip">7 套内置小镇</span>
-                <span class="cap-chip">4 种地形加种子生成</span>
-                <span class="cap-chip">卧室 / 客厅走动开关灯</span>
-                <span class="cap-chip">可视化画墙摆家具</span>
+                <span class="cap-chip">免选风貌全随机生成</span>
+                <span class="cap-chip">7 套内置代表小镇</span>
+                <span class="cap-chip">多房间走动开关窗与灯</span>
+                <span class="cap-chip">深浅双色地图编辑器</span>
               </div>
             </div>
           </article>
 
-          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 150ms">
+          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 120ms">
             <span class="cap-icon-box" aria-hidden="true">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
             </span>
             <div class="cap-card-body">
               <div class="cap-card-top">
-                <h3>双人共读、文稿对比与相册</h3>
-                <a href="#daily-companions" class="cap-where-link">记忆（随笔 · 共读 · 相册） →</a>
+                <h3>12 类街区店铺、自由点单与错峰店主</h3>
+                <a href="#daily-companions" class="cap-where-link">桌面「街区 / 商店」面板 →</a>
               </div>
-              <p class="cap-card-desc">带《凪浦海风手记》共读示范书，草稿支持挂起续写与逐行版本差异对比，明信片相册随时翻看。</p>
+              <p class="cap-card-desc">涵盖便利店、面包房、花店、钱汤等 12 类街坊小店，支持开放柜台自由点单（如买热关东煮）；旧书店与咖啡屋店主按独立错峰作息出勤。</p>
               <div class="cap-chips">
-                <span class="cap-chip">导入 txt / md 共读</span>
-                <span class="cap-chip">页码书签与批注</span>
-                <span class="cap-chip">文稿跨版逐行比对</span>
-                <span class="cap-chip">相册翻看 · 日记折起</span>
+                <span class="cap-chip">12 类街区商铺</span>
+                <span class="cap-chip">开放柜台买热关东煮</span>
+                <span class="cap-chip">书店 / 咖啡店主错峰作息</span>
+                <span class="cap-chip">打烊挂牌与吧台留言</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 160ms">
+            <span class="cap-icon-box" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+            </span>
+            <div class="cap-card-body">
+              <div class="cap-card-top">
+                <h3>随身包袋嵌套与冷热干湿物态</h3>
+                <a href="#daily-companions" class="cap-where-link">随身行囊 · 桌面书桌 →</a>
+              </div>
+              <p class="cap-card-desc">支持挎包套零钱包最多 3 层收纳；热饮搁久变凉、淋雨外套缓慢阴干，开窗遇微雨时桌边纸条还会受潮微微晕字。</p>
+              <div class="cap-chips">
+                <span class="cap-chip">最多 3 层包袋嵌套</span>
+                <span class="cap-chip">热饮自然放凉</span>
+                <span class="cap-chip">淋雨衣物晾干曲线</span>
+                <span class="cap-chip">开窗雨湿纸条晕字</span>
               </div>
             </div>
           </article>
 
           <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 200ms">
             <span class="cap-icon-box" aria-hidden="true">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
             </span>
             <div class="cap-card-body">
               <div class="cap-card-top">
-                <h3>起居节律与零偷跑预算闸门</h3>
-                <a href="#daily-companions" class="cap-where-link">节律开关 · /chiyo_consider →</a>
+                <h3>双层回忆灯、共读与无损搬家旅行箱</h3>
+                <a href="#data" class="cap-where-link">记忆与文稿 · 旅行箱 →</a>
               </div>
-              <p class="cap-card-desc">随在线时间体现困倦、饮水与街区早晚变换；后台自主活动默认关闭且设好时长与请求双重上限。</p>
+              <p class="cap-card-desc">双层回忆灯兼顾温润印象与零篡改原稿核查；支持双人共读批注，以及连同专属世界切片与损耗清单一并打包的无损旅行箱。</p>
               <div class="cap-chips">
-                <span class="cap-chip">休息与饮水简餐节律</span>
-                <span class="cap-chip">街区早晚时段变化</span>
-                <span class="cap-chip">双刹车防跑费用</span>
-                <span class="cap-chip">独立梳理问题不打乱聊天</span>
+                <span class="cap-chip">双层回忆灯保真核查</span>
+                <span class="cap-chip">无损旅行箱含世界切片</span>
+                <span class="cap-chip">导入 txt / md 共读</span>
+                <span class="cap-chip">文稿逐行历史比对</span>
               </div>
             </div>
           </article>
 
-          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 250ms">
+          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 240ms">
+            <span class="cap-icon-box" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>
+            </span>
+            <div class="cap-card-body">
+              <div class="cap-card-top">
+                <h3>本机长期记忆与可撤回账本</h3>
+                <a href="#cli-reference" class="cap-where-link">桌面「记忆 → 常驻 / 共处」 →</a>
+              </div>
+              <p class="cap-card-desc">日常喜好与约定全部写入本机 SQLite 记忆库，绝不上传官方后台；记错了可当面订正，不想再提的往事一键停用召回。</p>
+              <div class="cap-chips">
+                <span class="cap-chip">纯本机 SQLite 落盘</span>
+                <span class="cap-chip">SOUL.md 防误覆盖</span>
+                <span class="cap-chip">关键词检索 / 纠错</span>
+                <span class="cap-chip">未来留问与习惯话头</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="cap-card spotlight-surface" data-reveal style="--reveal-delay: 280ms">
             <span class="cap-icon-box" aria-hidden="true">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
             </span>
             <div class="cap-card-body">
               <div class="cap-card-top">
-                <h3>Windows 桌面端与手机多端直连</h3>
-                <a href="#windows" class="cap-where-link">约 5 MB 安装包 · 微信 / TG / QQ →</a>
+                <h3>起居节律、预算闸门与多端直连</h3>
+                <a href="#windows" class="cap-where-link">桌面端 · 微信 / TG / QQ →</a>
               </div>
-              <p class="cap-card-desc">免管理员装好后自动配齐环境，缩在托盘常驻；出门可连微信、Telegram 或 QQ，打码日志一包导出。</p>
+              <p class="cap-card-desc">随在线时长呈现困倦饮水节律与早晚天色；默认设好每日模型用量双闸门防偷跑费用，出门扫码连个人微信或 Telegram。</p>
               <div class="cap-chips">
-                <span class="cap-chip">约 5 MB 免管理员安装</span>
+                <span class="cap-chip">每日用量双闸门封顶</span>
+                <span class="cap-chip">约 5 MB 免管理员桌面端</span>
                 <span class="cap-chip">个人微信扫码直连</span>
-                <span class="cap-chip">Telegram / QQ 机器人</span>
                 <span class="cap-chip">脱敏诊断 · --rollback 回滚</span>
               </div>
             </div>
           </article>
+        </div>
+      </section>
+
+      <!-- 精选小镇与角色卡展厅（纯静态零服务器开销） -->
+      <section class="section-block" id="home-gallery" aria-labelledby="gallery-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">精选小镇与角色卡展厅 · 纯静态开箱即用</div>
+            <h2 class="section-title" id="gallery-heading">挑一座顺眼的小镇住下，或一键生成只属于你们的街区</h2>
+            <p class="section-desc">内置代表世界包与中立起手角色预设均随客户端附带，无需联网加载服务器资源；支持用离线地图编辑器自制导出，也欢迎向开源仓库分享你的作品。</p>
+          </div>
+          <a href="#world-editor" class="btn-outline">地图编辑与导出说明 <span class="arrow-nudge">→</span></a>
+        </div>
+
+        <div class="gallery-block" data-reveal>
+          <div class="gallery-subhead">
+            <h3 class="gallery-subtitle">代表世界与全随机生成模式</h3>
+            <span class="gallery-subnote">桌面端打开「街区 → 切换世界 / 生成新小镇」即可一键切换，原有记忆不断裂</span>
+          </div>
+
+          <div class="gallery-worlds-grid">
+            <article class="gallery-world-card spotlight-surface">
+              <div class="gallery-world-top">
+                <span class="gallery-tag is-sea">默认海滨</span>
+                <span class="gallery-meta font-mono">17 处节点 · 海岸坡道</span>
+              </div>
+              <h4>凪浦 · 临海小镇</h4>
+              <p>海湾栈桥、浪打道坡路、文浜堂旧书店与海鸥咖啡屋错落相连，推开书房窗就能听见潮声与晚间细雨。</p>
+              <div class="gallery-card-foot">
+                <span class="gallery-shop-hint">含旧书店 / 咖啡屋 / 青叶便利店</span>
+                <button type="button" class="gallery-jump-btn" data-gallery-world="nagiura">实机截图 ↑</button>
+              </div>
+            </article>
+
+            <article class="gallery-world-card spotlight-surface">
+              <div class="gallery-world-top">
+                <span class="gallery-tag is-amber">山间温泉</span>
+                <span class="gallery-meta font-mono">15 处节点 · 石阶山道</span>
+              </div>
+              <h4>汤川 · 温泉山町</h4>
+              <p>沿着溪谷石阶分布着翠泽汤屋、山茶点铺与雾见展望台，傍晚散步回来适合泡一杯热茶歇脚。</p>
+              <div class="gallery-card-foot">
+                <span class="gallery-shop-hint">含钱汤 / 和果子铺 / 杂货店</span>
+                <button type="button" class="gallery-jump-btn" data-gallery-world="onsawa">实机截图 ↑</button>
+              </div>
+            </article>
+
+            <article class="gallery-world-card spotlight-surface">
+              <div class="gallery-world-top">
+                <span class="gallery-tag">田园乡野</span>
+                <span class="gallery-meta font-mono">14 处节点 · 水渠田埂</span>
+              </div>
+              <h4>穗村 · 水车田园</h4>
+              <p>开阔的稻田水渠、木桥与水车公园彼此贯通，步程舒缓安静，适合喜欢慢节奏乡间散步与记随笔的日常。</p>
+              <div class="gallery-card-foot">
+                <span class="gallery-shop-hint">含农产直卖所 / 面包房 / 花店</span>
+                <button type="button" class="gallery-jump-btn" data-gallery-world="inobe">实机截图 ↑</button>
+              </div>
+            </article>
+
+            <article class="gallery-world-card spotlight-surface">
+              <div class="gallery-world-top">
+                <span class="gallery-tag">生活街区</span>
+                <span class="gallery-meta font-mono">16 处节点 · 商店街网</span>
+              </div>
+              <h4>栞泽 · 近郊街区</h4>
+              <p>贴近日常通勤尺度的拱廊商店街、唱片行、向阳咖啡店与街角洗衣房，烟火气十足且拐弯就能买到热食。</p>
+              <div class="gallery-card-foot">
+                <span class="gallery-shop-hint">含便利店 / 唱片行 / 文具铺</span>
+                <button type="button" class="gallery-jump-btn" data-gallery-world="wakaba">实机截图 ↑</button>
+              </div>
+            </article>
+
+            <article class="gallery-world-card is-procedural spotlight-surface">
+              <div class="gallery-world-top">
+                <span class="gallery-tag is-sea">一键生成 · 新实装</span>
+                <span class="gallery-meta font-mono">6 类混搭地貌 · 异构街网</span>
+              </div>
+              <h4>全随机专属世界（免选风貌）</h4>
+              <p>无需挑预设模板，一键随机混搭河岸、丘陵、港湾等 6 类地貌与环线、分岔等 4 种街道骨架，自动生成带多房间住居与 8 大类商铺的独有小镇，并随旅行箱完整打包带走。</p>
+              <div class="gallery-card-foot">
+                <span class="gallery-shop-hint">桌面端「街区 → 全随机生成专属世界」或命令行 <code>/world generate</code></span>
+                <button type="button" class="gallery-jump-btn" data-gallery-scene="5">看地图编辑器 ↑</button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="gallery-block" data-reveal>
+          <div class="gallery-subhead">
+            <h3 class="gallery-subtitle">中立底板与示例角色卡（SOUL.md）</h3>
+            <span class="gallery-subnote">点「复制角色卡」即可粘贴进客户端人设栏或本机 <code>~/.nyairo/SOUL.md</code>，名字与代词（默认 TA，可自定任意代词）随意改</span>
+          </div>
+
+          <div class="gallery-personas-grid">
+            <article class="persona-card">
+              <div class="persona-card-top">
+                <div>
+                  <h4>默认中立底板 · 留白起手</h4>
+                  <span class="persona-meta">不预设固定背景 / 默认代词 TA</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="neutral">复制角色卡</button>
+              </div>
+              <p class="persona-preview" id="persona-text-neutral">你住在自己的小镇房间里，按真实时间起居散步。说话平实自然，不端客服架子也不刻意讨好；手头在忙或出门路上就照实说，不想代劳的杂活干脆拒绝，答应下来的事认真记稳。</p>
+            </article>
+
+            <article class="persona-card">
+              <div class="persona-card-top">
+                <div>
+                  <h4>安静手作人 · 器皿与木工</h4>
+                  <span class="persona-meta">慢节奏动手派 / 默认代词 TA</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="craft">复制角色卡</button>
+              </div>
+              <p class="persona-preview" id="persona-text-craft">你平时喜欢在工作台修补木器、泡茶和打理窗台植物。性格沉稳慢热，聊天偏爱具体可感的生活细节；专注做手工时会把闲聊消息留到歇手再回，讨厌敷衍赶工式的代写请求。</p>
+            </article>
+
+            <article class="persona-card">
+              <div class="persona-card-top">
+                <div>
+                  <h4>夜读者 · 旧书店常客</h4>
+                  <span class="persona-meta">偏爱共读与批注 / 默认代词 TA</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="nightreader">复制角色卡</button>
+              </div>
+              <p class="persona-preview" id="persona-text-nightreader">你习惯傍晚去旧书店淘小册子，夜里开着阅读灯做页码批注。说话简练有分寸，遇到没读过或拿不准的内容直说不知道；喜欢和你一起翻共读书架，但绝不当随叫随到的摘要机器。</p>
+            </article>
+
+            <article class="persona-card">
+              <div class="persona-card-top">
+                <div>
+                  <h4>街角观察者 · 散步与随笔</h4>
+                  <span class="persona-meta">爱逛小店记风物 / 默认代词 TA</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="walker">复制角色卡</button>
+              </div>
+              <p class="persona-preview" id="persona-text-walker">你是个闲不住的散步爱好者，熟悉镇上便利店关东煮出锅的时间和咖啡屋店主的错峰排班。聊起天色、雨声和路边小事格外鲜活，出门在路上被问起就顺嘴分享眼前的街景。</p>
+            </article>
+          </div>
+
+          <div class="gallery-share-strip">
+            <div class="gallery-share-copy">
+              <strong>自制导出与社区分享：</strong>在离线地图编辑器点「导出世界包 (.json)」即可保存自建小镇；想把你捏的小镇或角色卡分享给更多人，可直接通过仓库投稿模板提交。
+            </div>
+            <div class="gallery-share-actions">
+              <a href="#world-editor" class="btn-outline">离线编辑器教程 →</a>
+              <a href="https://github.com/L1AN929/nyairo/issues/new?template=world_persona_share.yml" target="_blank" rel="noopener noreferrer" class="btn-outline">向 GitHub 投稿世界 / 角色卡 ↗</a>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -895,8 +1228,8 @@
           <div class="trust-cols">
             <div class="trust-col">
               <span class="trust-kicker">APACHE-2.0 开源</span>
-              <h3 class="trust-title">全仓库公开，源码逐行可查</h3>
-              <p class="trust-desc">后端运行底座、Windows 桌面界面与随包内置的凪浦等示例世界均以 Apache-2.0 协议开源，可自行审阅联网边界或从源码构建。</p>
+              <h3 class="trust-title">核心底座公开，源码逐行可查</h3>
+              <p class="trust-desc">核心运行底座、记忆账本、生活连续性引擎与内置示例世界均以 Apache-2.0 协议开源，可自行审阅联网边界或直接从源码构建。</p>
             </div>
             <div class="trust-col">
               <span class="trust-kicker">纯本地落盘</span>
@@ -922,7 +1255,7 @@
             <div class="trust-verify-sha">
               <span class="trust-sha-label">Windows v0.7.0 SHA256</span>
               <button type="button" class="sha-copy-btn" id="copy-trust-sha" data-sha="174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8" title="点击复制 nyairo-0.7.0-setup.exe 的完整 SHA256 校验值">
-                <code class="font-mono">01e0a8c0…2747e</code>
+                <code class="font-mono">174e4597…14dd8</code>
                 <span id="trust-sha-label">复制</span>
               </button>
             </div>
@@ -968,11 +1301,11 @@
             </button>
             <button type="button" class="evo-step-btn is-active" role="tab" aria-selected="true" data-evo="4">
               <span class="evo-ver"><span class="evo-dot-now"></span>v0.7.0 · 当前</span>
-              <span class="evo-label">日常相处与桌面端</span>
+              <span class="evo-label">专属小镇与日常分寸</span>
             </button>
             <button type="button" class="evo-step-btn" role="tab" aria-selected="false" data-evo="5">
               <span class="evo-ver">v1.0 · 规划</span>
-              <span class="evo-label">随机世界与搬家</span>
+              <span class="evo-label">跨季风物与多平台</span>
             </button>
           </div>
 
@@ -1043,41 +1376,41 @@
                 <span class="evo-status-badge now">当前公开测试版 · v0.7.0</span>
                 <span class="font-mono" style="font-size:0.76rem;color:var(--muted);">05 / 06</span>
               </div>
-              <h3 class="evo-heading">身体节律、早晚街景、共读批注、未来问题与 Windows 桌面客户端</h3>
+              <h3 class="evo-heading">全随机专属世界、街区点单、日常拒绝边界与无损搬家旅行箱</h3>
               <p class="evo-summary">
-                补齐休息与饮水饮食节律、随早晚变换的街区风貌、旅途相册与双人共读批注、未来问题与生活回执，并带来免管理员一键部署的原生 Windows 桌面端。
+                支持免选风貌的全随机专属小镇一键生成、12 类商铺开放柜台点单与错峰店主、按真实日程隔几小时异步回信、不滑跪的日常自主拒绝边界、随身包袋冷热干湿物态，以及含世界切片的无损旅行箱与 Windows 桌面端。
               </p>
               <div class="evo-cols">
                 <div class="evo-mini-card">
-                  <h4>起居节律与房间互动</h4>
-                  <p>按真实时间感受困倦与补给；能在卧室、客厅、厨房间走动并开关灯具。</p>
+                  <h4>全随机小镇与鲜活街坊</h4>
+                  <p>免选模板一键混搭地貌与街网生成独有小镇；12 类店铺可自由点热关东煮，书店与咖啡店主错峰出勤。</p>
                 </div>
                 <div class="evo-mini-card">
-                  <h4>相册、共读与文稿对比</h4>
-                  <p>支持翻看旅途明信片、双人同步读书做批注，以及比对不同版本的文稿修订。</p>
+                  <h4>自主拒绝边界与冷热物态</h4>
+                  <p>不想帮的杂活干脆拒绝不滑跪；按日程隔几小时异步回信，包袋支持 3 层嵌套与茶凉、雨湿晕字物态。</p>
                 </div>
                 <div class="evo-mini-card">
-                  <h4>Windows 原生桌面端</h4>
-                  <p>双击即可安装到个人目录，内置自动环境引导、流式引用对话、生活回执与多通道面板。</p>
+                  <h4>双层回忆灯与无损旅行箱</h4>
+                  <p>双层回忆灯保护原稿零篡改；<code>.nyairo-suitcase.zip</code> 连同专属世界切片与迁移损耗清单打包迁居。</p>
                 </div>
               </div>
               <div class="evo-honest-bar">
-                <strong>当前边界说明：</strong>v0.7.0 为公开测试版，日常起居、街区出行、共读批注与桌面端均已跑通；更完整的饥饿营养曲线与到点主动外呼提醒仍在持续完善，详见 <a href="#changelog-v0-7-0">v0.7.0 更新说明</a>。
+                <strong>当前边界说明：</strong>v0.7.0 为公开测试版，全随机专属世界、街区点单、异步回信、无损旅行箱与 Windows 桌面端均已实装跑通；原生 macOS 桌面安装包（<code>.dmg</code>）与跨季节长线街坊演化尚未实现，详见 <a href="#changelog-v0-7-0">v0.7.0 更新说明</a>。
               </div>
             </div>
 
             <!-- Phase 5: v1.0 -->
             <div class="evo-panel" data-evo-panel="5" hidden>
               <div class="evo-panel-top">
-                <span class="evo-status-badge">规划方向 · 尚未实现</span>
+                <span class="evo-status-badge">规划方向 · 持续演进</span>
                 <span class="font-mono" style="font-size:0.76rem;color:var(--muted);">06 / 06</span>
               </div>
-              <h3 class="evo-heading">千人千面的随机世界、模型解耦与无损搬家</h3>
-              <p class="evo-summary">每个人与数字个体的生活舞台都不该死定成同一个模板。后续计划支持随机生成独一无二的住居与街区路网，并在换电脑或换底层模型时把这片专属世界与过往记忆完整打包带走。</p>
+              <h3 class="evo-heading">四季风物演化、原生多桌面平台与长期模型解耦</h3>
+              <p class="evo-summary">在已落地的全随机专属世界与无损旅行箱基础上，后续将继续打磨跨季节的自然风物变迁、更省心的新设备一键还原向导，以及跨底层大模型的长久记忆兼容。</p>
               <div class="evo-cols">
-                <div class="evo-mini-card"><h4>免模板全自动专属世界</h4><p>尚未实现：脱离当前 4 套预设风貌骨架限制，首次打开无需配置即可生成真正独一无二的街区路网与房间格局。</p></div>
-                <div class="evo-mini-card"><h4>一键打包迁居</h4><p>尚未实现：完整导出专属世界、房间陈设、长期记忆与相册文稿，在新电脑上原样安家。</p></div>
-                <div class="evo-mini-card"><h4>底层模型自由切换</h4><p>世界状态与记忆独立于特定大模型，未来换上更聪明的底座依然是熟悉的 TA。</p></div>
+                <div class="evo-mini-card"><h4>四季节气与街坊长线叙事</h4><p>规划中：让街区草木、店铺时令菜单与邻里小事随真实月份自然更替，留下跨季度的共同生活痕迹。</p></div>
+                <div class="evo-mini-card"><h4>原生 macOS 客户端与一键安家</h4><p>规划中：补齐 macOS 原生桌面端安装包，支持在新电脑双击拖入旅行箱即自动恢复专属小镇与全部设置。</p></div>
+                <div class="evo-mini-card"><h4>底层模型自由切换</h4><p>世界状态、双层回忆灯与长期记忆独立于特定大模型，未来换上更聪明的底座依然是熟悉的 TA。</p></div>
               </div>
             </div>
           </div>
@@ -1087,8 +1420,8 @@
           <a href="#changelog-v0-7-0" class="release-row">
             <span class="release-ver font-mono">v0.7.0</span>
             <span class="release-badge is-current">当前最新</span>
-            <span class="release-title">生活自主动力学与反骚扰对齐</span>
-            <span class="release-summary">慢变量孵化、因果边动力学、反骚扰配额收敛、WakeTicket 与日 token 预算</span>
+            <span class="release-title">全随机专属小镇、街区自由点单、拒绝边界与无损旅行箱</span>
+            <span class="release-summary">免选风貌一键生成专属世界、12 类小店点热关东煮、隔几小时异步回信、雨湿晕字物态与双层回忆灯</span>
             <span class="release-link">查看记录 →</span>
           </a>
           <a href="#changelog-v0-6-0" class="release-row">
@@ -1135,7 +1468,7 @@
           <div class="onboard-step-card">
             <span class="onboard-step-kicker">STEP 02 · 贴密钥与起名</span>
             <h3 class="onboard-step-title">充十来块密钥，自定 TA 的一切</h3>
-            <p class="onboard-step-desc">去 DeepSeek 等常用模型平台充十来块钱拿到密钥贴进去（日常陪聊能用好久），再定好 TA 的名字、称呼（她 / 他 / TA）和性格。</p>
+            <p class="onboard-step-desc">去 DeepSeek 等常用模型平台充十来块钱拿到密钥贴进去（日常陪聊能用好久），再定好 TA 的名字、称呼（默认 TA，可自定任意代词）和性格。</p>
           </div>
           <div class="onboard-step-card">
             <span class="onboard-step-kicker">STEP 03 · 放桌面开聊</span>
@@ -1172,7 +1505,7 @@
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
-                当前 <code>v0.7.0</code> 随包内置 7 套不同地貌的世界包（如海滨「凪浦」、温泉镇「汤川」、田园「穗村」、生活街区「栞泽」等），在桌面端「街区 → 生成新小镇」也可按 4 种风貌与自定义种子一键生成并热切换，配合单机地图编辑器随时画墙、开门、摆家具。不过当前生成仍基于预设模板骨架，摆脱模板束缚、首次打开无需配置即全自动生成专属世界的体验目前尚未实现，正在 <a href="#roadmap">后续规划</a> 中推进。
+                随包内置 7 套不同地貌的世界包（如海滨「凪浦」、温泉镇「汤川」、田园「穗村」、生活街区「栞泽」等），同时在桌面端「街区 → 全随机生成专属世界」支持免选模板一键混搭 6 类地貌与 4 种异构街网生成只属于你们的小镇，也可按 4 种风貌加自定义种子生成并热切换。内置单机地图编辑器可随时画墙、开门、摆家具，导出旅行箱时也会把专属世界切片一并打包带走。
               </div>
             </details>
           </div>
@@ -1184,7 +1517,7 @@
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
-                软件完全免费，采用 Apache-2.0 协议开源，不需要注册任何 nyairo 官方账号，也没有会员订阅或算力抽成。你只需要去 DeepSeek、OpenAI 等自己信任的模型平台申请一个密钥填进本地设置（纯日常陪聊消耗很低，充十来块钱往往就能用很久），按实际对话量向平台付费即可；无人说话时的后台自主活动默认关闭，不会偷偷消耗额度。
+                软件完全免费，采用 Apache-2.0 协议开源，不需要注册任何 nyairo 官方账号，也没有会员订阅或算力抽成。你只需要去 DeepSeek、OpenAI 等自己信任的模型平台申请一个密钥填进本地设置（纯日常陪聊消耗很低，充五到十块钱往往就能用很久），或者接入本机免费的 Ollama；无人说话时的后台自主活动默认关闭，不会偷偷消耗额度。
               </div>
             </details>
 
@@ -1194,7 +1527,7 @@
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
-                大多数聊天工具在关掉窗口那一刻时间就停了，去哪全靠文字脑补瞬移。在 nyairo 里，TA 住在有明确房间与路网距离的街区里——出门去书店要在路上走几分钟，半路问起会如实说正在路上，做到一半的随笔能挂起保留，下次打开依然接在真实流动的时间线上。
+                大多数聊天工具在关掉窗口那一刻时间就停了，去哪全靠文字脑补瞬移。在 nyairo 里，TA 住在有明确房间、12 类商铺与路网距离的小镇里——去便利店买热关东煮要按距离走几分钟，专注或外出时按真实日程隔几小时异步回信，遇到不想代劳的杂活有不滑跪道歉的日常拒绝边界，随身茶水与桌边纸条还会随冷热干湿真实变化。
               </div>
             </details>
 
@@ -1309,7 +1642,7 @@
               </button>
               <button type="button" class="btn-outline dl-drawer-toggle" id="agent-toggle-drawer" aria-expanded="false" aria-controls="agent-code-drawer">
                 <span id="drawer-toggle-label">展开查看指令全文</span>
-                <span>▾</span>
+                <span class="dl-chevron" aria-hidden="true">▾</span>
               </button>
             </div>
             <div class="dl-card-foot">
@@ -1319,11 +1652,90 @@
           </div>
         </div>
 
+        <div class="beginner-guide-grid" id="beginner-guide-grid" data-reveal>
+          <article class="beginner-card spotlight-surface">
+            <div class="beginner-card-head">
+              <span class="beginner-kicker">首次安装防卡壳 · 原画矢量步骤示意</span>
+              <h3>若弹出 Windows 蓝色保护框，两步即可正常放行</h3>
+            </div>
+            <p class="beginner-desc">开源个人软件未购买每年数千元的商业 EV 证书时，Windows 首次打开新下载的 <code>.exe</code> 常会例行询问。核对上方 SHA256 指纹无误后，按下面两步点开即可（无需管理员权限）：</p>
+
+            <svg class="smartscreen-svg" viewBox="0 0 460 156" fill="none" role="img" aria-label="Windows SmartScreen 蓝框两步放行示意：第一步点更多信息，第二步点仍要运行">
+              <!-- Step 1 Window -->
+              <rect x="6" y="10" width="206" height="136" rx="8" class="ss-win-box" />
+              <rect x="6" y="10" width="206" height="24" rx="8" class="ss-win-bar" />
+              <text x="18" y="26" class="ss-step-tag">STEP 1 · 点展开链接</text>
+              <text x="18" y="52" class="ss-win-title">Windows 已保护你的电脑</text>
+              <line x1="18" y1="64" x2="186" y2="64" class="ss-skeleton-line" />
+              <line x1="18" y1="73" x2="152" y2="73" class="ss-skeleton-line" />
+              <!-- Highlighted "更多信息" link -->
+              <rect x="16" y="84" width="66" height="20" rx="4" class="ss-focus-pill" />
+              <text x="49" y="98" text-anchor="middle" class="ss-focus-text">更多信息</text>
+              <!-- Muted Don't Run button -->
+              <rect x="134" y="114" width="64" height="22" rx="4" class="ss-btn-muted" />
+              <text x="166" y="129" text-anchor="middle" class="ss-muted-text">不运行</text>
+
+              <!-- Connecting Arrow -->
+              <line x1="220" y1="78" x2="240" y2="78" class="ss-arrow-line" />
+              <polyline points="235 73 241 78 235 83" class="ss-arrow-head" />
+
+              <!-- Step 2 Window -->
+              <rect x="248" y="10" width="206" height="136" rx="8" class="ss-win-box" />
+              <rect x="248" y="10" width="206" height="24" rx="8" class="ss-win-bar" />
+              <text x="260" y="26" class="ss-step-tag">STEP 2 · 点底部运行</text>
+              <text x="260" y="52" class="ss-win-title">应用: nyairo-0.7.0-setup.exe</text>
+              <text x="260" y="70" class="ss-sub-caption">发布者: 未知发布者（开源构建）</text>
+              <!-- Highlighted "仍要运行" button -->
+              <rect x="260" y="112" width="84" height="24" rx="5" class="ss-focus-btn" />
+              <text x="302" y="128" text-anchor="middle" class="ss-focus-btn-text">仍要运行</text>
+              <rect x="354" y="112" width="84" height="24" rx="5" class="ss-btn-muted" />
+              <text x="396" y="128" text-anchor="middle" class="ss-muted-text">不运行</text>
+            </svg>
+
+            <div class="beginner-verify-note">
+              <span><strong>免管理员落盘：</strong>装入个人目录 <code>%LOCALAPPDATA%\Programs\nyairo</code>，不改系统注册表核心区；</span>
+              <span><strong>可机器校验：</strong><a href="downloads/latest.json" target="_blank" rel="noopener noreferrer">downloads/latest.json</a> 实时公开安装包字节数与完整 SHA256。</span>
+            </div>
+          </article>
+
+          <article class="beginner-card spotlight-surface">
+            <div class="beginner-card-head">
+              <span class="beginner-kicker">零基础 3 分钟配好模型 · 花几块钱或纯免费</span>
+              <h3>第一次填 API Key（或连本地 Ollama）傻瓜步骤</h3>
+            </div>
+            <p class="beginner-desc">nyairo 不卖算力会员，把模型选择权完全交还给你。从没接触过 API 的新手照着下面三步就能跑通：</p>
+
+            <ol class="beginner-steps-list">
+              <li>
+                <span class="b-step-num font-mono">01</span>
+                <div>
+                  <strong>去平价平台充 5 到 10 块钱拿一串密钥</strong>
+                  <p>浏览器搜「DeepSeek 开放平台」注册登录，充值 5–10 元（纯日常聊天能用小半年），点左侧「API keys → 创建 API key」，复制那串 <code>sk-</code> 开头的字符。</p>
+                </div>
+              </li>
+              <li>
+                <span class="b-step-num font-mono">02</span>
+                <div>
+                  <strong>贴进桌面客户端点「测试连通」</strong>
+                  <p>打开 nyairo 桌面端向导（或左侧「设置 → 模型接口」），服务商选 <code>DeepSeek</code>，把 <code>sk-...</code> 粘贴进去点测试，看到绿色延迟回执即大功告成。</p>
+                </div>
+              </li>
+              <li>
+                <span class="b-step-num font-mono">03</span>
+                <div>
+                  <strong>不想联网花钱？也可一键连本机免费 Ollama</strong>
+                  <p>电脑装好 <code>Ollama</code> 并拉取任意模型后，在接口地址填 <code>http://127.0.0.1:11434/v1</code>、密钥随便填 <code>ollama</code> 即可纯离线免费运行。</p>
+                </div>
+              </li>
+            </ol>
+          </article>
+        </div>
+
         <p class="downloads-platform-note">
           <strong>macOS 用户提示：</strong>目前 <code>v0.7.0</code> 暂未推出原生 <code>.dmg</code> 桌面端与苹果环境完整验收；熟悉终端的开发者可前往 <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer">GitHub 仓库</a> 按源码自行尝试，日常主力使用推荐首选 Windows 10/11 或 Ubuntu / WSL2。
         </p>
 
-        <pre class="agent-drawer-pre downloads-drawer-pre" id="agent-code-drawer" hidden><code id="agent-prompt-code">请帮我在这台电脑上安装 NyAiro（一个可以长期相处的数字个体框架）。请按下面的步骤做，每一步都用中文告诉我你在做什么，不要跳过检查，也不要假装成功。
+        <pre class="agent-drawer-pre downloads-drawer-pre" id="agent-code-drawer" hidden><code id="agent-prompt-code">请帮我在这台电脑上安装 nyairo（一个可以长期相处的数字个体框架）。请按下面的步骤做，每一步都用中文告诉我你在做什么，不要跳过检查，也不要假装成功。
 
 【背景资料】
 - 官方仓库：https://github.com/L1AN929/nyairo
@@ -1336,7 +1748,7 @@
 2. Python 情况（需要 3.13；安装器会自行准备 uv 与 Python，请说明是否需要联网下载）；
 3. 磁盘剩余空间（建议至少 3 GB，程序与个人数据都要占空间）；
 4. 网络能否访问 GitHub 与 astral.sh（安装器需要下载 Python 与依赖）；
-5. 这个 HOME 里是否已经装过 NyAiro 或 Chiyo：检查 ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1、~/apps/nyairo-*、~/.local/bin/nyairo；
+5. 这个 HOME 里是否已经装过 nyairo 或旧版 Chiyo：检查 ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1、~/apps/nyairo-*、~/.local/bin/nyairo；
 6. 现在有哪些程序在运行：pgrep -af m0_writer_worker、pgrep -af "gateway run"、pgrep -af nyairo，并看清每条命令里的路径属于哪个实例。
 如果某一项不满足（例如是原生 Windows 而不是 WSL、磁盘不够、无法访问 GitHub），请先用中文解释问题和建议做法（原生 Windows 用户也可直接下载桌面端安装器 https://nyairo.com/downloads/nyairo-0.7.0-setup.exe），然后停下来等我决定，不要继续安装。
 
@@ -1364,20 +1776,22 @@
 用简明中文告诉我启动（nyairo）、配模型（nyairo setup model）、接通道、更新、备份与卸载方式。绝不要让我把任何密码、私钥或 API Key 粘贴到聊天窗口。</code></pre>
       </section>
 
-      <!-- 第 6 屏：底部海岸星轨召唤横幅 + 多栏页脚 -->
-      <section class="cta-banner spotlight-surface" aria-labelledby="cta-title" data-reveal>
-        <div class="cta-art" aria-hidden="true">
-          <img class="on-dark" src="assets/nyairo-icon-light.png" alt="" width="120" height="120">
-          <img class="on-light" src="assets/nyairo-icon.png" alt="" width="120" height="120">
+      <!-- 第 6 屏：Magpie 风格居中徽标收尾召唤与页脚 -->
+      <section class="magpie-final-cta" aria-labelledby="cta-title" data-reveal>
+        <div class="magpie-final-emblem" aria-hidden="true">
+          <img class="on-dark" src="assets/nyairo-icon-light-66.webp" alt="" width="44" height="42">
+          <img class="on-light" src="assets/nyairo-icon-66.webp" alt="" width="44" height="42">
         </div>
-        <div class="cta-copy">
-          <div class="cta-eyebrow"><span class="status-dot status-dot-pulse" aria-hidden="true"></span>初见指南 · 打开即用</div>
-          <h2 id="cta-title">第一次见面，从一句你好开始</h2>
-          <p>装好首次打开时，先给 TA 起个名字、选定称呼与初见小镇；之后每一次日常聊天的回忆，都只保存在你的电脑里。</p>
-        </div>
-        <div class="cta-actions">
-          <a href="#quickstart" class="btn-accent">快速上手教程 <span class="arrow-nudge">→</span></a>
-          <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="btn-outline">开源仓库 ↗</a>
+        <h2 class="magpie-final-title" id="cta-title">一方世界，一段日常。</h2>
+        <p class="magpie-final-sub">免费、Apache-2.0 开源、数据纯留本机。支持 Windows 桌面端与 Linux / WSL2。</p>
+        <div class="magpie-final-actions">
+          <a href="downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe" class="hero-primary-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 5.5L10.5 4.4V11.3H3V5.5ZM11.5 4.25L21 2.8V11.3H11.5V4.25ZM3 12.4H10.5V19.3L3 18.2V12.4ZM11.5 12.4H21V20.9L11.5 19.5V12.4Z"/>
+            </svg>
+            <span>下载 Windows 版</span>
+          </a>
+          <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="hero-secondary-btn">在 GitHub 上查看 ↗</a>
         </div>
       </section>
 
@@ -1408,6 +1822,7 @@
             <ul class="footer-col-list">
               <li><a href="downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe">Windows 桌面客户端 (.exe)</a></li>
               <li><a href="downloads/nyairo-0.7.0-setup.exe.sha256" target="_blank" rel="noopener noreferrer">安装包 SHA256 校验值</a></li>
+              <li><a href="downloads/latest.json" target="_blank" rel="noopener noreferrer">静态最新版本清单 (latest.json)</a></li>
               <li><a href="#quickstart">Linux / WSL 一行命令安装</a></li>
               <li><a href="#agent-install">交给 AI 助手自动安装</a></li>
             </ul>
@@ -1429,7 +1844,7 @@
             <ul class="footer-col-list">
               <li><a href="#changelog-v0-7-0">v0.7.0 更新说明</a></li>
               <li><a href="#status-matrix">已完成与未完成清单</a></li>
-              <li><a href="#roadmap">未来规划（随机专属世界）</a></li>
+              <li><a href="#roadmap">未来规划（跨季风物与多平台）</a></li>
               <li><a href="#privacy">隐私与数据边界</a></li>
               <li><a href="USER_GUIDE.zh-CN.md" target="_blank" rel="noopener noreferrer">离线完整手册 (Markdown)</a></li>
             </ul>
@@ -1457,9 +1872,11 @@
         <div class="footer-bottom">
           <span class="footer-copy">Apache-2.0 Open Source · 当前公开测试版 v0.7.0（配套宿主保留 MIT 许可）</span>
           <div class="footer-bottom-links">
+            <a href="en/" lang="en" hreflang="en">English</a>
+            <a href="ja/" lang="ja" hreflang="ja">日本語</a>
             <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer">GitHub 源码</a>
             <a href="https://github.com/L1AN929/nyairo/releases" target="_blank" rel="noopener noreferrer">历史发行包</a>
-            <a href="https://github.com/L1AN929/nyairo/issues" target="_blank" rel="noopener noreferrer">问题反馈</a>
+            <a href="https://github.com/L1AN929/nyairo/issues/new/choose" target="_blank" rel="noopener noreferrer">问题反馈与投稿</a>
             <a href="#acknowledgments">致谢</a>
           </div>
         </div>
@@ -1494,12 +1911,13 @@
           <span class="lightbox-title" id="lightbox-title">实机演示</span>
         </div>
         <div class="lightbox-tabs" id="lightbox-tabs" role="tablist" aria-label="切换实机截图场景">
-          <button type="button" class="lightbox-tab is-active" data-lb-scene="0">实机演示</button>
-          <button type="button" class="lightbox-tab" data-lb-scene="1">状态总览</button>
-          <button type="button" class="lightbox-tab" data-lb-scene="2">街区与房间</button>
-          <button type="button" class="lightbox-tab" data-lb-scene="3">流式交谈</button>
-          <button type="button" class="lightbox-tab" data-lb-scene="4">文稿与共读</button>
-          <button type="button" class="lightbox-tab" data-lb-scene="5">地图编辑</button>
+          <span class="seg-thumb lb-seg-thumb" aria-hidden="true"></span>
+          <button type="button" class="lightbox-tab is-active" role="tab" aria-selected="true" tabindex="0" data-lb-scene="0">实机演示</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="1">状态总览</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="2">街区与房间</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="3">流式交谈</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="4">文稿与共读</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="5">地图编辑</button>
         </div>
         <button type="button" class="lightbox-close" id="lightbox-close" aria-label="关闭大图预览 (ESC)">
           <span>关闭</span>
@@ -1508,14 +1926,10 @@
       </div>
       <div class="lightbox-canvas" id="lightbox-canvas">
         <button type="button" class="lightbox-nav prev" id="lightbox-prev" aria-label="上一张截图">‹</button>
-        <video id="lightbox-video-dark" class="lightbox-video on-dark" muted loop playsinline controls preload="none" poster="assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13" width="1280" height="800" aria-label="nyairo 桌面端 60 帧实机交互演示">
-          <source src="assets/screenshots/desktop-demo-dark.mp4?v=20261115-v070-14" type="video/mp4">
-        </video>
-        <video id="lightbox-video-light" class="lightbox-video on-light" muted loop playsinline controls preload="none" poster="assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15" width="1280" height="800" aria-label="nyairo 桌面端 60 帧实机交互演示">
-          <source src="assets/screenshots/desktop-demo-light.mp4?v=20261115-v070-15" type="video/mp4">
-        </video>
-        <img id="lightbox-img-dark" class="on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13" alt="nyairo 桌面客户端高清实机预览" hidden>
-        <img id="lightbox-img-light" class="on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15" alt="nyairo 桌面客户端高清实机预览" hidden>
+        <video id="lightbox-video-dark" class="lightbox-video on-dark" muted loop playsinline controls preload="metadata" src="assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示"></video>
+        <video id="lightbox-video-light" class="lightbox-video on-light" muted loop playsinline controls preload="metadata" src="assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示"></video>
+        <img id="lightbox-img-dark" class="on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo 桌面客户端高清实机预览" hidden>
+        <img id="lightbox-img-light" class="on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo 桌面客户端高清实机预览" hidden>
         <button type="button" class="lightbox-nav next" id="lightbox-next" aria-label="下一张截图">›</button>
       </div>
     </div>
@@ -1532,7 +1946,7 @@
           <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
         <input type="text" id="search-input" class="search-modal-input" aria-label="搜索文档、命令或快捷操作" placeholder="搜索文档内容、配置项（如 QQ / 卸载 / Ollama）或快捷操作..." autocomplete="off">
-        <kbd class="search-kbd">ESC</kbd>
+        <button type="button" id="search-close" class="search-kbd search-close-btn" aria-label="关闭搜索">ESC</button>
       </div>
       <div id="search-results" class="search-modal-results"></div>
       <div class="search-modal-footer" aria-hidden="true">
@@ -1549,8 +1963,8 @@
     </svg>
   </button>
 
-  <script src="docs-data.js?v=20261115-v070-26"></script>
-  <script src="app.js?v=20261115-v070-26"></script>
+  <script src="docs-data.js?v=20261118-v070-41"></script>
+  <script src="app.js?v=20261118-v070-41"></script>
 
   <noscript>
     <div style="max-width: 880px; margin: 40px auto; padding: 24px; border: 1px solid #333; border-radius: 10px; line-height: 1.7;">

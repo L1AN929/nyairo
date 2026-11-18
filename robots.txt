@@ -1,15 +1,45 @@
 User-agent: *
 Allow: /
+Disallow: /anim-lab.html
+Disallow: /calligraphy.html
+Disallow: /ink.html
+Disallow: /ink-v3.html
+Disallow: /title-lab.html
+Disallow: /beta.html
+Disallow: /404.html
+Disallow: /README.md
+Disallow: /assets/README.md
 
 # Search Engine Crawlers
 User-agent: Googlebot
 Allow: /
+Disallow: /anim-lab.html
+Disallow: /calligraphy.html
+Disallow: /ink.html
+Disallow: /ink-v3.html
+Disallow: /title-lab.html
+Disallow: /beta.html
+Disallow: /404.html
 
 User-agent: Bingbot
 Allow: /
+Disallow: /anim-lab.html
+Disallow: /calligraphy.html
+Disallow: /ink.html
+Disallow: /ink-v3.html
+Disallow: /title-lab.html
+Disallow: /beta.html
+Disallow: /404.html
 
 User-agent: Baiduspider
 Allow: /
+Disallow: /anim-lab.html
+Disallow: /calligraphy.html
+Disallow: /ink.html
+Disallow: /ink-v3.html
+Disallow: /title-lab.html
+Disallow: /beta.html
+Disallow: /404.html
 
 User-agent: YandexBot
 Allow: /

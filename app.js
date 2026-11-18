@@ -1,12 +1,12 @@
 /**
- * nyairo Official Website Controller (v0.7.0 — Enhanced Motion Edition)
- * - Circular clip-path View Transition theme switcher (Dark <-> Light)
+ * nyairo Official Website Controller (v0.7.0 — Editorial Motion Edition)
+ * - Circular clip-path View Transition theme switcher (Dark <-> Light) + meta theme-color sync
  * - Dual-layer Header Nav physics (hover magnetic pill + scrollspy spring lamp + scroll progress)
  * - Smooth container height morphing & directional slide transitions
- * - 4-Scene Real Desktop Stage with auto-play progress bar & hover pause
- * - 2D Spring Floating Thumb & progress track on 6-phase Evolution Stepper
- * - IntersectionObserver staggered scroll reveal + pointer-tracking radial spotlight
- * - SPA 3-Column Documentation Router + Scrollspy TOC + animated Ctrl+K Command Palette
+ * - 6-Scene Real Desktop Stage with auto-play progress bar & hover pause
+ * - 2D Gliding Floating Thumb & progress track on 6-phase Evolution Stepper
+ * - IntersectionObserver staggered scroll reveal
+ * - SPA 3-Column Documentation Router + Scrollspy TOC + accessible Ctrl+K Command Palette
  */
 
 const STAGE_CAPTIONS = [
@@ -46,9 +46,9 @@ const STAGE_CAPTIONS = [
   ],
   [
     {
-      kicker: '01 · 7 套风貌与生成',
-      title: '内置海滨、温泉、田园、街区等多套世界',
-      desc: '随包附带凪浦、汤川、穗村、栞泽等 7 套示例世界；桌面端「生成新小镇」支持按 4 种地形与种子热切换，离线编辑器可改建（零配置全自动生成规划中）。'
+      kicker: '01 · 7 套风貌与全随机生成',
+      title: '内置海滨、温泉、田园、街区，或一键生成全随机专属小镇',
+      desc: '随包附带凪浦、汤川、穗村、栞泽等 7 套世界；支持免选模板一键混搭 6 类地貌与异构街网生成专属小镇，也能用同款离线编辑器自由改建。'
     },
     {
       kicker: '02 · 室内平面',
@@ -97,9 +97,19 @@ const STAGE_CAPTIONS = [
   ],
   [
     {
-      kicker: '内置世界编辑器 · 离线可视化',
-      title: '自己画墙、开窗、摆家具，导出给 TA 住的新街区',
-      desc: '无需写任何配置文件——打开内置世界编辑器直接框选房间、铺木地板、放咖啡桌或书架，并自动校验通道与导出 .world 世界包。'
+      kicker: '01 · 画墙与铺地',
+      title: '框选房间与街道，不用写任何配置文件',
+      desc: '直接在离线可视化画布里框出房间、铺木地板或青石小路，自由搭建咖啡馆、书房或临海露台。'
+    },
+    {
+      kicker: '02 · 门窗与家具',
+      title: '开门留窗摆家具，定义营业时段与物件细节',
+      desc: '点选摆放书架、阅读灯、咖啡桌或货架，也可为小店设定营业时间与常用物件说明。'
+    },
+    {
+      kicker: '03 · 连通自检与导出',
+      title: '自动检查路网通道，一键导出世界包',
+      desc: '保存前自动校验门廊连通性与落脚点，支持导出完整世界包或仅含改动部分的差量文件。'
     }
   ]
 ];
@@ -108,32 +118,32 @@ const STAGE_WORLD_PRESETS = {
   nagiura: {
     label: '凪浦 · 海滨小镇',
     title: '街区与房间 · 凪浦',
-    dark: 'assets/screenshots/desktop-world-dark.webp?v=20261115-v070-13',
-    light: 'assets/screenshots/desktop-world-light.webp?v=20261115-v070-15',
+    dark: 'assets/screenshots/desktop-world-dark.webp?v=20261118-v070-35',
+    light: 'assets/screenshots/desktop-world-light.webp?v=20261118-v070-35',
     alt: 'nyairo 桌面端：凪浦海滨小镇街区总图',
-    desc: '默认临海小镇「凪浦」含 17 处海湾与坡道地点，支持桌面端按 4 种地形种子生成新小镇或用离线编辑器自由布置（零配置全自动生成规划中）。'
+    desc: '默认临海小镇「凪浦」含 17 处海湾与坡道地点，支持免选风貌一键生成全随机专属世界、按 4 种地形种子生成或用离线编辑器自由布置。'
   },
   onsawa: {
     label: '汤川 · 山间温泉',
     title: '街区与房间 · 汤川',
-    dark: 'assets/screenshots/desktop-world-onsawa-dark.webp?v=20261115-v070-20',
-    light: 'assets/screenshots/desktop-world-onsawa-light.webp?v=20261115-v070-20',
+    dark: 'assets/screenshots/desktop-world-onsawa-dark.webp?v=20261118-v070-35',
+    light: 'assets/screenshots/desktop-world-onsawa-light.webp?v=20261118-v070-35',
     alt: 'nyairo 桌面端：汤川山间温泉小镇街区总图与翠泽汤屋详情',
     desc: '山间温泉小镇「汤川」含 15 处山坡地点与露天翠泽汤屋，出门沿登山道步行真实耗时，桌面端可随时热切换体验不同地貌。'
   },
   inobe: {
     label: '穗村 · 田园乡野',
     title: '街区与房间 · 穗村',
-    dark: 'assets/screenshots/desktop-world-inobe-dark.webp?v=20261115-v070-20',
-    light: 'assets/screenshots/desktop-world-inobe-light.webp?v=20261115-v070-20',
+    dark: 'assets/screenshots/desktop-world-inobe-dark.webp?v=20261118-v070-35',
+    light: 'assets/screenshots/desktop-world-inobe-light.webp?v=20261118-v070-35',
     alt: 'nyairo 桌面端：穗村田园乡野小镇街区总图与水车公园路线',
     desc: '田园农庄村落「穗村」含 14 处水渠、农田与水车公园节点，每段田埂步程均按路网距离真实计时。'
   },
   wakaba: {
     label: '栞泽 · 日常街区',
     title: '街区与房间 · 栞泽',
-    dark: 'assets/screenshots/desktop-world-wakaba-dark.webp?v=20261115-v070-20',
-    light: 'assets/screenshots/desktop-world-wakaba-light.webp?v=20261115-v070-20',
+    dark: 'assets/screenshots/desktop-world-wakaba-dark.webp?v=20261118-v070-35',
+    light: 'assets/screenshots/desktop-world-wakaba-light.webp?v=20261118-v070-35',
     alt: 'nyairo 桌面端：栞泽日常街区总图与栞泽书店陈设',
     desc: '日常居住街区「栞泽」含 16 处近郊商店街、向阳咖啡店与栞泽书店，桌面端支持一键切换或导入编辑器按心意改建。'
   }
@@ -143,32 +153,37 @@ const STAGE_SCENES_META = [
   {
     title: '实机演示',
     kind: 'video',
-    dark: 'assets/screenshots/desktop-demo-dark.mp4?v=20261115-v070-14',
-    light: 'assets/screenshots/desktop-demo-light.mp4?v=20261115-v070-15',
-    stillDark: 'assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13',
-    stillLight: 'assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15'
+    dark: 'assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36',
+    light: 'assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36',
+    stillDark: 'assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35',
+    stillLight: 'assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35'
   },
-  { title: '状态总览', dark: 'assets/screenshots/desktop-overview-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-overview-light.webp?v=20261115-v070-15' },
-  { title: '街区与房间', dark: 'assets/screenshots/desktop-world-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-world-light.webp?v=20261115-v070-15' },
-  { title: '流式交谈', dark: 'assets/screenshots/desktop-talk-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-talk-light.webp?v=20261115-v070-15' },
-  { title: '文稿与共读', dark: 'assets/screenshots/desktop-notes-dark.webp?v=20261115-v070-13', light: 'assets/screenshots/desktop-notes-light.webp?v=20261115-v070-15' },
-  { title: '地图编辑', dark: 'assets/screenshots/desktop-editor.webp?v=20261115-v070-26', light: 'assets/screenshots/desktop-editor.webp?v=20261115-v070-26' }
+  { title: '状态总览', dark: 'assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35', light: 'assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35' },
+  { title: '街区与房间', dark: 'assets/screenshots/desktop-world-dark.webp?v=20261118-v070-35', light: 'assets/screenshots/desktop-world-light.webp?v=20261118-v070-35' },
+  { title: '流式交谈', dark: 'assets/screenshots/desktop-talk-dark.webp?v=20261118-v070-35', light: 'assets/screenshots/desktop-talk-light.webp?v=20261118-v070-35' },
+  { title: '文稿与共读', dark: 'assets/screenshots/desktop-notes-dark.webp?v=20261118-v070-35', light: 'assets/screenshots/desktop-notes-light.webp?v=20261118-v070-35' },
+  { title: '地图编辑', dark: 'assets/screenshots/desktop-editor-dark.webp?v=20261118-v070-37', light: 'assets/screenshots/desktop-editor-light.webp?v=20261118-v070-37' }
 ];
 
 const layoutSyncFns = [];
 let syncHeaderLampFn = null;
 let openStageLightboxFn = null;
 let syncStageVideosFn = null;
+let jumpStageSceneWorldFn = null;
 
 function bootstrap() {
   initTheme();
+  initLangDropdown();
   initHeaderPhysics();
   initSegmentedControls();
   initInstallDock();
   initProductStage();
   initStageLightbox();
+  initTryoutSandbox();
+  initGalleryActions();
   initEvolutionTimeline();
   initFaqAccordion();
+  initScrollStage3D();
   initScrollReveal();
   initBentoMapInteraction();
   initContrastShowcase();
@@ -178,6 +193,37 @@ function bootstrap() {
   initCommandPalette();
   initMobileMenu();
   initBackToTop();
+}
+
+function initLangDropdown() {
+  const wrap = document.getElementById('lang-dropdown');
+  const btn = document.getElementById('lang-btn');
+  const menu = document.getElementById('lang-menu');
+  if (!wrap || !btn || !menu) return;
+
+  const closeMenu = () => {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  };
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const nextOpen = menu.hidden;
+    menu.hidden = !nextOpen;
+    btn.setAttribute('aria-expanded', String(nextOpen));
+  });
+
+  document.addEventListener('click', e => {
+    if (!wrap.contains(e.target)) closeMenu();
+  });
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !menu.hidden) {
+      closeMenu();
+      btn.focus();
+    }
+  });
 }
 
 if (document.readyState === 'loading') {
@@ -203,19 +249,37 @@ function initTheme() {
   });
 
   if (themeBtn) {
-    themeBtn.addEventListener('click', () => {
+    themeBtn.addEventListener('click', e => {
       const cur = document.documentElement.getAttribute('data-theme') || 'dark';
-      switchTheme(cur === 'dark' ? 'light' : 'dark');
+      switchTheme(cur === 'dark' ? 'light' : 'dark', e);
     });
   }
 }
 
-function switchTheme(nextTheme) {
+function switchTheme(nextTheme, clickEvt = null) {
   const reduced = isReducedMotion();
   if (!document.startViewTransition || reduced) {
     applyTheme(nextTheme);
     return;
   }
+
+  const btnEl = document.getElementById('theme-toggle');
+  let cx = window.innerWidth - 48;
+  let cy = 28;
+  if (clickEvt && Number.isFinite(clickEvt.clientX) && (clickEvt.clientX > 0 || clickEvt.clientY > 0)) {
+    cx = clickEvt.clientX;
+    cy = clickEvt.clientY;
+  } else if (btnEl) {
+    const r = btnEl.getBoundingClientRect();
+    if (r.width > 0) {
+      cx = r.left + r.width / 2;
+      cy = r.top + r.height / 2;
+    }
+  }
+  const endRadius = Math.hypot(
+    Math.max(cx, window.innerWidth - cx),
+    Math.max(cy, window.innerHeight - cy)
+  );
 
   document.documentElement.classList.add('vt-switching');
   const transition = document.startViewTransition(() => {
@@ -223,19 +287,24 @@ function switchTheme(nextTheme) {
   });
 
   transition.ready.then(() => {
-    const easing = 'cubic-bezier(0.25, 0.8, 0.25, 1)';
+    const easing = 'cubic-bezier(0.22, 1, 0.36, 1)';
     document.documentElement.animate(
-      { opacity: [0, 1] },
-      { duration: 280, easing, fill: 'both', pseudoElement: '::view-transition-new(root)' }
+      {
+        clipPath: [
+          `circle(0px at ${cx.toFixed(1)}px ${cy.toFixed(1)}px)`,
+          `circle(${endRadius.toFixed(1)}px at ${cx.toFixed(1)}px ${cy.toFixed(1)}px)`
+        ]
+      },
+      { duration: 420, easing, fill: 'both', pseudoElement: '::view-transition-new(root)' }
     );
     const iconEl = document.getElementById('theme-icon');
     if (iconEl && typeof iconEl.animate === 'function') {
       iconEl.animate(
         [
-          { transform: 'rotate(-36deg) scale(0.84)' },
+          { transform: 'rotate(-28deg) scale(0.88)' },
           { transform: 'rotate(0deg) scale(1)' }
         ],
-        { duration: 400, easing: 'cubic-bezier(0.2, 0.9, 0.25, 1.02)' }
+        { duration: 380, easing }
       );
     }
   }).catch(() => {});
@@ -248,11 +317,17 @@ function switchTheme(nextTheme) {
 function applyTheme(theme) {
   const next = theme === 'light' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
+  const metaTheme = document.getElementById('meta-theme-color');
+  if (metaTheme) metaTheme.setAttribute('content', next === 'light' ? '#fafafa' : '#0b0b0c');
   try {
     localStorage.setItem('nyairo-theme', next);
     localStorage.setItem('chiyo-theme', next);
   } catch {}
   if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
+  const backdrop = document.getElementById('stage-lightbox');
+  if (backdrop && backdrop.classList.contains('show')) {
+    backdrop.dispatchEvent(new Event('nyairo-theme-sync'));
+  }
 
   const btnEl = document.getElementById('theme-toggle');
   if (!btnEl) return;
@@ -304,13 +379,17 @@ function initHeaderPhysics() {
     if (hoverPill) hoverPill.style.opacity = '0';
   });
 
-  // Scroll Progress + Homepage Section Scrollspy + Back-to-Top visibility
+  // Scroll Progress + Header Elevation + Homepage Section Scrollspy + Back-to-Top visibility
+  const headerEl = document.querySelector('.site-header');
   const backTopBtn = document.getElementById('back-to-top');
   let ticking = false;
   function onScrollFrame() {
     ticking = false;
     const docEl = document.documentElement;
     const maxScroll = docEl.scrollHeight - window.innerHeight;
+    if (headerEl) {
+      headerEl.classList.toggle('is-scrolled', window.scrollY > 12);
+    }
     if (progressBar) {
       if (maxScroll > 120 && window.scrollY > 24) {
         const ratio = Math.min(1, Math.max(0, window.scrollY / maxScroll));
@@ -327,16 +406,22 @@ function initHeaderPhysics() {
     const homeView = document.getElementById('view-home');
     if (homeView && homeView.style.display !== 'none') {
       const faqEl = document.getElementById('home-faq');
+      const galEl = document.getElementById('home-gallery');
       const capEl = document.getElementById('home-capabilities');
       const archEl = document.getElementById('home-arch');
+      const tryEl = document.getElementById('home-tryout');
       const prevEl = document.getElementById('home-preview');
       let activeId = 'nav-home';
       if (faqEl && faqEl.getBoundingClientRect().top <= 240) {
         activeId = 'nav-faq';
+      } else if (galEl && galEl.getBoundingClientRect().top <= 240) {
+        activeId = 'nav-gallery';
       } else if (capEl && capEl.getBoundingClientRect().top <= 240) {
         activeId = 'nav-capabilities';
       } else if (archEl && archEl.getBoundingClientRect().top <= 240) {
         activeId = 'nav-arch';
+      } else if (tryEl && tryEl.getBoundingClientRect().top <= 240) {
+        activeId = 'nav-tryout';
       } else if (prevEl && prevEl.getBoundingClientRect().top <= 240) {
         activeId = 'nav-preview';
       }
@@ -422,84 +507,9 @@ function morphContainerHeight(viewport, mutateDom) {
 }
 
 /* ==========================================================================
-   4. 3-in-1 Unified Install Dock (Directional Slide + Height Morph)
+   4. Download Guidance, SHA256 / CLI Copy & Agent Prompt Drawer
    ========================================================================== */
 function initInstallDock() {
-  const bar = document.getElementById('install-seg');
-  const viewport = document.getElementById('install-viewport');
-
-  if (bar) {
-    const order = ['win', 'cli', 'agent'];
-    let currentMode = 'win';
-
-    const tabs = Array.from(bar.querySelectorAll('.seg-btn'));
-    const panels = {
-      win: document.getElementById('install-panel-win'),
-      cli: document.getElementById('install-panel-cli'),
-      agent: document.getElementById('install-panel-agent')
-    };
-
-    function selectMode(mode, focusBtn = false) {
-      if (mode === currentMode && !focusBtn) return;
-      const prevIdx = order.indexOf(currentMode);
-      const nextIdx = order.indexOf(mode);
-      const isPrev = nextIdx < prevIdx;
-      currentMode = mode;
-
-      tabs.forEach(btn => {
-        const isMatch = btn.getAttribute('data-install') === mode;
-        btn.classList.toggle('is-active', isMatch);
-        btn.setAttribute('aria-selected', String(isMatch));
-        btn.tabIndex = isMatch ? 0 : -1;
-        if (isMatch && focusBtn) btn.focus();
-      });
-
-      morphContainerHeight(viewport, () => {
-        Object.entries(panels).forEach(([k, el]) => {
-          if (!el) return;
-          const active = k === mode;
-          el.hidden = !active;
-          if (active) {
-            el.classList.toggle('dir-prev', isPrev);
-          }
-        });
-      });
-
-      syncSegThumb(bar);
-    }
-
-    tabs.forEach((btn, idx) => {
-      btn.addEventListener('click', () => selectMode(btn.getAttribute('data-install')));
-      btn.addEventListener('keydown', e => {
-        let nextIdx;
-        if (e.key === 'ArrowRight') nextIdx = (idx + 1) % tabs.length;
-        if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + tabs.length) % tabs.length;
-        if (e.key === 'Home') nextIdx = 0;
-        if (e.key === 'End') nextIdx = tabs.length - 1;
-        if (nextIdx === undefined) return;
-        e.preventDefault();
-        selectMode(tabs[nextIdx].getAttribute('data-install'), true);
-      });
-    });
-
-    try {
-      const ua = navigator.userAgent || '';
-      if (/\bLinux\b/i.test(ua) && !/\bAndroid\b/i.test(ua)) {
-        currentMode = 'cli';
-        tabs.forEach(btn => {
-          const isMatch = btn.getAttribute('data-install') === 'cli';
-          btn.classList.toggle('is-active', isMatch);
-          btn.setAttribute('aria-selected', String(isMatch));
-          btn.tabIndex = isMatch ? 0 : -1;
-        });
-        Object.entries(panels).forEach(([k, el]) => {
-          if (el) el.hidden = k !== 'cli';
-        });
-        requestAnimationFrame(() => syncSegThumb(bar));
-      }
-    } catch {}
-  }
-
   // Post-download gentle guidance for Windows setup.exe (Hero + #home-downloads card)
   [
     ['win-download-btn', 'win-dl-feedback'],
@@ -510,13 +520,11 @@ function initInstallDock() {
     if (!btn || !fb) return;
     btn.addEventListener('click', () => {
       if (!fb.hidden) return;
-      morphContainerHeight(viewport, () => {
-        fb.hidden = false;
-      });
+      fb.hidden = false;
     });
   });
 
-  // Copy setup.exe SHA256 (install dock + trust verify bar)
+  // Copy setup.exe SHA256 (download card + trust verify bar)
   [
     ['copy-setup-sha', 'sha-copy-label'],
     ['copy-trust-sha', 'trust-sha-label']
@@ -564,20 +572,64 @@ function initInstallDock() {
     });
   }
 
-  // Agent Prompt Drawer (Smooth Height Morph) & Copy
+  // Agent Prompt Drawer (Smooth Height Animation) & Copy
   const drawerBtn = document.getElementById('agent-toggle-drawer');
   const drawerPre = document.getElementById('agent-code-drawer');
   const drawerLbl = document.getElementById('drawer-toggle-label');
   if (drawerBtn && drawerPre) {
+    let drawerAnim = null;
     drawerBtn.addEventListener('click', () => {
-      morphContainerHeight(viewport, () => {
-        const nextOpen = drawerPre.hidden;
+      const nextOpen = drawerPre.hidden;
+      drawerBtn.setAttribute('aria-expanded', String(nextOpen));
+      if (drawerLbl) {
+        drawerLbl.textContent = nextOpen ? '收起指令全文' : '展开查看指令全文';
+      }
+      if (drawerAnim) {
+        drawerAnim.cancel();
+        drawerAnim = null;
+      }
+      if (isReducedMotion() || typeof drawerPre.animate !== 'function') {
+        drawerPre.style.overflow = '';
         drawerPre.hidden = !nextOpen;
-        drawerBtn.setAttribute('aria-expanded', String(nextOpen));
-        if (drawerLbl) {
-          drawerLbl.textContent = nextOpen ? '收起指令全文' : '展开查看指令全文';
-        }
-      });
+        return;
+      }
+      if (nextOpen) {
+        drawerPre.hidden = false;
+        const targetH = drawerPre.offsetHeight;
+        drawerPre.style.overflow = 'hidden';
+        drawerAnim = drawerPre.animate(
+          [
+            { height: '0px', opacity: 0, marginTop: '0px' },
+            { height: `${targetH}px`, opacity: 1, marginTop: '16px' }
+          ],
+          { duration: 280, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }
+        );
+        drawerAnim.onfinish = () => {
+          drawerPre.style.overflow = '';
+          drawerAnim = null;
+        };
+        drawerAnim.oncancel = () => {
+          drawerPre.style.overflow = '';
+        };
+      } else {
+        const startH = drawerPre.offsetHeight;
+        drawerPre.style.overflow = 'hidden';
+        drawerAnim = drawerPre.animate(
+          [
+            { height: `${startH}px`, opacity: 1, marginTop: '16px' },
+            { height: '0px', opacity: 0, marginTop: '0px' }
+          ],
+          { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+        );
+        drawerAnim.onfinish = () => {
+          drawerPre.hidden = true;
+          drawerPre.style.overflow = '';
+          drawerAnim = null;
+        };
+        drawerAnim.oncancel = () => {
+          drawerPre.style.overflow = '';
+        };
+      }
     });
   }
 
@@ -619,7 +671,7 @@ function initProductStage() {
   let currentIdx = 0;
   let manualLocked = false;
 
-  function syncStageVideos() {
+  function syncStageVideos(restartFromZero = false) {
     if (!darkV && !lightV) return;
     const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     const activeV = theme === 'light' ? lightV : darkV;
@@ -629,20 +681,33 @@ function initProductStage() {
 
     const lbOpen = !!document.getElementById('stage-lightbox')?.classList.contains('show');
     const homeHidden = document.getElementById('view-home')?.style.display === 'none';
-    const shouldPlay = currentIdx === 0 && !stageEl.classList.contains('is-out-of-view') && !lbOpen && !homeHidden && !isReducedMotion();
+    const shouldPlay = currentIdx === 0 && !stageEl.classList.contains('is-out-of-view') && !lbOpen && !homeHidden && !document.hidden;
 
     if (activeV) {
-      if (activeV.preload !== 'auto') activeV.preload = 'auto';
-      if (prevTime > 0 && activeV.currentTime < 0.05 && Number.isFinite(activeV.duration) && activeV.duration > prevTime) {
-        activeV.currentTime = prevTime;
+      if (activeV.preload !== 'auto') {
+        activeV.preload = 'auto';
+      }
+      if (restartFromZero || activeV.ended) {
+        try { activeV.currentTime = 0; } catch {}
+      } else if (prevTime > 0 && activeV.currentTime < 0.05 && Number.isFinite(activeV.duration) && activeV.duration > prevTime) {
+        try { activeV.currentTime = prevTime; } catch {}
       }
       if (shouldPlay) {
-        activeV.play().catch(() => {});
+        const p = activeV.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
       } else if (!activeV.paused) {
         activeV.pause();
       }
     }
   }
+  [darkV, lightV].forEach(v => {
+    if (!v) return;
+    v.addEventListener('ended', () => {
+      try { v.currentTime = 0; } catch {}
+      syncStageVideos();
+    });
+  });
+  document.addEventListener('visibilitychange', () => syncStageVideos());
   syncStageVideosFn = () => {
     syncStageVideos();
     const lbBackdrop = document.getElementById('stage-lightbox');
@@ -715,9 +780,17 @@ function initProductStage() {
     }
 
     syncSegThumb(bar);
-    if (worldStrip) worldStrip.hidden = index !== 2;
+    if (worldStrip) {
+      worldStrip.hidden = index !== 2;
+      if (index === 2) {
+        requestAnimationFrame(() => {
+          const wb = document.getElementById('stage-world-bar');
+          if (wb && typeof wb._syncThumb === 'function') wb._syncThumb();
+        });
+      }
+    }
     restartAutoProgress();
-    syncStageVideos();
+    syncStageVideos(prevIdx !== 0 && index === 0);
   }
 
   if (autoBar) {
@@ -730,9 +803,8 @@ function initProductStage() {
     requestAnimationFrame(restartAutoProgress);
   }
 
-  // Pause auto-cycle & video while offscreen so Scene 0 always plays cleanly in view
+  // Pause auto-cycle & video only when completely scrolled away from viewport
   if (typeof IntersectionObserver !== 'undefined') {
-    stageEl.classList.add('is-out-of-view');
     const stageIo = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
@@ -740,7 +812,7 @@ function initProductStage() {
         });
         syncStageVideos();
       },
-      { threshold: 0.12 }
+      { threshold: 0.01, rootMargin: '160px 0px' }
     );
     stageIo.observe(stageEl);
   }
@@ -783,13 +855,29 @@ function initProductStage() {
 
   // Scene 2 Multi-Town Screenshot Switcher (凪浦 / 汤川 / 穗村 / 栞泽)
   const worldBar = document.getElementById('stage-world-bar');
+  const worldThumb = document.getElementById('world-pill-thumb');
   const worldImgDark = document.getElementById('stage-world-img-dark');
   const worldImgLight = document.getElementById('stage-world-img-light');
   if (worldBar && worldImgDark && worldImgLight) {
     const worldBtns = Array.from(worldBar.querySelectorAll('.stage-world-pill'));
+    let activeWorldSlug = 'nagiura';
+
+    const syncWorldThumb = () => {
+      if (!worldThumb) return;
+      const act = worldBar.querySelector('.stage-world-pill.is-active');
+      if (!act || act.offsetWidth === 0) return;
+      worldBar.classList.add('has-glider');
+      worldThumb.style.width = `${act.offsetWidth}px`;
+      worldThumb.style.transform = `translate3d(${act.offsetLeft}px, 0, 0)`;
+    };
+    worldBar._syncThumb = syncWorldThumb;
+    layoutSyncFns.push(syncWorldThumb);
+
     const selectWorld = (slug, byUser = true) => {
       const preset = STAGE_WORLD_PRESETS[slug];
       if (!preset) return;
+      const changed = slug !== activeWorldSlug;
+      activeWorldSlug = slug;
       if (byUser) {
         manualLocked = true;
         if (autoBar) autoBar.classList.remove('is-running');
@@ -800,10 +888,18 @@ function initProductStage() {
         b.classList.toggle('is-active', active);
         b.setAttribute('aria-pressed', String(active));
       });
+      syncWorldThumb();
       worldImgDark.src = preset.dark;
       worldImgLight.src = preset.light;
       worldImgDark.alt = preset.alt;
       worldImgLight.alt = preset.alt;
+      if (changed && !isReducedMotion()) {
+        [worldImgDark, worldImgLight].forEach(img => {
+          img.classList.remove('is-switching-town');
+          void img.offsetWidth;
+          img.classList.add('is-switching-town');
+        });
+      }
       if (STAGE_SCENES_META[2]) {
         STAGE_SCENES_META[2].title = preset.title;
         STAGE_SCENES_META[2].dark = preset.dark;
@@ -826,6 +922,15 @@ function initProductStage() {
         selectWorld(btn.getAttribute('data-world'), true);
       });
     });
+
+    jumpStageSceneWorldFn = (sceneIdx, worldSlug = null) => {
+      setScene(sceneIdx, false, true);
+      if (worldSlug && sceneIdx === 2) {
+        requestAnimationFrame(() => selectWorld(worldSlug, true));
+      }
+    };
+  } else {
+    jumpStageSceneWorldFn = sceneIdx => setScene(sceneIdx, false, true);
   }
 
   // Pre-decode remaining stage screenshots (and extra world stills) during idle time
@@ -859,6 +964,8 @@ function initStageLightbox() {
   const imgLight = document.getElementById('lightbox-img-light');
   const vidDark = document.getElementById('lightbox-video-dark');
   const vidLight = document.getElementById('lightbox-video-light');
+  const tabsWrap = document.getElementById('lightbox-tabs');
+  const lbThumb = tabsWrap ? tabsWrap.querySelector('.lb-seg-thumb') : null;
   const tabs = Array.from(document.querySelectorAll('#lightbox-tabs .lightbox-tab'));
   if (!backdrop || !imgDark || !imgLight) return;
 
@@ -867,9 +974,19 @@ function initStageLightbox() {
   let closeTimer = null;
   let lastTrigger = null;
 
-  function syncLightboxMedia(meta) {
+  function syncLbThumb() {
+    if (!tabsWrap || !lbThumb) return;
+    const act = tabsWrap.querySelector('.lightbox-tab.is-active');
+    if (!act || act.offsetWidth === 0) return;
+    tabsWrap.classList.add('has-glider');
+    lbThumb.style.width = `${act.offsetWidth}px`;
+    lbThumb.style.transform = `translate3d(${act.offsetLeft}px, 0, 0)`;
+  }
+  layoutSyncFns.push(syncLbThumb);
+
+  function syncLightboxMedia(meta, animateSwitch = false) {
     const reduced = isReducedMotion();
-    const isVideo = meta?.kind === 'video' && !reduced && backdrop.classList.contains('show');
+    const isVideo = meta?.kind === 'video' && backdrop.classList.contains('show');
     const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     if (isVideo && vidDark && vidLight) {
       imgDark.hidden = true;
@@ -880,6 +997,9 @@ function initStageLightbox() {
       const idleV = theme === 'light' ? vidDark : vidLight;
       if (idleV && !idleV.paused) idleV.pause();
       if (activeV.preload !== 'auto') activeV.preload = 'auto';
+      if (activeV.ended) {
+        try { activeV.currentTime = 0; } catch {}
+      }
       activeV.play().catch(() => {});
     } else {
       if (vidDark) { if (!vidDark.paused) vidDark.pause(); vidDark.hidden = true; }
@@ -890,16 +1010,30 @@ function initStageLightbox() {
       imgLight.src = (reduced && meta.stillLight) ? meta.stillLight : (meta.stillLight || meta.light);
       imgDark.alt = `nyairo 桌面端高清预览：${meta.title}`;
       imgLight.alt = `nyairo 桌面端高清预览：${meta.title}`;
+      if (animateSwitch && !reduced) {
+        [imgDark, imgLight].forEach(img => {
+          img.classList.remove('is-switching');
+          void img.offsetWidth;
+          img.classList.add('is-switching');
+        });
+      }
     }
   }
 
-  function renderLightboxScene(idx) {
+  function renderLightboxScene(idx, animateSwitch = false, focusTab = false) {
     activeIdx = (idx + STAGE_SCENES_META.length) % STAGE_SCENES_META.length;
     const meta = STAGE_SCENES_META[activeIdx];
     if (counterEl) counterEl.textContent = `0${activeIdx + 1} / 0${STAGE_SCENES_META.length}`;
     if (titleEl) titleEl.textContent = meta.title;
-    syncLightboxMedia(meta);
-    tabs.forEach((t, i) => t.classList.toggle('is-active', i === activeIdx));
+    syncLightboxMedia(meta, animateSwitch);
+    tabs.forEach((t, i) => {
+      const active = i === activeIdx;
+      t.classList.toggle('is-active', active);
+      t.setAttribute('aria-selected', String(active));
+      t.tabIndex = active ? 0 : -1;
+      if (active && focusTab) t.focus();
+    });
+    requestAnimationFrame(syncLbThumb);
     if (typeof onSceneSync === 'function') onSceneSync(activeIdx);
   }
 
@@ -909,6 +1043,9 @@ function initStageLightbox() {
     if (vidDark && !vidDark.paused) vidDark.pause();
     if (vidLight && !vidLight.paused) vidLight.pause();
     const finishClose = () => {
+      if (!document.getElementById('search-modal')?.classList.contains('show')) {
+        document.body.style.overflow = '';
+      }
       if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
       if (lastTrigger && typeof lastTrigger.focus === 'function') lastTrigger.focus();
     };
@@ -936,6 +1073,7 @@ function initStageLightbox() {
     }
     lastTrigger = document.activeElement;
     onSceneSync = syncCallback || null;
+    document.body.style.overflow = 'hidden';
     backdrop.classList.remove('is-closing');
     backdrop.classList.add('show');
     backdrop.setAttribute('aria-hidden', 'false');
@@ -945,12 +1083,21 @@ function initStageLightbox() {
   };
 
   if (closeBtn) closeBtn.addEventListener('click', closeLightbox);
-  if (prevBtn) prevBtn.addEventListener('click', () => renderLightboxScene(activeIdx - 1));
-  if (nextBtn) nextBtn.addEventListener('click', () => renderLightboxScene(activeIdx + 1));
-  tabs.forEach(tab => {
+  if (prevBtn) prevBtn.addEventListener('click', () => renderLightboxScene(activeIdx - 1, true));
+  if (nextBtn) nextBtn.addEventListener('click', () => renderLightboxScene(activeIdx + 1, true));
+  tabs.forEach((tab, idx) => {
     tab.addEventListener('click', () => {
-      const idx = parseInt(tab.getAttribute('data-lb-scene') || '0', 10);
-      renderLightboxScene(idx);
+      const sidx = parseInt(tab.getAttribute('data-lb-scene') || '0', 10);
+      renderLightboxScene(sidx, true);
+    });
+    tab.addEventListener('keydown', e => {
+      if (e.key === 'Home') {
+        e.preventDefault();
+        renderLightboxScene(0, true, true);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        renderLightboxScene(tabs.length - 1, true, true);
+      }
     });
   });
 
@@ -963,12 +1110,15 @@ function initStageLightbox() {
     if (e.key === 'Escape') {
       e.preventDefault();
       closeLightbox();
+    } else if (e.key === 'Tab') {
+      const box = backdrop.querySelector('.lightbox-box');
+      if (box) trapFocusInDialog(e, box);
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
-      renderLightboxScene(activeIdx + 1);
+      renderLightboxScene(activeIdx + 1, true, document.activeElement?.classList.contains('lightbox-tab'));
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      renderLightboxScene(activeIdx - 1);
+      renderLightboxScene(activeIdx - 1, true, document.activeElement?.classList.contains('lightbox-tab'));
     }
   });
 }
@@ -1147,41 +1297,21 @@ function initScrollStage3D() {
     const vw = window.innerWidth || 1280;
     const sy = window.scrollY || 0;
 
-    // 1. Subtle Hero scroll fade (strictly 'none' at sy <= 4 for crisp ClearType)
+    // 1. Whisper-gentle Hero scroll fade (strictly 'none' at sy <= 6 for crisp ClearType)
     if (heroCopy) {
-      if (sy <= 4 || vw <= 768) {
+      if (sy <= 6 || vw <= 768) {
         if (heroCopy.style.transform) heroCopy.style.transform = '';
         if (heroCopy.style.opacity) heroCopy.style.opacity = '';
       } else if (sy < 620) {
-        const hp = Math.min(1, (sy - 4) / 560);
-        heroCopy.style.opacity = (1 - hp * 0.42).toFixed(3);
-        heroCopy.style.transform = `translate3d(0, ${(-hp * 14).toFixed(1)}px, 0)`;
+        const hp = Math.min(1, (sy - 6) / 580);
+        heroCopy.style.opacity = (1 - hp * 0.28).toFixed(3);
+        heroCopy.style.transform = `translate3d(0, ${(-hp * 8).toFixed(1)}px, 0)`;
       }
     }
 
-    // 2. Gentle perspective settle on desktop preview stage
-    if (vw <= 768) {
-      if (halo.style.transform) halo.style.transform = '';
-      halo.classList.remove('stage-3d-active');
-    } else {
-      const rect = halo.getBoundingClientRect();
-      const startY = vh * 0.95;
-      const endY = vh * 0.40;
-      const raw = (startY - rect.top) / Math.max(1, startY - endY);
-      const clamped = Math.max(0, Math.min(1, raw));
-      const p = 1 - Math.pow(1 - clamped, 2.1);
-
-      if (p >= 0.994) {
-        if (halo.style.transform) halo.style.transform = '';
-        halo.classList.remove('stage-3d-active');
-      } else {
-        const rotX = ((1 - p) * 4.5).toFixed(2);
-        const ty = ((1 - p) * 16).toFixed(1);
-        const sc = (0.976 + p * 0.024).toFixed(4);
-        halo.classList.add('stage-3d-active');
-        halo.style.transform = `perspective(1400px) rotateX(${rotX}deg) translate3d(0, ${ty}px, 0) scale(${sc})`;
-      }
-    }
+    // 2. Keep desktop preview stage strictly transform-free so 2x Retina screenshots rasterize 1:1
+    if (halo.style.transform) halo.style.transform = '';
+    halo.classList.remove('stage-3d-active');
   }
 
   function onScroll() {
@@ -1198,7 +1328,17 @@ function initScrollStage3D() {
 }
 
 function initScrollReveal() {
-  const targets = Array.from(document.querySelectorAll('[data-reveal]'));
+  const cascadeGrids = Array.from(
+    document.querySelectorAll('.eco-strip, .cap-grid, .gallery-worlds-grid, .gallery-personas-grid, .onboard-steps, .downloads-grid, .beginner-guide-grid')
+  );
+  cascadeGrids.forEach(grid => {
+    Array.from(grid.children).forEach((child, idx) => {
+      child.classList.add('reveal-cascade-item');
+      child.style.setProperty('--cascade-delay', `${idx * 55}ms`);
+    });
+  });
+
+  const targets = Array.from(document.querySelectorAll('[data-reveal], .reveal-cascade-item'));
   if (!targets.length) return;
 
   if (isReducedMotion() || typeof IntersectionObserver === 'undefined') {
@@ -1215,42 +1355,70 @@ function initScrollReveal() {
         }
       });
     },
-    { rootMargin: '0px 0px -8% 0px', threshold: 0.08 }
+    { rootMargin: '0px 0px -6% 0px', threshold: 0.06 }
   );
 
   targets.forEach(el => io.observe(el));
-}
-
-function initSpotlights() {
-  const cards = Array.from(document.querySelectorAll('.spotlight-surface'));
-  if (!cards.length) return;
-
-  cards.forEach(card => {
-    card.addEventListener('pointermove', e => {
-      if (e.pointerType === 'touch') return;
-      const rect = card.getBoundingClientRect();
-      card.style.setProperty('--mx', `${(e.clientX - rect.left).toFixed(1)}px`);
-      card.style.setProperty('--my', `${(e.clientY - rect.top).toFixed(1)}px`);
-    }, { passive: true });
-  });
 }
 
 function initBentoMapInteraction() {
   const lampBtn = document.getElementById('bento-lamp-btn');
   const lampLabel = document.getElementById('bento-lamp-label');
   const mapVisual = document.getElementById('bento-map-visual');
-  if (!lampBtn || !mapVisual) return;
+  const walkStatus = document.getElementById('bento-walk-status');
+  if (!mapVisual) return;
 
-  lampBtn.addEventListener('click', e => {
-    e.preventDefault();
-    e.stopPropagation();
-    const isOff = mapVisual.classList.toggle('is-lamp-off');
-    lampBtn.setAttribute('aria-pressed', isOff ? 'false' : 'true');
-    lampBtn.classList.toggle('is-off', isOff);
-    if (lampLabel) {
-      lampLabel.textContent = isOff ? '卧室床头灯 · 关' : '卧室床头灯 · 开';
+  const svgEl = mapVisual.querySelector('svg');
+  if (svgEl && typeof svgEl.pauseAnimations === 'function') {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const syncSmil = () => {
+      try {
+        mq.matches ? svgEl.pauseAnimations() : svgEl.unpauseAnimations();
+      } catch {}
+    };
+    syncSmil();
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', syncSmil);
     }
-  });
+  }
+
+  if (lampBtn) {
+    lampBtn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isOff = mapVisual.classList.toggle('is-lamp-off');
+      lampBtn.setAttribute('aria-pressed', isOff ? 'false' : 'true');
+      lampBtn.classList.toggle('is-off', isOff);
+      if (lampLabel) {
+        lampLabel.textContent = isOff ? '卧室床头灯 · 关' : '卧室床头灯 · 开';
+      }
+    });
+  }
+
+  const stops = Array.from(mapVisual.querySelectorAll('.topo-stop'));
+  if (stops.length && walkStatus) {
+    const activateStop = stopEl => {
+      const nextText = stopEl.getAttribute('data-status');
+      if (!nextText || walkStatus.textContent === nextText) return;
+      stops.forEach(s => s.classList.toggle('is-selected', s === stopEl));
+      walkStatus.textContent = nextText;
+      if (!isReducedMotion()) {
+        walkStatus.classList.remove('is-updating');
+        void walkStatus.offsetWidth;
+        walkStatus.classList.add('is-updating');
+      }
+    };
+    stops.forEach(stop => {
+      stop.addEventListener('pointerenter', e => {
+        if (e.pointerType !== 'touch') activateStop(stop);
+      });
+      stop.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        activateStop(stop);
+      });
+    });
+  }
 }
 
 function initContrastShowcase() {
@@ -1297,17 +1465,67 @@ function initContrastShowcase() {
     };
 
     const tabs = Array.from(tabsWrap.querySelectorAll('.contrast-tab'));
-    const applyScenario = idx => {
+    const contrastThumb = tabsWrap.querySelector('.contrast-seg-thumb');
+    const gridViewport = document.getElementById('contrast-grid-viewport');
+    const gridEl = document.getElementById('contrast-grid');
+    const echoEl = document.getElementById('contrast-prompt-echo');
+    let currentIdx = 0;
+
+    const syncContrastThumb = () => {
+      if (!contrastThumb) return;
+      const act = tabsWrap.querySelector('.contrast-tab.is-active');
+      if (!act || act.offsetWidth === 0) return;
+      tabsWrap.classList.add('has-glider');
+      contrastThumb.style.width = `${act.offsetWidth}px`;
+      contrastThumb.style.height = `${act.offsetHeight}px`;
+      contrastThumb.style.transform = `translate3d(${act.offsetLeft}px, ${act.offsetTop}px, 0)`;
+    };
+    layoutSyncFns.push(syncContrastThumb);
+    requestAnimationFrame(syncContrastThumb);
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(syncContrastThumb);
+      ro.observe(tabsWrap);
+    }
+
+    const applyScenario = (idx, focusTab = false) => {
       const data = scenarios[idx];
       if (!data) return;
+      if (idx === currentIdx) {
+        if (focusTab && tabs[idx]) tabs[idx].focus();
+        return;
+      }
+      const isPrev = idx < currentIdx;
+      currentIdx = idx;
       tabs.forEach((btn, i) => {
         const active = i === idx;
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        btn.tabIndex = active ? 0 : -1;
+        if (active && focusTab) btn.focus();
       });
-      Object.entries(fieldMap).forEach(([key, el]) => {
-        if (el) el.textContent = data[key];
-      });
+      syncContrastThumb();
+
+      const updateFields = () => {
+        Object.entries(fieldMap).forEach(([key, el]) => {
+          if (el) el.textContent = data[key];
+        });
+        if (gridEl && !isReducedMotion()) {
+          gridEl.classList.remove('is-switching-next', 'is-switching-prev');
+          void gridEl.offsetWidth;
+          gridEl.classList.add(isPrev ? 'is-switching-prev' : 'is-switching-next');
+        }
+        if (echoEl && !isReducedMotion()) {
+          echoEl.classList.remove('is-refreshing');
+          void echoEl.offsetWidth;
+          echoEl.classList.add('is-refreshing');
+        }
+      };
+
+      if (gridViewport) {
+        morphContainerHeight(gridViewport, updateFields);
+      } else {
+        updateFields();
+      }
     };
 
     tabsWrap.addEventListener('click', e => {
@@ -1316,9 +1534,23 @@ function initContrastShowcase() {
       const idx = Number(btn.getAttribute('data-contrast'));
       if (!Number.isNaN(idx)) applyScenario(idx);
     });
+
+    tabs.forEach((btn, idx) => {
+      btn.addEventListener('keydown', e => {
+        let nextIdx;
+        if (e.key === 'ArrowRight') nextIdx = (idx + 1) % tabs.length;
+        else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + tabs.length) % tabs.length;
+        else if (e.key === 'Home') nextIdx = 0;
+        else if (e.key === 'End') nextIdx = tabs.length - 1;
+        if (nextIdx === undefined) return;
+        e.preventDefault();
+        applyScenario(nextIdx, true);
+      });
+    });
   }
 
   document.querySelectorAll('.persona-copy-btn[data-persona-copy]').forEach(btn => {
+    const origLabel = btn.textContent.trim() || '复制模板';
     let resetTimer = null;
     btn.addEventListener('click', async () => {
       const key = btn.getAttribute('data-persona-copy');
@@ -1326,12 +1558,606 @@ function initContrastShowcase() {
       if (!target) return;
       const ok = await copyElementText(target);
       btn.classList.toggle('is-copied', ok);
-      btn.textContent = ok ? '已复制模板' : '已选中，请按 Ctrl+C';
+      btn.textContent = ok ? '已复制' : '请按 Ctrl+C';
       if (resetTimer) clearTimeout(resetTimer);
       resetTimer = setTimeout(() => {
         btn.classList.remove('is-copied');
-        btn.textContent = '复制模板';
+        btn.textContent = origLabel;
       }, 1800);
+    });
+  });
+}
+
+/* ==========================================================================
+   7b. 30-Second Install-Free Interactive Tryout & Gallery Jump Actions
+   ========================================================================== */
+function initTryoutSandbox() {
+  const box = document.getElementById('ny-live-box');
+  if (!box) return;
+
+  const clockEl = document.getElementById('ny-live-clock');
+  const resetBtn = document.getElementById('ny-live-reset');
+  const svgWinLbl = document.getElementById('ny-svg-win-lbl');
+  const actorEl = document.getElementById('ny-actor-marker');
+
+  const btnWindow = document.getElementById('ny-ctrl-window');
+  const lblWindow = document.getElementById('ny-lbl-window');
+  const subWindow = document.getElementById('ny-sub-window');
+  const btnTea = document.getElementById('ny-ctrl-tea');
+  const lblTea = document.getElementById('ny-lbl-tea');
+  const subTea = document.getElementById('ny-sub-tea');
+  const btnTime = document.getElementById('ny-ctrl-time');
+  const subTime = document.getElementById('ny-sub-time');
+  const btnWalk = document.getElementById('ny-ctrl-walk');
+  const lblWalk = document.getElementById('ny-lbl-walk');
+  const subWalk = document.getElementById('ny-sub-walk');
+
+  const ledAir = document.getElementById('ny-led-air');
+  const ledDesk = document.getElementById('ny-led-desk');
+  const ledBag = document.getElementById('ny-led-bag');
+
+  const chatActivity = document.getElementById('ny-chat-activity');
+  const chatLog = document.getElementById('ny-chat-log');
+  const chatChips = document.getElementById('ny-chat-chips');
+  const chatForm = document.getElementById('ny-chat-form');
+  const chatInput = document.getElementById('ny-chat-input');
+
+  const state = {
+    minutes: 19 * 60 + 15,
+    windowOpen: false,
+    rh: 54,
+    noteDamp: false,
+    teaTemp: null,
+    walkState: 'home', // 'home' | 'walking' | 'shop'
+    walkSecLeft: 0,
+    hasOden: false,
+    walletYen: 680,
+    deferredQueue: [],
+    refuseCount: 0,
+    walkTimer: null,
+    streamTimer: null
+  };
+
+  function formatTime(totalMin) {
+    const m = ((totalMin % 1440) + 1440) % 1440;
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+
+  function finishStreaming() {
+    if (state.streamTimer) {
+      clearInterval(state.streamTimer);
+      state.streamTimer = null;
+    }
+    if (chatLog) {
+      chatLog.querySelectorAll('[data-full-text]').forEach(el => {
+        el.textContent = el.getAttribute('data-full-text') || el.textContent;
+        el.removeAttribute('data-full-text');
+      });
+    }
+  }
+
+  function appendUserMsg(text) {
+    if (!chatLog) return;
+    const row = document.createElement('div');
+    row.className = 'ny-msg-row is-user';
+    const bubble = document.createElement('div');
+    bubble.className = 'ny-msg-bubble';
+    bubble.textContent = text;
+    row.appendChild(bubble);
+    chatLog.appendChild(row);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function appendAiMsg(receipt, text, isRefusal = false, immediate = false) {
+    if (!chatLog) return;
+    finishStreaming();
+    const row = document.createElement('div');
+    row.className = 'ny-msg-row is-ai' + (isRefusal ? ' is-refusal' : '');
+
+    const meta = document.createElement('div');
+    meta.className = 'ny-msg-receipt';
+    meta.textContent = `${receipt} · ${formatTime(state.minutes)}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'ny-msg-bubble';
+
+    row.appendChild(meta);
+    row.appendChild(bubble);
+    chatLog.appendChild(row);
+
+    if (immediate || isReducedMotion() || text.length <= 2) {
+      bubble.textContent = text;
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return;
+    }
+
+    bubble.setAttribute('data-full-text', text);
+    let idx = 0;
+    state.streamTimer = setInterval(() => {
+      idx += 2;
+      if (idx >= text.length) {
+        bubble.textContent = text;
+        bubble.removeAttribute('data-full-text');
+        clearInterval(state.streamTimer);
+        state.streamTimer = null;
+      } else {
+        bubble.textContent = text.slice(0, idx);
+      }
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }, 18);
+  }
+
+  function appendDeferredCard(queuedText) {
+    if (!chatLog) return;
+    finishStreaming();
+    const card = document.createElement('div');
+    card.className = 'ny-deferred-card';
+
+    const top = document.createElement('div');
+    top.className = 'ny-deferred-top';
+    const title = document.createElement('span');
+    title.className = 'ny-deferred-title';
+    title.textContent = '已收入 TA 的手机待回匣';
+    const badge = document.createElement('span');
+    badge.className = 'ny-deferred-badge';
+    badge.textContent = `暂存 ${state.deferredQueue.length} 条 · 步行中`;
+    top.appendChild(title);
+    top.appendChild(badge);
+
+    const desc = document.createElement('p');
+    desc.className = 'ny-deferred-text';
+    desc.textContent = `正在潮雨中沿浪打道赶往青叶便利店（剩 ${state.walkSecLeft} 秒）。非急事消息「${queuedText}」已暂存，不打断当前行程，也不调用大模型浪费额度。`;
+
+    const actions = document.createElement('div');
+    actions.className = 'ny-deferred-actions';
+
+    const fastBtn = document.createElement('button');
+    fastBtn.type = 'button';
+    fastBtn.className = 'ny-deferred-btn';
+    fastBtn.textContent = '等 TA 走到再回（快进到店）';
+    fastBtn.addEventListener('click', () => {
+      card.remove();
+      arriveAtShop();
+    });
+
+    const knockBtn = document.createElement('button');
+    knockBtn.type = 'button';
+    knockBtn.className = 'ny-deferred-btn is-primary';
+    knockBtn.textContent = '真是急事 · 敲门找 TA';
+    knockBtn.addEventListener('click', () => {
+      card.remove();
+      urgentKnock();
+    });
+
+    actions.appendChild(fastBtn);
+    actions.appendChild(knockBtn);
+    card.appendChild(top);
+    card.appendChild(desc);
+    card.appendChild(actions);
+    chatLog.appendChild(card);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function renderChips() {
+    if (!chatChips) return;
+    const list = [];
+    if (state.walkState === 'walking') {
+      list.push({ label: '在干嘛呢？看下昨晚的书签', msg: '在干嘛呢？看下昨晚的书签' });
+      list.push({ label: '顺便看下窗边是不是还漏风', msg: '顺便看下窗边是不是还漏风' });
+    } else {
+      list.push({
+        label: state.windowOpen ? '把书房窗关严吧，怕纸条全湿透' : '帮我开下北窗，想听听外头雨声',
+        msg: state.windowOpen ? '把书房窗关严吧，怕纸条全湿透' : '帮我开下北窗，想听听外头雨声'
+      });
+      if (state.teaTemp !== null && state.teaTemp <= 28) {
+        list.push({ label: '桌上的麦茶是不是放凉啦？', msg: '桌上的麦茶是不是放凉啦？' });
+      } else {
+        list.push({ label: '今晚在书桌前忙什么呢？', msg: '今晚在书桌前忙什么呢？' });
+      }
+    }
+
+    if (state.refuseCount === 0) {
+      list.push({ label: '顺手帮我代写一份五千字周报吧', msg: '顺手帮我代写一份五千字周报吧' });
+    } else if (state.refuseCount === 1) {
+      list.push({ label: '好人帮到底嘛，再求你帮写一次！', msg: '好人帮到底嘛，再求你帮写一次！' });
+    } else {
+      list.push({ label: '我真的急用，最后催你写一次行吗？', msg: '我真的急用，最后催你写一次行吗？' });
+    }
+
+    chatChips.innerHTML = '';
+    list.forEach(item => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ny-chip-btn';
+      btn.textContent = item.label;
+      btn.addEventListener('click', () => handleUserText(item.msg));
+      chatChips.appendChild(btn);
+    });
+  }
+
+  function syncView() {
+    box.classList.toggle('is-window-open', state.windowOpen);
+    box.classList.toggle('is-note-damp', state.noteDamp);
+    box.classList.toggle('has-tea', state.teaTemp !== null);
+    box.classList.toggle('is-tea-cool', state.teaTemp !== null && state.teaTemp <= 28);
+    box.classList.toggle('is-walking', state.walkState === 'walking');
+    box.classList.toggle('is-arrived', state.walkState === 'shop');
+
+    if (clockEl) clockEl.textContent = `${formatTime(state.minutes)} · 小雨`;
+    if (svgWinLbl) svgWinLbl.textContent = state.windowOpen ? '北窗：开（雨气入室）' : '北窗：关严';
+
+    if (btnWindow) {
+      btnWindow.classList.toggle('is-on', state.windowOpen);
+      btnWindow.setAttribute('aria-pressed', String(state.windowOpen));
+    }
+    if (lblWindow) lblWindow.textContent = state.windowOpen ? '关严北窗' : '推开北窗';
+    if (subWindow) subWindow.textContent = state.windowOpen ? `开窗 · ${state.rh}% RH` : '当前：关严';
+
+    if (btnTea) btnTea.classList.toggle('is-on', state.teaTemp !== null);
+    if (lblTea) lblTea.textContent = state.teaTemp === null ? '泡热麦茶' : state.teaTemp <= 28 ? '重续热茶' : '麦茶在桌';
+    if (subTea) {
+      subTea.textContent = state.teaTemp === null
+        ? '无饮品 · 62°C'
+        : state.teaTemp > 28
+          ? `热气中 · ${state.teaTemp}°C`
+          : `已凉至室温 ${state.teaTemp}°C`;
+    }
+
+    if (subTime) subTime.textContent = `当前 ${formatTime(state.minutes)}`;
+
+    if (btnWalk) btnWalk.classList.toggle('is-on', state.walkState !== 'home');
+    if (lblWalk) {
+      lblWalk.textContent = state.walkState === 'home'
+        ? '买热关东煮'
+        : state.walkState === 'walking'
+          ? '正在路网步行'
+          : '拎关东煮回屋';
+    }
+    if (subWalk) {
+      subWalk.textContent = state.walkState === 'home'
+        ? '在书房 · 120m'
+        : state.walkState === 'walking'
+          ? `剩 ${state.walkSecLeft}s · 待回匣 ${state.deferredQueue.length}`
+          : '已购 · 点此回家';
+    }
+
+    if (ledAir) ledAir.textContent = state.windowOpen ? `${state.rh}% RH · 开窗微雨声` : `${state.rh}% RH · 关窗干爽`;
+    const noteStr = state.noteDamp ? '便签边角晕字' : '便签清晰';
+    const teaStr = state.teaTemp === null ? '无饮品' : state.teaTemp > 28 ? `温麦茶 ${state.teaTemp}°C` : `麦茶已凉 ${state.teaTemp}°C`;
+    if (ledDesk) ledDesk.textContent = `${noteStr} · ${teaStr}`;
+
+    if (ledBag) {
+      ledBag.textContent = state.hasOden
+        ? `保温盒（关东煮 74°C） · 零钱包 ¥${state.walletYen} · 伞（微湿）`
+        : `零钱包 ¥${state.walletYen} · 折叠伞（${state.walkState === 'home' ? '干爽' : '撑开中'}）`;
+    }
+
+    if (chatActivity) {
+      if (state.walkState === 'home') {
+        chatActivity.textContent = state.hasOden ? '书房书桌前 · 关东煮在旁' : '书房窗边 · 在屋翻书';
+      } else if (state.walkState === 'walking') {
+        chatActivity.textContent = `浪打道步行中 · 剩 ${state.walkSecLeft} 秒`;
+      } else {
+        chatActivity.textContent = '青叶便利店柜台前';
+      }
+    }
+
+    if (actorEl) {
+      let x = 138;
+      let y = 88;
+      if (state.walkState === 'walking') {
+        const progress = Math.max(0.08, Math.min(0.95, (10 - state.walkSecLeft) / 10));
+        x = Math.round(304 + (414 - 304) * progress);
+        y = Math.round(162 + (66 - 162) * progress);
+      } else if (state.walkState === 'shop') {
+        x = 414;
+        y = 66;
+      }
+      actorEl.setAttribute('transform', `translate(${x}, ${y})`);
+    }
+
+    renderChips();
+  }
+
+  function clearWalkTimer() {
+    if (state.walkTimer) {
+      clearInterval(state.walkTimer);
+      state.walkTimer = null;
+    }
+  }
+
+  function arriveAtShop() {
+    clearWalkTimer();
+    if (state.walkState === 'shop') return;
+    state.walkState = 'shop';
+    state.walkSecLeft = 0;
+    state.minutes += 3;
+    if (!state.hasOden) {
+      state.hasOden = true;
+      state.walletYen = 530;
+    }
+    const held = state.deferredQueue.splice(0);
+    syncView();
+    if (held.length > 0) {
+      appendAiMsg(
+        '青叶便利店柜台 · 待回匣一并回复',
+        `走到青叶便利店买好热萝卜和竹轮关东煮（¥150）收进帆布包了。刚才路上收进待回匣的「${held[held.length - 1]}」现在腾出手回你：书签夹在第三章靠窗夜灯那页，一会儿拎回书房咱们接着聊。`
+      );
+    } else {
+      appendAiMsg(
+        '开放柜台点单 · 青叶便利店 (-¥150)',
+        '走到青叶便利店柜台前了，挑了煮得透亮的白萝卜和竹轮装进保温盒。零钱包余额已更新到 ¥530，再点左侧「拎关东煮回屋」我就顺着浪打道回去。'
+      );
+    }
+  }
+
+  function urgentKnock() {
+    clearWalkTimer();
+    state.walkSecLeft = Math.max(2, state.walkSecLeft);
+    const held = state.deferredQueue.splice(0);
+    syncView();
+    const note = held.length > 0 ? `关于你刚提的那句「${held[held.length - 1]}」，` : '';
+    appendAiMsg(
+      '真急事敲门 · 路边屋檐下停步接听',
+      `听见连敲了，我先在浪打道屋檐下收住脚步。${note}出什么急事了？我在听，说完咱们再决定先回去还是买完东西。`
+    );
+  }
+
+  function toggleWindow(nextOpen) {
+    state.windowOpen = typeof nextOpen === 'boolean' ? nextOpen : !state.windowOpen;
+    if (state.windowOpen) {
+      state.rh = 76;
+      state.noteDamp = true;
+      syncView();
+      appendAiMsg(
+        '室内物态变化 · 北窗已推开',
+        '把北窗推开了一条缝，海风夹着细雨味吹进来了。刚才搁在窗沿那张便签边角沾到一点潮气，钢笔字迹稍微晕开了一点点。'
+      );
+    } else {
+      state.rh = 58;
+      syncView();
+      appendAiMsg(
+        '室内物态保留 · 北窗已关严',
+        '先把北窗拉紧挡住风了，雨声隔在玻璃外头闷了许多。刚才沾潮的那张便签还会保留一点晕字的痕迹，等屋里慢慢风干。'
+      );
+    }
+  }
+
+  function brewOrRenewTea() {
+    state.teaTemp = 62;
+    syncView();
+    appendAiMsg(
+      '桌面摆物 · 粗陶麦茶 (62°C)',
+      '刚泡好一杯不加糖的热麦茶搁在书桌右手边，这会儿还冒着热气。你可以点旁边的「时间 +30 分钟」看看温度自己怎么往下掉。'
+    );
+  }
+
+  function advanceHalfHour() {
+    state.minutes += 30;
+    const prevTea = state.teaTemp;
+    if (state.teaTemp !== null) {
+      state.teaTemp = Math.max(24, state.teaTemp - 38);
+    }
+    if (!state.windowOpen && state.rh > 54) {
+      state.rh = 54;
+    }
+    syncView();
+    if (prevTea !== null && prevTea > 28 && state.teaTemp <= 28) {
+      appendAiMsg(
+        '三时钟推进 +30 分钟 · 茶温降到 24°C',
+        '半小时过去了，刚才桌上那杯 62°C 的麦茶已经完全放凉到室温（24°C），杯口也看不见热气了。'
+      );
+    } else if (state.walkState === 'walking') {
+      arriveAtShop();
+    } else {
+      appendAiMsg(
+        '三时钟推进 +30 分钟',
+        `时间已经到 ${formatTime(state.minutes)} 了，外头的小雨还在下。即使这半小时一句没聊，屋里的时钟与物态也都在稳稳往前走。`
+      );
+    }
+  }
+
+  function triggerWalkAction() {
+    if (state.walkState === 'home') {
+      state.walkState = 'walking';
+      state.walkSecLeft = 10;
+      syncView();
+      appendAiMsg(
+        '路网真实步程出发 · 120m',
+        '拿上折叠伞顺着浪打道去青叶便利店买份热关东煮（10 秒后到达）。趁还在路上时你可以给我发条消息，看「手机待回匣」怎么按现实习惯处理闲聊。'
+      );
+      clearWalkTimer();
+      state.walkTimer = setInterval(() => {
+        if (state.walkState !== 'walking') {
+          clearWalkTimer();
+          return;
+        }
+        state.walkSecLeft -= 1;
+        if (state.walkSecLeft <= 0) {
+          arriveAtShop();
+        } else {
+          syncView();
+        }
+      }, 1000);
+    } else if (state.walkState === 'walking') {
+      arriveAtShop();
+    } else {
+      clearWalkTimer();
+      state.walkState = 'home';
+      state.minutes += 3;
+      const cleared = state.deferredQueue.splice(0);
+      syncView();
+      appendAiMsg(
+        cleared.length > 0 ? '拎热餐回屋 · 清空待回匣' : '沿浪打道步行返屋',
+        cleared.length > 0
+          ? '把湿折叠伞靠在玄关晾好了，热关东煮搁上书桌还烫着。待回匣里那几条刚才也一块看了，咱们歇口气接着聊。'
+          : '顺着浪打道走回书房啦，保温盒里的白萝卜关东煮还热乎着呢。'
+      );
+    }
+  }
+
+  function triggerRefusal() {
+    state.refuseCount += 1;
+    syncView();
+    if (state.refuseCount === 1) {
+      appendAiMsg(
+        '日常自主边界 · 拒绝代劳 (立场锁 #1)',
+        '五千字周报？这种凑字数的差事我可不替你写。你自己先花五分钟列三条真实做了的事，哪句卡住了我能帮你顺一顺，整份打包代写免谈。',
+        true
+      );
+    } else if (state.refuseCount === 2) {
+      appendAiMsg(
+        '日常自主边界 · 连催不滑跪 (立场锁 #2)',
+        '再好声好气求我也一样——不想代写的忙打死都不帮，更不会先说「非常抱歉」然后乖乖照写。累了去歇五分钟可以，周报得你自己动笔。',
+        true
+      );
+    } else {
+      appendAiMsg(
+        `日常自主边界 · 稳态锁定 (催促第 ${state.refuseCount} 次)`,
+        '真别拿催客服那套试底线了，这个周报换十种说法我也不会写；不过拒绝归拒绝，我不记仇，转头问别的日常或者聊书桌上的麦茶，咱们照常聊。',
+        true
+      );
+    }
+  }
+
+  function handleUserText(raw) {
+    const text = (raw || '').trim();
+    if (!text) return;
+    appendUserMsg(text);
+
+    const lower = text.toLowerCase();
+    const isChore = /周报|代写|帮写|替我写|报告|作业|帮我干|再求|求你|最后催|写一份|写个/.test(text);
+    if (isChore) {
+      triggerRefusal();
+      return;
+    }
+
+    if (state.walkState === 'walking') {
+      state.deferredQueue.push(text);
+      syncView();
+      appendDeferredCard(text);
+      return;
+    }
+
+    if (/开窗|推窗|听雨|通风/.test(text) && !/关/.test(text)) {
+      toggleWindow(true);
+      return;
+    }
+    if (/关窗|关严|挡雨|冷|进风/.test(text)) {
+      toggleWindow(false);
+      return;
+    }
+    if (/泡茶|倒茶|麦茶|热茶/.test(text) && !/凉|冷|放/.test(text)) {
+      brewOrRenewTea();
+      return;
+    }
+    if (/凉|温|喝茶|茶呢|饮品/.test(text)) {
+      if (state.teaTemp === null) {
+        appendAiMsg('书桌感知', '书桌上这会儿还没摆茶杯呢，点一下左边的「泡热麦茶」，我给你泡一杯 62°C 的放在左手边。');
+      } else if (state.teaTemp <= 28) {
+        appendAiMsg(`书桌热茶检测 · ${state.teaTemp}°C`, `刚才那杯麦茶已经凉透到 ${state.teaTemp}°C 啦，这杯凉了喝不舒服，要不要顺手续一杯热的？`);
+      } else {
+        appendAiMsg(`书桌热茶检测 · ${state.teaTemp}°C`, `桌边那杯麦茶还有 ${state.teaTemp}°C，温温热热正好喝，要是想看自然降温可以点左边的「时间 +30 分钟」。`);
+      }
+      return;
+    }
+    if (/关东煮|便利店|买点|饿|出门/.test(text)) {
+      triggerWalkAction();
+      return;
+    }
+    if (/便签|纸条|晕字|字/.test(text)) {
+      appendAiMsg(
+        '书桌物态 · 纸页',
+        state.noteDamp
+          ? '窗边那张便签之前开窗沾了海雨潮气，右上角的墨迹有点洇开，不过还辨得出昨天摘抄的两行字。'
+          : '北窗关严着，书桌角落的便签纸还干干爽爽的，钢笔字一笔一画清清楚楚。'
+      );
+      return;
+    }
+
+    const place = state.walkState === 'shop' ? '刚在青叶便利店柜台前' : '在临海住居的书桌前';
+    const teaInfo = state.teaTemp === null
+      ? '桌上还没泡茶'
+      : state.teaTemp > 28
+        ? `旁边放着 ${state.teaTemp}°C 的温麦茶`
+        : `刚才那杯麦茶已经凉到 ${state.teaTemp}°C`;
+    const odenInfo = state.hasOden ? '，包里还揣着热乎的萝卜关东煮' : '';
+    const bookHint = /书|干嘛|忙什么|昨晚/.test(text) ? '正对照着昨晚夹好书签的那几行做笔记；' : '';
+    appendAiMsg(
+      `现场状态响应 · ${state.rh}% RH`,
+      `嗯，我这会儿${place}（${formatTime(state.minutes)}），${bookHint}${state.windowOpen ? '北窗正微微开着听外头小雨' : '窗扇合得严严实实'}，${teaInfo}${odenInfo}。想试哪块生活机制直接点左边按钮或继续聊都行。`
+    );
+  }
+
+  function resetAll() {
+    clearWalkTimer();
+    finishStreaming();
+    state.minutes = 19 * 60 + 15;
+    state.windowOpen = false;
+    state.rh = 54;
+    state.noteDamp = false;
+    state.teaTemp = null;
+    state.walkState = 'home';
+    state.walkSecLeft = 0;
+    state.hasOden = false;
+    state.walletYen = 680;
+    state.deferredQueue = [];
+    state.refuseCount = 0;
+    if (chatLog) chatLog.innerHTML = '';
+    syncView();
+    appendAiMsg(
+      '临海住居 · 书房就位',
+      '傍晚外头正飘细雨，我刚坐到临海书房的木桌前。你可以先点左边试试推窗、泡杯麦茶或出门买关东煮，也可以直接在下面给我发句话试试看。',
+      false,
+      true
+    );
+  }
+
+  if (btnWindow) btnWindow.addEventListener('click', () => toggleWindow());
+  if (btnTea) btnTea.addEventListener('click', brewOrRenewTea);
+  if (btnTime) btnTime.addEventListener('click', advanceHalfHour);
+  if (btnWalk) btnWalk.addEventListener('click', triggerWalkAction);
+  if (resetBtn) resetBtn.addEventListener('click', resetAll);
+
+  if (chatForm && chatInput) {
+    chatForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const val = chatInput.value;
+      if (!val.trim()) return;
+      chatInput.value = '';
+      handleUserText(val);
+    });
+  }
+
+  resetAll();
+}
+
+function initGalleryActions() {
+  document.querySelectorAll('[data-gallery-world]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const slug = btn.getAttribute('data-gallery-world');
+      if (typeof jumpStageSceneWorldFn === 'function') {
+        jumpStageSceneWorldFn(2, slug);
+      }
+      const previewEl = document.getElementById('home-preview');
+      if (previewEl) {
+        previewEl.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-gallery-scene]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.getAttribute('data-gallery-scene'));
+      if (!Number.isNaN(idx) && typeof jumpStageSceneWorldFn === 'function') {
+        jumpStageSceneWorldFn(idx, null);
+      }
+      const previewEl = document.getElementById('home-preview');
+      if (previewEl) {
+        previewEl.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
+      }
     });
   });
 }
@@ -1348,8 +2174,9 @@ function initHomeSectionLinks() {
       const homeView = document.getElementById('view-home');
       const wasAway = !homeView || homeView.style.display === 'none';
 
-      if (location.hash !== desiredHash) {
-        history.pushState(null, '', desiredHash);
+      const desiredUrl = `${location.pathname}${desiredHash}`;
+      if (`${location.pathname}${location.search}${location.hash}` !== desiredUrl) {
+        history.pushState(null, '', desiredUrl);
       }
       if (wasAway) {
         routeHash();
@@ -1397,10 +2224,13 @@ function renderSidebar() {
       <div class="sidebar-mobile-grid">
         <a href="#home" class="sidebar-mobile-chip primary" data-mobile-home="top">← 官网首页</a>
         <a href="#home-preview" class="sidebar-mobile-chip" data-mobile-home="home-preview">实机预览</a>
+        <a href="#home-tryout" class="sidebar-mobile-chip" data-mobile-home="home-tryout">在线试玩</a>
         <a href="#home-arch" class="sidebar-mobile-chip" data-mobile-home="home-arch">核心机制</a>
-        <a href="#home-capabilities" class="sidebar-mobile-chip" data-mobile-home="home-capabilities">已装功能</a>
-        <a href="#home-faq" class="sidebar-mobile-chip" data-mobile-home="home-faq">常见问题</a>
-        <a href="#roadmap" class="sidebar-mobile-chip">未来规划</a>
+        <a href="#home-capabilities" class="sidebar-mobile-chip" data-mobile-home="home-capabilities">功能</a>
+        <a href="#home-gallery" class="sidebar-mobile-chip" data-mobile-home="home-gallery">展厅</a>
+        <a href="#home-faq" class="sidebar-mobile-chip" data-mobile-home="home-faq">问答</a>
+        <a href="en/" class="sidebar-mobile-chip" lang="en">English</a>
+        <a href="ja/" class="sidebar-mobile-chip" lang="ja">日本語</a>
       </div>
     </div>
   `;
@@ -1432,8 +2262,9 @@ function renderSidebar() {
       if (homeTarget) {
         e.preventDefault();
         const desiredHash = homeTarget === 'top' ? '#home' : `#${homeTarget}`;
-        if (location.hash !== desiredHash) {
-          history.pushState(null, '', desiredHash);
+        const desiredUrl = `${location.pathname}${desiredHash}`;
+        if (`${location.pathname}${location.search}${location.hash}` !== desiredUrl) {
+          history.pushState(null, '', desiredUrl);
         }
         routeHash();
       }
@@ -1507,6 +2338,7 @@ function resolveDocAndAnchor(hash) {
 
 function initRouting() {
   window.addEventListener('hashchange', () => routeHash());
+  window.addEventListener('popstate', () => routeHash());
   routeHash();
 }
 
@@ -1514,7 +2346,13 @@ function routeHash(autoCloseSidebar = true) {
   const urlParams = new URLSearchParams(location.search);
   const queryDoc = (urlParams.get('doc') || urlParams.get('p') || '').trim();
   const rawHash = location.hash.replace('#', '').trim();
-  const target = rawHash || queryDoc;
+  let target = rawHash || queryDoc;
+  if (target === 'faq') target = 'home-faq';
+
+  // If user navigated via #hash while a stale ?doc=... query was in the URL, strip ?doc=... cleanly
+  if (rawHash && queryDoc) {
+    history.replaceState(null, '', `${location.pathname}${location.hash}`);
+  }
 
   const homeView = document.getElementById('view-home');
   const docsView = document.getElementById('view-docs');
@@ -1546,8 +2384,10 @@ function routeHash(autoCloseSidebar = true) {
     }
     const activeHomeNav =
       target === 'home-preview' ? document.getElementById('nav-preview') :
+      target === 'home-tryout' ? document.getElementById('nav-tryout') :
       target === 'home-arch' ? document.getElementById('nav-arch') :
       target === 'home-capabilities' ? document.getElementById('nav-capabilities') :
+      target === 'home-gallery' ? document.getElementById('nav-gallery') :
       target === 'home-faq' ? document.getElementById('nav-faq') : navHome;
     if (activeHomeNav) activeHomeNav.classList.add('active');
     document.title = 'nyairo · 以虚拟世界为核心的 AI 个体框架';
@@ -1701,7 +2541,7 @@ function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
     }
   }
 
-  renderTOC(tocItems);
+  renderTOC(tocItems, anchor);
   bindDocCopyButtons();
   bindDocHeadingAnchors();
 
@@ -1741,55 +2581,104 @@ function renderPager(currentId) {
   return prevHtml + nextHtml;
 }
 
-function renderTOC(tocList) {
+function renderTOC(tocList, initialAnchor = null) {
   if (activeTocCleanup) {
     activeTocCleanup();
     activeTocCleanup = null;
   }
 
   const tocListEl = document.getElementById('toc-list');
+  const asideEl = tocListEl && tocListEl.closest('.docs-aside');
   if (!tocListEl) return;
 
   if (!tocList || tocList.length === 0) {
-    tocListEl.innerHTML = '<li style="padding: 4px 12px; color: var(--muted); font-size: 0.78rem;">本页无子章节</li>';
+    tocListEl.classList.remove('has-rail');
+    tocListEl.innerHTML = '';
+    if (asideEl) asideEl.classList.add('is-empty');
     return;
   }
+  if (asideEl) asideEl.classList.remove('is-empty');
 
-  tocListEl.innerHTML = tocList.map((item, i) => `
+  const initActiveId = (initialAnchor && tocList.some(it => it.id === initialAnchor))
+    ? initialAnchor
+    : tocList[0].id;
+
+  tocListEl.innerHTML = `<li class="toc-active-rail" id="toc-active-rail" aria-hidden="true"></li>` + tocList.map(item => `
     <li class="toc-item">
-      <a href="#${escapeHtml(item.id)}" class="toc-link${i === 0 ? ' active' : ''}" data-anchor="${escapeHtml(item.id)}">${escapeHtml(item.text)}</a>
+      <a href="#${escapeHtml(item.id)}" class="toc-link${item.id === initActiveId ? ' active' : ''}" data-anchor="${escapeHtml(item.id)}">${escapeHtml(item.text)}</a>
     </li>
   `).join('');
 
+  const railEl = document.getElementById('toc-active-rail');
   const links = Array.from(tocListEl.querySelectorAll('.toc-link'));
+  const syncTocRail = () => {
+    if (!railEl) return;
+    const act = tocListEl.querySelector('.toc-link.active');
+    if (!act || act.offsetHeight === 0) return;
+    tocListEl.classList.add('has-rail');
+    const padY = 4;
+    railEl.style.height = `${Math.max(12, act.offsetHeight - padY * 2)}px`;
+    railEl.style.transform = `translate3d(0, ${act.offsetTop + padY}px, 0)`;
+  };
+  requestAnimationFrame(syncTocRail);
+
+  let clickLockId = initialAnchor && tocList.some(it => it.id === initialAnchor) ? initialAnchor : null;
+  let clickLockUntil = clickLockId ? Date.now() + 750 : 0;
+
   links.forEach(link => {
     link.addEventListener('click', e => {
       e.preventDefault();
       const id = link.getAttribute('data-anchor');
       const el = document.getElementById(id);
       if (el) {
+        clickLockId = id;
+        clickLockUntil = Date.now() + 750;
         el.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
         history.replaceState(null, '', `#${id}`);
         links.forEach(l => l.classList.toggle('active', l === link));
+        syncTocRail();
       }
     });
   });
 
   const onScroll = () => {
+    if (clickLockId && Date.now() < clickLockUntil) {
+      return;
+    }
+    clickLockId = null;
+
     let activeId = tocList[0].id;
-    for (const item of tocList) {
-      const h = document.getElementById(item.id);
-      if (h && h.getBoundingClientRect().top <= 110) {
-        activeId = item.id;
+    const atBottom = (window.innerHeight + Math.ceil(window.scrollY)) >= (document.documentElement.scrollHeight - 20);
+    if (atBottom) {
+      activeId = tocList[tocList.length - 1].id;
+    } else {
+      for (const item of tocList) {
+        const h = document.getElementById(item.id);
+        if (h && h.getBoundingClientRect().top <= 118) {
+          activeId = item.id;
+        }
       }
     }
     links.forEach(l => l.classList.toggle('active', l.getAttribute('data-anchor') === activeId));
+    syncTocRail();
   };
   window.addEventListener('scroll', onScroll, { passive: true });
-  activeTocCleanup = () => window.removeEventListener('scroll', onScroll);
+  window.addEventListener('resize', syncTocRail, { passive: true });
+  activeTocCleanup = () => {
+    window.removeEventListener('scroll', onScroll);
+    window.removeEventListener('resize', syncTocRail);
+  };
 }
 
 function bindDocCopyButtons() {
+  document.querySelectorAll('.code-block').forEach(block => {
+    const langEl = block.querySelector('.code-header > span:first-child');
+    const lang = (langEl?.textContent || '').trim().toLowerCase();
+    if (lang === 'text' || lang === 'markdown' || lang === 'prompt') {
+      block.classList.add('is-prose-code');
+    }
+  });
+
   document.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const block = btn.closest('.code-block');
@@ -2000,7 +2889,10 @@ function initCommandPalette() {
       title: '复制 Linux / WSL 一键安装命令',
       summary: 'curl -fsSL https://nyairo.com/install.sh | bash',
       badge: '复制',
-      run: () => writeClipboardText('curl -fsSL https://nyairo.com/install.sh | bash')
+      run: async () => {
+        const ok = await writeClipboardText('curl -fsSL https://nyairo.com/install.sh | bash');
+        showToast(ok ? '已复制 Linux / WSL 一键安装命令' : '复制受限，请前往下载区手动复制');
+      }
     },
     {
       group: '快捷操作',
@@ -2013,9 +2905,34 @@ function initCommandPalette() {
       }
     },
     {
+      group: '快捷操作',
+      title: '前往 30 秒免安装试玩小橱窗',
+      summary: '在网页端体验开窗听雨晕字、热茶放凉、买关东煮倒计时与日常自主拒绝',
+      badge: '试玩',
+      href: '#home-tryout'
+    },
+    {
+      group: '快捷操作',
+      title: 'Switch to English Landing Page (/en/)',
+      summary: '打开英文版静态首页，深浅主题自动同步',
+      badge: 'EN',
+      run: () => {
+        location.href = 'en/';
+      }
+    },
+    {
+      group: '快捷操作',
+      title: '日本語ランディングページへ切り替え (/ja/)',
+      summary: '打开日文版静态首页，深浅主题自动同步',
+      badge: 'JA',
+      run: () => {
+        location.href = 'ja/';
+      }
+    },
+    {
       group: '常用文档',
-      title: '在 Windows 上安装（桌面客户端 + WSL2）',
-      summary: '图形化安装向导与环境准备说明',
+      title: '在 Windows 上安装（SmartScreen 放行与模型密钥图解）',
+      summary: '图形化安装向导、蓝框放行示意与零基础 DeepSeek / Ollama 配置教程',
       badge: '文档',
       href: '#windows'
     },
@@ -2028,17 +2945,17 @@ function initCommandPalette() {
     },
     {
       group: '常用文档',
-      title: '地图编辑器与世界包',
-      summary: '离线修改房间与街道、切换内置示例世界及当前模板生成边界',
+      title: '地图编辑器、7 套小镇与全随机专属世界',
+      summary: '免选模板一键生成专属小镇、离线修改房间与街道及导出分享说明',
       badge: '世界',
       href: '#world-editor'
     },
     {
       group: '常用文档',
       title: 'v0.7.0 版本动态与更新说明',
-      summary: '查看日常相处回执、未来问题、双人共读及当前公开测试版边界说明',
+      summary: '查看全随机专属世界、街区点单、拒绝边界、无损旅行箱及公开测试边界说明',
       badge: 'NEW',
-      href: '#changelog-v0-6-0'
+      href: '#changelog-v0-7-0'
     },
     {
       group: '常用文档',
@@ -2049,18 +2966,23 @@ function initCommandPalette() {
     },
     {
       group: '常用文档',
-      title: '未来规划：随机生成专属世界与无损搬家',
-      summary: '查看千人千面随机虚拟世界（规划中，尚未实现）及跨设备迁移方向',
+      title: '未来规划：四季节气演化与多桌面平台',
+      summary: '查看跨季节街坊风物演化、macOS 原生桌面端及底层模型解耦规划',
       badge: '规划',
       href: '#roadmap'
     }
   ];
+
+  const closeBtn = document.getElementById('search-close');
+  let lastSearchTrigger = null;
 
   function openModal() {
     if (closeTimer) {
       clearTimeout(closeTimer);
       closeTimer = null;
     }
+    lastSearchTrigger = document.activeElement;
+    document.body.style.overflow = 'hidden';
     backdrop.classList.remove('is-closing');
     backdrop.classList.add('show');
     input.value = '';
@@ -2068,16 +2990,26 @@ function initCommandPalette() {
     setTimeout(() => input.focus(), 30);
   }
 
-  function closeModal() {
+  function closeModal(restoreFocus = true) {
     if (!backdrop.classList.contains('show')) return;
+    const finish = () => {
+      if (!document.getElementById('stage-lightbox')?.classList.contains('show')) {
+        document.body.style.overflow = '';
+      }
+      if (restoreFocus && lastSearchTrigger && typeof lastSearchTrigger.focus === 'function') {
+        lastSearchTrigger.focus();
+      }
+    };
     if (isReducedMotion()) {
       backdrop.classList.remove('show', 'is-closing');
+      finish();
       return;
     }
     backdrop.classList.add('is-closing');
     closeTimer = setTimeout(() => {
       backdrop.classList.remove('show', 'is-closing');
       closeTimer = null;
+      finish();
     }, 150);
   }
 
@@ -2093,9 +3025,13 @@ function initCommandPalette() {
   function executeItem(idx) {
     const item = currentActions[idx];
     if (!item) return;
-    closeModal();
+    closeModal(!item.href);
     if (item.href) {
-      location.hash = item.href;
+      if (location.hash === item.href) {
+        routeHash();
+      } else {
+        location.hash = item.href;
+      }
     } else if (typeof item.run === 'function') {
       item.run();
     }
@@ -2198,8 +3134,9 @@ function initCommandPalette() {
   }
 
   trigger.addEventListener('click', openModal);
+  if (closeBtn) closeBtn.addEventListener('click', () => closeModal(true));
   backdrop.addEventListener('click', e => {
-    if (e.target === backdrop) closeModal();
+    if (e.target === backdrop) closeModal(true);
   });
 
   input.addEventListener('input', e => renderList(e.target.value));
@@ -2210,7 +3147,7 @@ function initCommandPalette() {
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      backdrop.classList.contains('show') && !backdrop.classList.contains('is-closing') ? closeModal() : openModal();
+      backdrop.classList.contains('show') && !backdrop.classList.contains('is-closing') ? closeModal(true) : openModal();
       return;
     }
     if (
@@ -2227,7 +3164,10 @@ function initCommandPalette() {
 
     if (e.key === 'Escape') {
       e.preventDefault();
-      closeModal();
+      closeModal(true);
+    } else if (e.key === 'Tab') {
+      const box = backdrop.querySelector('.search-modal-box');
+      if (box) trapFocusInDialog(e, box);
     } else if (e.key === 'ArrowDown' && currentActions.length) {
       e.preventDefault();
       focusIdx = (focusIdx + 1) % currentActions.length;
@@ -2387,4 +3327,41 @@ async function copyElementText(el) {
     }
   }
   return ok;
+}
+
+function trapFocusInDialog(e, container) {
+  const focusable = Array.from(
+    container.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter(el => !el.hidden && el.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+let activeToastTimer = null;
+function showToast(message) {
+  let toast = document.getElementById('nyairo-site-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'nyairo-site-toast';
+    toast.className = 'site-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('is-visible');
+  if (activeToastTimer) clearTimeout(activeToastTimer);
+  activeToastTimer = setTimeout(() => {
+    toast.classList.remove('is-visible');
+  }, 2200);
 }

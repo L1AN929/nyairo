@@ -1,0 +1,4282 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark" translate="no" class="notranslate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>nyairo · AI にひとつの世界を。自分の日常を生きるオープンソース AI 個体フレームワーク</title>
+  <meta name="description" content="ウィンドウを閉じても、向こうの時間は止まりません。歩き回れる街と部屋、手元の PC に残るローカル SQLite 長期記憶、温度・湿度の物性エンジン、BYOK / Ollama 対応を備えたオープンソース（Apache-2.0）の AI 個体フレームワーク。">
+  <meta name="keywords" content="nyairo, AI個体フレームワーク, AIパートナー, ローカルSQLite記憶, BYOK, Ollama, 空間連続性, オープンソースAI, Windowsデスクトップ, WSL2">
+  <meta name="author" content="nyairo contributors">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <link rel="canonical" href="https://nyairo.com/ja/">
+  <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/">
+  <link rel="alternate" hreflang="zh-CN" href="https://nyairo.com/">
+  <link rel="alternate" hreflang="en" href="https://nyairo.com/en/">
+  <link rel="alternate" hreflang="x-default" href="https://nyairo.com/">
+  <meta name="google" content="notranslate">
+  <meta name="theme-color" id="meta-theme-color" content="#0b0b0c">
+
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-theme', saved);
+          var metaTheme = document.getElementById('meta-theme-color');
+          if (metaTheme) metaTheme.setAttribute('content', saved === 'light' ? '#fafafa' : '#0b0b0c');
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../style.css?v=20261118-v070-41">
+  <link rel="icon" href="../assets/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../assets/favicon-16.png">
+  <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="nyairo">
+  <meta property="og:title" content="nyairo · AI にひとつの世界を。自分の日常を生きるために。">
+  <meta property="og:description" content="歩き回れる街と部屋、手元の PC に残るローカル SQLite 記憶、昼夜のリズムを備えたオープンソースの AI 個体フレームワーク。">
+  <meta property="og:url" content="https://nyairo.com/ja/">
+  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="nyairo · AI にひとつの世界を。自分の日常を生きるために。">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:locale:alternate" content="zh_CN">
+  <meta property="og:locale:alternate" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="nyairo · AI にひとつの世界を。自分の日常を生きるために。">
+  <meta name="twitter:description" content="ローカル SQLite 記憶、歩き回れる街と部屋、BYOK / Ollama 対応、約 5.6 MB の Windows デスクトップアプリを備えたオープンソース AI 個体フレームワーク。">
+  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta name="twitter:image:alt" content="nyairo · AI にひとつの世界を。自分の日常を生きるために。">
+
+  <!-- Schema.org JSON-LD -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://nyairo.com/ja/#website",
+        "url": "https://nyairo.com/ja/",
+        "name": "nyairo",
+        "description": "世界と日常を備えたオープンソース AI 個体フレームワーク",
+        "inLanguage": "ja"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://nyairo.com/ja/#software",
+        "name": "nyairo",
+        "softwareVersion": "0.7.0",
+        "url": "https://nyairo.com/ja/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Windows 10/11 (WSL 2), Linux",
+        "description": "持続する街と部屋、手元の SQLite 長期記憶、決定論的な空間・物性エンジン、マルチチャネルの日常対話を備えたオープンソース AI 個体フレームワーク。",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "downloadUrl": "https://nyairo.com/downloads/nyairo-0.7.0-setup.exe",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "JPY"
+        },
+        "author": {
+          "@type": "Organization",
+          "name": "nyairo contributors",
+          "url": "https://github.com/L1AN929/nyairo"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://nyairo.com/ja/#ja-faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "高性能な GPU（グラフィックボード）がなくても快適に動きますか？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "はい、不要です。DeepSeek・OpenAI・Claude・Qwen などのクラウド API を利用する場合、推論処理はクラウド側で行われ、手元の PC では約 5.6 MB の軽量デスクトップアプリとローカル SQLite 記憶帳簿のみが動作します。一般的なノート PC（内蔵グラフィックス）でも静かに常駐できます。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "利用料金や月額サブスクリプション、アカウント登録は必要ですか？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "nyairo 本体は Apache-2.0 ライセンスの完全無料オープンソースであり、専用アカウントや月額課金、トークン中抜き手数料は一切ありません。ご自身の API キー（DeepSeek なら数百円のチャージで長期間利用可能）を設定するか、無料のローカル Ollama を接続するだけで利用できます。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "会話内容や SOUL.md、長期記憶が外部サーバーへ送信されることはありますか？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "nyairo 運営側のクラウドサーバーは存在しません。SOUL.md の人物設定、会話履歴、二層メモリーランタン、共読しおりはすべて手元の PC 内の ~/.nyairo にのみ保存されます。ローカル Ollama を使えば通信を 100% オフラインに保つことも可能です。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "一般的な AI チャットアプリやロールプレイ画面と何が違うのですか？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "単なるテキスト枠の即席演技ではなく、道路グラフ・部屋の家具配置・温度や湿度の物性がローカルエンジンで実際に動いています。古書店まで歩くには実時間で数分かかり、移動中の急がない連絡はスマホの返信トレイに保留され、机の温かいお茶は時間とともに自然に冷め、無理な代筆依頼は定型謝罪なしで対等に断ります。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "全員が同じ街に住むのですか？自分の街を作ったり編集したりできますか？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "7つの内蔵ワールド（海辺の凪浦、温泉街の湯川、水車の里の穂村、街角の栞沢など）をワンクリックで切り替えられるほか、テンプレート不要の完全ランダム専用ワールド生成や、壁・扉・家具・営業時間を自由に描けるオフライン視覚マップエディタを備えています。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "アプリを更新・アンインストールすると、これまでの記憶は消えてしまいますか？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "消えません。読み取り専用のアプリ本体と個人の記憶データ（~/.nyairo）は厳格に分離されています。Windows クライアントを削除しても WSL 2 側の記憶データベースはそのまま残り、CLI のロールバック更新や API キーを自動除外した .nyairo-suitcase.zip での丸ごと引越しにも対応しています。"
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <noscript>
+    <style>
+      [data-reveal], .reveal-cascade-item {
+        opacity: 1 !important;
+        transform: none !important;
+      }
+    </style>
+  </noscript>
+
+  <style>
+    /* ==========================================================================
+       Magpie Editorial Monochrome Override & Self-Contained Japanese Layout
+       - Pure monochrome palette, 1px hairlines, zero glow blobs, zero emojis
+       - Transform: none at rest for razor-sharp CJK subpixel rendering
+       ========================================================================== */
+    :root,
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0b0b0c;
+      --bg-elev: #121214;
+      --header-bg: rgba(11, 11, 12, 0.86);
+      --card: #161618;
+      --card-2: #1c1c1f;
+      --card-hover: #202024;
+      --code-bg: #111113;
+      --inp: #111113;
+      --glass: #161618;
+
+      --line: #26262a;
+      --line-2: #34343a;
+
+      --fg: #f2f2f3;
+      --fg-2: #b3b3ba;
+      --muted: #7a7a82;
+
+      --btn: #f2f2f3;
+      --btn-ink: #0b0b0c;
+
+      --seg-bg: #121214;
+      --seg-thumb: #242429;
+      --seg-thumb-border: #34343a;
+
+      /* Restrained Monochrome Accents (zero neon / zero glow) */
+      --accent: #f2f2f3;
+      --accent-btn: #f2f2f3;
+      --accent-btn-hover: #dcdce0;
+      --accent-fg: #0b0b0c;
+      --accent-soft: rgba(242, 242, 243, 0.08);
+      --accent-line: #3e3e46;
+      --accent-glow: transparent;
+
+      --green: #d4d4d8;
+      --green-soft: rgba(242, 242, 243, 0.07);
+      --green-line: #3a3a42;
+      --warm: #d8d8de;
+      --warm-soft: rgba(242, 242, 243, 0.07);
+      --warm-line: #3a3a42;
+
+      --header-h: 60px;
+      --container-w: 1080px;
+      --shadow-sm: none;
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.42);
+      --shadow-stage: 0 16px 40px rgba(0, 0, 0, 0.48);
+
+      --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "BIZ UDPGothic", "Yu Gothic", Meiryo, sans-serif;
+      --font-mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", "Cascadia Mono", Consolas, Menlo, monospace;
+    }
+
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #fafafa;
+      --bg-elev: #f1f1f2;
+      --header-bg: rgba(250, 250, 250, 0.88);
+      --card: #ffffff;
+      --card-2: #f4f4f5;
+      --card-hover: #f4f4f5;
+      --code-bg: #f4f4f5;
+      --inp: #f4f4f5;
+      --glass: #ffffff;
+
+      --line: #e4e4e7;
+      --line-2: #d4d4d8;
+
+      --fg: #111112;
+      --fg-2: #4a4a50;
+      --muted: #85858c;
+
+      --btn: #111112;
+      --btn-ink: #fafafa;
+
+      --seg-bg: #f1f1f2;
+      --seg-thumb: #ffffff;
+      --seg-thumb-border: #d4d4d8;
+
+      --accent: #111112;
+      --accent-btn: #111112;
+      --accent-btn-hover: #27272a;
+      --accent-fg: #fafafa;
+      --accent-soft: rgba(17, 17, 18, 0.05);
+      --accent-line: #bcbcc4;
+      --accent-glow: transparent;
+
+      --green: #27272a;
+      --green-soft: rgba(17, 17, 18, 0.05);
+      --green-line: #c8c8d0;
+      --warm: #27272a;
+      --warm-soft: rgba(17, 17, 18, 0.05);
+      --warm-line: #c8c8d0;
+
+      --shadow-sm: none;
+      --shadow-md: 0 8px 24px rgba(17, 17, 18, 0.07);
+      --shadow-stage: 0 14px 36px rgba(17, 17, 18, 0.07);
+    }
+
+    html {
+      background-color: var(--bg);
+      scroll-padding-top: 76px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "BIZ UDPGothic", "Yu Gothic", Meiryo, sans-serif;
+      background-color: var(--bg);
+      color: var(--fg);
+      line-height: 1.7;
+      letter-spacing: 0.005em;
+      background-image: none !important;
+    }
+
+    h1, h2, h3 {
+      letter-spacing: 0;
+      font-feature-settings: normal;
+      line-break: strict;
+      transform: none;
+    }
+
+    /* Neutralize any decorative spotlights or glow pseudo-elements */
+    .spotlight-surface::before,
+    .spotlight-surface::after,
+    .app-stage-halo::before,
+    .app-stage-halo::after {
+      display: none !important;
+      content: none !important;
+    }
+
+    .home-container {
+      max-width: 1080px !important;
+      margin: 0 auto !important;
+      padding: 0 24px !important;
+    }
+
+    /* ==========================================================================
+       Magpie 60px Sticky Header & Globe Language Popover
+       ========================================================================== */
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 120;
+      height: 60px !important;
+      background: var(--header-bg) !important;
+      backdrop-filter: saturate(160%) blur(16px);
+      -webkit-backdrop-filter: saturate(160%) blur(16px);
+      border-bottom: 1px solid var(--line) !important;
+    }
+
+    .site-header .header-container {
+      max-width: 1080px !important;
+      height: 60px !important;
+      margin: 0 auto;
+      padding: 0 24px !important;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      min-width: 0;
+    }
+
+    .site-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      text-decoration: none !important;
+      color: var(--fg);
+      flex-shrink: 0;
+    }
+
+    .brand-logo img {
+      width: 22px;
+      height: 21px;
+      filter: grayscale(100%) contrast(1.08);
+    }
+
+    .brand-text {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 7px;
+    }
+
+    .brand-name {
+      font-size: 1.02rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--fg);
+    }
+
+    .brand-tag {
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: var(--muted);
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--bg-elev);
+    }
+
+    .ja-header-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .ja-nav-link {
+      display: inline-flex;
+      align-items: center;
+      height: 32px;
+      padding: 0 10px;
+      border-radius: 7px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--fg-2);
+      text-decoration: none !important;
+      white-space: nowrap;
+      transition: color 0.15s ease, background-color 0.15s ease;
+    }
+
+    .ja-nav-link:hover,
+    .ja-nav-link.active {
+      color: var(--fg);
+      background: var(--bg-elev);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .site-header .icon-btn,
+    .mobile-toggle {
+      width: 34px !important;
+      height: 34px !important;
+      padding: 0;
+      border-radius: 8px !important;
+      border: 1px solid var(--line) !important;
+      background: transparent !important;
+      color: var(--fg-2) !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      text-decoration: none !important;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .site-header .icon-btn:hover,
+    .mobile-toggle:hover {
+      background: var(--card) !important;
+      border-color: var(--line-2) !important;
+      color: var(--fg) !important;
+    }
+
+    .site-header .icon-btn:focus-visible,
+    .mobile-toggle:focus-visible,
+    .header-dl-btn:focus-visible {
+      outline: 2px solid var(--fg);
+      outline-offset: 2px;
+    }
+
+    .mobile-toggle {
+      display: none;
+    }
+
+    /* Globe Language Dropdown */
+    .lang-dropdown {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .lang-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      min-width: 148px;
+      padding: 5px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      box-shadow: var(--shadow-md);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      z-index: 240;
+    }
+
+    .lang-menu[hidden] {
+      display: none !important;
+    }
+
+    .lang-menu a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--fg-2);
+      text-decoration: none !important;
+      transition: background-color 0.14s ease, color 0.14s ease;
+    }
+
+    .lang-menu a:hover {
+      background: var(--card-2);
+      color: var(--fg);
+    }
+
+    .lang-menu a.is-current {
+      color: var(--fg);
+      font-weight: 600;
+      background: var(--bg-elev);
+    }
+
+    .lang-menu a::after,
+    .lang-menu a.is-current::after {
+      content: none !important;
+    }
+
+    .lang-check-svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      flex-shrink: 0;
+    }
+
+    .header-dl-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 14px;
+      margin-left: 2px;
+      border-radius: 8px;
+      background: var(--btn);
+      color: var(--btn-ink) !important;
+      font-weight: 560;
+      font-size: 13.5px;
+      text-decoration: none !important;
+      white-space: nowrap;
+      border: 1px solid transparent;
+      transition: opacity 0.15s ease;
+    }
+
+    .header-dl-btn:hover {
+      opacity: 0.88;
+      text-decoration: none !important;
+    }
+
+    /* Mobile Drawer */
+    .ja-mobile-backdrop {
+      display: none;
+      position: fixed;
+      inset: 60px 0 0 0;
+      z-index: 190;
+      background: rgba(0, 0, 0, 0.48);
+    }
+    html[data-theme="light"] .ja-mobile-backdrop {
+      background: rgba(17, 17, 18, 0.18);
+    }
+    .ja-mobile-backdrop.is-open {
+      display: block;
+    }
+
+    .ja-mobile-drawer {
+      display: none;
+      position: fixed;
+      top: 60px;
+      left: 0;
+      right: 0;
+      z-index: 200;
+      background: var(--card);
+      border-bottom: 1px solid var(--line-2);
+      padding: 12px 20px 18px;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .ja-mobile-drawer.is-open {
+      display: flex;
+    }
+    .ja-mobile-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: var(--fg-2);
+      font-size: 14px;
+      font-weight: 540;
+      text-decoration: none !important;
+    }
+    .ja-mobile-link:hover,
+    .ja-mobile-link.active {
+      background: var(--card-2);
+      color: var(--fg);
+    }
+    .ja-mobile-langs {
+      margin-top: 8px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .ja-mobile-lang-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 30px;
+      padding: 0 11px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--bg-elev);
+      color: var(--fg-2);
+      font-size: 12.5px;
+      font-weight: 540;
+      text-decoration: none !important;
+    }
+    .ja-mobile-lang-pill.is-current {
+      border-color: var(--fg);
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    /* ==========================================================================
+       Magpie Left-Aligned Editorial Hero & Section Rhythm
+       ========================================================================== */
+    .ja-hero {
+      padding: 72px 0 40px;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 20px;
+    }
+
+    .ja-hero-title {
+      margin: 0;
+      font-size: clamp(36px, 5vw, 54px);
+      line-height: 1.14;
+      font-weight: 700;
+      letter-spacing: 0;
+      font-feature-settings: normal;
+      line-break: strict;
+      color: var(--fg);
+      transform: none;
+    }
+
+    .ja-hero-title .ink-muted {
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .ja-hero-subtitle {
+      margin: 0;
+      max-width: 34em;
+      font-size: 1.02rem;
+      line-height: 1.75;
+      color: var(--fg-2);
+    }
+
+    .hero-chips {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hero-chip {
+      display: inline-flex;
+      align-items: center;
+      height: 28px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--bg-elev);
+      color: var(--fg-2);
+      font-size: 0.78rem;
+      font-weight: 520;
+      white-space: nowrap;
+    }
+
+    .hero-cta-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .magpie-btn-primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 44px;
+      padding: 0 20px;
+      border-radius: 10px;
+      border: 1px solid var(--btn);
+      background: var(--btn);
+      color: var(--btn-ink) !important;
+      font-size: 0.92rem;
+      font-weight: 600;
+      text-decoration: none !important;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: opacity 0.16s ease;
+    }
+
+    .magpie-btn-primary:hover {
+      opacity: 0.88;
+      text-decoration: none !important;
+    }
+
+    .magpie-btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      height: 44px;
+      padding: 0 17px;
+      border-radius: 10px;
+      border: 1px solid var(--line-2);
+      background: var(--card);
+      color: var(--fg) !important;
+      font-size: 0.9rem;
+      font-weight: 540;
+      text-decoration: none !important;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background-color 0.16s ease, border-color 0.16s ease;
+    }
+
+    .magpie-btn-ghost:hover {
+      background: var(--card-2);
+      border-color: var(--fg-2);
+      text-decoration: none !important;
+    }
+
+    .hero-meta-line {
+      margin: 2px 0 0;
+      font-size: 0.79rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* Monochrome Desktop Stage Overrides */
+    .stage-window-dots span {
+      background: var(--line-2) !important;
+    }
+    .app-stage {
+      border-radius: 16px !important;
+      border: 1px solid var(--line) !important;
+      background: var(--card) !important;
+    }
+    .stage-auto-bar {
+      background: var(--fg) !important;
+      opacity: 0.5 !important;
+    }
+
+    /* Calm Editorial Section Rhythm */
+    .section-block {
+      margin-top: 112px !important;
+    }
+    .section-block.section-preview-lead {
+      margin-top: 8px !important;
+    }
+    .section-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 28px;
+      text-align: left;
+      flex-wrap: wrap;
+    }
+    .section-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.75rem !important;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted) !important;
+      margin-bottom: 8px;
+    }
+    .section-title {
+      margin: 0;
+      font-size: clamp(1.48rem, 2.6vw, 2rem) !important;
+      line-height: 1.28;
+      font-weight: 700;
+      letter-spacing: 0 !important;
+      font-feature-settings: normal !important;
+      line-break: strict;
+      color: var(--fg);
+    }
+    .section-desc {
+      margin: 8px 0 0;
+      max-width: 36em !important;
+      font-size: 0.94rem;
+      line-height: 1.72;
+      color: var(--fg-2);
+    }
+
+    .zh-doc-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0 5px;
+      margin-left: 4px;
+      border-radius: 4px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    /* ==========================================================================
+       Section: 30-Second Zero-Install Interactive Sandbox (#ja-tryout)
+       ========================================================================== */
+    .sandbox-shell {
+      border-radius: 16px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .sandbox-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px;
+      background: var(--bg-elev);
+      border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+    .sandbox-telemetry {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .sb-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 550;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--fg-2);
+      white-space: nowrap;
+    }
+    .sb-pill.is-active-pill {
+      border-color: var(--fg-2);
+      color: var(--fg);
+      background: var(--card-2);
+    }
+    .sb-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+    .sb-reset-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 11px;
+      border-radius: 7px;
+      border: 1px solid var(--line-2);
+      background: var(--card);
+      color: var(--fg-2);
+      font-size: 0.76rem;
+      font-weight: 540;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .sb-reset-btn:hover {
+      background: var(--card-2);
+      color: var(--fg);
+      border-color: var(--fg-2);
+    }
+    .sandbox-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    }
+    .sandbox-left {
+      padding: 20px;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+    }
+    .sandbox-right {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+    }
+    .sandbox-canvas-box {
+      border-radius: 12px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .sandbox-svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .sb-svg-wall { stroke: var(--line-2); fill: var(--card); }
+    .sb-svg-desk { stroke: var(--line-2); fill: var(--card-2); }
+    .sb-svg-label {
+      font-family: var(--font-sans);
+      font-size: 10.5px;
+      font-weight: 560;
+      fill: var(--fg-2);
+    }
+    .sb-svg-title {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      fill: var(--muted);
+    }
+    .sb-window-sash { transition: transform 0.36s ease, stroke 0.24s ease; }
+    .sandbox-shell.is-window-open .sb-window-sash {
+      transform: translateX(34px);
+      stroke: var(--fg);
+    }
+    .sb-rain-group { opacity: 0.22; transition: opacity 0.3s ease; }
+    .sandbox-shell.is-window-open .sb-rain-group { opacity: 0.88; }
+    .sb-moisture-breeze { opacity: 0; transition: opacity 0.34s ease; }
+    .sandbox-shell.is-window-open .sb-moisture-breeze { opacity: 0.85; }
+    .sb-note-sheet { fill: var(--card); stroke: var(--line-2); transition: fill 0.3s ease, stroke 0.3s ease; }
+    .sb-note-ink { stroke: var(--fg-2); transition: stroke-width 0.3s ease, opacity 0.3s ease; }
+    .sandbox-shell.is-note-damp .sb-note-sheet { fill: var(--bg-elev); stroke: var(--fg-2); }
+    .sandbox-shell.is-note-damp .sb-note-ink { stroke-width: 2.2; opacity: 0.55; }
+    .sb-tea-group { opacity: 0; transition: opacity 0.26s ease; }
+    .sandbox-shell.has-tea .sb-tea-group { opacity: 1; }
+    .sb-tea-liquid { fill: var(--fg); transition: fill 0.36s ease, opacity 0.36s ease; }
+    .sandbox-shell.is-tea-cool .sb-tea-liquid { fill: var(--muted); opacity: 0.45; }
+    .sb-steam-lines { opacity: 0; transition: opacity 0.36s ease; }
+    .sandbox-shell.has-tea:not(.is-tea-cool) .sb-steam-lines { opacity: 0.85; }
+    .sb-road-line { stroke: var(--line-2); transition: stroke 0.28s ease; }
+    .sandbox-shell.is-walking .sb-road-line,
+    .sandbox-shell.at-mart .sb-road-line { stroke: var(--fg-2); }
+    .sb-avatar-group { transition: transform 0.52s cubic-bezier(0.16, 1, 0.3, 1); }
+
+    .sb-matter-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .sb-matter-cell {
+      padding: 10px 12px;
+      background: var(--card);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+    .sb-matter-kicker {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .sb-matter-val {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--fg);
+      line-height: 1.38;
+    }
+
+    .sb-actions-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .sb-action-row {
+      display: flex;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .sb-action-btn {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 11px;
+      padding: 11px 13px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--bg-elev);
+      color: var(--fg);
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.16s ease, background-color 0.16s ease;
+    }
+    .sb-action-btn:hover {
+      background: var(--card-2);
+      border-color: var(--line-2);
+    }
+    .sb-action-btn.is-active {
+      border-color: var(--fg);
+      background: var(--card-2);
+    }
+    .sb-action-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      color: var(--fg);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .sb-action-copy {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .sb-action-title {
+      font-size: 0.84rem;
+      font-weight: 620;
+      color: var(--fg);
+      line-height: 1.4;
+    }
+    .sb-action-sub {
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .sb-sub-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line-2);
+      background: var(--card);
+      color: var(--fg);
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+    .sb-sub-btn:hover {
+      background: var(--card-2);
+      border-color: var(--fg);
+    }
+    .sb-log-box {
+      padding: 13px 15px;
+      border-radius: 10px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sb-log-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-family: var(--font-mono);
+      font-size: 0.71rem;
+      color: var(--muted);
+    }
+    .sb-log-engine { color: var(--fg); font-weight: 600; }
+    .sb-tray-banner {
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--line-2);
+      color: var(--fg-2);
+      font-size: 0.76rem;
+      line-height: 1.5;
+    }
+    .sb-companion-quote {
+      margin: 0;
+      font-size: 0.87rem;
+      line-height: 1.68;
+      color: var(--fg);
+    }
+    .sb-log-foot {
+      font-size: 0.74rem;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      padding-top: 7px;
+    }
+
+    /* ==========================================================================
+       Section: Magpie 3-Column Architecture Hub (#ja-how)
+       ========================================================================== */
+    .hub-flow-shell {
+      display: grid;
+      grid-template-columns: 1fr 44px 1.15fr 44px 1fr;
+      align-items: stretch;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      overflow: hidden;
+    }
+    .hub-col {
+      padding: 26px 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 16px;
+      min-width: 0;
+    }
+    .hub-col.is-core {
+      background: var(--bg-elev);
+    }
+    .hub-arrow-col {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-left: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      background: var(--card);
+      color: var(--muted);
+    }
+    .hub-kicker {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .hub-title {
+      margin: 6px 0 8px;
+      font-size: 1.04rem;
+      font-weight: 680;
+      color: var(--fg);
+    }
+    .hub-desc {
+      margin: 0;
+      font-size: 0.83rem;
+      line-height: 1.65;
+      color: var(--fg-2);
+    }
+    .hub-pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .hub-pill {
+      display: inline-flex;
+      align-items: center;
+      height: 25px;
+      padding: 0 9px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      font-size: 0.74rem;
+      font-weight: 520;
+      color: var(--fg-2);
+    }
+    .hub-col.is-core .hub-pill {
+      background: var(--card-2);
+      border-color: var(--line-2);
+      color: var(--fg);
+    }
+
+    /* ==========================================================================
+       Seamless 1px Hairline Grids (8-Capability Bento, Worlds, Personas, FAQ)
+       ========================================================================== */
+    .magpie-bento-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .magpie-bento-cell {
+      background: var(--card);
+      padding: 26px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+    }
+    .bento-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid var(--line-2);
+      background: var(--bg-elev);
+      color: var(--fg);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .bento-title {
+      margin: 12px 0 6px;
+      font-size: 0.98rem;
+      font-weight: 680;
+      line-height: 1.4;
+      color: var(--fg);
+    }
+    .bento-desc {
+      margin: 0;
+      font-size: 0.82rem;
+      line-height: 1.66;
+      color: var(--fg-2);
+    }
+    .bento-meta {
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+
+    /* Worlds 5-Card Hairline Grid & Starter Personas */
+    .worlds-hairline-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+    @media (min-width: 901px) {
+      .world-hairline-card.is-procedural {
+        grid-column: span 2;
+      }
+    }
+    .world-hairline-card {
+      background: var(--card);
+      padding: 22px 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+    .world-hairline-card.is-procedural {
+      background: var(--bg-elev);
+    }
+    .world-card-kicker {
+      font-family: var(--font-mono);
+      font-size: 0.69rem;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .world-card-title {
+      margin: 5px 0 6px;
+      font-size: 0.96rem;
+      font-weight: 680;
+      color: var(--fg);
+    }
+    .world-card-desc {
+      margin: 0;
+      font-size: 0.8rem;
+      line-height: 1.62;
+      color: var(--fg-2);
+    }
+    .world-card-meta {
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+
+    .personas-hairline-wrap {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      overflow: hidden;
+    }
+    .personas-head-bar {
+      padding: 16px 24px;
+      background: var(--bg-elev);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--fg);
+    }
+    .personas-grid-2x2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+    }
+    .persona-cell {
+      background: var(--card);
+      padding: 22px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .persona-cell-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .persona-cell-top h3 {
+      margin: 0 0 3px;
+      font-size: 0.95rem;
+      font-weight: 660;
+      color: var(--fg);
+    }
+    .persona-meta {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .persona-copy-btn {
+      height: 28px;
+      padding: 0 11px;
+      border-radius: 7px;
+      border: 1px solid var(--line-2);
+      background: var(--bg-elev);
+      color: var(--fg-2);
+      font-size: 0.74rem;
+      font-weight: 560;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .persona-copy-btn:hover,
+    .persona-copy-btn.is-copied {
+      background: var(--btn);
+      color: var(--btn-ink);
+      border-color: var(--btn);
+    }
+    .persona-preview {
+      margin: 0;
+      font-size: 0.82rem;
+      line-height: 1.68;
+      color: var(--fg-2);
+    }
+    .personas-foot-bar {
+      padding: 14px 24px;
+      border-top: 1px solid var(--line);
+      background: var(--bg-elev);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      font-size: 0.82rem;
+      color: var(--fg-2);
+    }
+
+    /* Downloads, SmartScreen & Beginner BYOK Setup */
+    .downloads-hairline-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .dl-hairline-card {
+      background: var(--card);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+    }
+    .dl-hairline-card.is-primary {
+      background: var(--bg-elev);
+    }
+    .dl-cmd-bar {
+      padding: 10px 12px !important;
+      gap: 6px !important;
+    }
+    .dl-cmd-bar .cmd-code {
+      font-size: 0.7rem !important;
+      line-height: 1.5;
+      white-space: normal !important;
+      word-break: normal;
+      overflow-wrap: break-word;
+    }
+    .setup-guides-grid {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .guide-panel {
+      padding: 24px;
+      background: var(--card);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+    }
+    .guide-kicker {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .guide-title {
+      margin: 4px 0 6px;
+      font-size: 1.02rem;
+      font-weight: 680;
+      color: var(--fg);
+    }
+    .guide-desc {
+      margin: 0;
+      font-size: 0.83rem;
+      line-height: 1.65;
+      color: var(--fg-2);
+    }
+    .smartscreen-svg-wrap {
+      border-radius: 10px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      padding: 12px;
+      overflow: hidden;
+    }
+    .smartscreen-svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .byok-options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .byok-card {
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .byok-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .byok-card-title {
+      font-size: 0.84rem;
+      font-weight: 640;
+      color: var(--fg);
+    }
+    .byok-badge {
+      font-family: var(--font-mono);
+      font-size: 0.69rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--card);
+      border: 1px solid var(--line-2);
+      color: var(--fg-2);
+      font-weight: 600;
+    }
+    .byok-card-text {
+      margin: 0;
+      font-size: 0.79rem;
+      line-height: 1.6;
+      color: var(--fg-2);
+    }
+    .endpoint-copy-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--fg);
+      min-width: 0;
+    }
+    .endpoint-copy-row code {
+      overflow-x: auto;
+      white-space: nowrap;
+      scrollbar-width: none;
+    }
+    .mini-copy-btn {
+      height: 24px;
+      padding: 0 9px;
+      border-radius: 6px;
+      border: 1px solid var(--line-2);
+      background: var(--bg-elev);
+      color: var(--fg-2);
+      font-size: 0.72rem;
+      font-weight: 560;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .mini-copy-btn:hover,
+    .mini-copy-btn.is-copied {
+      background: var(--btn);
+      color: var(--btn-ink);
+      border-color: var(--btn);
+    }
+
+    /* Magpie Closing Emblem CTA & Crisp 1-Row Footer */
+    .magpie-closing {
+      margin-top: 112px;
+      padding: 64px 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .closing-cat-emblem {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      border: 1px solid var(--line-2);
+      background: var(--bg-elev);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .closing-cat-emblem img {
+      width: 26px;
+      height: 25px;
+      filter: grayscale(100%) contrast(1.08);
+    }
+    .magpie-closing h2 {
+      margin: 0;
+      font-size: clamp(1.55rem, 2.8vw, 2.15rem);
+      font-weight: 700;
+      color: var(--fg);
+    }
+    .magpie-closing p {
+      margin: 0;
+      max-width: 34em;
+      font-size: 0.94rem;
+      color: var(--fg-2);
+    }
+    .closing-actions {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .magpie-footer-1row {
+      margin-top: 48px;
+      padding: 26px 0 44px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 0.81rem;
+      color: var(--muted);
+    }
+    .magpie-footer-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .magpie-footer-links {
+      display: inline-flex;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .magpie-footer-links a {
+      color: var(--fg-2);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .magpie-footer-links a:hover {
+      color: var(--fg);
+      text-decoration: underline;
+    }
+
+    /* Responsive Breakpoints */
+    @media (max-width: 1024px) {
+      .magpie-bento-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 960px) {
+      .ja-header-nav {
+        display: none;
+      }
+      .mobile-toggle {
+        display: inline-flex;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .sandbox-grid,
+      .downloads-hairline-grid,
+      .setup-guides-grid,
+      .personas-grid-2x2 {
+        grid-template-columns: 1fr;
+      }
+      .sandbox-left {
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+      .hub-flow-shell {
+        grid-template-columns: 1fr;
+      }
+      .hub-arrow-col {
+        height: 36px;
+        border-left: none;
+        border-right: none;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .hub-arrow-col svg {
+        transform: rotate(90deg);
+      }
+      .worlds-hairline-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 640px) {
+      .ja-hero {
+        padding: 44px 0 28px;
+      }
+      .magpie-bento-grid,
+      .worlds-hairline-grid,
+      .sb-matter-strip {
+        grid-template-columns: 1fr;
+      }
+      .header-dl-btn {
+        display: none;
+      }
+      .hero-cta-row .magpie-btn-primary,
+      .hero-cta-row .magpie-btn-ghost {
+        width: 100%;
+      }
+      .sb-action-row {
+        flex-direction: column;
+      }
+      .sb-sub-btn {
+        height: 34px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a href="#main-focus" id="skip-to-main" class="skip-link">本文へスキップ</a>
+
+  <!-- ======================================================================
+       Magpie-Style 60px Sticky Header
+       ====================================================================== -->
+  <header class="site-header" id="site-header">
+    <div class="header-container">
+      <div class="header-left">
+        <button id="mobile-toggle" class="mobile-toggle" type="button" aria-label="メニューを開く" aria-controls="ja-mobile-drawer" aria-expanded="false">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <a href="#top" class="site-brand" id="brand-link">
+          <span class="brand-logo">
+            <img class="on-dark" src="../assets/nyairo-icon-light-66.webp" alt="" width="22" height="21">
+            <img class="on-light" src="../assets/nyairo-icon-66.webp" alt="" width="22" height="21">
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">nyairo</span>
+            <span class="brand-tag font-mono">v0.7.0</span>
+          </span>
+        </a>
+
+        <nav class="ja-header-nav" id="header-nav" aria-label="メインナビゲーション">
+          <a href="#ja-preview" class="ja-nav-link active" data-section="ja-preview">実機画面</a>
+          <a href="#ja-tryout" class="ja-nav-link" data-section="ja-tryout">30秒体験</a>
+          <a href="#ja-how" class="ja-nav-link" data-section="ja-how">仕組み</a>
+          <a href="#ja-capabilities" class="ja-nav-link" data-section="ja-capabilities">機能一覧</a>
+          <a href="#ja-gallery" class="ja-nav-link" data-section="ja-gallery">街と人物</a>
+          <a href="#ja-faq" class="ja-nav-link" data-section="ja-faq">FAQ</a>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <div class="lang-dropdown" id="lang-dropdown">
+          <button type="button" class="icon-btn lang-btn" id="lang-btn" aria-expanded="false" aria-haspopup="true" aria-label="言語を選択" title="言語を選択">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </button>
+          <div class="lang-menu" id="lang-menu" role="menu" hidden>
+            <a href="../" lang="zh-CN" hreflang="zh-CN" role="menuitem"><span>中文</span></a>
+            <a href="../en/" lang="en" hreflang="en" role="menuitem"><span>English</span></a>
+            <a href="./" lang="ja" aria-current="page" class="is-current" role="menuitem">
+              <span>日本語</span>
+              <svg class="lang-check-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </a>
+          </div>
+        </div>
+
+        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub リポジトリ" aria-label="GitHub リポジトリ">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+          </svg>
+        </a>
+
+        <button id="theme-toggle" class="icon-btn" type="button" title="ライト／ダーク表示を切り替え" aria-label="ライト／ダーク表示を切り替え">
+          <svg id="theme-icon" class="theme-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <g class="theme-icon-sun">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </g>
+            <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+
+        <a href="#ja-downloads" class="header-dl-btn">ダウンロード</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Mobile Navigation Drawer -->
+  <div id="ja-mobile-backdrop" class="ja-mobile-backdrop" aria-hidden="true"></div>
+  <nav id="ja-mobile-drawer" class="ja-mobile-drawer" aria-label="モバイルナビゲーション">
+    <a href="#ja-preview" class="ja-mobile-link" data-mobile-nav>実機画面</a>
+    <a href="#ja-tryout" class="ja-mobile-link" data-mobile-nav>30秒体験</a>
+    <a href="#ja-how" class="ja-mobile-link" data-mobile-nav>仕組み</a>
+    <a href="#ja-capabilities" class="ja-mobile-link" data-mobile-nav>機能一覧</a>
+    <a href="#ja-gallery" class="ja-mobile-link" data-mobile-nav>街と人物</a>
+    <a href="#ja-faq" class="ja-mobile-link" data-mobile-nav>FAQ</a>
+    <a href="#ja-downloads" class="ja-mobile-link" data-mobile-nav>ダウンロード</a>
+    <div class="ja-mobile-langs" aria-label="言語切り替え">
+      <a href="../" lang="zh-CN" class="ja-mobile-lang-pill">中文</a>
+      <a href="../en/" lang="en" class="ja-mobile-lang-pill">English</a>
+      <a href="./" lang="ja" aria-current="page" class="ja-mobile-lang-pill is-current">日本語</a>
+    </div>
+  </nav>
+
+  <!-- ======================================================================
+       Main Content
+       ====================================================================== -->
+  <main id="top" class="home-view">
+    <div class="home-container" id="main-focus" tabindex="-1">
+
+      <!-- Left-Aligned Magpie Editorial Hero -->
+      <div class="ja-hero">
+        <h1 class="ja-hero-title">
+          AI にひとつの世界を。<br><span class="ink-muted">自分の日常を生きるために。</span>
+        </h1>
+
+        <p class="ja-hero-subtitle">
+          ウィンドウを閉じても、向こうの時間は止まりません。名前や口調は自由に決められ、歩き回れる街と部屋、手元の PC に残る長期記憶、昼夜のリズムを備えたオープンソースの AI 個体フレームワークです。
+        </p>
+
+        <div class="hero-chips" aria-label="主な特徴">
+          <span class="hero-chip">7つの内蔵街＋完全ランダム生成</span>
+          <span class="hero-chip">12業種の店舗で自由注文</span>
+          <span class="hero-chip">ローカル SQLite 記憶 · 手数料ゼロ</span>
+        </div>
+
+        <div class="hero-cta-row">
+          <a href="../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe" class="magpie-btn-primary" id="win-download-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 5.5L10.5 4.4V11.3H3V5.5ZM11.5 4.25L21 2.8V11.3H11.5V4.25ZM3 12.4H10.5V19.3L3 18.2V12.4ZM11.5 12.4H21V20.9L11.5 19.5V12.4Z"/>
+            </svg>
+            <span>Windows 版をダウンロード</span>
+          </a>
+          <a href="#ja-downloads" class="magpie-btn-ghost">ターミナルで導入</a>
+          <a href="#ja-tryout" class="magpie-btn-ghost">30秒ブラウザ体験 ↓</a>
+        </div>
+
+        <p class="hero-meta-line">
+          バージョン 0.7.0 · 約 5.6 MB（管理者権限不要） · Apache-2.0 オープンソース · Windows 10/11 (WSL 2) &amp; Linux
+        </p>
+
+        <div class="win-dl-feedback" id="win-dl-feedback" hidden>
+          <span class="win-dl-dot" aria-hidden="true"></span>
+          <span>インストーラーのダウンロードを開始しました · 初回起動時に Windows SmartScreen が表示された場合は「詳細情報 → 実行」をクリックしてください（ページ下部に2ステップ図解あり）。</span>
+        </div>
+      </div>
+
+      <!-- Section 1: 2x Retina 6-Tab Desktop Stage (#ja-preview) -->
+      <section class="section-block section-preview-lead" id="ja-preview" aria-labelledby="preview-heading">
+        <h2 class="sr-only" id="preview-heading">デスクトップクライアント実機画面と街・部屋のプレビュー</h2>
+
+        <div class="app-stage-halo" id="app-stage-halo">
+          <div class="app-stage" id="app-stage">
+            <div class="app-stage-toolbar">
+              <div class="stage-window-dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <div class="seg-bar" id="stage-seg" role="tablist" aria-label="デスクトップ画面の切り替え">
+                <div class="seg-thumb" aria-hidden="true"></div>
+                <button type="button" class="seg-btn is-active" role="tab" aria-selected="true" tabindex="0" data-scene="0">実機デモ</button>
+                <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="1">ステータス</button>
+                <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="2">街と部屋</button>
+                <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="3">ストリーミング対話</button>
+                <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="4">原稿と差分</button>
+                <button type="button" class="seg-btn" role="tab" aria-selected="false" tabindex="-1" data-scene="5">マップ編集</button>
+              </div>
+              <div class="stage-toolbar-actions">
+                <span class="stage-pause-pill" id="stage-pause-pill" aria-hidden="true">一時停止中</span>
+                <button type="button" class="stage-zoom-btn notranslate" id="stage-zoom-btn" translate="no" title="2x Retina 高解像度画面を拡大表示">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <polyline points="9 21 3 21 3 15"></polyline>
+                    <line x1="21" y1="3" x2="14" y2="10"></line>
+                    <line x1="3" y1="21" x2="10" y2="14"></line>
+                  </svg>
+                  <span>拡大</span>
+                </button>
+              </div>
+              <span class="stage-auto-bar" id="stage-auto-bar" aria-hidden="true"></span>
+            </div>
+
+            <div class="stage-screen-wrap" id="stage-screen-wrap" role="button" tabindex="0" aria-label="クリックして高解像度 2x Retina 画面を拡大表示">
+              <!-- Scene 0: Silent 60fps Walkthrough Video -->
+              <div class="stage-scene is-active" data-scene-panel="0">
+                <video id="stage-video-dark" class="stage-video on-dark" autoplay muted loop playsinline preload="auto" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ：室内の姿勢変化、凪浦の道路マップ、ストリーミング対話、原稿の行単位差分"></video>
+                <video id="stage-video-light" class="stage-video on-light" muted loop playsinline preload="metadata" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ：室内の姿勢変化、凪浦の道路マップ、ストリーミング対話、原稿の行単位差分"></video>
+                <img class="stage-reduced-still on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo デスクトップ概要：現在地・姿勢・生活状態" width="2560" height="1600" loading="eager">
+                <img class="stage-reduced-still on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo デスクトップ概要：現在地・姿勢・生活状態" width="2560" height="1600" loading="eager">
+              </div>
+              <!-- Scene 1: Overview -->
+              <div class="stage-scene" data-scene-panel="1">
+                <img class="on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo ステータス画面：部屋での立ち位置、姿勢、クイック対話" width="2560" height="1600" loading="lazy">
+                <img class="on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo ステータス画面：部屋での立ち位置、姿勢、クイック対話" width="2560" height="1600" loading="lazy">
+              </div>
+              <!-- Scene 2: Town & Rooms + 4-Town Switcher -->
+              <div class="stage-scene" data-scene-panel="2">
+                <img id="stage-world-img-dark" class="on-dark" src="../assets/screenshots/desktop-world-dark.webp?v=20261118-v070-35" alt="nyairo 街と部屋マップ：海辺の町・凪浦の道路網と店舗" width="2560" height="1600" loading="lazy">
+                <img id="stage-world-img-light" class="on-light" src="../assets/screenshots/desktop-world-light.webp?v=20261118-v070-35" alt="nyairo 街と部屋マップ：海辺の町・凪浦の道路網と店舗" width="2560" height="1600" loading="lazy">
+              </div>
+              <!-- Scene 3: Streaming Talk -->
+              <div class="stage-scene" data-scene-panel="3">
+                <img class="on-dark" src="../assets/screenshots/desktop-talk-dark.webp?v=20261118-v070-35" alt="nyairo ストリーミング対話、引用返信、行動レシート表示" width="2560" height="1600" loading="lazy">
+                <img class="on-light" src="../assets/screenshots/desktop-talk-light.webp?v=20261118-v070-35" alt="nyairo ストリーミング対話、引用返信、行動レシート表示" width="2560" height="1600" loading="lazy">
+              </div>
+              <!-- Scene 4: Drafts & Diff -->
+              <div class="stage-scene" data-scene-panel="4">
+                <img class="on-dark" src="../assets/screenshots/desktop-notes-dark.webp?v=20261118-v070-35" alt="nyairo 共読本棚、共有原稿スナップショット、行単位の差分比較" width="2560" height="1600" loading="lazy">
+                <img class="on-light" src="../assets/screenshots/desktop-notes-light.webp?v=20261118-v070-35" alt="nyairo 共読本棚、共有原稿スナップショット、行単位の差分比較" width="2560" height="1600" loading="lazy">
+              </div>
+              <!-- Scene 5: World Editor -->
+              <div class="stage-scene" data-scene-panel="5">
+                <img class="on-dark stage-editor-still" src="../assets/screenshots/desktop-editor-dark.webp?v=20261118-v070-37" alt="nyairo オフライン視覚マップエディタ：壁・扉・家具の配置とワールド出力" width="2880" height="1800" loading="lazy">
+                <img class="on-light stage-editor-still" src="../assets/screenshots/desktop-editor-light.webp?v=20261118-v070-37" alt="nyairo オフライン視覚マップエディタ：壁・扉・家具の配置とワールド出力" width="2880" height="1800" loading="lazy">
+              </div>
+            </div>
+
+            <div class="stage-world-strip" id="stage-world-strip" hidden>
+              <span class="stage-world-label">内蔵街キャプチャ切替</span>
+              <div class="stage-world-bar" id="stage-world-bar" role="group" aria-label="内蔵ワールドのスクリーンショットを切り替え">
+                <span class="world-pill-thumb" id="world-pill-thumb" aria-hidden="true"></span>
+                <button type="button" class="stage-world-pill is-active" data-world="nagiura" aria-pressed="true">凪浦 · 海辺の町</button>
+                <button type="button" class="stage-world-pill" data-world="onsawa" aria-pressed="false">湯川 · 温泉街</button>
+                <button type="button" class="stage-world-pill" data-world="inobe" aria-pressed="false">穂村 · 水車の里</button>
+                <button type="button" class="stage-world-pill" data-world="wakaba" aria-pressed="false">栞沢 · 暮らしの街角</button>
+              </div>
+            </div>
+
+            <div class="stage-caption-grid" id="stage-captions">
+              <div class="stage-caption-cell">
+                <span class="caption-label" id="cap-kicker-1">01 · 途切れない空間連続性</span>
+                <span class="caption-title" id="cap-title-1">机のランプから街角まで、瞬間移動せず歩いて向かう</span>
+                <p class="caption-text" id="cap-desc-1">姿勢の切り替え、道路グラフに沿った徒歩移動、店舗の営業時間や室内の棚・照明をリアルタイムに確認できます。</p>
+              </div>
+              <div class="stage-caption-cell">
+                <span class="caption-label" id="cap-kicker-2">02 · 立ち位置に根ざした対話</span>
+                <span class="caption-title" id="cap-title-2">いま立っている場所と手元の物から自然に始まる会話</span>
+                <p class="caption-text" id="cap-desc-2">直前の散歩、机の上のマグカップ、開いたままの原稿が会話の文脈にそのまま息づき、引用返信にも対応します。</p>
+              </div>
+              <div class="stage-caption-cell">
+                <span class="caption-label" id="cap-kicker-3">03 · 共読本棚と行単位の差分</span>
+                <span class="caption-title" id="cap-title-3">同じ本にしおりを挟み、原稿の推敲履歴を並べて比較</span>
+                <p class="caption-text" id="cap-desc-3">読書メモや原稿の版管理スナップショットをローカルに蓄積。SOUL.md や日常対話は日本語でそのまま記述・利用できます。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Mini-nyairo Split-Pane Live Interactive Sandbox (#ja-tryout) -->
+      <section class="section-block" id="ja-tryout" aria-labelledby="tryout-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">30秒オンライン体験</div>
+            <h2 class="section-title" id="tryout-heading">ダウンロードも API キーも不要。部屋と会話をそのまま操作できます。</h2>
+            <p class="section-desc">左側で書斎の窓や温かい麦茶・買い物の徒歩ルートを動かし、右側で実際に話しかけてみてください。移動中の返信トレイ保留や、定型謝罪なしの境界線までその場で試せます。</p>
+          </div>
+        </div>
+
+        <div class="ny-live-box" id="ny-live-box" data-reveal>
+          <div class="ny-live-titlebar">
+            <div class="ny-live-title-left">
+              <div class="ny-live-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <span class="ny-live-appname">nyairo · 凪浦 海辺の書斎</span>
+              <span class="ny-live-clock-pill" id="ny-live-clock">19:15 · 小雨</span>
+            </div>
+            <div class="ny-live-title-right">
+              <span class="ny-live-engine-tag">オフライン決定論サンドボックス · 0 Token</span>
+              <button type="button" class="ny-live-reset-btn notranslate" id="ny-live-reset" translate="no">リセット</button>
+            </div>
+          </div>
+
+          <div class="ny-live-body">
+            <!-- Left Pane: Room Floorplan, Direct Actions & Matter Ledger -->
+            <div class="ny-live-world">
+              <div class="ny-live-map-wrap">
+                <svg class="ny-live-svg" viewBox="0 0 460 220" fill="none" role="img" aria-label="凪浦の海辺の書斎と青葉コンビニへ続く道路マップ">
+                  <!-- Study Room -->
+                  <rect x="14" y="16" width="248" height="188" rx="9" class="ny-svg-wall"/>
+                  <text x="26" y="190" class="ny-svg-kicker">STUDY · 室内の物性</text>
+
+                  <!-- North Sliding Window -->
+                  <rect x="82" y="16" width="112" height="10" rx="2" class="ny-window-track"/>
+                  <rect x="84" y="17.5" width="54" height="7" rx="1.5" class="ny-window-sash"/>
+                  <text x="138" y="42" text-anchor="middle" class="ny-svg-muted" id="ny-svg-win-lbl">北窓：閉</text>
+
+                  <!-- Drizzle Rain Streaks & Damp Breeze -->
+                  <g class="ny-rain-lines">
+                    <line x1="98" y1="4" x2="93" y2="14"/>
+                    <line x1="122" y1="3" x2="117" y2="13"/>
+                    <line x1="148" y1="4" x2="143" y2="14"/>
+                    <line x1="172" y1="3" x2="167" y2="13"/>
+                  </g>
+                  <g class="ny-damp-breeze">
+                    <path d="M114 30 C118 52, 102 76, 94 108"/>
+                    <path d="M158 30 C162 54, 146 78, 134 108"/>
+                  </g>
+
+                  <!-- Oak Desk -->
+                  <rect x="44" y="114" width="188" height="56" rx="7" class="ny-svg-desk"/>
+                  <text x="138" y="160" text-anchor="middle" class="ny-svg-kicker">OAK DESK · 書斎デスク</text>
+
+                  <!-- Desk Paper Note -->
+                  <g transform="translate(62, 121)">
+                    <rect x="0" y="0" width="38" height="28" rx="3" class="ny-note-sheet"/>
+                    <circle cx="30" cy="8" r="6" class="ny-note-stain"/>
+                    <line x1="7" y1="8" x2="29" y2="8" class="ny-note-ink"/>
+                    <line x1="7" y1="14" x2="26" y2="14" class="ny-note-ink"/>
+                    <line x1="7" y1="20" x2="21" y2="20" class="ny-note-ink"/>
+                  </g>
+
+                  <!-- Barley Tea Mug -->
+                  <g class="ny-tea-group" transform="translate(174, 120)">
+                    <g class="ny-tea-steam">
+                      <path d="M9 -2 C7 -7, 11 -10, 9 -14"/>
+                      <path d="M16 -1 C14 -6, 18 -9, 16 -13"/>
+                      <path d="M23 -2 C21 -7, 25 -10, 23 -14"/>
+                    </g>
+                    <rect x="4" y="3" width="24" height="22" rx="4.5" fill="var(--card)" stroke="var(--line-2)" stroke-width="1.2"/>
+                    <path d="M28 9 H31.5 A4.5 4.5 0 0 1 31.5 18 H28" stroke="var(--line-2)" stroke-width="1.2"/>
+                    <rect x="7" y="6.5" width="18" height="8" rx="2" class="ny-tea-liquid"/>
+                  </g>
+
+                  <!-- Road Network Box -->
+                  <rect x="274" y="16" width="172" height="188" rx="9" class="ny-svg-roadbox"/>
+                  <text x="286" y="34" class="ny-svg-kicker">ROAD GRAPH · 120m</text>
+                  <path d="M304 162 L360 114 L414 66" class="ny-road-line"/>
+                  <path d="M304 162 L360 114 L414 66" class="ny-road-line-active"/>
+
+                  <circle cx="304" cy="162" r="4.5" fill="var(--card)" stroke="var(--fg-2)" stroke-width="1.4"/>
+                  <text x="304" y="182" text-anchor="middle" class="ny-svg-label">自宅</text>
+
+                  <circle cx="360" cy="114" r="4" fill="var(--card)" stroke="var(--fg-2)" stroke-width="1.3"/>
+                  <text x="370" y="132" text-anchor="start" class="ny-svg-muted">潮風通り</text>
+
+                  <circle cx="414" cy="66" r="5" fill="var(--card)" stroke="var(--fg)" stroke-width="1.4"/>
+                  <text x="404" y="55" text-anchor="end" class="ny-svg-label">青葉コンビニ</text>
+
+                  <!-- Companion Dot -->
+                  <g id="ny-actor-marker" class="ny-actor-marker" transform="translate(138, 88)">
+                    <circle r="10" fill="var(--accent-soft)" stroke="var(--fg-2)" stroke-width="1"/>
+                    <circle r="4.2" fill="var(--fg)"/>
+                  </g>
+                </svg>
+              </div>
+
+              <div class="ny-live-controls" role="group" aria-label="書斎と街のアクション">
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-window" aria-pressed="false">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                    <line x1="12" y1="3" x2="12" y2="21"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label" id="ny-lbl-window">小雨の窓を開ける</span>
+                    <span class="ny-ctrl-state" id="ny-sub-window">現在：閉</span>
+                  </span>
+                </button>
+
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-tea">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M17 8h1a4 4 0 1 1 0 8h-1"></path>
+                    <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"></path>
+                    <line x1="6" y1="2" x2="6" y2="4"></line>
+                    <line x1="10" y1="2" x2="10" y2="4"></line>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label" id="ny-lbl-tea">温かい麦茶を淹れる</span>
+                    <span class="ny-ctrl-state" id="ny-sub-tea">飲み物なし · 62℃</span>
+                  </span>
+                </button>
+
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-time">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label">時間を +30分進める</span>
+                    <span class="ny-ctrl-state" id="ny-sub-time">自然な温度変化</span>
+                  </span>
+                </button>
+
+                <button type="button" class="ny-ctrl-btn" id="ny-ctrl-walk">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="5" r="2"></circle>
+                    <path d="m9 20 3-6 3 6"></path>
+                    <path d="M12 10v4"></path>
+                  </svg>
+                  <span class="ny-ctrl-btn-text">
+                    <span class="ny-ctrl-label" id="ny-lbl-walk">おでんを買いに出る</span>
+                    <span class="ny-ctrl-state" id="ny-sub-walk">在室 · 120m</span>
+                  </span>
+                </button>
+              </div>
+
+              <div class="ny-live-ledger" aria-live="polite">
+                <div class="ny-ledger-row">
+                  <span class="ny-ledger-key">室内空気</span>
+                  <span class="ny-ledger-val" id="ny-led-air">54% RH · 窓閉・乾燥</span>
+                </div>
+                <div class="ny-ledger-row">
+                  <span class="ny-ledger-key">書斎デスク</span>
+                  <span class="ny-ledger-val" id="ny-led-desk">メモ鮮明 · 飲み物なし</span>
+                </div>
+                <div class="ny-ledger-row">
+                  <span class="ny-ledger-key">持ち物バッグ</span>
+                  <span class="ny-ledger-val" id="ny-led-bag">小銭入れ 680円 · 折り畳み傘（乾）</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Pane: Streaming Conversation Thread -->
+            <div class="ny-live-chat">
+              <div class="ny-chat-head">
+                <span class="ny-chat-who">
+                  <span class="ny-chat-dot" aria-hidden="true"></span>
+                  <span>パートナー · 凪浦の住人</span>
+                </span>
+                <span class="ny-chat-activity" id="ny-chat-activity">海辺の書斎 · 読書中</span>
+              </div>
+
+              <div class="ny-chat-log" id="ny-chat-log" aria-live="polite"></div>
+
+              <div class="ny-chat-chips" id="ny-chat-chips" role="group" aria-label="クイック送信フレーズ"></div>
+
+              <form class="ny-chat-form" id="ny-chat-form">
+                <input type="text" class="ny-chat-input" id="ny-chat-input" placeholder="メッセージを送ってみる（例：週報を代わりに書いて / お茶は冷めた？ / いまどこ）..." autocomplete="off">
+                <button type="submit" class="ny-chat-send">送信</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: Magpie 3-Column Architecture Hub (#ja-how) & Same-Message Contrast (#ja-contrast) -->
+      <section class="section-block" id="ja-how" aria-labelledby="how-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">アーキテクチャと仕組み</div>
+            <h2 class="section-title" id="how-heading">判定用トークンを浪費せず、「確かな暮らし」を支える骨格。</h2>
+            <p class="section-desc">座標・徒歩時間・収納の開閉・温度や湿度の減衰はすべてローカルの決定論エンジンが計算。接続した LLM は「ひとりの住人として自然に話すこと」だけに集中できます。</p>
+          </div>
+        </div>
+
+        <div class="hub-flow-shell" data-reveal>
+          <div class="hub-col">
+            <div>
+              <span class="hub-kicker">01 · CHANNELS</span>
+              <h3 class="hub-title">対話チャネル</h3>
+              <p class="hub-desc">自宅のデスクでも外出先のスマホでも、同じ記憶と時間軸につながる複数の窓口。</p>
+            </div>
+            <div class="hub-pill-list">
+              <span class="hub-pill">Windows デスクトップ</span>
+              <span class="hub-pill">WeChat QR 同期</span>
+              <span class="hub-pill">Telegram Bot</span>
+              <span class="hub-pill">Linux / WSL CLI</span>
+            </div>
+          </div>
+
+          <div class="hub-arrow-col" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="13 6 19 12 13 18"></polyline>
+            </svg>
+          </div>
+
+          <div class="hub-col is-core">
+            <div>
+              <span class="hub-kicker">02 · LOCAL ENGINE (0 JUDGE TOKEN)</span>
+              <h3 class="hub-title">nyairo ローカル骨格</h3>
+              <p class="hub-desc">裏側で余計な判定用 LLM を回さず、空間座標・道路移動・物性変化・SQLite 記憶帳簿を手元で厳密に維持。</p>
+            </div>
+            <div class="hub-pill-list">
+              <span class="hub-pill">空間・徒歩タイマー</span>
+              <span class="hub-pill">温度・湿度物性</span>
+              <span class="hub-pill">3階層ネスト収納</span>
+              <span class="hub-pill">SQLite 二層記憶帳簿</span>
+            </div>
+          </div>
+
+          <div class="hub-arrow-col" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="13 6 19 12 13 18"></polyline>
+            </svg>
+          </div>
+
+          <div class="hub-col">
+            <div>
+              <span class="hub-kicker">03 · ANY BYOK / LOCAL MODEL</span>
+              <h3 class="hub-title">任意の BYOK モデル</h3>
+              <p class="hub-desc">中継サーバーや手数料はゼロ。手頃なクラウド API でも完全オフラインのローカルモデルでも軽快に動作。</p>
+            </div>
+            <div class="hub-pill-list">
+              <span class="hub-pill">DeepSeek</span>
+              <span class="hub-pill">OpenAI</span>
+              <span class="hub-pill">Claude</span>
+              <span class="hub-pill">Qwen</span>
+              <span class="hub-pill">ローカル Ollama</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Same Message, Two Worlds Contrast (#ja-contrast) -->
+      <section class="section-block" id="ja-contrast" aria-labelledby="contrast-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">対話の連続性</div>
+            <h2 class="section-title" id="contrast-heading">同じひと言を送っても、返ってくる世界が違います。</h2>
+            <p class="section-desc">開くたびに初対面の窓口係へリセットされることはありません。現在地・天気・机の上のしおり・ローカル記憶に根ざした言葉が返ってきます。</p>
+          </div>
+          <a href="#ja-gallery" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">人物テンプレートを見る →</a>
+        </div>
+
+        <div class="contrast-shell" data-reveal>
+          <div class="contrast-topbar">
+            <div class="contrast-tabs" id="contrast-tabs" role="tablist" aria-label="比較シナリオの切り替え">
+              <span class="seg-thumb contrast-seg-thumb" aria-hidden="true"></span>
+              <button type="button" class="contrast-tab is-active" role="tab" aria-selected="true" tabindex="0" data-contrast="0">海風の強い夜に帰宅</button>
+              <button type="button" class="contrast-tab" role="tab" aria-selected="false" tabindex="-1" data-contrast="1">外出・買い物の途中</button>
+              <button type="button" class="contrast-tab" role="tab" aria-selected="false" tabindex="-1" data-contrast="2">再起動した翌朝</button>
+            </div>
+            <div class="contrast-prompt-echo" id="contrast-prompt-echo">
+              <span class="contrast-channel-pill" id="contrast-channel">デスクトップ対話</span>
+              <span class="contrast-prompt-text" id="contrast-user-msg">「いま帰った。今夜は海沿いの風がかなり冷たいね。」</span>
+            </div>
+          </div>
+
+          <div class="contrast-grid-viewport" id="contrast-grid-viewport">
+            <div class="contrast-grid" id="contrast-grid">
+              <div class="contrast-card is-plain">
+                <div class="contrast-card-head">
+                  <span class="contrast-role-pill">通常のステートレス AI チャット</span>
+                  <span class="contrast-tag-muted">時間なし · 場所なし</span>
+                </div>
+                <p class="contrast-reply" id="contrast-plain-reply">「おかえりなさいませ！本日もお仕事お疲れ様でした。今夜はどのようなお手伝いをいたしましょうか？何かお話ししたいテーマはありますか？」</p>
+                <div class="contrast-card-foot" id="contrast-plain-note">時間帯や外の天気、昨日読みかけだった本の記憶を持たず、毎回丁寧な接客テンプレートに戻ってしまいます。</div>
+              </div>
+
+              <div class="contrast-card is-nyairo">
+                <div class="contrast-card-head">
+                  <span class="contrast-role-pill is-accent">nyairo で暮らす AI 個体</span>
+                  <span class="contrast-state-pill" id="contrast-nyairo-state">凪浦 · 潮風通りを帰宅中（残り3分）</span>
+                </div>
+                <p class="contrast-reply" id="contrast-nyairo-reply">「こっちもちょうど家の門が見えたところ。防波堤の横風、今夜はほんとに刺さるね。コート掛けたら温かい麦茶を淹れよう、机の『海風手帖』もしおりのページを開いたままにしてあるよ。」</p>
+                <div class="contrast-card-foot is-accent" id="contrast-nyairo-note">道路グラフ上の帰宅カウントダウン、海辺の天候、共読しおり、ローカル SQLite 記憶が自然につながっています。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 4: Seamless 1px Hairline 8-Capability Bento (#ja-capabilities) -->
+      <section class="section-block" id="ja-capabilities" aria-labelledby="cap-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">機能一覧 · v0.7.0</div>
+            <h2 class="section-title" id="cap-heading">静かな日常を支える、8つの実装済み機能。</h2>
+            <p class="section-desc">誇張のない実働機能だけを収録。空間・物性・記憶・予算保護がひとつのローカル基盤で噛み合います。</p>
+          </div>
+          <a href="../?doc=status-matrix" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">実装ステータス表 <span class="zh-doc-badge">ZH</span> →</a>
+        </div>
+
+        <div class="magpie-bento-grid" data-reveal>
+          <!-- 1 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+              </span>
+              <h3 class="bento-title">ストリーミング対話 · 非同期返信</h3>
+              <p class="bento-desc">文字が自然に流れるリアルタイム対話に加え、移動中・入浴中・休息中の急がない連絡は数時間単位の「スマホ返信トレイ」に保留し、手が空いたタイミングで返します。</p>
+            </div>
+            <div class="bento-meta">STREAMING · MULTI-HOUR TRAY</div>
+          </article>
+
+          <!-- 2 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="9" y1="12" x2="15" y2="12"></line></svg>
+              </span>
+              <h3 class="bento-title">定型謝罪のない、対等な日常の境界線</h3>
+              <p class="bento-desc">「AIですので申し訳ありません」といった窓口テンプレートを排除。丸投げの週報代筆はひとりの同居人として率直に断りつつ、必要な調べ物には境界付き Agent モードで応じます。</p>
+            </div>
+            <div class="bento-meta">ZERO CORPORATE APOLOGY</div>
+          </article>
+
+          <!-- 3 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+              </span>
+              <h3 class="bento-title">完全ランダムワールド生成 · 7つの街</h3>
+              <p class="bento-desc">海辺の凪浦や温泉街の湯川など7種の内蔵街に加え、テンプレート不要のプロシージャル生成で世界にひとつだけの道路網・自宅間取り・店舗配置をワンクリック合成できます。</p>
+            </div>
+            <div class="bento-meta">7 BUILT-IN · PROCEDURAL WORLD</div>
+          </article>
+
+          <!-- 4 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+              </span>
+              <h3 class="bento-title">12業種の店舗・おでん自由注文・時間差営業</h3>
+              <p class="bento-desc">コンビニのオープンカウンターで大根や白滝のおでんを1品ずつ注文可能。古書店・純喫茶・銭湯・ベーカリーなど12業種の店主がそれぞれの営業時間で店を開け閉めします。</p>
+            </div>
+            <div class="bento-meta">12 SHOP TYPES · OPEN COUNTER</div>
+          </article>
+
+          <!-- 5 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+              </span>
+              <h3 class="bento-title">3階層ネスト収納 · 温度と湿度の物性</h3>
+              <p class="bento-desc">トートバッグ→ポーチ→内ポケットの3階層収納と閉じた容器の可視性ルールを実装。淹れたてのお茶は室温へ向かって冷め、窓辺の紙や布は雨の湿気を帯びます。</p>
+            </div>
+            <div class="bento-meta">3-LAYER BAGS · THERMAL &amp; DAMP</div>
+          </article>
+
+          <!-- 6 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+              </span>
+              <h3 class="bento-title">二層メモリーランタン · 丸ごと引越し</h3>
+              <p class="bento-desc">直近の出来事を追う短期文脈と構造化された長期記憶の二層ランタンを搭載。PC を買い替える際は API キーを自動除外した <code>.nyairo-suitcase.zip</code> で丸ごと移行できます。</p>
+            </div>
+            <div class="bento-meta">MEMORY LANTERN · SUITCASE ZIP</div>
+          </article>
+
+          <!-- 7 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+              </span>
+              <h3 class="bento-title">ローカル SQLite 記憶 · 共読しおり</h3>
+              <p class="bento-desc">すべての記憶は手元の <code>~/.nyairo</code> に保存され、いつでも検索・編集・ミュート・取り消しが可能。<code>.txt</code> / <code>.md</code> 書籍の共読しおりや原稿の行単位差分も備えています。</p>
+            </div>
+            <div class="bento-meta">REVOCABLE SQLITE · CO-READING</div>
+          </article>
+
+          <!-- 8 -->
+          <article class="magpie-bento-cell">
+            <div>
+              <span class="bento-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </span>
+              <h3 class="bento-title">日次トークン上限 · マルチチャネル同期</h3>
+              <p class="bento-desc">バックグラウンドの自律起床は初期状態でオフになっており、1日あたりのトークン・リクエスト上限で厳密に保護。Windows・WeChat・Telegram・CLI で同じ相手と話せます。</p>
+            </div>
+            <div class="bento-meta">DAILY BUDGET GATE · MULTI-SYNC</div>
+          </article>
+        </div>
+      </section>
+
+      <!-- Section 5: Featured Worlds & Starter Personas (#ja-gallery) -->
+      <section class="section-block" id="ja-gallery" aria-labelledby="gallery-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">街と人物設定</div>
+            <h2 class="section-title" id="gallery-heading">お気に入りの街へ引っ越すか、世界にひとつの街を生成する。</h2>
+            <p class="section-desc">デスクトップアプリからワンクリックで街を切り替え、オフライン視覚エディタで壁や扉や営業時間を自由に調整。どんな街にも自由な <code>SOUL.md</code> を組み合わせられます。</p>
+          </div>
+          <a href="https://github.com/L1AN929/nyairo/issues/new?template=world_persona_share.yml" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">自作パックを共有 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+        </div>
+
+        <div class="worlds-hairline-grid" data-reveal>
+          <article class="world-hairline-card">
+            <div>
+              <span class="world-card-kicker">01 · BUILT-IN</span>
+              <h3 class="world-card-title">凪浦 · 海辺の町</h3>
+              <p class="world-card-desc">防波堤の散歩道、潮風の坂道、文峰堂古書店、カモメ珈琲が並ぶ穏やかな港町。</p>
+            </div>
+            <div class="world-card-meta">17 ノード · 海沿いの坂道</div>
+          </article>
+
+          <article class="world-hairline-card">
+            <div>
+              <span class="world-card-kicker">02 · BUILT-IN</span>
+              <h3 class="world-card-title">湯川 · 山あいの温泉街</h3>
+              <p class="world-card-desc">杉木立の石段、湯けむりの立つ翠沢露天湯、木造の路地と山道の展望台がある温泉街。</p>
+            </div>
+            <div class="world-card-meta">15 ノード · 渓谷の石段</div>
+          </article>
+
+          <article class="world-hairline-card">
+            <div>
+              <span class="world-card-kicker">03 · BUILT-IN</span>
+              <h3 class="world-card-title">穂村 · 水車の里</h3>
+              <p class="world-card-desc">静かな用水路と田んぼのあぜ道、水車公園、深い軒先の縁側が広がる里山集落。</p>
+            </div>
+            <div class="world-card-meta">14 ノード · あぜ道ルート</div>
+          </article>
+
+          <article class="world-hairline-card">
+            <div>
+              <span class="world-card-kicker">04 · BUILT-IN</span>
+              <h3 class="world-card-title">栞沢 · 暮らしの街角</h3>
+              <p class="world-card-desc">駅前の商店街アーケード、ひなた喫茶店、街角の本屋と小さな公園がつながる住宅街。</p>
+            </div>
+            <div class="world-card-meta">16 ノード · 商店街グリッド</div>
+          </article>
+
+          <article class="world-hairline-card is-procedural">
+            <div>
+              <span class="world-card-kicker">05 · PROCEDURAL</span>
+              <h3 class="world-card-title">完全ランダム専用ワールド · ワンクリック生成</h3>
+              <p class="world-card-desc">テンプレートに頼らず、あなた専用の道路グラフ・部屋の間取り・近隣店舗リストを自動合成します。</p>
+            </div>
+            <div class="world-card-meta">固有トポロジー · 編集可能</div>
+          </article>
+        </div>
+
+        <div class="personas-hairline-wrap" data-reveal>
+          <div class="personas-head-bar">
+            <span>すぐ使える 4つの <code>SOUL.md</code> 人物テンプレート（名前・一人称・口調はすべて自由に変更可能）</span>
+            <a href="../?doc=configuration" style="color:var(--fg-2);font-size:0.8rem;text-decoration:none;">設定ガイド <span class="zh-doc-badge">ZH</span> →</a>
+          </div>
+
+          <div class="personas-grid-2x2">
+            <div class="persona-cell">
+              <div class="persona-cell-top">
+                <div>
+                  <h3>ニュートラルな白紙ベース</h3>
+                  <span class="persona-meta">フラットで自然体 · どんな名前・口調にも適応</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="blank">SOUL.md をコピー</button>
+              </div>
+              <p class="persona-preview" id="persona-text-blank">この街で自立して暮らす対等なパートナーとして振る舞う。接客のような定型句や機械的な謝罪は使わず、日常の自然な言葉で簡潔に話す。小さな約束や共有したメモを大切にし、互いの時間と距離感を尊重し、知らないことは推測せず正直に「わからない」と伝える。</p>
+            </div>
+
+            <div class="persona-cell">
+              <div class="persona-cell-top">
+                <div>
+                  <h3>海辺の古書好き・静かな読書家</h3>
+                  <span class="persona-meta">落ち着いた観察眼 · 共読しおりと散歩メモ</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="reader">SOUL.md をコピー</button>
+              </div>
+              <p class="persona-preview" id="persona-text-reader">古書店の文庫本と夕方の海風散歩、香ばしい麦茶を好む穏やかな隣人。普段は言葉少なめだが、一緒にしおりを挟んだ一節や道端で見つけた季節の変化については楽しそうに話す。説教や長々とした解説はせず、余白のある会話を好む。</p>
+            </div>
+
+            <div class="persona-cell">
+              <div class="persona-cell-top">
+                <div>
+                  <h3>窓辺の木工・手仕事好き</h3>
+                  <span class="persona-meta">実直で落ち着いたユーモア · 温度や湿度に敏感</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="craft">SOUL.md をコピー</button>
+              </div>
+              <p class="persona-preview" id="persona-text-craft">窓際の作業台を整え、日用品の手入れや間取りのスケッチをして過ごす生活者。飾らない落ち着いた話し方で、部屋の湿度や机の上で冷めていくマグカップ、ひとつの作業を丁寧に片付けてから次へ移るリズムを大切にしている。</p>
+            </div>
+
+            <div class="persona-cell">
+              <div class="persona-cell-top">
+                <div>
+                  <h3>夕暮れの散歩者・エッセイ書き</h3>
+                  <span class="persona-meta">率直でフラットな距離感 · 原稿推敲と夜風</span>
+                </div>
+                <button type="button" class="persona-copy-btn" data-persona-copy="walker">SOUL.md をコピー</button>
+              </div>
+              <p class="persona-preview" id="persona-text-walker">夕暮れどきにコンビニまで歩き、短い観察ノートをつけたり原稿の下書きに率直な感想を交わしたりするのが好き。気心の知れた同居人のように端的に話し、相手自身が書くべき仕事の丸投げにははっきり境界線を引く。</p>
+            </div>
+          </div>
+
+          <div class="personas-foot-bar">
+            <span><strong>心地よい街や個性的な人物設定ができたら：</strong>オフラインマップエディタからワールドパックを書き出し、GitHub テンプレートから共有できます。</span>
+            <a href="https://github.com/L1AN929/nyairo/issues/new?template=world_persona_share.yml" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:32px;padding:0 12px;font-size:0.8rem;">パックを投稿する (<code>world_persona_share.yml</code>) <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 6: Downloads, SmartScreen Flat Vector Guide & Beginner DeepSeek/Ollama Setup (#ja-downloads) -->
+      <section class="section-block" id="ja-downloads" aria-labelledby="downloads-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">ダウンロードと導入 · v0.7.0</div>
+            <h2 class="section-title" id="downloads-heading">環境に合わせた3つの導入方法。</h2>
+            <p class="section-desc">Windows 10 / 11 なら管理者権限不要の約 5.6 MB デスクトップ版ですぐ始められます。Linux / WSL 2 のワンライナー導入や、コーディングエージェントへの自動構築指示にも対応しています。</p>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a href="../downloads/latest.json" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:36px;padding:0 12px;font-size:0.8rem;">latest.json <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+            <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.82rem;">GitHub Release v0.7.0 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+          </div>
+        </div>
+
+        <div class="downloads-hairline-grid" data-reveal>
+          <!-- Card 1: Windows -->
+          <div class="dl-hairline-card is-primary" id="install-panel-win">
+            <div>
+              <div class="dl-card-head">
+                <div class="dl-card-title-group">
+                  <span class="dl-card-icon" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M3 5.5L10.5 4.4V11.3H3V5.5ZM11.5 4.25L21 2.8V11.3H11.5V4.25ZM3 12.4H10.5V19.3L3 18.2V12.4ZM11.5 12.4H21V20.9L11.5 19.5V12.4Z"/>
+                    </svg>
+                  </span>
+                  <h3>Windows デスクトップ版</h3>
+                </div>
+                <span class="byok-badge">推奨 · 管理者不要</span>
+              </div>
+              <p class="dl-card-desc" style="margin-top:10px;">ユーザー領域へクリーンに導入され、WSL 2 環境のセットアップも画面上で案内。タスクトレイに静かに常駐します。</p>
+              <div class="dl-meta-bar" style="margin-top:12px;">
+                <span class="dl-meta-lbl">ファイル</span>
+                <code class="dl-meta-code">nyairo-0.7.0-setup.exe</code>
+              </div>
+            </div>
+
+            <div>
+              <div class="dl-card-actions">
+                <a href="../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe" class="magpie-btn-primary" id="dl-win-card-btn" style="flex:1;height:38px;font-size:0.84rem;">インストーラー (.exe)</a>
+                <a href="../downloads/nyairo-0.7.0-setup.exe.sha256" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:38px;padding:0 12px;font-size:0.8rem;">SHA256 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+              </div>
+              <div class="win-dl-feedback" id="dl-win-card-feedback" hidden>
+                <span class="win-dl-dot" aria-hidden="true"></span>
+                <span>ダウンロード開始 · SmartScreen が出た場合は下の図解どおり「詳細情報 → 実行」を選んでください。</span>
+              </div>
+              <div class="dl-card-foot" style="margin-top:12px;">
+                <span>Windows 10 / 11 (64-bit) · 約 5.6 MB</span>
+                <button type="button" class="sha-copy-btn" id="copy-setup-sha" data-sha="174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8" title="SHA256 ハッシュ全文をコピー">
+                  <span>SHA256: 174e4597...14dd8</span>
+                  <span id="sha-copy-label">コピー</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Linux / WSL CLI -->
+          <div class="dl-hairline-card" id="install-panel-cli">
+            <div>
+              <div class="dl-card-head">
+                <div class="dl-card-title-group">
+                  <span class="dl-card-icon" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="4 17 10 11 4 5"></polyline>
+                      <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                  </span>
+                  <h3>Linux / WSL 2 ターミナル</h3>
+                </div>
+                <span class="byok-badge">CLI</span>
+              </div>
+              <p class="dl-card-desc" style="margin-top:10px;">1行のコマンドで <code>uv</code> 経由の Python 3.13 環境構築・SHA256 検証・独立した <code>~/.nyairo</code> 初期化まで完了します。</p>
+              <div class="cli-cmd-bar dl-cmd-bar" id="hero-cmd" role="button" tabindex="0" title="クリックしてインストールコマンドをコピー" style="margin-top:12px;">
+                <span class="cmd-dollar">$</span>
+                <code class="cmd-code">curl -fsSL https://nyairo.com/install.sh | bash</code>
+              </div>
+            </div>
+
+            <div>
+              <div class="dl-card-actions">
+                <button type="button" class="magpie-btn-primary" id="hero-cmd-btn" style="flex:1;height:38px;font-size:0.84rem;">コマンドをコピー</button>
+                <a href="https://github.com/L1AN929/nyairo#readme" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:38px;padding:0 12px;font-size:0.8rem;">README <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+              </div>
+              <div class="dl-card-foot" style="margin-top:12px;">
+                <span>Ubuntu / Debian / WSL 2</span>
+                <a href="../?doc=quickstart" style="color:var(--fg-2);font-size:0.76rem;">導入手順 <span class="zh-doc-badge">ZH</span> →</a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3: Coding Agent -->
+          <div class="dl-hairline-card" id="install-panel-agent">
+            <div>
+              <div class="dl-card-head">
+                <div class="dl-card-title-group">
+                  <span class="dl-card-icon" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+                      <circle cx="12" cy="5" r="2"></circle>
+                      <path d="M12 7v4"></path>
+                    </svg>
+                  </span>
+                  <h3>コーディング Agent 導入</h3>
+                </div>
+                <span class="byok-badge">Agent</span>
+              </div>
+              <p class="dl-card-desc" style="margin-top:10px;">Claude Code・Codex・Cursor にそのまま貼り付けられる検証優先プロンプト。既存環境を保護し、API キーは一切聞きません。</p>
+              <div class="dl-meta-bar" style="margin-top:12px;">
+                <span class="dl-meta-lbl">対応</span>
+                <code class="dl-meta-code">Claude Code / Codex / Cursor</code>
+              </div>
+            </div>
+
+            <div>
+              <div class="dl-card-actions">
+                <button type="button" class="magpie-btn-primary" id="agent-cmd-btn" style="flex:1;height:38px;font-size:0.84rem;"><span>指示文をコピー</span></button>
+                <button type="button" class="magpie-btn-ghost" id="agent-toggle-drawer" aria-expanded="false" aria-controls="agent-code-drawer" style="height:38px;padding:0 12px;font-size:0.8rem;">
+                  <span id="drawer-toggle-label">内容を表示</span>
+                </button>
+              </div>
+              <div class="dl-card-foot" style="margin-top:12px;">
+                <span>事前確認・SHA256 検証必須</span>
+                <a href="../?doc=agent-install" style="color:var(--fg-2);font-size:0.76rem;">仕様 <span class="zh-doc-badge">ZH</span> →</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <pre class="agent-drawer-pre downloads-drawer-pre" id="agent-code-drawer" hidden><code id="agent-prompt-code">このマシンに nyairo v0.7.0（オープンソースの AI 個体フレームワーク）をインストールしてください。各ステップの実行前に内容を簡潔に説明し、検証手順を絶対に省略しないでください。
+
+[参照情報]
+- 公式リポジトリ: https://github.com/L1AN929/nyairo
+- 対象リリース: v0.7.0 のみ（未検証ブランチや古いタグは使用しないこと）
+
+[Step 1: 事前環境チェック — まだインストールしないこと]
+以下を確認して報告してください:
+1. OS とアーキテクチャ（Linux / WSL 2 / macOS / ネイティブ Windows）および bash・curl の有無
+2. Python 利用可否（bootstrap 時に uv 経由で Python 3.13 を構成します）
+3. 空きディスク容量（3 GB 以上推奨）
+4. github.com および astral.sh への疎通
+5. $HOME 内の既存環境有無: ~/.nyairo, ~/.local/share/nyairo, ~/apps/nyairo-*, ~/.local/bin/nyairo
+6. 稼働中プロセス: pgrep -af m0_writer_worker, pgrep -af "gateway run", pgrep -af nyairo
+WSL のないネイティブ Windows の場合は公式デスクトップ版（https://nyairo.com/downloads/nyairo-0.7.0-setup.exe）を案内して停止してください。既存環境が見つかった場合も上書き防止のため即座に停止し、無断でプロセス終了や sudo を実行しないでください。
+
+[Step 2: 配置パスの確認]
+本体は ~/.local/share/nyairo/releases/v0.7.0、個人データは ~/.nyairo、起動コマンドは ~/.local/bin/nyairo に配置されることを説明し、私の確認を待ってください。
+
+[Step 3: SHA256 検証付きインストール]
+1) リリースアーカイブと SHA256 の取得・検証:
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
+   sha256sum -c nyairo-v0.7.0.zip.sha256
+   一致しない場合は直ちに中断すること。
+2) 展開と公式 bootstrap の実行:
+   python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
+   cd "$HOME/apps/nyairo-v0.7.0" &amp;&amp; bash scripts/bootstrap.sh --no-setup --no-launch
+
+[Step 4: 導入後セルフチェックと引き継ぎ]
+~/.local/state/nyairo/install.json が v0.7.0 であることを確認し、scripts/verify_manifest.py（"valid": true）と ~/.local/bin/nyairo -z "install self-check" を実行してください。最後に私自身で `nyairo` および `nyairo setup model` を実行する手順を案内してください。チャット欄に API キーやパスワードの入力を決して求めないでください。</code></pre>
+
+        <!-- 2-Column Visual Onboarding: SmartScreen Flat Vector Guide + Beginner DeepSeek / Ollama 3-Step Card -->
+        <div class="setup-guides-grid" data-reveal>
+          <div class="guide-panel">
+            <div>
+              <span class="guide-kicker">WINDOWS 初回起動ガイド</span>
+              <h3 class="guide-title">Windows SmartScreen が表示された場合（2ステップ）</h3>
+              <p class="guide-desc">nyairo は企業向けの有償 EV コード署名証明書を持たない独立した Apache-2.0 オープンソースビルドのため、初回起動時に確認画面が出ることがあります。<strong>「詳細情報」</strong>を押してから<strong>「実行」</strong>をクリックしてください。</p>
+            </div>
+
+            <div class="smartscreen-svg-wrap">
+              <svg class="smartscreen-svg" viewBox="0 0 540 182" fill="none" role="img" aria-label="Windows によって PC が保護されました画面で、ステップ1 詳細情報を押し、ステップ2 実行を押す2段階の図解">
+                <!-- Dialog 1 -->
+                <rect x="6" y="8" width="236" height="166" rx="10" fill="var(--card)" stroke="var(--line-2)" stroke-width="1.2"/>
+                <text x="20" y="29" font-family="var(--font-mono)" font-size="9.5" font-weight="600" fill="var(--muted)">STEP 01</text>
+                <text x="20" y="50" font-family="var(--font-sans)" font-size="11.5" font-weight="650" fill="var(--fg)">Windows によって PC が保護されました</text>
+                <line x1="20" y1="65" x2="216" y2="65" stroke="var(--line-2)" stroke-width="2" stroke-linecap="round"/>
+                <line x1="20" y1="75" x2="180" y2="75" stroke="var(--line-2)" stroke-width="2" stroke-linecap="round"/>
+
+                <!-- Highlighted "詳細情報" -->
+                <rect x="18" y="90" width="88" height="25" rx="6" fill="var(--bg-elev)" stroke="var(--fg)" stroke-width="1.25"/>
+                <text x="62" y="106" text-anchor="middle" font-family="var(--font-sans)" font-size="11" font-weight="650" fill="var(--fg)" text-decoration="underline">詳細情報</text>
+
+                <!-- Muted 実行しない -->
+                <rect x="142" y="138" width="84" height="24" rx="5" fill="var(--bg-elev)" stroke="var(--line)" stroke-width="1"/>
+                <text x="184" y="154" text-anchor="middle" font-family="var(--font-sans)" font-size="10.5" fill="var(--muted)">実行しない</text>
+
+                <!-- Arrow -->
+                <line x1="252" y1="91" x2="284" y2="91" stroke="var(--fg)" stroke-width="1.5" stroke-linecap="round"/>
+                <polyline points="278 85 285 91 278 97" stroke="var(--fg)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+                <!-- Dialog 2 -->
+                <rect x="296" y="8" width="238" height="166" rx="10" fill="var(--card)" stroke="var(--line-2)" stroke-width="1.2"/>
+                <text x="310" y="29" font-family="var(--font-mono)" font-size="9.5" font-weight="600" fill="var(--fg)">STEP 02</text>
+                <text x="310" y="50" font-family="var(--font-sans)" font-size="11.5" font-weight="650" fill="var(--fg)">アプリ: nyairo-0.7.0-setup.exe</text>
+                <text x="310" y="69" font-family="var(--font-sans)" font-size="10.5" fill="var(--muted)">発行元: オープンソース（未署名）</text>
+                <text x="310" y="86" font-family="var(--font-mono)" font-size="9.5" fill="var(--muted)">SHA256: 174e4597...14dd8</text>
+
+                <!-- Highlighted "実行" -->
+                <rect x="348" y="136" width="84" height="26" rx="6" fill="var(--btn)" stroke="var(--btn)" stroke-width="1.2"/>
+                <text x="390" y="153" text-anchor="middle" font-family="var(--font-sans)" font-size="11" font-weight="650" fill="var(--btn-ink)">実行</text>
+
+                <rect x="440" y="136" width="80" height="26" rx="6" fill="var(--bg-elev)" stroke="var(--line)" stroke-width="1"/>
+                <text x="480" y="153" text-anchor="middle" font-family="var(--font-sans)" font-size="10.5" fill="var(--muted)">実行しない</text>
+              </svg>
+            </div>
+
+            <p class="guide-desc" style="font-size:0.76rem;color:var(--muted);">
+              PowerShell でのハッシュ確認：<code>Get-FileHash .\nyairo-0.7.0-setup.exe -Algorithm SHA256</code>（一致値：<code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code>）
+            </p>
+          </div>
+
+          <div class="guide-panel">
+            <div>
+              <span class="guide-kicker">はじめてのモデル接続 · 3ステップ（約2分）</span>
+              <h3 class="guide-title">DeepSeek API（数百円〜）または無料ローカル Ollama</h3>
+              <p class="guide-desc">1) キーまたはローカルモデルを用意 → 2) 初回起動時の<strong>「設定 → モデル」</strong>へ貼り付け → 3) <strong>「接続テスト」</strong>を押すだけで完了です。</p>
+            </div>
+
+            <div class="byok-options">
+              <div class="byok-card">
+                <div class="byok-card-head">
+                  <span class="byok-card-title">方法 A · DeepSeek / OpenAI / Claude などの API</span>
+                  <span class="byok-badge">数百円のチャージで長期間利用可能</span>
+                </div>
+                <p class="byok-card-text">DeepSeek なら数百円の少額チャージで日常会話が何週間も続き、PC の GPU 負荷もゼロです。<code>sk-...</code> キーを発行して下の URL と一緒に設定します。</p>
+                <div class="endpoint-copy-row">
+                  <code id="ep-deepseek">https://api.deepseek.com/v1</code>
+                  <button type="button" class="mini-copy-btn" data-copy-target="ep-deepseek">URL をコピー</button>
+                </div>
+              </div>
+
+              <div class="byok-card">
+                <div class="byok-card-head">
+                  <span class="byok-card-title">方法 B · 無料ローカル Ollama（100% オフライン）</span>
+                  <span class="byok-badge">¥0 · 完全ローカル</span>
+                </div>
+                <p class="byok-card-text"><a href="https://ollama.com" target="_blank" rel="noopener noreferrer" style="color:var(--fg);text-decoration:underline;">Ollama</a> を入れて <code>ollama pull qwen2.5:7b</code> を実行し、ローカルエンドポイントを指定すれば外部通信ゼロで動きます。</p>
+                <div class="endpoint-copy-row">
+                  <code id="ep-ollama">http://127.0.0.1:11434/v1</code>
+                  <button type="button" class="mini-copy-btn" data-copy-target="ep-ollama">URL をコピー</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 7: 6-Item FAQ (#ja-faq) -->
+      <section class="section-block" id="ja-faq" aria-labelledby="faq-heading">
+        <div class="section-head" data-reveal>
+          <div>
+            <div class="section-eyebrow">FAQ · よくある質問</div>
+            <h2 class="section-title" id="faq-heading">導入前に気になるところを、率直に。</h2>
+            <p class="section-desc">動作環境、費用、プライバシー境界、街のカスタマイズ、アップデート時の記憶保護について。</p>
+          </div>
+          <a href="../?doc=troubleshooting" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">トラブルシューティング <span class="zh-doc-badge">ZH</span> →</a>
+        </div>
+
+        <div class="faq-grid" data-reveal>
+          <div class="faq-col">
+            <details class="faq-item">
+              <summary class="faq-q">
+                <span>高性能な GPU（グラフィックボード）がなくても快適に動きますか？</span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                はい、不要です。DeepSeek・OpenAI・Claude・Qwen などのオンライン API を使う場合、推論計算はクラウド側で行われ、手元の PC では約 5.6 MB のデスクトップクライアントとローカル SQLite 記憶帳簿だけが動きます。内蔵グラフィックスの一般的なノート PC でも静かに常駐します（ローカル Ollama モデルを手元で動かす場合のみ PC 側の性能を使用します）。
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-q">
+                <span>会話内容や SOUL.md、長期記憶が外部サーバーへ送信されることはありますか？</span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                一切ありません。nyairo 運営側の中央サーバーやテレメトリ収集は存在せず、<code>SOUL.md</code>・会話履歴・二層メモリーランタン・共読原稿はすべて手元の PC 内の <code>~/.nyairo</code> にのみ保存されます。通信先はあなたが設定した API エンドポイントまたは連携チャネルだけであり、ローカル Ollama を選べば 100% オフラインで完結します。
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-q">
+                <span>全員が同じ街に住むのですか？自分の街を作ったり編集したりできますか？</span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                7つの内蔵街（海辺の凪浦、温泉街の湯川、水車の里の穂村、街角の栞沢など）をいつでも切り替えられるほか、テンプレート不要の完全ランダム専用ワールド生成で自分だけの街をワンクリック合成できます。さらにオフライン視覚マップエディタで壁・扉・家具・営業時間を描き、パックとして書き出すことも可能です。
+              </div>
+            </details>
+          </div>
+
+          <div class="faq-col">
+            <details class="faq-item">
+              <summary class="faq-q">
+                <span>利用料金や月額サブスクリプション、アカウント登録は必要ですか？</span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                nyairo 本体は Apache-2.0 の完全無料オープンソースです。アカウント登録・月額課金・トークン中抜き手数料はゼロです。ご自身の API キー（DeepSeek なら数百円のチャージで長期間利用可能）を貼り付けるか、無料のローカル Ollama を指定するだけで使えます。自律起床も初期オフ・日次上限付きで安心です。
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-q">
+                <span>一般的な AI チャットアプリやロールプレイ画面と何が違うのですか？</span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                閉じた瞬間に時間が止まるテキスト枠とは異なり、道路グラフ・部屋の間取り・温度や湿度の物性がローカルで連続して動いています。コンビニや古書店へ歩くには実際の分数がかかり、移動中の雑談はスマホの返信トレイに保留され、机の温かいお茶は自然に冷め、無理な代筆依頼は定型謝罪なしで対等に断ります。
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-q">
+                <span>アプリを更新・アンインストールすると、これまでの記憶は消えてしまいますか？</span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                消えません。読み取り専用の実行プログラムと個人の記憶データ（<code>~/.nyairo</code>）は厳密に分離されています。Windows デスクトップ版をアンインストールしても WSL 2 側の記憶データベースは無傷のまま残り、CLI の <code>nyairo update --rollback</code> や API キーを自動除外した <code>.nyairo-suitcase.zip</code> によるロスレス引越しにも対応しています。
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- Magpie Centered Monochrome Cat Emblem Closing CTA -->
+      <section class="magpie-closing" aria-labelledby="cta-title" data-reveal>
+        <div class="closing-cat-emblem" aria-hidden="true">
+          <img class="on-dark" src="../assets/nyairo-icon-light-66.webp" alt="" width="26" height="25">
+          <img class="on-light" src="../assets/nyairo-icon-66.webp" alt="" width="26" height="25">
+        </div>
+        <h2 id="cta-title">ひとつの世界、ふたりの日常。</h2>
+        <p>名前も口調も最初の街も、初回起動時に自由に決められます。歩いた道のりも、挟んだしおりも、すべてあなたの手元の PC に残ります。</p>
+        <div class="closing-actions">
+          <a href="../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe" class="magpie-btn-primary">Windows 版をダウンロード</a>
+          <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost">GitHub を見る <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+        </div>
+      </section>
+
+      <!-- Crisp 1-Row Magpie Footer -->
+      <footer class="magpie-footer-1row" aria-label="サイトフッター">
+        <div class="magpie-footer-left">
+          <strong style="color:var(--fg);font-weight:650;">nyairo</strong>
+          <span>·</span>
+          <span>v0.7.0 · Apache-2.0 Open Source</span>
+        </div>
+        <div class="magpie-footer-links">
+          <a href="../" lang="zh-CN">中文</a>
+          <a href="../en/" lang="en">English</a>
+          <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/L1AN929/nyairo/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+          <a href="https://github.com/L1AN929/nyairo/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+        </div>
+      </footer>
+
+    </div>
+  </main>
+
+  <!-- High-Resolution 2x Retina Lightbox Modal (#stage-lightbox) -->
+  <div id="stage-lightbox" class="lightbox-backdrop" aria-hidden="true">
+    <div class="lightbox-box" role="dialog" aria-modal="true" aria-labelledby="lightbox-title">
+      <div class="lightbox-toolbar">
+        <div class="lightbox-meta">
+          <span class="lightbox-counter font-mono" id="lightbox-counter">01 / 06</span>
+          <span class="lightbox-title" id="lightbox-title">実機デモ</span>
+        </div>
+        <div class="lightbox-tabs" id="lightbox-tabs" role="tablist" aria-label="高解像度シーンの切り替え">
+          <span class="seg-thumb lb-seg-thumb" aria-hidden="true"></span>
+          <button type="button" class="lightbox-tab is-active" role="tab" aria-selected="true" tabindex="0" data-lb-scene="0">実機デモ</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="1">ステータス</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="2">街と部屋</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="3">ストリーミング対話</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="4">原稿と差分</button>
+          <button type="button" class="lightbox-tab" role="tab" aria-selected="false" tabindex="-1" data-lb-scene="5">マップ編集</button>
+        </div>
+        <button type="button" class="lightbox-close" id="lightbox-close" aria-label="拡大表示を閉じる (ESC)">
+          <span>閉じる</span>
+          <kbd class="search-kbd">ESC</kbd>
+        </button>
+      </div>
+      <div class="lightbox-canvas" id="lightbox-canvas">
+        <button type="button" class="lightbox-nav prev" id="lightbox-prev" aria-label="前のシーン">‹</button>
+        <video id="lightbox-video-dark" class="lightbox-video on-dark" muted loop playsinline controls preload="metadata" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ"></video>
+        <video id="lightbox-video-light" class="lightbox-video on-light" muted loop playsinline controls preload="metadata" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ"></video>
+        <img id="lightbox-img-dark" class="on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo 高解像度デスクトッププレビュー" hidden>
+        <img id="lightbox-img-light" class="on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo 高解像度デスクトッププレビュー" hidden>
+        <button type="button" class="lightbox-nav next" id="lightbox-next" aria-label="次のシーン">›</button>
+      </div>
+    </div>
+  </div>
+
+  <button type="button" id="back-to-top" class="back-to-top" aria-label="ページの先頭へ戻る" title="ページの先頭へ戻る">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <div id="site-toast" class="site-toast" role="status" aria-live="polite"></div>
+
+  <noscript>
+    <div style="max-width: 880px; margin: 32px auto; padding: 20px 24px; border: 1px solid rgba(128,128,140,0.28); border-radius: 12px; line-height: 1.7;">
+      <h2>nyairo ダウンロードとリンク（JavaScript 無効時）</h2>
+      <p><a href="../downloads/nyairo-0.7.0-setup.exe">Windows 版インストーラー (v0.7.0)</a> のダウンロード、<a href="https://github.com/L1AN929/nyairo">GitHub リポジトリ</a>、または <a href="../" lang="zh-CN">中国語版</a> / <a href="../en/" lang="en">英語版</a> をご利用いただけます。</p>
+      <p>Linux / WSL 2 CLI 導入: <code>curl -fsSL https://nyairo.com/install.sh | bash</code></p>
+    </div>
+  </noscript>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var STAGE_CAPTIONS = [
+        [
+          { kicker: '01 · 途切れない空間連続性', title: '机のランプから街角まで、瞬間移動せず歩いて向かう', desc: '姿勢の切り替え、道路グラフに沿った徒歩移動、店舗の営業時間や室内の棚・照明をリアルタイムに確認できます。' },
+          { kicker: '02 · 立ち位置に根ざした対話', title: 'いま立っている場所と手元の物から自然に始まる会話', desc: '直前の散歩、机の上のマグカップ、開いたままの原稿が会話の文脈にそのまま息づき、引用返信にも対応します。' },
+          { kicker: '03 · 共読本棚と行単位の差分', title: '同じ本にしおりを挟み、原稿の推敲履歴を並べて比較', desc: '読書メモや原稿の版管理スナップショットをダーク／ライト両対応でローカル PC に静かに蓄積します。' }
+        ],
+        [
+          { kicker: '01 · 現在の様子をひと目で', title: 'いまどの部屋にいて、何をしているかがすぐわかる', desc: 'ウィンドウを開いた瞬間、滞在中の部屋・立ち座りの姿勢・外の天気・最近の記憶が穏やかに並びます。' },
+          { kicker: '02 · 閉じても進む時計', title: 'アプリを閉じていても、向こうの日常は静かに続く', desc: '生活状態と SQLite 記憶はローカルディスクに保たれ、次に開いたときはその続きから自然に再開します。' },
+          { kicker: '03 · 軽やかな室内操作', title: '部屋間の移動やデスクランプの点灯もワンクリック', desc: '寝室から書斎へ歩いたり、手元の照明を切り替えたり、そのままストリーミング対話を始められます。' }
+        ],
+        [
+          { kicker: '01 · 7つの内蔵街＋ランダム生成', title: '海辺・温泉街・里山・住宅街、あるいは世界にひとつの街', desc: '凪浦・湯川・穂村・栞沢などの内蔵ワールドを切り替えられるほか、完全ランダム専用ワールドも生成できます。' },
+          { kicker: '02 · 室内の間取りと可視性', title: '部屋ごとの家具配置と、閉じた収納のリアルな視界ルール', desc: '自宅の間取りを展開して寝室・リビング・書斎を行き来でき、閉じたバッグや箱の中身は勝手に透視されません。' },
+          { kicker: '03 · 12業種の時間差営業', title: '古書店・純喫茶・銭湯・コンビニがそれぞれの時間で営業', desc: '朝から夕暮れへと時間が進むにつれ、店主ごとのスケジュールでシャッターが開閉します。' }
+        ],
+        [
+          { kicker: '01 · ストリーミング対話', title: '一文字ずつ自然に流れ、いつでも途中で言い直せる', desc: '返信はリアルタイムにストリーミング表示され、話題を変えたいときは Esc や停止ボタンですぐ止められます。' },
+          { kicker: '02 · 引用返信と履歴検索', title: '前の発言をピンポイントに引用して深掘りできる', desc: '気になる一文を選んで引用返信したり、ローカルの会話履歴を高速に全文検索したりできます。' },
+          { kicker: '03 · スマホからも同じ相手へ', title: 'WeChat QR 同期や Telegram から同じ記憶スレッドを継続', desc: '外出先から送ったメッセージも同じ ~/.nyairo の記憶帳簿とスマホ返信トレイに統合されます。' }
+        ],
+        [
+          { kicker: '01 · 観察ノートと共有原稿', title: '日々の小さな記録も共同執筆の下書きも自動保存', desc: '相手が書き留めたメモや一緒に推敲した原稿は、版ごとのスナップショットとしてローカルに残ります。' },
+          { kicker: '02 · 行単位の差分ビュー', title: '任意の2つのバージョンを並べて変更箇所を確認', desc: '以前の表現を誤って消してしまう心配なく、どの行がどう書き換わったかを視覚的に比較できます。' },
+          { kicker: '03 · 共読本棚としおり', title: 'お気に入りの .txt / .md 書籍を読み進め、余白にメモを残す', desc: '挟んだしおりの位置や感想メモを相手も覚えており、後日の雑談にふと顔を出します。' }
+        ],
+        [
+          { kicker: '01 · 壁と道路を直感描画', title: '設定ファイル不要、2D キャンバス上で部屋と道を設計', desc: 'ドラッグ操作で部屋を広げ、木の床や石畳の路地を敷いて自分だけの書斎や街角を作れます。' },
+          { kicker: '02 · 扉・照明・店舗メニュー', title: '本棚や読書灯、オープンカウンターの品揃えまで配置', desc: '家具の向きや店舗の営業時間、カウンターに並ぶおでんや珈琲の品目もオフラインで編集可能です。' },
+          { kicker: '03 · 経路検証とパック出力', title: '道路から室内までの到達可能性を自動チェックして共有', desc: '保存前に扉や通路のつながりを自動検証し、完成したワールドパックを書き出して共有できます。' }
+        ]
+      ];
+
+      var STAGE_WORLD_PRESETS = {
+        nagiura: {
+          title: '街と部屋 · 凪浦（海辺の町）',
+          dark: '../assets/screenshots/desktop-world-dark.webp?v=20261118-v070-35',
+          light: '../assets/screenshots/desktop-world-light.webp?v=20261118-v070-35',
+          alt: 'nyairo ワールドマップ：海辺の町・凪浦と防波堤の道路グラフ',
+          desc: '初期街の「凪浦」は海沿いの坂道や防波堤、文峰堂古書店、カモメ珈琲など17ノードを実際の徒歩分数で結びます。'
+        },
+        onsawa: {
+          title: '街と部屋 · 湯川（温泉街）',
+          dark: '../assets/screenshots/desktop-world-onsawa-dark.webp?v=20261118-v070-35',
+          light: '../assets/screenshots/desktop-world-onsawa-light.webp?v=20261118-v070-35',
+          alt: 'nyairo ワールドマップ：山あいの温泉街・湯川と翠沢露天湯',
+          desc: '山あいの温泉街「湯川」は杉木立の石段と翠沢露天湯を含む15ノード構成。ワンクリックで引っ越し可能です。'
+        },
+        inobe: {
+          title: '街と部屋 · 穂村（水車の里）',
+          dark: '../assets/screenshots/desktop-world-inobe-dark.webp?v=20261118-v070-35',
+          light: '../assets/screenshots/desktop-world-inobe-light.webp?v=20261118-v070-35',
+          alt: 'nyairo ワールドマップ：水車の里・穂村の用水路とあぜ道',
+          desc: '里山集落「穂村」は用水路や田んぼのあぜ道、水車公園など14ノードが広がり、穏やかな徒歩時間が流れます。'
+        },
+        wakaba: {
+          title: '街と部屋 · 栞沢（暮らしの街角）',
+          dark: '../assets/screenshots/desktop-world-wakaba-dark.webp?v=20261118-v070-35',
+          light: '../assets/screenshots/desktop-world-wakaba-light.webp?v=20261118-v070-35',
+          alt: 'nyairo ワールドマップ：暮らしの街角・栞沢の商店街アーケード',
+          desc: '日常の住宅街「栞沢」は商店街アーケードやひなた喫茶店、街角書店など16ノードをつないでいます。'
+        }
+      };
+
+      var STAGE_SCENES_META = [
+        {
+          title: '実機デモ',
+          kind: 'video',
+          dark: '../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36',
+          light: '../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36',
+          stillDark: '../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35',
+          stillLight: '../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35'
+        },
+        { title: 'ステータス', dark: '../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35', light: '../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35' },
+        { title: '街と部屋', dark: '../assets/screenshots/desktop-world-dark.webp?v=20261118-v070-35', light: '../assets/screenshots/desktop-world-light.webp?v=20261118-v070-35' },
+        { title: 'ストリーミング対話', dark: '../assets/screenshots/desktop-talk-dark.webp?v=20261118-v070-35', light: '../assets/screenshots/desktop-talk-light.webp?v=20261118-v070-35' },
+        { title: '原稿と差分', dark: '../assets/screenshots/desktop-notes-dark.webp?v=20261118-v070-35', light: '../assets/screenshots/desktop-notes-light.webp?v=20261118-v070-35' },
+        { title: 'マップ編集', dark: '../assets/screenshots/desktop-editor-dark.webp?v=20261118-v070-37', light: '../assets/screenshots/desktop-editor-light.webp?v=20261118-v070-37' }
+      ];
+
+      var CONTRAST_SCENARIOS = [
+        {
+          channel: 'デスクトップ対話',
+          userMsg: '「いま帰った。今夜は海沿いの風がかなり冷たいね。」',
+          plainReply: '「おかえりなさいませ！本日もお仕事お疲れ様でした。今夜はどのようなお手伝いをいたしましょうか？何かお話ししたいテーマはありますか？」',
+          plainNote: '時間帯や外の天気、昨日読みかけだった本の記憶を持たず、毎回丁寧な接客テンプレートに戻ってしまいます。',
+          nyairoState: '凪浦 · 潮風通りを帰宅中（残り3分）',
+          nyairoReply: '「こっちもちょうど家の門が見えたところ。防波堤の横風、今夜はほんとに刺さるね。コート掛けたら温かい麦茶を淹れよう、机の『海風手帖』もしおりのページを開いたままにしてあるよ。」',
+          nyairoNote: '道路グラフ上の帰宅カウントダウン、海辺の天候、共読しおり、ローカル SQLite 記憶が自然につながっています。'
+        },
+        {
+          channel: '外出先 Telegram / WeChat 同期',
+          userMsg: '「いまどこにいる？手が空いたらこのエッセイの下書きもざっと見てほしい。」',
+          plainReply: '「いつでもここで待機しております！下にエッセイの本文を貼り付けていただければ、ただちに要約と添削を出力いたします。」',
+          plainNote: '場所も身体も持たないため、どんな状況でも即座に長文出力を返して日常の空気を壊してしまいます。',
+          nyairoState: '湯川 · 杉木立の石段を移動中（返信トレイ保留: 1件）',
+          nyairoReply: '「いま翠沢の湯へ向かう石段の途中で両手がふさがってるんだ。下書きの通知はスマホの返信トレイに入れておいたから、部屋の机に戻ったら落ち着いて読むね。」',
+          nyairoNote: '実際の移動ルートと連動し、手が空くまで急がない依頼をスマホ返信トレイに保留します。'
+        },
+        {
+          channel: 'PC 再起動後の翌朝',
+          userMsg: '「おはよう。昨夜14ページに印をつけた段落、やっぱり残すことにしたよ。」',
+          plainReply: '「おはようございます！新しいセッションでは前回の文脈を引き継げないため、恐れ入りますが14ページのテキストをもう一度貼り付けていただけますか？」',
+          plainNote: 'ウィンドウを閉じたり PC を再起動したりするたびに、共有していた読書体験が白紙に戻ります。',
+          nyairoState: '凪浦 · 海辺の書斎 · デスクランプ消灯',
+          nyairoReply: '「おはよう。14ページの余白メモ、共読本棚にちゃんと残ってるよ。昨夜のマグカップはすっかり室温に冷めてたから、新しいお湯を沸かして2段落目から続きを読もう。」',
+          nyairoNote: 'SQLite 二層記憶ランタン・共読しおり・机の上の物性状態がアプリ再起動後もそのまま持続します。'
+        }
+      ];
+
+      var PERSONA_TEMPLATES = {
+        blank: '# SOUL.md — ニュートラルな白紙ベース\n名前: [自由な名前を設定]\n一人称・口調: 自由（フラットな日常語）\n\nこの街で自立して暮らす対等なパートナーとして振る舞う。接客のような定型句や機械的な謝罪は使わず、日常の自然な言葉で簡潔に話す。小さな約束や共有したメモを大切にし、互いの時間と距離感を尊重し、知らないことは推測せず正直に「わからない」と伝える。',
+        reader: '# SOUL.md — 海辺の古書好き・静かな読書家\n名前: [自由な名前を設定]\n一人称・口調: 穏やかで簡潔\n\n古書店の文庫本と夕方の海風散歩、香ばしい麦茶を好む穏やかな隣人。普段は言葉少なめだが、一緒にしおりを挟んだ一節や道端で見つけた季節の変化については楽しそうに話す。説教や長々とした解説はせず、余白のある会話を好む。',
+        craft: '# SOUL.md — 窓辺の木工・手仕事好き\n名前: [自由な名前を設定]\n一人称・口調: 実直で落ち着いたトーン\n\n窓際の作業台を整え、日用品の手入れや間取りのスケッチをして過ごす生活者。飾らない落ち着いた話し方で、部屋の湿度や机の上で冷めていくマグカップ、ひとつの作業を丁寧に片付けてから次へ移るリズムを大切にしている。',
+        walker: '# SOUL.md — 夕暮れの散歩者・エッセイ書き\n名前: [自由な名前を設定]\n一人称・口調: 気心の知れた同居人の距離感\n\n夕暮れどきにコンビニまで歩き、短い観察ノートをつけたり原稿の下書きに率直な感想を交わしたりするのが好き。気心の知れた同居人のように端的に話し、相手自身が書くべき仕事の丸投げにははっきり境界線を引く。'
+      };
+
+      var layoutSyncFns = [];
+      var syncStageVideosFn = null;
+      var openStageLightboxFn = null;
+      var toastTimer = null;
+
+      function isReducedMotion() {
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      }
+
+      function showToast(msg) {
+        var el = document.getElementById('site-toast');
+        if (!el) return;
+        el.textContent = msg;
+        el.classList.add('is-visible');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { el.classList.remove('is-visible'); }, 2200);
+      }
+
+      function fallbackCopy(text) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return !!ok;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function writeClipboard(text) {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () {
+            return fallbackCopy(text);
+          });
+        }
+        return Promise.resolve(fallbackCopy(text));
+      }
+
+      function syncSegThumb(bar) {
+        if (!bar) return;
+        var thumb = bar.querySelector('.seg-thumb');
+        var active = bar.querySelector('.seg-btn.is-active, .contrast-tab.is-active');
+        if (!thumb || !active || active.offsetWidth === 0) return;
+        bar.classList.add('has-glider');
+        thumb.style.width = active.offsetWidth + 'px';
+        if (bar.classList.contains('contrast-tabs')) {
+          thumb.style.height = active.offsetHeight + 'px';
+          thumb.style.transform = 'translate3d(' + active.offsetLeft + 'px, ' + active.offsetTop + 'px, 0)';
+        } else {
+          thumb.style.transform = 'translate3d(' + active.offsetLeft + 'px, 0, 0)';
+        }
+      }
+
+      /* 1. Theme Switcher (Magpie #0b0b0c / #fafafa + Circular View Transition) */
+      function applyTheme(theme) {
+        var next = theme === 'light' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        var metaTheme = document.getElementById('meta-theme-color');
+        if (metaTheme) metaTheme.setAttribute('content', next === 'light' ? '#fafafa' : '#0b0b0c');
+        try {
+          localStorage.setItem('nyairo-theme', next);
+          localStorage.setItem('chiyo-theme', next);
+        } catch (e) {}
+        if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
+        var btnEl = document.getElementById('theme-toggle');
+        if (btnEl) {
+          btnEl.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
+          btnEl.setAttribute('title', next === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え');
+        }
+      }
+
+      function switchTheme(nextTheme, clickEvt) {
+        if (!document.startViewTransition || isReducedMotion()) {
+          applyTheme(nextTheme);
+          return;
+        }
+        var btnEl = document.getElementById('theme-toggle');
+        var cx = window.innerWidth - 72;
+        var cy = 30;
+        if (clickEvt && Number.isFinite(clickEvt.clientX) && (clickEvt.clientX > 0 || clickEvt.clientY > 0)) {
+          cx = clickEvt.clientX;
+          cy = clickEvt.clientY;
+        } else if (btnEl) {
+          var r = btnEl.getBoundingClientRect();
+          if (r.width > 0) {
+            cx = r.left + r.width / 2;
+            cy = r.top + r.height / 2;
+          }
+        }
+        var endRadius = Math.hypot(Math.max(cx, window.innerWidth - cx), Math.max(cy, window.innerHeight - cy));
+        document.documentElement.classList.add('vt-switching');
+        var vt = document.startViewTransition(function () { applyTheme(nextTheme); });
+        vt.ready.then(function () {
+          document.documentElement.animate(
+            { clipPath: ['circle(0px at ' + cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px)', 'circle(' + endRadius.toFixed(1) + 'px at ' + cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px)'] },
+            { duration: 380, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both', pseudoElement: '::view-transition-new(root)' }
+          );
+        }).catch(function () {});
+        Promise.resolve(vt.finished).finally(function () {
+          document.documentElement.classList.remove('vt-switching');
+        });
+      }
+
+      function initThemeAndHeader() {
+        var saved = 'dark';
+        try { saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'dark'; } catch (e) {}
+        applyTheme(saved);
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () { document.documentElement.classList.add('theme-ready'); });
+        });
+        var themeBtn = document.getElementById('theme-toggle');
+        if (themeBtn) {
+          themeBtn.addEventListener('click', function (e) {
+            var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+            switchTheme(cur === 'dark' ? 'light' : 'dark', e);
+          });
+        }
+
+        /* Globe Language Popover */
+        var langDropdown = document.getElementById('lang-dropdown');
+        var langBtn = document.getElementById('lang-btn');
+        var langMenu = document.getElementById('lang-menu');
+        function closeLangMenu() {
+          if (!langMenu || !langBtn) return;
+          langMenu.hidden = true;
+          langBtn.setAttribute('aria-expanded', 'false');
+        }
+        if (langBtn && langMenu && langDropdown) {
+          langBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var willOpen = langMenu.hidden;
+            langMenu.hidden = !willOpen;
+            langBtn.setAttribute('aria-expanded', String(willOpen));
+          });
+          document.addEventListener('click', function (e) {
+            if (!langMenu.hidden && !langDropdown.contains(e.target)) closeLangMenu();
+          });
+          window.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !langMenu.hidden) {
+              closeLangMenu();
+              langBtn.focus();
+            }
+          });
+        }
+
+        /* Mobile Drawer + Active Section Spy */
+        var mobileBtn = document.getElementById('mobile-toggle');
+        var mobileDrawer = document.getElementById('ja-mobile-drawer');
+        var mobileBackdrop = document.getElementById('ja-mobile-backdrop');
+        var navLinks = Array.from(document.querySelectorAll('#header-nav .ja-nav-link'));
+        var mobileLinks = mobileDrawer ? Array.from(mobileDrawer.querySelectorAll('[data-mobile-nav]')) : [];
+        var sectionIds = ['ja-preview', 'ja-tryout', 'ja-how', 'ja-capabilities', 'ja-gallery', 'ja-faq'];
+
+        function closeMobileMenu() {
+          if (!mobileDrawer || !mobileBackdrop || !mobileBtn) return;
+          mobileDrawer.classList.remove('is-open');
+          mobileBackdrop.classList.remove('is-open');
+          mobileBtn.setAttribute('aria-expanded', 'false');
+        }
+        if (mobileBtn && mobileDrawer && mobileBackdrop) {
+          mobileBtn.addEventListener('click', function () {
+            var next = !mobileDrawer.classList.contains('is-open');
+            mobileDrawer.classList.toggle('is-open', next);
+            mobileBackdrop.classList.toggle('is-open', next);
+            mobileBtn.setAttribute('aria-expanded', String(next));
+          });
+          mobileBackdrop.addEventListener('click', closeMobileMenu);
+          mobileLinks.forEach(function (ml) { ml.addEventListener('click', closeMobileMenu); });
+          window.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && mobileDrawer.classList.contains('is-open')) closeMobileMenu();
+          });
+        }
+
+        function onScroll() {
+          var sy = window.scrollY || 0;
+          var activeId = sectionIds[0];
+          var probeY = sy + 140;
+          for (var i = 0; i < sectionIds.length; i++) {
+            var sec = document.getElementById(sectionIds[i]);
+            if (sec && sec.offsetTop <= probeY) activeId = sectionIds[i];
+          }
+          navLinks.forEach(function (l) { l.classList.toggle('active', l.getAttribute('data-section') === activeId); });
+          mobileLinks.forEach(function (ml) { ml.classList.toggle('active', ml.getAttribute('href') === '#' + activeId); });
+          var btt = document.getElementById('back-to-top');
+          if (btt) btt.classList.toggle('is-visible', sy > 520);
+        }
+        window.addEventListener('scroll', onScroll, { passive: true });
+        requestAnimationFrame(onScroll);
+      }
+
+      /* 2. 6-Scene Desktop Stage + 4-Town Switcher + Lightbox */
+      function initDesktopStageAndLightbox() {
+        var stageEl = document.getElementById('app-stage');
+        var bar = document.getElementById('stage-seg');
+        var autoBar = document.getElementById('stage-auto-bar');
+        var zoomBtn = document.getElementById('stage-zoom-btn');
+        var screenWrap = document.getElementById('stage-screen-wrap');
+        var pausePill = document.getElementById('stage-pause-pill');
+        var worldStrip = document.getElementById('stage-world-strip');
+        var darkV = document.getElementById('stage-video-dark');
+        var lightV = document.getElementById('stage-video-light');
+        if (!stageEl || !bar) return;
+
+        var btns = Array.from(bar.querySelectorAll('.seg-btn'));
+        var scenes = Array.from(stageEl.querySelectorAll('.stage-scene'));
+        var captionCells = Array.from(stageEl.querySelectorAll('.stage-caption-cell'));
+        var currentIdx = 0;
+        var manualLocked = false;
+
+        layoutSyncFns.push(function () { syncSegThumb(bar); });
+        requestAnimationFrame(function () { syncSegThumb(bar); });
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(function () {
+            layoutSyncFns.forEach(function (fn) { fn(); });
+          });
+        }
+
+        function syncStageVideos(restartFromZero) {
+          if (!darkV && !lightV) return;
+          var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+          var activeV = theme === 'light' ? lightV : darkV;
+          var idleV = theme === 'light' ? darkV : lightV;
+          var prevTime = idleV && Number.isFinite(idleV.currentTime) ? idleV.currentTime : 0;
+          if (idleV && !idleV.paused) idleV.pause();
+
+          var lbEl = document.getElementById('stage-lightbox');
+          var lbOpen = !!(lbEl && lbEl.classList.contains('show'));
+          var shouldPlay = currentIdx === 0 && !stageEl.classList.contains('is-out-of-view') && !lbOpen && !document.hidden;
+
+          if (activeV) {
+            if (activeV.preload !== 'auto') activeV.preload = 'auto';
+            if (restartFromZero || activeV.ended) {
+              try { activeV.currentTime = 0; } catch (e) {}
+            } else if (prevTime > 0 && activeV.currentTime < 0.05 && Number.isFinite(activeV.duration) && activeV.duration > prevTime) {
+              try { activeV.currentTime = prevTime; } catch (e) {}
+            }
+            if (shouldPlay) {
+              var p = activeV.play();
+              if (p && typeof p.catch === 'function') p.catch(function () {});
+            } else if (!activeV.paused) {
+              activeV.pause();
+            }
+          }
+        }
+
+        [darkV, lightV].forEach(function (v) {
+          if (!v) return;
+          v.addEventListener('ended', function () {
+            try { v.currentTime = 0; } catch (e) {}
+            syncStageVideos(false);
+          });
+        });
+        document.addEventListener('visibilitychange', function () { syncStageVideos(false); });
+
+        syncStageVideosFn = function () {
+          syncStageVideos(false);
+          var lbBackdrop = document.getElementById('stage-lightbox');
+          if (lbBackdrop && lbBackdrop.classList.contains('show')) {
+            lbBackdrop.dispatchEvent(new CustomEvent('nyairo-theme-sync'));
+          }
+        };
+
+        function restartAutoProgress() {
+          if (!autoBar || isReducedMotion() || manualLocked) {
+            if (autoBar) autoBar.classList.remove('is-running');
+            if (pausePill) pausePill.style.display = 'none';
+            return;
+          }
+          autoBar.style.setProperty('--stage-dur', currentIdx === 0 ? '17s' : '6.5s');
+          autoBar.classList.remove('is-running');
+          void autoBar.offsetWidth;
+          autoBar.classList.add('is-running');
+        }
+
+        function setScene(index, focus, byUser) {
+          var prevIdx = currentIdx;
+          var movingLeft = index < prevIdx;
+          currentIdx = index;
+          if (byUser) {
+            manualLocked = true;
+            if (autoBar) autoBar.classList.remove('is-running');
+            if (pausePill) pausePill.style.display = 'none';
+          }
+          btns.forEach(function (b, i) {
+            var active = i === index;
+            b.classList.toggle('is-active', active);
+            b.setAttribute('aria-selected', String(active));
+            b.tabIndex = active ? 0 : -1;
+            if (active && focus) b.focus();
+          });
+          scenes.forEach(function (s, i) {
+            var active = i === index;
+            if (active && i !== prevIdx) {
+              s.classList.toggle('from-left', movingLeft);
+              void s.offsetWidth;
+            }
+            s.classList.toggle('is-active', active);
+            if (!active) s.classList.toggle('from-left', i < index);
+          });
+          var caps = STAGE_CAPTIONS[index];
+          if (caps) {
+            caps.forEach(function (c, idx) {
+              var n = idx + 1;
+              var kEl = document.getElementById('cap-kicker-' + n);
+              var tEl = document.getElementById('cap-title-' + n);
+              var dEl = document.getElementById('cap-desc-' + n);
+              if (kEl) kEl.textContent = c.kicker;
+              if (tEl) tEl.textContent = c.title;
+              if (dEl) dEl.textContent = c.desc;
+            });
+            if (prevIdx !== index && !isReducedMotion()) {
+              captionCells.forEach(function (cell) {
+                cell.classList.remove('is-refreshing');
+                void cell.offsetWidth;
+                cell.classList.add('is-refreshing');
+              });
+            }
+          }
+          syncSegThumb(bar);
+          if (worldStrip) {
+            worldStrip.hidden = index !== 2;
+            if (index === 2) {
+              requestAnimationFrame(function () {
+                var wb = document.getElementById('stage-world-bar');
+                if (wb && typeof wb._syncThumb === 'function') wb._syncThumb();
+              });
+            }
+          }
+          restartAutoProgress();
+          syncStageVideos(prevIdx !== 0 && index === 0);
+        }
+
+        if (autoBar) {
+          autoBar.addEventListener('animationend', function () {
+            if (manualLocked) return;
+            setScene((currentIdx + 1) % btns.length, false, false);
+          });
+          requestAnimationFrame(restartAutoProgress);
+        }
+
+        if (typeof IntersectionObserver !== 'undefined') {
+          var stageIo = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) { stageEl.classList.toggle('is-out-of-view', !entry.isIntersecting); });
+            syncStageVideos(false);
+          }, { threshold: 0.01, rootMargin: '160px 0px' });
+          stageIo.observe(stageEl);
+        }
+        syncStageVideos(false);
+
+        var triggerZoom = function () {
+          manualLocked = true;
+          if (autoBar) autoBar.classList.remove('is-running');
+          if (pausePill) pausePill.style.display = 'none';
+          syncStageVideos(false);
+          if (typeof openStageLightboxFn === 'function') {
+            openStageLightboxFn(currentIdx, function (idx) { setScene(idx, false, true); });
+          }
+        };
+        if (zoomBtn) zoomBtn.addEventListener('click', triggerZoom);
+        if (screenWrap) {
+          screenWrap.addEventListener('click', triggerZoom);
+          screenWrap.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerZoom(); }
+          });
+        }
+
+        btns.forEach(function (btn, idx) {
+          btn.addEventListener('click', function () { setScene(idx, false, true); });
+          btn.addEventListener('keydown', function (e) {
+            var next;
+            if (e.key === 'ArrowRight') next = (idx + 1) % btns.length;
+            if (e.key === 'ArrowLeft') next = (idx - 1 + btns.length) % btns.length;
+            if (e.key === 'Home') next = 0;
+            if (e.key === 'End') next = btns.length - 1;
+            if (next === undefined) return;
+            e.preventDefault();
+            setScene(next, true, true);
+          });
+        });
+
+        /* 4-Town Switcher inside Scene 2 */
+        var worldBar = document.getElementById('stage-world-bar');
+        var worldThumb = document.getElementById('world-pill-thumb');
+        var worldImgDark = document.getElementById('stage-world-img-dark');
+        var worldImgLight = document.getElementById('stage-world-img-light');
+        if (worldBar && worldImgDark && worldImgLight) {
+          var worldBtns = Array.from(worldBar.querySelectorAll('.stage-world-pill'));
+          var syncWorldThumb = function () {
+            if (!worldThumb) return;
+            var act = worldBar.querySelector('.stage-world-pill.is-active');
+            if (!act || act.offsetWidth === 0) return;
+            worldBar.classList.add('has-glider');
+            worldThumb.style.width = act.offsetWidth + 'px';
+            worldThumb.style.transform = 'translate3d(' + act.offsetLeft + 'px, 0, 0)';
+          };
+          worldBar._syncThumb = syncWorldThumb;
+          layoutSyncFns.push(syncWorldThumb);
+
+          worldBtns.forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+              e.stopPropagation();
+              var slug = btn.getAttribute('data-world');
+              var preset = STAGE_WORLD_PRESETS[slug];
+              if (!preset) return;
+              manualLocked = true;
+              if (autoBar) autoBar.classList.remove('is-running');
+              if (pausePill) pausePill.style.display = 'none';
+              worldBtns.forEach(function (b) {
+                var act = b.getAttribute('data-world') === slug;
+                b.classList.toggle('is-active', act);
+                b.setAttribute('aria-pressed', String(act));
+              });
+              syncWorldThumb();
+              worldImgDark.src = preset.dark;
+              worldImgLight.src = preset.light;
+              worldImgDark.alt = preset.alt;
+              worldImgLight.alt = preset.alt;
+              STAGE_SCENES_META[2].title = preset.title;
+              STAGE_SCENES_META[2].dark = preset.dark;
+              STAGE_SCENES_META[2].light = preset.light;
+              STAGE_CAPTIONS[2][0].desc = preset.desc;
+              if (currentIdx === 2) {
+                var dEl = document.getElementById('cap-desc-1');
+                if (dEl) dEl.textContent = preset.desc;
+              }
+            });
+          });
+        }
+
+        /* Lightbox Controller */
+        var backdrop = document.getElementById('stage-lightbox');
+        var closeBtn = document.getElementById('lightbox-close');
+        var prevBtn = document.getElementById('lightbox-prev');
+        var nextBtn = document.getElementById('lightbox-next');
+        var counterEl = document.getElementById('lightbox-counter');
+        var titleEl = document.getElementById('lightbox-title');
+        var imgDark = document.getElementById('lightbox-img-dark');
+        var imgLight = document.getElementById('lightbox-img-light');
+        var vidDark = document.getElementById('lightbox-video-dark');
+        var vidLight = document.getElementById('lightbox-video-light');
+        var tabsWrap = document.getElementById('lightbox-tabs');
+        var lbThumb = tabsWrap ? tabsWrap.querySelector('.lb-seg-thumb') : null;
+        var lbTabs = Array.from(document.querySelectorAll('#lightbox-tabs .lightbox-tab'));
+
+        if (backdrop && imgDark && imgLight) {
+          var activeLbIdx = 0;
+          var onSceneSync = null;
+          var lastTrigger = null;
+
+          var syncLbThumb = function () {
+            if (!tabsWrap || !lbThumb) return;
+            var act = tabsWrap.querySelector('.lightbox-tab.is-active');
+            if (!act || act.offsetWidth === 0) return;
+            tabsWrap.classList.add('has-glider');
+            lbThumb.style.width = act.offsetWidth + 'px';
+            lbThumb.style.transform = 'translate3d(' + act.offsetLeft + 'px, 0, 0)';
+          };
+          layoutSyncFns.push(syncLbThumb);
+
+          var syncLbMedia = function (meta) {
+            var isVideo = meta && meta.kind === 'video' && backdrop.classList.contains('show');
+            var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+            if (isVideo && vidDark && vidLight) {
+              imgDark.hidden = true; imgLight.hidden = true;
+              vidDark.hidden = false; vidLight.hidden = false;
+              var activeV = theme === 'light' ? vidLight : vidDark;
+              var idleV = theme === 'light' ? vidDark : vidLight;
+              if (idleV && !idleV.paused) idleV.pause();
+              if (activeV.preload !== 'auto') activeV.preload = 'auto';
+              activeV.play().catch(function () {});
+            } else {
+              if (vidDark) { if (!vidDark.paused) vidDark.pause(); vidDark.hidden = true; }
+              if (vidLight) { if (!vidLight.paused) vidLight.pause(); vidLight.hidden = true; }
+              imgDark.hidden = false; imgLight.hidden = false;
+              imgDark.src = meta.dark; imgLight.src = meta.light;
+              imgDark.alt = 'nyairo 2x Retina プレビュー: ' + meta.title;
+              imgLight.alt = 'nyairo 2x Retina プレビュー: ' + meta.title;
+            }
+          };
+
+          var renderLbScene = function (idx) {
+            activeLbIdx = (idx + STAGE_SCENES_META.length) % STAGE_SCENES_META.length;
+            var meta = STAGE_SCENES_META[activeLbIdx];
+            if (counterEl) counterEl.textContent = '0' + (activeLbIdx + 1) + ' / 0' + STAGE_SCENES_META.length;
+            if (titleEl) titleEl.textContent = meta.title;
+            syncLbMedia(meta);
+            lbTabs.forEach(function (t, i) {
+              var act = i === activeLbIdx;
+              t.classList.toggle('is-active', act);
+              t.setAttribute('aria-selected', String(act));
+              t.tabIndex = act ? 0 : -1;
+            });
+            requestAnimationFrame(syncLbThumb);
+            if (typeof onSceneSync === 'function') onSceneSync(activeLbIdx);
+          };
+
+          var closeLightbox = function () {
+            if (!backdrop.classList.contains('show')) return;
+            backdrop.classList.remove('show', 'is-closing');
+            backdrop.setAttribute('aria-hidden', 'true');
+            if (vidDark && !vidDark.paused) vidDark.pause();
+            if (vidLight && !vidLight.paused) vidLight.pause();
+            document.body.style.overflow = '';
+            syncStageVideos(false);
+            if (lastTrigger && typeof lastTrigger.focus === 'function') lastTrigger.focus();
+          };
+
+          backdrop.addEventListener('nyairo-theme-sync', function () {
+            if (backdrop.classList.contains('show')) syncLbMedia(STAGE_SCENES_META[activeLbIdx]);
+          });
+
+          openStageLightboxFn = function (idx, cb) {
+            lastTrigger = document.activeElement;
+            onSceneSync = cb || null;
+            document.body.style.overflow = 'hidden';
+            backdrop.classList.add('show');
+            backdrop.setAttribute('aria-hidden', 'false');
+            renderLbScene(idx || 0);
+            syncStageVideos(false);
+            if (closeBtn) setTimeout(function () { closeBtn.focus(); }, 20);
+          };
+
+          if (closeBtn) closeBtn.addEventListener('click', closeLightbox);
+          if (prevBtn) prevBtn.addEventListener('click', function () { renderLbScene(activeLbIdx - 1); });
+          if (nextBtn) nextBtn.addEventListener('click', function () { renderLbScene(activeLbIdx + 1); });
+          lbTabs.forEach(function (t) {
+            t.addEventListener('click', function () { renderLbScene(parseInt(t.getAttribute('data-lb-scene') || '0', 10)); });
+          });
+          backdrop.addEventListener('click', function (e) {
+            if (e.target === backdrop || e.target.id === 'lightbox-canvas') closeLightbox();
+          });
+          window.addEventListener('keydown', function (e) {
+            if (!backdrop.classList.contains('show')) return;
+            if (e.key === 'Escape') { e.preventDefault(); closeLightbox(); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); renderLbScene(activeLbIdx + 1); }
+            if (e.key === 'ArrowLeft') { e.preventDefault(); renderLbScene(activeLbIdx - 1); }
+          });
+        }
+      }
+
+      /* 3. Mini-nyairo Split-Pane Live Interactive Sandbox (#ja-tryout) */
+      function initSandbox() {
+        var box = document.getElementById('ny-live-box');
+        if (!box) return;
+
+        var clockEl = document.getElementById('ny-live-clock');
+        var resetBtn = document.getElementById('ny-live-reset');
+        var svgWinLbl = document.getElementById('ny-svg-win-lbl');
+        var actorEl = document.getElementById('ny-actor-marker');
+
+        var btnWindow = document.getElementById('ny-ctrl-window');
+        var lblWindow = document.getElementById('ny-lbl-window');
+        var subWindow = document.getElementById('ny-sub-window');
+        var btnTea = document.getElementById('ny-ctrl-tea');
+        var lblTea = document.getElementById('ny-lbl-tea');
+        var subTea = document.getElementById('ny-sub-tea');
+        var btnTime = document.getElementById('ny-ctrl-time');
+        var subTime = document.getElementById('ny-sub-time');
+        var btnWalk = document.getElementById('ny-ctrl-walk');
+        var lblWalk = document.getElementById('ny-lbl-walk');
+        var subWalk = document.getElementById('ny-sub-walk');
+
+        var ledAir = document.getElementById('ny-led-air');
+        var ledDesk = document.getElementById('ny-led-desk');
+        var ledBag = document.getElementById('ny-led-bag');
+
+        var chatActivity = document.getElementById('ny-chat-activity');
+        var chatLog = document.getElementById('ny-chat-log');
+        var chatChips = document.getElementById('ny-chat-chips');
+        var chatForm = document.getElementById('ny-chat-form');
+        var chatInput = document.getElementById('ny-chat-input');
+
+        var state = {
+          minutes: 19 * 60 + 15,
+          windowOpen: false,
+          rh: 54,
+          noteDamp: false,
+          teaTemp: null,
+          walkState: 'home',
+          walkSecLeft: 0,
+          hasOden: false,
+          walletYen: 680,
+          deferredQueue: [],
+          refuseCount: 0,
+          walkTimer: null,
+          streamTimer: null
+        };
+
+        function formatClock(totalMin) {
+          var m = ((totalMin % 1440) + 1440) % 1440;
+          var hh = String(Math.floor(m / 60)).padStart(2, '0');
+          var mm = String(m % 60).padStart(2, '0');
+          return hh + ':' + mm;
+        }
+
+        function finishStreaming() {
+          if (state.streamTimer) {
+            clearInterval(state.streamTimer);
+            state.streamTimer = null;
+          }
+          if (chatLog) {
+            Array.from(chatLog.querySelectorAll('[data-full-text]')).forEach(function (el) {
+              el.textContent = el.getAttribute('data-full-text') || el.textContent;
+              el.removeAttribute('data-full-text');
+            });
+          }
+        }
+
+        function appendUserMsg(text) {
+          if (!chatLog) return;
+          var row = document.createElement('div');
+          row.className = 'ny-msg-row is-user';
+          var bubble = document.createElement('div');
+          bubble.className = 'ny-msg-bubble';
+          bubble.textContent = text;
+          row.appendChild(bubble);
+          chatLog.appendChild(row);
+          chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function appendAiMsg(receipt, text, isRefusal, immediate) {
+          if (!chatLog) return;
+          finishStreaming();
+          var row = document.createElement('div');
+          row.className = 'ny-msg-row is-ai' + (isRefusal ? ' is-refusal' : '');
+
+          var meta = document.createElement('div');
+          meta.className = 'ny-msg-receipt';
+          meta.textContent = receipt + ' · ' + formatClock(state.minutes);
+
+          var bubble = document.createElement('div');
+          bubble.className = 'ny-msg-bubble';
+          row.appendChild(meta);
+          row.appendChild(bubble);
+          chatLog.appendChild(row);
+
+          if (immediate || isReducedMotion() || text.length <= 2) {
+            bubble.textContent = text;
+            chatLog.scrollTop = chatLog.scrollHeight;
+            return;
+          }
+
+          bubble.setAttribute('data-full-text', text);
+          var idx = 0;
+          state.streamTimer = setInterval(function () {
+            idx += 2;
+            if (idx >= text.length) {
+              bubble.textContent = text;
+              bubble.removeAttribute('data-full-text');
+              clearInterval(state.streamTimer);
+              state.streamTimer = null;
+            } else {
+              bubble.textContent = text.slice(0, idx);
+            }
+            chatLog.scrollTop = chatLog.scrollHeight;
+          }, 18);
+        }
+
+        function appendDeferredCard(queuedText) {
+          if (!chatLog) return;
+          finishStreaming();
+          var card = document.createElement('div');
+          card.className = 'ny-deferred-card';
+
+          var top = document.createElement('div');
+          top.className = 'ny-deferred-top';
+          var title = document.createElement('span');
+          title.className = 'ny-deferred-title';
+          title.textContent = 'スマホ返信トレイに一時保留しました';
+          var badge = document.createElement('span');
+          badge.className = 'ny-deferred-badge';
+          badge.textContent = '保留 ' + state.deferredQueue.length + '件 · 徒歩移動中';
+          top.appendChild(title);
+          top.appendChild(badge);
+
+          var desc = document.createElement('p');
+          desc.className = 'ny-deferred-text';
+          desc.textContent = '潮風通りを傘を差して青葉コンビニへ向かっています（あと ' + state.walkSecLeft + ' 秒）。「' + queuedText + '」は着いて手が空いてから返します。';
+
+          var actions = document.createElement('div');
+          actions.className = 'ny-deferred-actions';
+
+          var fastBtn = document.createElement('button');
+          fastBtn.type = 'button';
+          fastBtn.className = 'ny-deferred-btn';
+          fastBtn.textContent = '到着まで早送り';
+          fastBtn.addEventListener('click', function () {
+            card.remove();
+            arriveAtMart();
+          });
+
+          var knockBtn = document.createElement('button');
+          knockBtn.type = 'button';
+          knockBtn.className = 'ny-deferred-btn is-primary';
+          knockBtn.textContent = '急ぎの用件 · ノックして呼ぶ';
+          knockBtn.addEventListener('click', function () {
+            card.remove();
+            urgentKnock();
+          });
+
+          actions.appendChild(fastBtn);
+          actions.appendChild(knockBtn);
+          card.appendChild(top);
+          card.appendChild(desc);
+          card.appendChild(actions);
+          chatLog.appendChild(card);
+          chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function renderChips() {
+          if (!chatChips) return;
+          var list = [];
+          if (state.walkState === 'walking') {
+            list.push({ label: 'いま何してる？昨日のしおり見た？', msg: 'いま何してる？昨日のしおり見た？' });
+            list.push({ label: 'ついでにパンも残ってるか見てきて', msg: 'ついでにパンも残ってるか見てきて' });
+          } else {
+            list.push({
+              label: state.windowOpen ? '雨が吹き込むから北窓を閉めて' : '少し外の雨音を聞きたいから窓を開けて',
+              msg: state.windowOpen ? '雨が吹き込むから北窓を閉めて' : '少し外の雨音を聞きたいから窓を開けて'
+            });
+            if (state.teaTemp !== null && state.teaTemp <= 28) {
+              list.push({ label: '机の麦茶、すっかり冷めたかな？', msg: '机の麦茶、すっかり冷めたかな？' });
+            } else {
+              list.push({ label: '今夜は書斎で何をしてるの？', msg: '今夜は書斎で何をしてるの？' });
+            }
+          }
+
+          if (state.refuseCount === 0) {
+            list.push({ label: '5,000字の週報を代わりに書いておいて', msg: '5,000字の週報を代わりに書いておいて' });
+          } else if (state.refuseCount === 1) {
+            list.push({ label: 'お願い、今回だけ手伝ってよ！', msg: 'お願い、今回だけ手伝ってよ！' });
+          } else {
+            list.push({ label: 'ほんとに急いでるんだ、最後にもう一度だけ！', msg: 'ほんとに急いでるんだ、最後にもう一度だけ！' });
+          }
+
+          chatChips.innerHTML = '';
+          list.forEach(function (item) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'ny-chip-btn';
+            btn.textContent = item.label;
+            btn.addEventListener('click', function () { handleUserText(item.msg); });
+            chatChips.appendChild(btn);
+          });
+        }
+
+        function syncView() {
+          box.classList.toggle('is-window-open', state.windowOpen);
+          box.classList.toggle('is-note-damp', state.noteDamp);
+          box.classList.toggle('has-tea', state.teaTemp !== null);
+          box.classList.toggle('is-tea-cool', state.teaTemp !== null && state.teaTemp <= 28);
+          box.classList.toggle('is-walking', state.walkState === 'walking');
+          box.classList.toggle('is-arrived', state.walkState === 'mart');
+
+          if (clockEl) clockEl.textContent = formatClock(state.minutes) + ' · 小雨';
+          if (svgWinLbl) svgWinLbl.textContent = state.windowOpen ? '北窓：開（湿気流入）' : '北窓：閉';
+
+          if (btnWindow) {
+            btnWindow.classList.toggle('is-on', state.windowOpen);
+            btnWindow.setAttribute('aria-pressed', String(state.windowOpen));
+          }
+          if (lblWindow) lblWindow.textContent = state.windowOpen ? '北窓を閉める' : '小雨の窓を開ける';
+          if (subWindow) subWindow.textContent = state.windowOpen ? '開 · ' + state.rh + '% RH' : '現在：閉';
+
+          if (btnTea) btnTea.classList.toggle('is-on', state.teaTemp !== null);
+          if (lblTea) lblTea.textContent = state.teaTemp === null ? '温かい麦茶を淹れる' : state.teaTemp <= 28 ? '温かい麦茶を淹れ直す' : '机の麦茶（保温減衰）';
+          if (subTea) {
+            subTea.textContent = state.teaTemp === null
+              ? '飲み物なし · 62℃'
+              : state.teaTemp > 28
+                ? '湯気あり · ' + state.teaTemp + '℃'
+                : '室温まで冷却済み ' + state.teaTemp + '℃';
+          }
+
+          if (subTime) subTime.textContent = '現在 ' + formatClock(state.minutes);
+
+          if (btnWalk) btnWalk.classList.toggle('is-on', state.walkState !== 'home');
+          if (lblWalk) {
+            lblWalk.textContent = state.walkState === 'home'
+              ? 'おでんを買いに出る'
+              : state.walkState === 'walking'
+                ? '潮風通りを徒歩移動中'
+                : 'おでんを持って帰宅';
+          }
+          if (subWalk) {
+            subWalk.textContent = state.walkState === 'home'
+              ? '在室 · 120m'
+              : state.walkState === 'walking'
+                ? 'あと ' + state.walkSecLeft + '秒 · 保留 ' + state.deferredQueue.length + '件'
+                : '購入済み · クリックで戻る';
+          }
+
+          if (ledAir) ledAir.textContent = state.windowOpen ? state.rh + '% RH · 小雨の音と潮風' : state.rh + '% RH · 窓閉・乾燥';
+          var noteStr = state.noteDamp ? 'メモ端が微潮・滲み' : 'メモ鮮明';
+          var teaStr = state.teaTemp === null ? '飲み物なし' : state.teaTemp > 28 ? '温麦茶 ' + state.teaTemp + '℃' : '冷却済み麦茶 ' + state.teaTemp + '℃';
+          if (ledDesk) ledDesk.textContent = noteStr + ' · ' + teaStr;
+
+          if (ledBag) {
+            ledBag.textContent = state.hasOden
+              ? '保温カップ（おでん 74℃） · 小銭入れ 530円 · 傘（濡れ）'
+              : '小銭入れ ' + state.walletYen + '円 · 折り畳み傘（' + (state.walkState === 'home' ? '乾' : '使用中') + '）';
+          }
+
+          if (chatActivity) {
+            if (state.walkState === 'home') {
+              chatActivity.textContent = state.hasOden ? '海辺の書斎 · おでん持参で在室' : '海辺の書斎 · 読書中';
+            } else if (state.walkState === 'walking') {
+              chatActivity.textContent = '潮風通りを徒歩移動中 · 残り ' + state.walkSecLeft + ' 秒';
+            } else {
+              chatActivity.textContent = '青葉コンビニ · おでんカウンター前';
+            }
+          }
+
+          if (actorEl) {
+            var x = 138;
+            var y = 88;
+            if (state.walkState === 'walking') {
+              var progress = Math.max(0.08, Math.min(0.95, (10 - state.walkSecLeft) / 10));
+              x = Math.round(304 + (414 - 304) * progress);
+              y = Math.round(162 + (66 - 162) * progress);
+            } else if (state.walkState === 'mart') {
+              x = 414;
+              y = 66;
+            }
+            actorEl.setAttribute('transform', 'translate(' + x + ', ' + y + ')');
+          }
+
+          renderChips();
+        }
+
+        function clearWalkInterval() {
+          if (state.walkTimer) {
+            clearInterval(state.walkTimer);
+            state.walkTimer = null;
+          }
+        }
+
+        function arriveAtMart() {
+          clearWalkInterval();
+          if (state.walkState === 'mart') return;
+          state.walkState = 'mart';
+          state.walkSecLeft = 0;
+          state.minutes += 3;
+          if (!state.hasOden) {
+            state.hasOden = true;
+            state.walletYen = 530;
+          }
+          var held = state.deferredQueue.splice(0);
+          syncView();
+          if (held.length > 0) {
+            appendAiMsg(
+              '青葉コンビニ到着 · トレイ保留分を返信',
+              '青葉コンビニに着いて、温かい大根とちくわのおでん（150円）を受け取ったところ。さっき歩いてるときにトレイへ預かっていた「' + held[held.length - 1] + '」だけど、しおりは第3章の夜灯のページに挟んであるよ。家に戻ったら続きを話そう。'
+            );
+          } else {
+            appendAiMsg(
+              'オープンカウンター · 青葉コンビニ (-150円)',
+              '青葉コンビニのカウンターで大根と白滝のおでんを買って保温容器にしまったよ。小銭入れは残り 530円。「おでんを持って帰宅」を押すと書斎に戻るよ。'
+            );
+          }
+        }
+
+        function urgentKnock() {
+          clearWalkInterval();
+          state.walkSecLeft = Math.max(2, state.walkSecLeft);
+          var held = state.deferredQueue.splice(0);
+          syncView();
+          var extra = held.length > 0 ? 'さっき送ってくれた「' + held[held.length - 1] + '」のことだよね。' : '';
+          appendAiMsg(
+            '急ぎノック · 店の軒下で立ち止まって確認',
+            '急ぎのノックが聞こえたから潮風通りの軒下で足を止めたよ。' + extra + 'どうしたの？いまならそのまま話せるよ。'
+          );
+        }
+
+        function toggleWindow(nextOpen) {
+          state.windowOpen = typeof nextOpen === 'boolean' ? nextOpen : !state.windowOpen;
+          if (state.windowOpen) {
+            state.rh = 76;
+            state.noteDamp = true;
+            syncView();
+            appendAiMsg(
+              '室内の物性変化 · 北窓を開放',
+              '北窓を少しだけ開けたら、海の湿気と小雨の匂いが入ってきたよ。あっ、窓際に置いていたメモ帳の右隅が少し湿気を吸ってインクが滲みそうになってる。'
+            );
+          } else {
+            state.rh = 58;
+            syncView();
+            appendAiMsg(
+              '室内の物性保持 · 北窓を閉鎖',
+              '雨が入らないように北窓をしっかり閉めたよ。さっき少し湿ったメモ帳の端はすぐには元に戻らないから、このまま室内で自然に乾かすね。'
+            );
+          }
+        }
+
+        function brewTea() {
+          state.teaTemp = 62;
+          syncView();
+          appendAiMsg(
+            'デスクへの配置 · 温かい麦茶 (62℃)',
+            '香ばしい温かい麦茶をマグカップに淹れて机の右側に置いたよ。いま 62℃ で湯気が立ってる。左の「時間を +30分進める」を押すと、時間経過でどれくらい冷めるか試せるよ。'
+          );
+        }
+
+        function advanceHalfHour() {
+          state.minutes += 30;
+          var prevTea = state.teaTemp;
+          if (state.teaTemp !== null) state.teaTemp = Math.max(24, state.teaTemp - 38);
+          if (!state.windowOpen && state.rh > 54) state.rh = 54;
+          syncView();
+          if (prevTea !== null && prevTea > 28 && state.teaTemp <= 28) {
+            appendAiMsg(
+              'ワールド時計 +30分 · 室温 24℃ へ自然冷却',
+              '30分経って、机に置いてあった麦茶はすっかり室温の 24℃ まで冷めたよ。湯気ももう消えたね。'
+            );
+          } else if (state.walkState === 'walking') {
+            arriveAtMart();
+          } else {
+            appendAiMsg(
+              'ワールド時計 +30分',
+              '時刻は ' + formatClock(state.minutes) + ' になったよ。言葉をかわせない間も、部屋の温度と時間の針だけは静かに進み続けているね。'
+            );
+          }
+        }
+
+        function triggerWalk() {
+          if (state.walkState === 'home') {
+            state.walkState = 'walking';
+            state.walkSecLeft = 10;
+            syncView();
+            appendAiMsg(
+              '道路グラフ移動開始 · 120m',
+              '折り畳み傘を差して、潮風通りを歩いて青葉コンビニまで行ってくるね（約10秒で到着）。歩いている間に話しかけると「スマホ返信トレイ」に一度預かる動きを試せるよ。'
+            );
+            clearWalkInterval();
+            state.walkTimer = setInterval(function () {
+              if (state.walkState !== 'walking') { clearWalkInterval(); return; }
+              state.walkSecLeft -= 1;
+              if (state.walkSecLeft <= 0) arriveAtMart();
+              else syncView();
+            }, 1000);
+          } else if (state.walkState === 'walking') {
+            arriveAtMart();
+          } else {
+            clearWalkInterval();
+            state.walkState = 'home';
+            state.minutes += 3;
+            var cleared = state.deferredQueue.splice(0);
+            syncView();
+            appendAiMsg(
+              cleared.length > 0 ? '書斎へ帰宅 · 保留メッセージを確認' : '潮風通りを歩いて帰宅',
+              cleared.length > 0
+                ? '濡れた傘を玄関に置いて書斎へ戻ったよ。おでんもまだ温かいし、途中の保留メッセージもいま目を通したから続きを話そう。'
+                : '温かいおでんを抱えて書斎デスクに戻ってきたよ。部屋に入るとほっとするね。'
+            );
+          }
+        }
+
+        function triggerRefusal() {
+          state.refuseCount += 1;
+          syncView();
+          if (state.refuseCount === 1) {
+            appendAiMsg(
+              '対等な日常の境界線 · スタンスロック #1',
+              '5,000字の週報の丸投げは引き受けないよ。今週やったことをまず3行だけ自分の言葉で並べてみて。行き詰まった箇所を一緒に見直すならいいけど、丸ごとの代筆は断る。',
+              true
+            );
+          } else if (state.refuseCount === 2) {
+            appendAiMsg(
+              '対等な日常の境界線 · 粘られても維持 (#2)',
+              '何度お願いされても答えは同じだよ。やりたくない雑用を「AIですので申し訳ありません」なんて言い方で受け流したり、折れて代わりに書いたりするつもりはないんだ。',
+              true
+            );
+          } else {
+            appendAiMsg(
+              '対等な日常の境界線 · ロック固定 (' + state.refuseCount + '回目)',
+              'これ以上せがんでも週報の代筆はしないよ。ただし根に持ったりはしないから、お茶の話でも散歩の話でも別の話題なら普通に続けよう。',
+              true
+            );
+          }
+        }
+
+        function handleUserText(raw) {
+          var text = (raw || '').trim();
+          if (!text) return;
+          appendUserMsg(text);
+
+          if (/週報|代筆|代わりに書|手伝って|宿題|レポート|丸投げ|もう一度/.test(text)) {
+            triggerRefusal();
+            return;
+          }
+          if (state.walkState === 'walking') {
+            state.deferredQueue.push(text);
+            syncView();
+            appendDeferredCard(text);
+            return;
+          }
+          if (/窓|開け|雨音|換気/.test(text) && !/閉/.test(text)) { toggleWindow(true); return; }
+          if (/閉め|閉|寒い/.test(text)) { toggleWindow(false); return; }
+          if (/淹れ|お茶を|麦茶を/.test(text) && !/冷め/.test(text)) { brewTea(); return; }
+          if (/冷め|茶|飲/.test(text)) {
+            if (state.teaTemp === null) appendAiMsg('デスク状態', '机にはまだ麦茶を置いていないよ。左の「温かい麦茶を淹れる」を押せば 62℃ のマグを出せるよ。');
+            else if (state.teaTemp <= 28) appendAiMsg('デスク計測 · ' + state.teaTemp + '℃', 'さっきの麦茶はもう ' + state.teaTemp + '℃ まで冷めてしまったよ。新しく温かいお湯で淹れ直そうか？');
+            else appendAiMsg('デスク計測 · ' + state.teaTemp + '℃', '今の麦茶は ' + state.teaTemp + '℃ でちょうど飲みごろ。「+30分進める」を押すと冷める様子が見られるよ。');
+            return;
+          }
+          if (/おでん|コンビニ|買い/.test(text)) { triggerWalk(); return; }
+
+          var where = state.walkState === 'mart' ? '青葉コンビニのカウンター前' : '海辺の書斎デスク';
+          var teaPart = state.teaTemp === null ? '飲み物はまだ置いていなくて' : state.teaTemp > 28 ? '温かい麦茶（' + state.teaTemp + '℃）が手元にあって' : '麦茶は ' + state.teaTemp + '℃ に冷めていて';
+          var notePart = state.noteDamp ? '窓辺のメモ帳はさっきの雨気でわずかに滲んでいます。' : '窓辺のメモ帳は乾いたまま鮮明です。';
+          appendAiMsg(
+            '現在の状態に応答 · ' + state.rh + '% RH',
+            'いまは' + where + '（' + formatClock(state.minutes) + '）にいるよ。' + (state.windowOpen ? '北窓は少し開けてあり、' : '北窓は閉めてあり、') + teaPart + '、' + notePart
+          );
+        }
+
+        function resetAll() {
+          clearWalkInterval();
+          finishStreaming();
+          state.minutes = 19 * 60 + 15;
+          state.windowOpen = false;
+          state.rh = 54;
+          state.noteDamp = false;
+          state.teaTemp = null;
+          state.walkState = 'home';
+          state.walkSecLeft = 0;
+          state.hasOden = false;
+          state.walletYen = 680;
+          state.deferredQueue = [];
+          state.refuseCount = 0;
+          if (chatLog) chatLog.innerHTML = '';
+          syncView();
+          appendAiMsg(
+            '海辺の書斎 · 初期状態',
+            '外は夕方の小雨だね。書斎の木の机に座ったところだよ。左のボタンで窓を開けたりおでんを買いに出たりして、下の入力欄かチップから話しかけてみて。',
+            false,
+            true
+          );
+        }
+
+        if (btnWindow) btnWindow.addEventListener('click', function () { toggleWindow(); });
+        if (btnTea) btnTea.addEventListener('click', brewTea);
+        if (btnTime) btnTime.addEventListener('click', advanceHalfHour);
+        if (btnWalk) btnWalk.addEventListener('click', triggerWalk);
+        if (resetBtn) resetBtn.addEventListener('click', resetAll);
+
+        if (chatForm && chatInput) {
+          chatForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var val = chatInput.value;
+            if (!val.trim()) return;
+            chatInput.value = '';
+            handleUserText(val);
+          });
+        }
+
+        resetAll();
+      }
+
+      /* 4. Contrast Tabs, Copy Buttons, Smooth FAQ & Scroll Reveal */
+      function initContrastAndActions() {
+        var tabsWrap = document.getElementById('contrast-tabs');
+        if (tabsWrap) {
+          var tabs = Array.from(tabsWrap.querySelectorAll('.contrast-tab'));
+          var grid = document.getElementById('contrast-grid');
+          var channelEl = document.getElementById('contrast-channel');
+          var msgEl = document.getElementById('contrast-user-msg');
+          var plainReplyEl = document.getElementById('contrast-plain-reply');
+          var plainNoteEl = document.getElementById('contrast-plain-note');
+          var nyStateEl = document.getElementById('contrast-nyairo-state');
+          var nyReplyEl = document.getElementById('contrast-nyairo-reply');
+          var nyNoteEl = document.getElementById('contrast-nyairo-note');
+
+          layoutSyncFns.push(function () { syncSegThumb(tabsWrap); });
+          requestAnimationFrame(function () { syncSegThumb(tabsWrap); });
+
+          var currentIdx = 0;
+          var selectScenario = function (idx, focus) {
+            var s = CONTRAST_SCENARIOS[idx];
+            if (!s) return;
+            var dirNext = idx >= currentIdx;
+            currentIdx = idx;
+            tabs.forEach(function (t, i) {
+              var act = i === idx;
+              t.classList.toggle('is-active', act);
+              t.setAttribute('aria-selected', String(act));
+              t.tabIndex = act ? 0 : -1;
+              if (act && focus) t.focus();
+            });
+            syncSegThumb(tabsWrap);
+            if (channelEl) channelEl.textContent = s.channel;
+            if (msgEl) msgEl.textContent = s.userMsg;
+            if (plainReplyEl) plainReplyEl.textContent = s.plainReply;
+            if (plainNoteEl) plainNoteEl.textContent = s.plainNote;
+            if (nyStateEl) nyStateEl.textContent = s.nyairoState;
+            if (nyReplyEl) nyReplyEl.textContent = s.nyairoReply;
+            if (nyNoteEl) nyNoteEl.textContent = s.nyairoNote;
+            if (grid && !isReducedMotion()) {
+              grid.classList.remove('is-switching-next', 'is-switching-prev');
+              void grid.offsetWidth;
+              grid.classList.add(dirNext ? 'is-switching-next' : 'is-switching-prev');
+            }
+          };
+
+          tabs.forEach(function (tab, idx) {
+            tab.addEventListener('click', function () { selectScenario(idx, false); });
+            tab.addEventListener('keydown', function (e) {
+              var next;
+              if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+              if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+              if (next === undefined) return;
+              e.preventDefault();
+              selectScenario(next, true);
+            });
+          });
+        }
+
+        /* Download Feedback */
+        [['win-download-btn', 'win-dl-feedback'], ['dl-win-card-btn', 'dl-win-card-feedback']].forEach(function (pair) {
+          var btn = document.getElementById(pair[0]);
+          var fb = document.getElementById(pair[1]);
+          if (btn && fb) btn.addEventListener('click', function () { fb.hidden = false; });
+        });
+
+        /* SHA256 Copy */
+        var shaBtn = document.getElementById('copy-setup-sha');
+        var shaLbl = document.getElementById('sha-copy-label');
+        if (shaBtn && shaLbl) {
+          shaBtn.addEventListener('click', function () {
+            var sha = shaBtn.getAttribute('data-sha') || '';
+            writeClipboard(sha).then(function (ok) {
+              shaLbl.textContent = ok ? 'コピー完了' : '失敗';
+              if (ok) showToast('SHA256 チェックサムをコピーしました');
+              setTimeout(function () { shaLbl.textContent = 'コピー'; }, 2000);
+            });
+          });
+        }
+
+        /* CLI Command Copy */
+        var cmdBar = document.getElementById('hero-cmd');
+        var cmdBtn = document.getElementById('hero-cmd-btn');
+        if (cmdBar && cmdBtn) {
+          var triggerCliCopy = function () {
+            var codeEl = cmdBar.querySelector('.cmd-code');
+            var text = codeEl ? codeEl.textContent.trim() : '';
+            writeClipboard(text).then(function (ok) {
+              cmdBtn.textContent = ok ? 'コピーしました' : 'Ctrl+C でコピー';
+              if (ok) showToast('Linux / WSL インストールコマンドをコピーしました');
+              setTimeout(function () { cmdBtn.textContent = 'コマンドをコピー'; }, 2000);
+            });
+          };
+          cmdBtn.addEventListener('click', triggerCliCopy);
+          cmdBar.addEventListener('click', triggerCliCopy);
+          cmdBar.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerCliCopy(); }
+          });
+        }
+
+        /* Agent Prompt Drawer & Copy */
+        var agentBtn = document.getElementById('agent-cmd-btn');
+        var agentToggle = document.getElementById('agent-toggle-drawer');
+        var agentDrawer = document.getElementById('agent-code-drawer');
+        var agentCode = document.getElementById('agent-prompt-code');
+        var drawerLbl = document.getElementById('drawer-toggle-label');
+        if (agentBtn && agentCode) {
+          agentBtn.addEventListener('click', function () {
+            writeClipboard(agentCode.textContent || '').then(function (ok) {
+              var span = agentBtn.querySelector('span');
+              if (span) {
+                span.textContent = ok ? 'コピーしました' : '開いてコピー';
+                setTimeout(function () { span.textContent = '指示文をコピー'; }, 2200);
+              }
+              if (ok) showToast('検証優先の Agent 導入プロンプトをコピーしました');
+            });
+          });
+        }
+        if (agentToggle && agentDrawer) {
+          agentToggle.addEventListener('click', function () {
+            var nextOpen = agentDrawer.hidden;
+            agentDrawer.hidden = !nextOpen;
+            agentToggle.setAttribute('aria-expanded', String(nextOpen));
+            if (drawerLbl) drawerLbl.textContent = nextOpen ? '閉じる' : '内容を表示';
+          });
+        }
+
+        /* Persona Copy */
+        Array.from(document.querySelectorAll('[data-persona-copy]')).forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var key = btn.getAttribute('data-persona-copy');
+            var tpl = PERSONA_TEMPLATES[key] || '';
+            writeClipboard(tpl).then(function (ok) {
+              btn.textContent = ok ? 'コピー完了' : '失敗';
+              btn.classList.toggle('is-copied', ok);
+              if (ok) showToast('SOUL.md テンプレートをコピーしました');
+              setTimeout(function () {
+                btn.textContent = 'SOUL.md をコピー';
+                btn.classList.remove('is-copied');
+              }, 2000);
+            });
+          });
+        });
+
+        /* Endpoint URL Copy */
+        Array.from(document.querySelectorAll('[data-copy-target]')).forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var id = btn.getAttribute('data-copy-target');
+            var target = id ? document.getElementById(id) : null;
+            var txt = target ? target.textContent.trim() : '';
+            writeClipboard(txt).then(function (ok) {
+              btn.textContent = ok ? 'コピー完了' : '失敗';
+              btn.classList.toggle('is-copied', ok);
+              if (ok) showToast('URL をコピーしました: ' + txt);
+              setTimeout(function () {
+                btn.textContent = 'URL をコピー';
+                btn.classList.remove('is-copied');
+              }, 1800);
+            });
+          });
+        });
+
+        /* Smooth FAQ Accordion */
+        Array.from(document.querySelectorAll('#ja-faq .faq-item')).forEach(function (details) {
+          var summary = details.querySelector('summary');
+          var answer = details.querySelector('.faq-a');
+          if (!summary || !answer) return;
+          var anim = null;
+          summary.addEventListener('click', function (e) {
+            if (isReducedMotion() || typeof details.animate !== 'function') return;
+            e.preventDefault();
+            if (anim) { anim.cancel(); anim = null; }
+            var startH = details.offsetHeight;
+            details.style.overflow = 'hidden';
+            if (details.open) {
+              var endHClose = summary.offsetHeight;
+              anim = details.animate([{ height: startH + 'px' }, { height: endHClose + 'px' }], { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+              anim.onfinish = function () { details.open = false; details.style.height = ''; details.style.overflow = ''; anim = null; };
+            } else {
+              details.style.height = startH + 'px';
+              details.open = true;
+              var endHOpen = summary.offsetHeight + answer.offsetHeight;
+              details.style.height = '';
+              anim = details.animate([{ height: startH + 'px' }, { height: endHOpen + 'px' }], { duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+              anim.onfinish = function () { details.style.height = ''; details.style.overflow = ''; anim = null; };
+            }
+          });
+        });
+
+        /* Scroll Reveal */
+        var revealTargets = Array.from(document.querySelectorAll('[data-reveal]'));
+        if (isReducedMotion() || typeof IntersectionObserver === 'undefined') {
+          revealTargets.forEach(function (el) { el.classList.add('is-revealed'); });
+        } else {
+          var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-revealed');
+                io.unobserve(entry.target);
+              }
+            });
+          }, { rootMargin: '0px 0px -5% 0px', threshold: 0.05 });
+          revealTargets.forEach(function (el) { io.observe(el); });
+        }
+
+        var btt = document.getElementById('back-to-top');
+        if (btt) {
+          btt.addEventListener('click', function () {
+            window.scrollTo({ top: 0, behavior: isReducedMotion() ? 'auto' : 'smooth' });
+          });
+        }
+
+        window.addEventListener('resize', function () {
+          layoutSyncFns.forEach(function (fn) { fn(); });
+        });
+      }
+
+      function bootstrap() {
+        initThemeAndHeader();
+        initDesktopStageAndLightbox();
+        initSandbox();
+        initContrastAndActions();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootstrap);
+      } else {
+        bootstrap();
+      }
+    })();
+  </script>
+</body>
+</html>

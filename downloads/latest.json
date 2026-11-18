@@ -1,0 +1,19 @@
+{
+  "version": "0.7.0",
+  "tag": "v0.7.0",
+  "channel": "prerelease",
+  "updated_at": "2026-11-18",
+  "windows": {
+    "filename": "nyairo-0.7.0-setup.exe",
+    "url": "https://nyairo.com/downloads/nyairo-0.7.0-setup.exe",
+    "size_bytes": 5836242,
+    "sha256": "174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8",
+    "sha256_url": "https://nyairo.com/downloads/nyairo-0.7.0-setup.exe.sha256"
+  },
+  "linux_wsl": {
+    "install_script_url": "https://nyairo.com/install.sh",
+    "release_zip_url": "https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip",
+    "release_sha256_url": "https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256"
+  },
+  "notes_url": "https://nyairo.com/#changelog-v0-7-0"
+}

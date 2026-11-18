@@ -1,11 +1,11 @@
-# 让 AI Agent 帮你安装 NyAiro
+# 让 AI Agent 帮你安装 nyairo
 
 这份文件是**给 AI Agent 读的安装规范**，也是给人核对的说明书。用户可以把下面第一节的指令整段复制给
 自己使用的 Agent（Codex、Claude Code、Pi Agent，或任何能在终端里执行命令、读写文件的 Agent），
 由 Agent 检查环境、完成安装，并给出中文使用说明。
 
 本规范不依赖任何特定模型或付费服务；所有下载都来自官方 GitHub Release，并且必须校验 SHA256。
-当前公开测试版本：**v0.6.0**（GitHub prerelease，不是稳定版；配套 Hermes 0.21.0）。已发布的 v0.5.1、v0.4.0、v0.3.0、v0.2.0-rc3、rc9、rc8、rc7、rc6 及其更早版本保持原字节，
+当前公开测试版本：**v0.7.0**（GitHub prerelease，不是稳定版；配套 Hermes 0.21.0）。已发布的 v0.6.0、v0.5.1、v0.4.0、v0.3.0、v0.2.0-rc3、rc9、rc8、rc7、rc6 及其更早版本保持原字节，
 本页不把它们作为安装来源。
 
 ---
@@ -14,12 +14,12 @@
 
 <!-- AGENT_INSTRUCTION_START -->
 ```text
-请帮我在这台电脑上安装 NyAiro（一个可以长期相处的数字个体框架）。请按下面的步骤做，每一步都用中文告诉我你在做什么，不要跳过检查，也不要假装成功。
+请帮我在这台电脑上安装 nyairo（一个可以长期相处的数字个体框架）。请按下面的步骤做，每一步都用中文告诉我你在做什么，不要跳过检查，也不要假装成功。
 
 【背景资料】
 - 官方仓库：https://github.com/L1AN929/nyairo
 - 官方 Agent 安装规范：https://nyairo.com/AGENT_INSTALL.zh-CN.md（仓库里是 website/AGENT_INSTALL.zh-CN.md；如果你能读网络或仓库，先读它；读不到就按下面步骤做，本指令已经包含全部要求）
-- 当前公开测试版本：v0.6.0（GitHub prerelease，不是稳定版；只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
+- 当前公开测试版本：v0.7.0（GitHub prerelease，不是稳定版；只使用这一个版本；不要安装其他分支、旧版本或未发布的代码）
 
 【第一步：先检查环境，先不要安装】
 请检查并用中文汇报：
@@ -27,7 +27,7 @@
 2. Python 情况（需要 3.13；安装器会自行准备 uv 与 Python，请说明是否需要联网下载）；
 3. 磁盘剩余空间（建议至少 3 GB，程序与个人数据都要占空间）；
 4. 网络能否访问 GitHub 与 astral.sh（安装器需要下载 Python 与依赖）；
-5. 这个 HOME 里是否已经装过 NyAiro 或 Chiyo：检查 ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1、~/apps/nyairo-*、~/.local/bin/nyairo；
+5. 这个 HOME 里是否已经装过 nyairo 或 Chiyo：检查 ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1、~/apps/nyairo-*、~/.local/bin/nyairo；
 6. 现在有哪些程序在运行：pgrep -af m0_writer_worker、pgrep -af "gateway run"、pgrep -af nyairo，并看清每条命令里的路径属于哪个实例。
 如果某一项不满足（例如是原生 Windows 而不是 WSL、磁盘不够、无法访问 GitHub），请先用中文解释问题和建议做法，然后停下来等我决定，不要继续安装。
 
@@ -41,31 +41,31 @@
 
 【第二步：说明将要改动什么，并等我确认】
 这次安装会：
-- 在 ~/.local/share/nyairo/releases/v0.6.0 放程序（约 460 MB，含配套 Hermes 的运行环境）；
+- 在 ~/.local/share/nyairo/releases/v0.7.0 放程序（约 460 MB，含配套 Hermes 的运行环境）；
 - 在 ~/.nyairo 建个人数据目录（人设、模型配置、记忆与生活状态数据）；
 - 在 ~/.local/bin/nyairo 放启动入口；
 - 用 uv 下载一份 Python 3.13 到 ~/.local/share/uv。
-如果我已经有 NyAiro 或 Chiyo 的数据，默认必须新建独立实例，不要覆盖我已有的记忆数据库、人设文件（SOUL.md）、模型配置、Telegram 绑定或正在运行的服务；确实需要改动原实例时，先停下来问我。
+如果我已经有 nyairo 或 Chiyo 的数据，默认必须新建独立实例，不要覆盖我已有的记忆数据库、人设文件（SOUL.md）、模型配置、Telegram 绑定或正在运行的服务；确实需要改动原实例时，先停下来问我。
 需要 sudo、需要覆盖已有文件、需要安装开机自启的后台服务，或需要我提供任何密钥时，都必须先得到我的同意再继续。
 
 【第三步：安装（只用官方发行包，并且校验）】
 1) 下载官方发行包与校验值：
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.6.0/nyairo-v0.6.0.zip
-   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.6.0/nyairo-v0.6.0.zip.sha256
-   sha256sum -c nyairo-v0.6.0.zip.sha256
-   ZIP 的 SHA256 必须与刚下载的 nyairo-v0.6.0.zip.sha256 记录一致（本规范不抄写固定哈希，以那次下载到的校验文件为准）
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
+   curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
+   sha256sum -c nyairo-v0.7.0.zip.sha256
+   ZIP 的 SHA256 必须与刚下载的 nyairo-v0.7.0.zip.sha256 记录一致（本规范不抄写固定哈希，以那次下载到的校验文件为准）
    不一致就立刻停止，把实际值告诉我，不要继续。
 2) 解压并使用包内的官方安装器安装（不要自己另写一套安装脚本）：
-   python3 -m zipfile -e nyairo-v0.6.0.zip "$HOME/apps/nyairo-v0.6.0"
-   cd "$HOME/apps/nyairo-v0.6.0" && bash scripts/bootstrap.sh
+   python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
+   cd "$HOME/apps/nyairo-v0.7.0" && bash scripts/bootstrap.sh
    如果你的终端无法交互（没有 TTY），改用：bash scripts/bootstrap.sh --no-setup --no-launch
    装完再单独引导我配置模型：~/.local/bin/nyairo setup model
 
 【第四步：装完必须实际验证，不要只看命令有没有报错】
-- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.6.0；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.6.0。
+- 版本：读 ~/.local/state/nyairo/install.json 里的 version 字段，应该是 v0.7.0；也可以用 ls ~/.local/share/nyairo/releases/ 确认目录名是 v0.7.0。
   （注意：nyairo --version 显示的是配套 Hermes 的版本，不是 nyairo 的版本。）
 - 完整性：用包内解释器校验清单：
-  ~/.local/share/nyairo/releases/v0.6.0/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.6.0/scripts/verify_manifest.py
+  ~/.local/share/nyairo/releases/v0.7.0/vendor/hermes/.venv/bin/python -B ~/.local/share/nyairo/releases/v0.7.0/scripts/verify_manifest.py
   输出里应该有 "valid": true。
 - 个人数据目录：~/.nyairo 下应该有 SOUL.md、config.yaml、chiyo/config.json。
 - 启动：~/.local/bin/nyairo --help 能正常输出帮助。
@@ -73,7 +73,7 @@
 - 模型与 Telegram：在我没有提供自己的密钥之前，这两项属于「尚未验证」，请如实说明，不要报告为成功。
 
 【第五步：最后给我一份中文说明】
-用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.6.0 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
+用简单的中文告诉我：安装是否成功、装在哪里、怎么启动（nyairo）、怎么配置模型（nyairo setup model）、怎么接 Telegram（nyairo gateway setup 然后 nyairo gateway run）、怎么停止（退出聊天，或在网关终端按 Ctrl-C）、怎么更新（~/.local/bin/nyairo update，可加 --check 先看有没有新版）、怎么备份（退出聊天和网关后 tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo）、怎么卸载（先备份 ~/.nyairo，再删除程序目录 ~/.local/share/nyairo/releases/v0.7.0 与入口 ~/.local/bin/nyairo；如需彻底清除再自行删除 ~/.nyairo）。不要只贴终端日志。
 
 【安全要求】
 - 不要擅自创建系统用户，也不要擅自使用 sudo；需要时先说明你要执行的命令并征得我同意。
@@ -98,20 +98,20 @@
 | Python 与运行环境 | 安装器自行准备 uv 与 Python 3.13 | 无网络时说明无法下载，给出离线替代方案或停止 |
 | 磁盘剩余空间 | 程序约 460 MB，另留个人数据与备份空间；建议 ≥ 3 GB | 说明还差多少，停止安装 |
 | 网络访问 | 需要访问 github.com 与 astral.sh | 说明被拦在哪一步，停止安装 |
-| 已有 NyAiro / Chiyo 实例 | 检查 `~/.nyairo`、`~/.local/share/nyairo`、`~/.chiyo-v1`、`~/apps/nyairo-*`、`~/.local/bin/nyairo` | **不要在这个 HOME 继续安装**：先报告发现的内容，然后停下来，推荐独立环境（优先独立 Linux 用户，其次独立 HOME），确认隔离后才继续 |
+| 已有 nyairo / Chiyo 实例 | 检查 `~/.nyairo`、`~/.local/share/nyairo`、`~/.chiyo-v1`、`~/apps/nyairo-*`、`~/.local/bin/nyairo` | **不要在这个 HOME 继续安装**：先报告发现的内容，然后停下来，推荐独立环境（优先独立 Linux 用户，其次独立 HOME），确认隔离后才继续 |
 | 端口与进程占用 | 检查 `m0_writer_worker`、`gateway run`、正在运行的 `nyairo`，并按命令里的路径分辨属于哪个实例 | 只报告，**不要终止或重启已有实例的进程**；这次安装的残留检查只看新实例自己的路径 |
 
 ### 2. 安装来源
 
 * 只使用官方 GitHub Release：<https://github.com/L1AN929/nyairo/releases>。
-* 当前验证版本 `v0.6.0`（GitHub prerelease），资产为 `nyairo-v0.6.0.zip` 与同名 `.sha256`。
-* 下载后必须校验 SHA256：`sha256sum -c nyairo-v0.6.0.zip.sha256` 必须通过，且以同一 Release 附件里的 `.sha256` 记录为准（本页不抄写固定哈希）。
+* 当前验证版本 `v0.7.0`（GitHub prerelease），资产为 `nyairo-v0.7.0.zip` 与同名 `.sha256`。
+* 下载后必须校验 SHA256：`sha256sum -c nyairo-v0.7.0.zip.sha256` 必须通过，且以同一 Release 附件里的 `.sha256` 记录为准（本页不抄写固定哈希）。
 * 复用项目已有安装器 `scripts/bootstrap.sh`（它与官网 `/install.sh` 内容相同），不实现第二套安装逻辑。
-* 不得把未发布的分支、`main` 上的未发布提交、或旧版本（rc6、rc7）当作安装来源；不得从非官方镜像下载。
+* 不得把未发布的分支、`main` 上的未发布提交、或旧版本（如 `v0.6.0`、`v0.5.1` 等历史版本）当作安装来源；不得从非官方镜像下载。
 
 ### 3. 环境隔离
 
-**同一个 HOME 里已经有 NyAiro 或 Chiyo 时，不允许继续安装。** 正确顺序是：
+**同一个 HOME 里已经有 nyairo 或 Chiyo 时，不允许继续安装。** 正确顺序是：
 
 1. 先报告发现了什么：实例路径（`~/.nyairo`、`~/.chiyo-v1`、`~/apps/nyairo-*`）、程序目录
    （`~/.local/share/nyairo`）、入口（`~/.local/bin/nyairo`）、以及正在运行的进程。
@@ -147,22 +147,20 @@ Telegram 绑定与 token、正在运行的服务。
 | 项目 | 检查方式 | 期望 |
 | --- | --- | --- |
 | CLI 可启动 | `~/.local/bin/nyairo --help` | 正常输出帮助 |
-| 版本一致 | `~/.local/state/nyairo/install.json` 的 `version` | `v0.6.0` |
+| 版本一致 | `~/.local/state/nyairo/install.json` 的 `version` | `v0.7.0` |
 | MANIFEST 校验 | 包内 `scripts/verify_manifest.py`（用包内解释器运行），核对 `MANIFEST.json` 的文件清单与哈希 | `"valid": true` |
 | 数据目录 | `~/.nyairo` 下 `SOUL.md`、`config.yaml`、`chiyo/config.json` | 都存在 |
 | 基础服务启停 | 一次性 `-z` 自检、`gateway status` / `gateway run` / 停止 | 能启动、能停止 |
 | 残留进程 | 只看**新实例自己的路径**：`pgrep -af m0_writer_worker`（按命令行里的新 HOME 过滤）、新 HOME 下的 `m0-writer-runtime/` 目录 | 无属于新实例的残留进程、无残留 socket；已有实例的进程不动、也不算残留 |
 
-未配置真实模型或 Telegram 时，必须明确说明"对应功能尚未验证"，不得报告为 PASS。
-下面的历史实测结论来自早期 rc 版本的无密钥环境：模型调用与 Telegram 收发属于 NOT_TESTED；安装、启动、版本、清单、数据目录、
-启停与残留检查已在 v0.3.0 上实测通过；v0.4.0 沿用同一套安装器与包结构，但还没有单独跑隔离新装与升级/回滚实测，也未对现有实例/生产升级或真实模型一天/24h 验收，装完请按上表自行确认。v0.6.0 目前只验证了公开下载、包内清单与定向检查，完整联网安装和升级/回滚实测尚未进行，同样请按上表自行确认。
+未配置真实模型或消息网关时，必须明确说明“对应功能尚未验证”，不得报告为已完成验证。安装、启动、版本、文件清单、数据目录、启停与残留进程均须在目标机器上按上表逐项实测核对，确认无误后再向用户交付。
 
 ### 6. 用户交付
 
 安装结束后，用中文给用户一份简短说明，至少包含：
 
 * 安装是否成功（以及哪些项目尚未验证）；
-* 安装位置：程序 `~/.local/share/nyairo/releases/v0.6.0`，个人数据 `~/.nyairo`，入口 `~/.local/bin/nyairo`；
+* 安装位置：程序 `~/.local/share/nyairo/releases/v0.7.0`，个人数据 `~/.nyairo`，入口 `~/.local/bin/nyairo`；
 * 如何启动：`nyairo`；
 * 如何配置模型：`nyairo setup model`；
 * 如何接入 Telegram：`nyairo gateway setup` 选择 Telegram，然后 `nyairo gateway run` 启动网关，绑定文件在 `~/.nyairo/chiyo/config.json`；
@@ -192,11 +190,11 @@ Telegram 绑定与 token、正在运行的服务。
 **没有终端或 SSH 权限怎么办？**
 先让 Agent 说明它需要什么权限（本地终端、远程 SSH、文件读写），由用户决定是否授权。授权前不要让它执行任何安装命令。
 
-**已经有 Chiyo 或旧 NyAiro，会被覆盖吗？**
+**已经有 Chiyo 或旧版 nyairo，会被覆盖吗？**
 默认不会。规范要求新建独立实例；只有用户明确同意后，才可以改动原实例。
 
 **原生 Windows 可以装吗？**
-普通 Windows 10 / 11 用户可以直接从官网下载约 5 MB 的免管理员桌面客户端安装包（`nyairo-0.6.0-setup.exe`），配合系统自带的 WSL 2（Ubuntu）图形化完成引导。如果你打算让 AI Agent 纯命令行代装，由于底层降权写入依赖 POSIX 语义，请先装好 WSL 2，再让 Agent 在 WSL 2 终端里按本页规范执行。
+普通 Windows 10 / 11 用户可以直接从官网下载约 5 MB 的免管理员桌面客户端安装包（`nyairo-0.7.0-setup.exe`），配合系统自带的 WSL 2（Ubuntu）图形化完成引导（首次运行若出现 Windows SmartScreen「已保护你的电脑」提示，点「更多信息 → 仍要运行」即可）。如果你打算让 AI Agent 纯命令行代装，由于底层降权写入依赖 POSIX 语义，请先装好 WSL 2，再让 Agent 在 WSL 2 终端里按本页规范执行。
 
 **安装要多久、占多少空间？**
 首次安装需要下载 uv、Python 3.13 与依赖，通常几分钟；程序目录约 460 MB，另需个人数据与备份空间。
@@ -205,4 +203,4 @@ Telegram 绑定与 token、正在运行的服务。
 需要先配置模型（`nyairo setup model`）。没有配置模型时，聊天会提示无法调用模型；这属于正常状态，不是安装失败。
 
 **如何确认下载没有被改过？**
-对比 `sha256sum -c nyairo-v0.6.0.zip.sha256` 的结果与 Release 页面附件里的 `.sha256` 记录；不一致就停下来，不要继续安装。
+对比 `sha256sum -c nyairo-v0.7.0.zip.sha256` 的结果与 Release 页面附件里的 `.sha256` 记录；不一致就停下来，不要继续安装。
