@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" translate="no" class="notranslate">
+<html lang="en" data-theme="light" translate="no" class="notranslate">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -14,21 +14,35 @@
   <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/">
   <link rel="alternate" hreflang="x-default" href="https://nyairo.com/">
   <meta name="google" content="notranslate">
-  <meta name="theme-color" id="meta-theme-color" content="#0b0b0c">
+  <meta name="theme-color" id="meta-theme-color" content="#f5efea">
 
   <script>
     (function () {
+      var PALETTE_BG = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c' }
+      };
       try {
         var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        var savedPal = localStorage.getItem('nyairo-palette');
         if (saved === 'light' || saved === 'dark') {
           document.documentElement.setAttribute('data-theme', saved);
-          var metaTheme = document.getElementById('meta-theme-color');
-          if (metaTheme) metaTheme.setAttribute('content', saved === 'light' ? '#fafafa' : '#0b0b0c');
         }
+        if (savedPal && PALETTE_BG[savedPal]) {
+          document.documentElement.setAttribute('data-palette', savedPal);
+        }
+        var activeTheme = (saved === 'light' || saved === 'dark') ? saved : 'light';
+        var activePal = (savedPal && PALETTE_BG[savedPal]) ? savedPal : 'deep-sea-sakura';
+        var metaTheme = document.getElementById('meta-theme-color');
+        if (metaTheme) metaTheme.setAttribute('content', PALETTE_BG[activePal][activeTheme]);
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../style.css?v=20261118-v070-41">
+  <link rel="stylesheet" href="../style.css?v=20261120-v070-55">
   <link rel="icon" href="../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../assets/favicon-16.png">
@@ -52,7 +66,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="nyairo · Give AI a world, and let them have a daily life of their own.">
-  <meta name="twitter:description" content="Open-source AI individual framework with local SQLite memory, walkable neighborhoods, BYOK/Ollama support, and a 5.6 MB Windows desktop app.">
+  <meta name="twitter:description" content="Open-source AI individual framework with local SQLite memory, walkable neighborhoods, BYOK/Ollama support, and a 5.8 MB Windows desktop app.">
   <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
   <meta name="twitter:image:alt" content="nyairo · Give AI a world, and let them have a daily life of their own.">
 
@@ -100,7 +114,7 @@
             "name": "Do I need a dedicated GPU to run nyairo smoothly?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. When connected to cloud APIs such as DeepSeek, OpenAI, Claude, or Qwen, model inference runs remotely while your computer only runs the ~5.6 MB desktop client and local SQLite memory ledger. Any everyday laptop with integrated graphics runs it quietly in the system tray."
+              "text": "No. When connected to cloud APIs such as DeepSeek, OpenAI, Claude, or Qwen, model inference runs remotely while your computer only runs the ~5.8 MB desktop client and local SQLite memory ledger. Any everyday laptop with integrated graphics runs it quietly in the system tray."
             }
           },
           {
@@ -160,78 +174,119 @@
 
   <style>
     /* ==========================================================================
-       Magpie Monochrome Editorial Design System (nyairo English Edition)
-       - Crisp monochrome tokens (#0b0b0c / #fafafa), 1px hairlines, 1080px column
-       - Left-aligned two-tone Hero & Section Headers, 10px-radius solid/ghost CTAs
-       - Seamless 1px hairline Bento grids & trilingual Globe language dropdown
+       Noir Sakura Dark (#0c0b0d × #f4c2d1) & Deep Sea Light (#f5efea × #122e8a)
+       - Dark: Noir Charcoal (#0c0b0d) / Soft Sakura Blush (#f4c2d1)
+       - Light: Soft Milk White (#f5efea) / Deep Sea Ultramarine (#122e8a)
        ========================================================================== */
     :root,
     html[data-theme="dark"] {
-      --bg: #0b0b0c;
-      --bg-elev: #121214;
-      --bg-elevated: #121214;
-      --header-bg: rgba(11, 11, 12, 0.80);
-      --card: #161618;
-      --card-2: #1c1c1f;
-      --card-hover: #1f1f23;
-      --code-bg: #121214;
-      --inp: #121214;
-      --glass: #161618;
-      --seg-bg: rgba(255, 255, 255, 0.05);
-      --seg-thumb: #232327;
-      --seg-thumb-border: #34343a;
-      --line: #26262a;
-      --line-2: #34343a;
-      --fg: #f2f2f3;
-      --fg-2: #b3b3ba;
-      --muted: #7a7a82;
-      --btn: #f2f2f3;
-      --btn-ink: #0b0b0c;
-      --accent: #f2f2f3;
-      --accent-btn: #f2f2f3;
-      --accent-btn-hover: #ffffff;
-      --accent-fg: #0b0b0c;
-      --accent-soft: rgba(242, 242, 243, 0.08);
-      --accent-line: #3f3f46;
-      --accent-glow: rgba(242, 242, 243, 0.03);
+      --bg: #0c0b0d;
+      --bg-elev: #141216;
+      --bg-elevated: #141216;
+      --header-bg: rgba(12, 11, 13, 0.86);
+      --card: #18151b;
+      --card-2: #201c24;
+      --card-hover: #241f29;
+      --code-bg: #121015;
+      --inp: #110f14;
+      --glass: #18151b;
+      --seg-bg: #121015;
+      --seg-thumb: #252029;
+      --seg-thumb-border: rgba(244, 194, 209, 0.22);
+      --line: rgba(244, 194, 209, 0.11);
+      --line-2: rgba(244, 194, 209, 0.23);
+      --fg: #f7f1f3;
+      --fg-2: #cabdc3;
+      --muted: #91828a;
+      --btn: #f4c2d1;
+      --btn-ink: #161015;
+      --accent: #b8cdf2;
+      --accent-btn: #f4c2d1;
+      --accent-btn-hover: #f9d5e0;
+      --accent-fg: #161015;
+      --accent-soft: rgba(184, 205, 242, 0.11);
+      --accent-line: rgba(184, 205, 242, 0.28);
+      --accent-glow: transparent;
+      --green: #86cfb5;
+      --green-soft: rgba(134, 207, 181, 0.11);
+      --green-line: rgba(134, 207, 181, 0.28);
+      --warm: #f4b6c8;
+      --amber: #f4b6c8;
+      --warm-soft: rgba(244, 182, 200, 0.12);
+      --warm-line: rgba(244, 182, 200, 0.30);
+      --pal-light: #122e8a;
+      --pal-dark: #f4c2d1;
+      --hero-h1: #f7f1f3;
+      --hero-h1-muted: #f4c2d1;
+      --cta-bg: #f4c2d1;
+      --cta-border: rgba(244, 194, 209, 0.42);
+      --cta-shadow: 0 22px 60px -18px rgba(0, 0, 0, 0.64);
+      --cta-fg: #181217;
+      --cta-sub: rgba(24, 18, 23, 0.78);
+      --cta-btn-bg: #181217;
+      --cta-btn-fg: #f7eef1;
+      --cta-ghost-border: rgba(24, 18, 23, 0.30);
+      --cta-ghost-hover: rgba(24, 18, 23, 0.08);
+      --cta-ghost-hover-border: rgba(24, 18, 23, 0.50);
       --container-w: 1080px;
       --shadow-sm: none;
-      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.36);
-      --shadow-stage: 0 20px 56px rgba(0, 0, 0, 0.48);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.42);
+      --shadow-stage: 0 22px 60px -16px rgba(0, 0, 0, 0.62);
     }
 
     html[data-theme="light"] {
-      --bg: #fafafa;
-      --bg-elev: #f1f1f2;
-      --bg-elevated: #f1f1f2;
-      --header-bg: rgba(250, 250, 250, 0.82);
-      --card: #ffffff;
-      --card-2: #f4f4f5;
-      --card-hover: #f4f4f6;
-      --code-bg: #f4f4f5;
-      --inp: #f4f4f5;
-      --glass: #ffffff;
-      --seg-bg: rgba(17, 17, 18, 0.05);
-      --seg-thumb: #ffffff;
-      --seg-thumb-border: #d4d4d8;
-      --line: #e4e4e7;
-      --line-2: #d4d4d8;
-      --fg: #111112;
-      --fg-2: #4a4a50;
-      --muted: #85858c;
-      --btn: #111112;
-      --btn-ink: #fafafa;
-      --accent: #111112;
-      --accent-btn: #111112;
-      --accent-btn-hover: #27272a;
-      --accent-fg: #fafafa;
-      --accent-soft: rgba(17, 17, 18, 0.06);
-      --accent-line: #c4c4cc;
-      --accent-glow: rgba(17, 17, 18, 0.025);
+      --bg: #f5efea;
+      --bg-elev: #ece5de;
+      --bg-elevated: #ece5de;
+      --header-bg: rgba(245, 239, 234, 0.88);
+      --card: #fcfaf7;
+      --card-2: #f0eae3;
+      --card-hover: #f7f2ed;
+      --code-bg: #ede6df;
+      --inp: #f1ebe5;
+      --glass: #fcfaf7;
+      --seg-bg: #eae2da;
+      --seg-thumb: #fcfaf7;
+      --seg-thumb-border: rgba(18, 46, 138, 0.18);
+      --line: rgba(18, 46, 138, 0.12);
+      --line-2: rgba(18, 46, 138, 0.24);
+      --fg: #11225c;
+      --fg-2: #435280;
+      --muted: #727ea3;
+      --btn: #122e8a;
+      --btn-ink: #f5efea;
+      --accent: #1d46bf;
+      --accent-btn: #122e8a;
+      --accent-btn-hover: #0e246e;
+      --accent-fg: #f5efea;
+      --accent-soft: rgba(29, 70, 191, 0.08);
+      --accent-line: rgba(29, 70, 191, 0.25);
+      --accent-glow: transparent;
+      --green: #187a64;
+      --green-soft: rgba(24, 122, 100, 0.09);
+      --green-line: rgba(24, 122, 100, 0.24);
+      --warm: #122e8a;
+      --amber: #122e8a;
+      --warm-soft: rgba(18, 46, 138, 0.08);
+      --warm-line: rgba(18, 46, 138, 0.26);
+      --pal-light: #122e8a;
+      --pal-dark: #f4c2d1;
+      --hero-h1: #122e8a;
+      --hero-h1-muted: #3d56a8;
+      --cta-bg: #122e8a;
+      --cta-border: rgba(245, 239, 234, 0.18);
+      --cta-shadow: 0 20px 56px -18px rgba(18, 46, 138, 0.34);
+      --cta-fg: #f5efea;
+      --cta-sub: rgba(245, 239, 234, 0.82);
+      --cta-btn-bg: #f5efea;
+      --cta-btn-fg: #122e8a;
+      --cta-ghost-border: rgba(245, 239, 234, 0.36);
+      --cta-ghost-hover: rgba(245, 239, 234, 0.12);
+      --cta-ghost-hover-border: rgba(245, 239, 234, 0.56);
       --container-w: 1080px;
       --shadow-sm: none;
-      --shadow-md: 0 8px 24px rgba(17, 17, 18, 0.07);
-      --shadow-stage: 0 18px 46px rgba(17, 17, 18, 0.08);
+      --shadow-md: 0 8px 24px rgba(18, 46, 138, 0.10);
+      --shadow-stage: 0 18px 46px -12px rgba(18, 46, 138, 0.16);
     }
 
     .header-container {
@@ -431,9 +486,14 @@
       color: var(--fg-2);
       font-size: 0.78rem;
     }
+    .release-pill .status-dot {
+      background: var(--warm);
+      box-shadow: none;
+      animation: ny-lamp-breathe 3.6s ease-in-out infinite;
+    }
     .release-pill:hover {
       background: var(--card);
-      border-color: var(--line-2);
+      border-color: var(--warm-line);
       color: var(--fg);
       transform: none;
     }
@@ -448,8 +508,12 @@
       max-width: 18.5em;
     }
     .hero-title .ink-muted {
-      color: var(--muted);
-      font-weight: 700;
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+      font-style: italic;
+      color: var(--fg-2);
+      font-weight: 400;
+      opacity: 0.84;
+      letter-spacing: -0.012em;
     }
     .hero-title .accent-word,
     html[data-theme="light"] .hero-title .accent-word {
@@ -624,15 +688,27 @@
       margin-bottom: 28px;
     }
     .section-eyebrow {
-      font-size: 13px;
-      letter-spacing: 0.06em;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--muted) !important;
+      color: var(--warm) !important;
       background: none;
       border: none;
       padding: 0;
       font-weight: 560;
       margin-bottom: 10px;
+    }
+    .section-eyebrow::before {
+      content: "";
+      display: inline-block;
+      width: 16px;
+      height: 1px;
+      background: var(--warm);
+      flex-shrink: 0;
     }
     h2.section-title,
     .section-title {
@@ -1158,8 +1234,16 @@
     .cap-icon-box {
       background: var(--bg-elev);
       border: 1px solid var(--line);
-      color: var(--fg);
-      border-radius: 9px;
+      color: var(--fg-2);
+      border-radius: 8px;
+      width: 32px;
+      height: 32px;
+      transition: border-color 0.18s var(--ease), color 0.18s var(--ease), background 0.18s var(--ease);
+    }
+    .cap-card:hover .cap-icon-box {
+      border-color: var(--warm-line);
+      color: var(--warm);
+      background: var(--warm-soft);
     }
     .world-gallery-card {
       display: flex;
@@ -1171,6 +1255,7 @@
     .world-gallery-card.is-procedural {
       grid-column: span 2;
       background: var(--card);
+      box-shadow: inset 0 2px 0 0 var(--warm) !important;
     }
     .world-card-kicker,
     .world-gallery-card.is-procedural .world-card-kicker {
@@ -1180,7 +1265,7 @@
       font-family: var(--font-mono);
       font-size: 0.7rem;
       font-weight: 600;
-      color: var(--muted);
+      color: var(--warm);
       letter-spacing: 0.05em;
       text-transform: uppercase;
     }
@@ -1205,12 +1290,12 @@
       color: var(--muted);
     }
 
-    /* Flat Monochrome Surfaces Across Stage, Contrast, Gallery, Downloads & FAQ */
+    /* Sumi & Washi Surfaces Across Stage, Contrast, Gallery, Downloads & FAQ */
     .app-stage,
     html[data-theme="light"] .app-stage {
-      border-radius: 16px;
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow-stage);
+      border-radius: 15px;
+      border: 1px solid var(--line-2);
+      box-shadow: none;
     }
     .stage-caption-cell {
       padding: 20px 22px;
@@ -1219,12 +1304,10 @@
     .gallery-personas-shell,
     .dl-card,
     .guide-panel,
-    .faq-item,
     html[data-theme="light"] .contrast-shell,
     html[data-theme="light"] .gallery-personas-shell,
     html[data-theme="light"] .dl-card,
-    html[data-theme="light"] .guide-panel,
-    html[data-theme="light"] .faq-item {
+    html[data-theme="light"] .guide-panel {
       border-radius: 16px;
       background: var(--card);
       border: 1px solid var(--line);
@@ -1241,6 +1324,7 @@
     .dl-card.is-featured,
     .dl-card.is-featured:hover {
       border-color: var(--line-2);
+      box-shadow: inset 0 2px 0 0 var(--warm);
     }
     .dl-card-icon {
       background: var(--bg-elev);
@@ -1248,8 +1332,9 @@
       color: var(--fg);
     }
     .contrast-card.is-nyairo {
-      background: var(--card-2);
-      border-color: var(--line-2);
+      background: var(--card);
+      border-color: var(--line);
+      border-top: 2px solid var(--warm);
     }
     .gallery-personas-shell {
       padding: 24px 26px;
@@ -1427,12 +1512,11 @@
     .cta-banner.cta-closing-emblem,
     html[data-theme="light"] .cta-banner.cta-closing-emblem {
       margin-top: 96px;
-      padding: 64px 24px 20px;
-      border-radius: 0;
-      background: transparent;
-      border: none;
-      border-top: 1px solid var(--line);
-      box-shadow: none;
+      padding: 68px 32px 64px;
+      border-radius: 24px;
+      background: var(--cta-bg);
+      border: 1px solid var(--cta-border);
+      box-shadow: var(--cta-shadow);
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -1444,16 +1528,32 @@
       width: 56px;
       height: 56px;
       border-radius: 14px;
-      background: var(--card);
-      border: 1px solid var(--line-2);
+      background: rgba(24, 18, 23, 0.07);
+      border: 1px solid rgba(24, 18, 23, 0.18);
       display: inline-flex;
       align-items: center;
       justify-content: center;
+    }
+    html[data-theme="light"] .cta-emblem-tile {
+      background: rgba(245, 239, 234, 0.10);
+      border-color: rgba(245, 239, 234, 0.24);
     }
     .cta-emblem-tile img {
       width: 28px;
       height: 28px;
       object-fit: contain;
+    }
+    .cta-emblem-tile .on-dark {
+      display: none !important;
+    }
+    .cta-emblem-tile .on-light {
+      display: block !important;
+    }
+    html[data-theme="light"] .cta-emblem-tile .on-dark {
+      display: block !important;
+    }
+    html[data-theme="light"] .cta-emblem-tile .on-light {
+      display: none !important;
     }
     .cta-banner.cta-closing-emblem .cta-copy {
       max-width: 34em;
@@ -1462,24 +1562,43 @@
       align-items: center;
       gap: 10px;
     }
-    .cta-banner.cta-closing-emblem h2 {
+    .cta-banner.cta-closing-emblem h2,
+    html[data-theme="light"] .cta-banner.cta-closing-emblem h2 {
       margin: 0;
       font-size: clamp(28px, 3.8vw, 40px);
       font-weight: 700;
       letter-spacing: -0.03em;
       line-height: 1.12;
-      color: var(--fg);
+      color: var(--cta-fg);
     }
-    .cta-banner.cta-closing-emblem p {
+    .cta-banner.cta-closing-emblem p,
+    html[data-theme="light"] .cta-banner.cta-closing-emblem p {
       margin: 0;
       font-size: 16.5px;
       line-height: 1.6;
-      color: var(--fg-2);
+      color: var(--cta-sub);
     }
     .cta-banner.cta-closing-emblem .cta-actions {
       justify-content: center;
       gap: 10px;
       margin-top: 4px;
+    }
+    .cta-banner.cta-closing-emblem .hero-primary-btn,
+    html[data-theme="light"] .cta-banner.cta-closing-emblem .hero-primary-btn {
+      background: var(--cta-btn-bg) !important;
+      color: var(--cta-btn-fg) !important;
+      border-color: var(--cta-btn-bg) !important;
+    }
+    .cta-banner.cta-closing-emblem .hero-secondary-btn,
+    html[data-theme="light"] .cta-banner.cta-closing-emblem .hero-secondary-btn {
+      background: transparent !important;
+      color: var(--cta-fg) !important;
+      border-color: var(--cta-ghost-border) !important;
+    }
+    .cta-banner.cta-closing-emblem .hero-secondary-btn:hover,
+    html[data-theme="light"] .cta-banner.cta-closing-emblem .hero-secondary-btn:hover {
+      background: var(--cta-ghost-hover) !important;
+      border-color: var(--cta-ghost-hover-border) !important;
     }
     .home-footer {
       padding-bottom: 56px;
@@ -1591,6 +1710,7 @@
           <a href="#en-gallery" class="nav-link" data-section="en-gallery">Worlds &amp; Personas</a>
           <a href="#en-downloads" class="nav-link" data-section="en-downloads">Download</a>
           <a href="#en-faq" class="nav-link" data-section="en-faq">FAQ</a>
+          <a href="docs/" class="nav-link">Docs</a>
         </nav>
       </div>
 
@@ -1623,22 +1743,123 @@
           </svg>
         </a>
 
-        <button id="theme-toggle" class="icon-btn" type="button" title="Toggle Light / Dark theme" aria-label="Toggle Light / Dark theme">
-          <svg id="theme-icon" class="theme-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <g class="theme-icon-sun">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </g>
-            <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-          </svg>
-        </button>
+        <div class="palette-dropdown" id="palette-dropdown">
+          <div class="palette-dual-capsule" id="palette-capsule">
+            <button id="palette-btn" class="palette-cap-pal" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="palette-menu" title="Open palette swatch tray" aria-label="Open palette swatch tray">
+              <svg class="palette-cap-star" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path></svg>
+              <span class="palette-cap-label" id="palette-cap-label">Sea</span>
+            </button>
+            <span class="palette-cap-sep" aria-hidden="true"></span>
+            <button id="theme-toggle" class="palette-cap-theme" type="button" title="Toggle Light / Dark theme" aria-label="Toggle Light / Dark theme">
+              <svg id="theme-icon" class="theme-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g class="theme-icon-sun">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </g>
+                <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="palette-menu" id="palette-menu" role="dialog" aria-label="Choose color palette" aria-hidden="true">
+            <div class="palette-deck-head">
+              <div class="palette-deck-live">
+                <svg id="palette-stage-star" class="palette-stage-star" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path>
+                </svg>
+                <div class="palette-deck-meta">
+                  <span id="palette-stage-title" class="palette-stage-title">Deep Sea · Sakura</span>
+                  <span id="palette-stage-hex" class="palette-stage-hex">#122e8a · #f4c2d1</span>
+                </div>
+              </div>
+              <button type="button" id="palette-shuffle" class="palette-shuffle-btn" title="Shuffle palette">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="16 3 21 3 21 8"></polyline>
+                  <line x1="4" y1="20" x2="21" y2="3"></line>
+                  <polyline points="21 16 21 21 16 21"></polyline>
+                  <line x1="15" y1="15" x2="21" y2="21"></line>
+                  <line x1="4" y1="4" x2="9" y2="9"></line>
+                </svg>
+                <span>Shuffle</span>
+              </button>
+            </div>
+            <div class="palette-tray-grid" role="radiogroup" aria-label="Curated Day and Night palettes">
+              <button type="button" class="palette-card is-active" role="radio" aria-checked="true" aria-label="Deep Sea · Sakura" data-palette-id="deep-sea-sakura" style="--dot-a:#122e8a;--dot-b:#f4c2d1;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Sea</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Forest · Mint" data-palette-id="forest-mint" style="--dot-a:#164638;--dot-b:#a9dec6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Mint</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Burgundy · Rose" data-palette-id="burgundy-rosewood" style="--dot-a:#73142c;--dot-b:#e6b3bd;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Rose</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Iris · Lilac" data-palette-id="iris-lilac" style="--dot-a:#3e277a;--dot-b:#d5c3f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Iris</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Glacier · Ice" data-palette-id="glacier-porcelain" style="--dot-a:#164b8a;--dot-b:#b6d8f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Ice</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Berry · Peach" data-palette-id="berry-peach" style="--dot-a:#8f2d4b;--dot-b:#f8cad6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Peach</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="palette-deck-foot">
+              <div class="palette-mode-switch" role="group" aria-label="Day or Night preview">
+                <button type="button" class="palette-mode-btn is-active" data-theme-pick="light" aria-pressed="true">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <line x1="12" y1="2" x2="12" y2="4"></line>
+                    <line x1="12" y1="20" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line>
+                    <line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="4" y2="12"></line>
+                    <line x1="20" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line>
+                    <line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                  </svg>
+                  <span>Day</span>
+                </button>
+                <button type="button" class="palette-mode-btn" data-theme-pick="dark" aria-pressed="false">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                  <span>Night</span>
+                </button>
+              </div>
+              <span id="palette-counter" class="palette-counter">01 / 06</span>
+            </div>
+          </div>
+        </div>
 
         <a href="#en-downloads" class="header-dl-btn">Download</a>
       </div>
@@ -1654,6 +1875,7 @@
     <a href="#en-gallery" class="en-mobile-link" data-mobile-nav>Worlds &amp; Personas</a>
     <a href="#en-downloads" class="en-mobile-link" data-mobile-nav>Download</a>
     <a href="#en-faq" class="en-mobile-link" data-mobile-nav>FAQ</a>
+    <a href="docs/" class="en-mobile-link">Docs</a>
     <div class="en-mobile-foot">
       <div class="en-mobile-langs" aria-label="Select language">
         <a href="../" class="lang-switch-pill" lang="zh-CN">中文</a>
@@ -1694,20 +1916,14 @@
             When you close the chat window, their clock does not freeze. Define your companion's name, pronouns (<code>they / she / he</code>), and <code>SOUL.md</code> character — grounded in a walkable town, persistent local SQLite memory, and unhurried day-night routines.
           </p>
 
-          <div class="hero-chips hero-stagger" style="--stagger: 2" aria-label="Core architecture pillars">
-            <span class="hero-chip">Deterministic Spatial World</span>
-            <span class="hero-chip">Local SQLite Memory</span>
-            <span class="hero-chip">BYOK &amp; Offline Ollama</span>
-          </div>
-
-          <div class="hero-cta-wrap hero-stagger" style="--stagger: 3">
+          <div class="hero-cta-wrap hero-stagger" style="--stagger: 2">
             <div class="hero-cta-row">
               <a href="../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe" class="hero-primary-btn" id="win-download-btn">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M3 5.5L10.5 4.4V11.3H3V5.5ZM11.5 4.25L21 2.8V11.3H11.5V4.25ZM3 12.4H10.5V19.3L3 18.2V12.4ZM11.5 12.4H21V20.9L11.5 19.5V12.4Z"/>
                 </svg>
                 <span>Download for Windows v0.7.0</span>
-                <span class="hero-btn-meta font-mono">5.6 MB</span>
+                <span class="hero-btn-meta font-mono">5.8 MB</span>
               </a>
               <a href="#en-tryout" class="hero-secondary-btn">
                 <span>30s Interactive Tryout</span>
@@ -1718,7 +1934,25 @@
               </a>
             </div>
 
-            <p class="hero-meta-line">Version 0.7.0 · 5.6 MB No-Admin · Apache-2.0 Open Source · Windows 10/11 &amp; Linux/WSL2</p>
+            <p class="hero-meta-line">Version 0.7.0 · 5.8 MB No-Admin · Apache-2.0 Open Source · Windows 10/11 &amp; Linux/WSL2</p>
+
+            <div class="hero-spec-rail" aria-label="Core architecture pillars">
+              <div class="hero-spec-item">
+                <span class="hero-spec-idx">01 / SPATIAL WORLD</span>
+                <span class="hero-spec-val">7 Built-in + Procedural Towns</span>
+                <span class="hero-spec-sub">Timed walks across real road networks</span>
+              </div>
+              <div class="hero-spec-item">
+                <span class="hero-spec-idx">02 / LIVING STREETS</span>
+                <span class="hero-spec-val">12 Shop Types · Open Counters</span>
+                <span class="hero-spec-sub">Shopkeeper shifts, tea cooling &amp; damp ink</span>
+              </div>
+              <div class="hero-spec-item">
+                <span class="hero-spec-idx">03 / LOCAL SOVEREIGNTY</span>
+                <span class="hero-spec-val">Local SQLite · BYOK / Ollama</span>
+                <span class="hero-spec-sub">Zero nyairo servers, memories stay yours</span>
+              </div>
+            </div>
 
             <div class="win-dl-feedback hero-dl-feedback" id="win-dl-feedback" hidden>
               <span class="win-dl-dot" aria-hidden="true"></span>
@@ -1765,8 +1999,8 @@
             <div class="stage-screen-wrap" id="stage-screen-wrap" role="button" tabindex="0" aria-label="Click to inspect full-resolution 2x Retina capture">
               <!-- Scene 0: Silent 60fps Walkthrough Video -->
               <div class="stage-scene is-active" data-scene-panel="0">
-                <video id="stage-video-dark" class="stage-video on-dark" autoplay muted loop playsinline preload="auto" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
-                <video id="stage-video-light" class="stage-video on-light" muted loop playsinline preload="metadata" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
+                <video id="stage-video-dark" class="stage-video on-dark" muted loop playsinline preload="metadata" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
+                <video id="stage-video-light" class="stage-video on-light" autoplay muted loop playsinline preload="auto" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
                 <img class="stage-reduced-still on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo desktop overview: room presence, posture, and live status" width="2560" height="1600" loading="eager">
                 <img class="stage-reduced-still on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo desktop overview: room presence, posture, and live status" width="2560" height="1600" loading="eager">
               </div>
@@ -2064,7 +2298,7 @@
             <h2 class="section-title" id="cap-heading">How nyairo sustains a real daily life without burning tokens</h2>
             <p class="section-desc">Spatial coordinates, shop hours, container visibility, and thermal/moisture states run on a deterministic local engine — leaving your chosen LLM free to speak naturally as an individual.</p>
           </div>
-          <a href="../?doc=status-matrix" class="btn-outline">Status Matrix <span class="zh-doc-badge">ZH</span> <span class="arrow-nudge">→</span></a>
+          <a href="docs/?doc=status-matrix" class="btn-outline">Status Matrix <span class="arrow-nudge">→</span></a>
         </div>
 
         <div class="eco-strip" id="en-ecosystem">
@@ -2086,7 +2320,7 @@
           <div class="eco-card spotlight-surface" data-reveal style="--reveal-delay: 80ms">
             <div class="eco-head">
               <span class="eco-kicker">Featherweight · No GPU Needed</span>
-              <h3 class="eco-title">~5.6 MB desktop client, quiet in the system tray</h3>
+              <h3 class="eco-title">~5.8 MB desktop client, quiet in the system tray</h3>
             </div>
             <p class="eco-desc">With online APIs, inference happens remotely while your PC runs a crisp native UI and local SQLite ledger. Integrated-graphics laptops run it effortlessly without admin privileges.</p>
             <div class="eco-chips" aria-label="Supported platforms">
@@ -2228,7 +2462,7 @@
             <div class="cap-card-body">
               <div class="cap-card-top">
                 <h3>Dual-Layer Memory Lantern &amp; Co-Reading</h3>
-                <a href="../?doc=daily-companions" class="cap-where-link">Docs <span class="zh-doc-badge">ZH</span> →</a>
+                <a href="docs/?doc=daily-companions" class="cap-where-link">Docs →</a>
               </div>
               <p class="cap-card-desc">Pairs short-horizon episodic context with curated long-term SQLite facts you can search, edit, or mute anytime — alongside shared book reading bookmarks and line-by-line draft version diffs.</p>
               <div class="cap-chips">
@@ -2246,7 +2480,7 @@
             <div class="cap-card-body">
               <div class="cap-card-top">
                 <h3>Procedural Worlds &amp; Portable Suitcase</h3>
-                <a href="../?doc=world-editor" class="cap-where-link">Editor Docs <span class="zh-doc-badge">ZH</span> →</a>
+                <a href="docs/?doc=world-editor" class="cap-where-link">Editor Docs →</a>
               </div>
               <p class="cap-card-desc">Synthesize a one-click template-free procedural exclusive world or sculpt custom rooms offline, and pack memories, world state, and <code>SOUL.md</code> into a key-stripped <code>.nyairo-suitcase.zip</code> archive.</p>
               <div class="cap-chips">
@@ -2320,7 +2554,7 @@
         <div class="gallery-personas-shell" data-reveal>
           <div class="persona-starter-head">
             <span class="persona-starter-title">4 Ready-to-Use <code>SOUL.md</code> Starter Personas (Gender-neutral <code>they / them</code> by default — customize name &amp; pronouns freely)</span>
-            <a href="../?doc=configuration" class="persona-starter-link">Persona Guide <span class="zh-doc-badge">ZH</span> →</a>
+            <a href="docs/?doc=configuration" class="persona-starter-link">Persona Guide →</a>
           </div>
 
           <div class="persona-starter-grid">
@@ -2384,7 +2618,7 @@
           <div>
             <div class="section-eyebrow">Get nyairo v0.7.0</div>
             <h2 class="section-title" id="downloads-heading">Choose your installation path</h2>
-            <p class="section-desc">Windows 10/11 users can start directly with the ~5.6 MB no-admin desktop installer; Linux / WSL 2 users and developers can install via one-line CLI or delegate to an AI coding agent.</p>
+            <p class="section-desc">Windows 10/11 users can start directly with the ~5.8 MB no-admin desktop installer; Linux / WSL 2 users and developers can install via one-line CLI or delegate to an AI coding agent.</p>
           </div>
           <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0" target="_blank" rel="noopener noreferrer" class="btn-outline">GitHub Release v0.7.0 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
         </div>
@@ -2416,7 +2650,7 @@
               <span>Download started · If SmartScreen appears, click "More info -&gt; Run anyway" (diagram below).</span>
             </div>
             <div class="dl-card-foot">
-              <span>Windows 10 / 11 (64-bit) · ~5.6 MB</span>
+              <span>Windows 10 / 11 (64-bit) · ~5.8 MB</span>
               <button type="button" class="sha-copy-btn" id="copy-setup-sha" data-sha="174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8" title="Copy full SHA256 checksum for nyairo-0.7.0-setup.exe">
                 <span>SHA256 · 174e4597...14dd8</span>
                 <span id="sha-copy-label">Copy</span>
@@ -2448,7 +2682,7 @@
             </div>
             <div class="dl-card-foot">
               <span>Ubuntu / Debian / WSL 2</span>
-              <a href="../?doc=quickstart">Quickstart <span class="zh-doc-badge">ZH</span> →</a>
+              <a href="docs/?doc=quickstart">Quickstart →</a>
             </div>
           </div>
 
@@ -2484,7 +2718,7 @@
             </div>
             <div class="dl-card-foot">
               <span>Pre-check &amp; SHA256 verified</span>
-              <a href="../?doc=agent-install">Spec <span class="zh-doc-badge">ZH</span> →</a>
+              <a href="docs/?doc=agent-install">Spec →</a>
             </div>
           </div>
         </div>
@@ -2616,7 +2850,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
             <h2 class="section-title" id="faq-heading">Frequently asked questions</h2>
             <p class="section-desc">Clear answers on hardware needs, pricing, privacy, world customization, and safe upgrades.</p>
           </div>
-          <a href="../?doc=troubleshooting" class="btn-outline">Troubleshooting <span class="zh-doc-badge">ZH</span> <span class="arrow-nudge">→</span></a>
+          <a href="docs/?doc=troubleshooting" class="btn-outline">Troubleshooting <span class="arrow-nudge">→</span></a>
         </div>
 
         <div class="faq-grid" data-reveal>
@@ -2627,7 +2861,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
-                No. When connected to cloud APIs such as DeepSeek, OpenAI, Claude, or Qwen, model inference runs remotely while your computer only runs the ~5.6 MB desktop client and local SQLite memory ledger. Any everyday laptop with integrated graphics runs it quietly in the system tray. (A local GPU is only helpful if you choose to run local Ollama models or optional local image generation.)
+                No. When connected to cloud APIs such as DeepSeek, OpenAI, Claude, or Qwen, model inference runs remotely while your computer only runs the ~5.8 MB desktop client and local SQLite memory ledger. Any everyday laptop with integrated graphics runs it quietly in the system tray. (A local GPU is only helpful if you choose to run local Ollama models or optional local image generation.)
               </div>
             </details>
 
@@ -2637,7 +2871,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
-                Never. nyairo operates zero centralized cloud servers. Your <code>SOUL.md</code> persona, full conversation database, long-term memory lantern, and co-reading drafts live strictly inside <code>~/.nyairo</code> on your own machine. Network requests go solely to the model endpoint or messaging channel you configure — and stay 100% offline with local Ollama. See <a href="../?doc=privacy">Privacy &amp; Data Boundaries (ZH)</a>.
+                Never. nyairo operates zero centralized cloud servers. Your <code>SOUL.md</code> persona, full conversation database, long-term memory lantern, and co-reading drafts live strictly inside <code>~/.nyairo</code> on your own machine. Network requests go solely to the model endpoint or messaging channel you configure — and stay 100% offline with local Ollama. See <a href="docs/?doc=privacy">Privacy &amp; Data Boundaries</a>.
               </div>
             </details>
 
@@ -2751,17 +2985,17 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
             <ul class="footer-col-list">
               <li><a href="https://github.com/L1AN929/nyairo#readme" target="_blank" rel="noopener noreferrer">GitHub Overview (EN/ZH) <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a></li>
               <li><a href="https://github.com/L1AN929/nyairo/issues/new?template=world_persona_share.yml" target="_blank" rel="noopener noreferrer">Share World / Persona Pack <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a></li>
-              <li><a href="../?doc=desktop-guide">Desktop App Guide <span class="zh-doc-badge">ZH</span></a></li>
-              <li><a href="../?doc=world-editor">Offline World Editor <span class="zh-doc-badge">ZH</span></a></li>
+              <li><a href="docs/?doc=desktop-guide">Desktop App Guide</a></li>
+              <li><a href="docs/?doc=world-editor">Offline World Editor</a></li>
             </ul>
           </div>
 
           <div class="footer-col">
             <h3 class="footer-col-title">Transparency &amp; Source</h3>
             <ul class="footer-col-list">
-              <li><a href="../?doc=changelog">v0.7.0 Release Notes <span class="zh-doc-badge">ZH</span></a></li>
-              <li><a href="../?doc=status-matrix">Shipped vs. Planned <span class="zh-doc-badge">ZH</span></a></li>
-              <li><a href="../?doc=privacy">Privacy &amp; Local Storage <span class="zh-doc-badge">ZH</span></a></li>
+              <li><a href="docs/?doc=changelog">v0.7.0 Release Notes</a></li>
+              <li><a href="docs/?doc=status-matrix">Shipped vs. Planned</a></li>
+              <li><a href="docs/?doc=privacy">Privacy &amp; Local Storage</a></li>
               <li><a href="https://github.com/L1AN929/nyairo/releases" target="_blank" rel="noopener noreferrer">All Releases <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a></li>
             </ul>
           </div>
@@ -3032,69 +3266,347 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
         }
       }
 
-      /* 1. Theme Switcher */
-      function applyTheme(theme) {
-        var next = theme === 'light' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
+      /* 1. Theme & 6-Palette Studio Fan Switcher */
+      var PALETTE_ORDER = [
+        'deep-sea-sakura',
+        'forest-mint',
+        'burgundy-rosewood',
+        'iris-lilac',
+        'glacier-porcelain',
+        'berry-peach'
+      ];
+
+      var PALETTE_META = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d', dayInk: '#122e8a', nightInk: '#f4c2d1', short: 'Sea', title: 'Deep Sea · Sakura', index: '01 / 06' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d', dayInk: '#164638', nightInk: '#a9dec6', short: 'Mint', title: 'Forest · Mint', index: '02 / 06' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c', dayInk: '#73142c', nightInk: '#e6b3bd', short: 'Rose', title: 'Burgundy · Rose', index: '03 / 06' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10', dayInk: '#3e277a', nightInk: '#d5c3f8', short: 'Iris', title: 'Iris · Lilac', index: '04 / 06' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10', dayInk: '#164b8a', nightInk: '#b6d8f8', short: 'Ice', title: 'Glacier · Ice', index: '05 / 06' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c', dayInk: '#8f2d4b', nightInk: '#f8cad6', short: 'Peach', title: 'Berry · Peach', index: '06 / 06' }
+      };
+
+      var paletteVtSeq = 0;
+      var activePaletteAnim = null;
+      var themeVtSeq = 0;
+      var activeThemeVt = null;
+      var paletteFeedbackTimers = { shuffle: null, star: null, sheen: null };
+
+      function getActivePalette() {
+        var cur = document.documentElement.getAttribute('data-palette');
+        return cur && PALETTE_META[cur] ? cur : 'deep-sea-sakura';
+      }
+
+      function syncMetaThemeColor() {
         var metaTheme = document.getElementById('meta-theme-color');
-        if (metaTheme) metaTheme.setAttribute('content', next === 'light' ? '#fafafa' : '#0b0b0c');
+        if (!metaTheme) return;
+        var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        var pal = getActivePalette();
+        metaTheme.setAttribute('content', PALETTE_META[pal][theme]);
+      }
+
+      function ensurePaletteWashBeam() {
+        var beam = document.getElementById('palette-wash-beam');
+        if (!beam && document.body) {
+          beam = document.createElement('div');
+          beam.id = 'palette-wash-beam';
+          beam.className = 'palette-wash-beam';
+          beam.setAttribute('aria-hidden', 'true');
+          document.body.appendChild(beam);
+        }
+        return beam;
+      }
+
+      function renderPaletteDeckMeta(paletteId) {
+        var meta = PALETTE_META[paletteId] || PALETTE_META['deep-sea-sakura'];
+        var titleEl = document.getElementById('palette-stage-title');
+        var hexEl = document.getElementById('palette-stage-hex');
+        var counterEl = document.getElementById('palette-counter');
+        if (titleEl) titleEl.textContent = meta.title;
+        if (hexEl) hexEl.textContent = meta.dayInk + ' · ' + meta.nightInk;
+        if (counterEl) counterEl.textContent = meta.index;
+      }
+
+      function triggerPaletteFeedback(sourceCard) {
+        var btn = document.getElementById('palette-btn');
+        var star = document.getElementById('palette-stage-star');
+        if (btn) {
+          btn.classList.remove('is-shuffling');
+          void btn.offsetWidth;
+          btn.classList.add('is-shuffling');
+          clearTimeout(paletteFeedbackTimers.shuffle);
+          paletteFeedbackTimers.shuffle = setTimeout(function () { btn.classList.remove('is-shuffling'); }, 480);
+        }
+        if (star) {
+          star.classList.remove('is-popping');
+          void star.offsetWidth;
+          star.classList.add('is-popping');
+          clearTimeout(paletteFeedbackTimers.star);
+          paletteFeedbackTimers.star = setTimeout(function () { star.classList.remove('is-popping'); }, 380);
+        }
+        var cardEl = sourceCard || document.querySelector('#palette-menu .palette-card.is-active');
+        if (cardEl) {
+          cardEl.classList.remove('is-sheen');
+          void cardEl.offsetWidth;
+          cardEl.classList.add('is-sheen');
+          clearTimeout(paletteFeedbackTimers.sheen);
+          paletteFeedbackTimers.sheen = setTimeout(function () { cardEl.classList.remove('is-sheen'); }, 540);
+        }
+      }
+
+      function applyPalette(paletteId) {
+        var next = paletteId && PALETTE_META[paletteId] ? paletteId : 'deep-sea-sakura';
+        if (next === 'deep-sea-sakura') {
+          document.documentElement.removeAttribute('data-palette');
+        } else {
+          document.documentElement.setAttribute('data-palette', next);
+        }
         try {
-          localStorage.setItem('nyairo-theme', next);
-          localStorage.setItem('chiyo-theme', next);
+          localStorage.setItem('nyairo-palette', next);
         } catch (e) {}
+        syncMetaThemeColor();
+        var capLabel = document.getElementById('palette-cap-label');
+        if (capLabel) capLabel.textContent = PALETTE_META[next].short;
+        var menu = document.getElementById('palette-menu');
+        if (menu) {
+          Array.prototype.forEach.call(menu.querySelectorAll('.palette-card'), function (card) {
+            var active = card.getAttribute('data-palette-id') === next;
+            card.classList.toggle('is-active', active);
+            card.setAttribute('aria-checked', active ? 'true' : 'false');
+          });
+        }
+        renderPaletteDeckMeta(next);
+      }
+
+      function switchPalette(paletteId, sourceCard) {
+        var next = paletteId && PALETTE_META[paletteId] ? paletteId : 'deep-sea-sakura';
+        if (next === getActivePalette()) return;
+        var seq = ++paletteVtSeq;
+        if (activePaletteAnim) {
+          try { activePaletteAnim.cancel(); } catch (e) {}
+          activePaletteAnim = null;
+        }
+        if (activeThemeVt) {
+          ++themeVtSeq;
+          try { activeThemeVt.skipTransition(); } catch (e) {}
+          activeThemeVt = null;
+          document.documentElement.classList.remove('vt-switching');
+        }
+        triggerPaletteFeedback(sourceCard);
+        applyPalette(next);
+        if (isReducedMotion()) return;
+        var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        var beamPrimary = theme === 'light' ? PALETTE_META[next].dayInk : PALETTE_META[next].nightInk;
+        var beamSecondary = theme === 'light' ? PALETTE_META[next].nightInk : PALETTE_META[next].dayInk;
+        var beam = ensurePaletteWashBeam();
+        if (beam && typeof beam.animate === 'function') {
+          beam.style.setProperty('--beam-primary', beamPrimary);
+          beam.style.setProperty('--beam-secondary', beamSecondary);
+          beam.style.opacity = '1';
+          var anim = beam.animate(
+            [
+              { transform: 'translate3d(64vw, 0, 0)', opacity: 0 },
+              { transform: 'translate3d(18vw, 0, 0)', opacity: 0.94, offset: 0.3 },
+              { transform: 'translate3d(-68vw, 0, 0)', opacity: 0 }
+            ],
+            { duration: 580, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+          );
+          activePaletteAnim = anim;
+          Promise.resolve(anim.finished).catch(function () {}).finally(function () {
+            if (seq === paletteVtSeq) {
+              beam.style.opacity = '0';
+              activePaletteAnim = null;
+            }
+          });
+        }
+      }
+
+      function initPaletteDropdown() {
+        var wrap = document.getElementById('palette-dropdown');
+        var capsule = document.getElementById('palette-capsule');
+        var btn = document.getElementById('palette-btn');
+        var menu = document.getElementById('palette-menu');
+        var savedPal = 'deep-sea-sakura';
+        try {
+          savedPal = localStorage.getItem('nyairo-palette') || 'deep-sea-sakura';
+        } catch (e) {}
+        applyPalette(savedPal);
+        if (!wrap || !btn || !menu) return;
+
+        function isOpen() {
+          return menu.classList.contains('is-open');
+        }
+        function clampPaletteMenu() {
+          var wrapRect = wrap.getBoundingClientRect();
+          var menuWidth = menu.offsetWidth || Math.min(372, window.innerWidth - 24);
+          var pad = 12;
+          var idealRight = wrapRect.right;
+          var idealLeft = idealRight - menuWidth;
+          var shiftX = 0;
+          if (idealLeft < pad) {
+            shiftX = pad - idealLeft;
+          } else if (idealRight > window.innerWidth - pad) {
+            shiftX = (window.innerWidth - pad) - idealRight;
+          }
+          menu.style.setProperty('--menu-shift-x', Math.round(shiftX) + 'px');
+        }
+        function openMenu() {
+          clampPaletteMenu();
+          renderPaletteDeckMeta(getActivePalette());
+          menu.classList.add('is-open');
+          if (capsule) capsule.classList.add('is-open');
+          menu.setAttribute('aria-hidden', 'false');
+          btn.setAttribute('aria-expanded', 'true');
+        }
+        function closeMenu() {
+          if (!isOpen()) return;
+          menu.classList.remove('is-open');
+          if (capsule) capsule.classList.remove('is-open');
+          menu.setAttribute('aria-hidden', 'true');
+          btn.setAttribute('aria-expanded', 'false');
+          renderPaletteDeckMeta(getActivePalette());
+        }
+
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var langMenu = document.getElementById('lang-menu');
+          var langToggle = document.getElementById('lang-toggle');
+          if (langMenu && !langMenu.hidden) {
+            langMenu.hidden = true;
+            if (langToggle) langToggle.setAttribute('aria-expanded', 'false');
+          }
+          if (isOpen()) {
+            closeMenu();
+          } else {
+            openMenu();
+          }
+        });
+
+        menu.addEventListener('click', function (e) {
+          var card = e.target.closest('[data-palette-id]');
+          if (card) {
+            e.stopPropagation();
+            switchPalette(card.getAttribute('data-palette-id'), card);
+            return;
+          }
+          var modeBtn = e.target.closest('[data-theme-pick]');
+          if (modeBtn) {
+            e.stopPropagation();
+            var pick = modeBtn.getAttribute('data-theme-pick');
+            var curTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+            if (pick !== curTheme) {
+              switchTheme(pick, e);
+            }
+            return;
+          }
+          var shuffleBtn = e.target.closest('#palette-shuffle');
+          if (shuffleBtn) {
+            e.stopPropagation();
+            shuffleBtn.classList.remove('is-spinning');
+            void shuffleBtn.offsetWidth;
+            shuffleBtn.classList.add('is-spinning');
+            setTimeout(function () { shuffleBtn.classList.remove('is-spinning'); }, 440);
+            var cur = getActivePalette();
+            var candidates = PALETTE_ORDER.filter(function (id) { return id !== cur; });
+            var next = candidates[Math.floor(Math.random() * candidates.length)];
+            var nextCard = menu.querySelector('[data-palette-id="' + next + '"]');
+            switchPalette(next, nextCard);
+          }
+        });
+
+        var grid = menu.querySelector('.palette-tray-grid');
+        if (grid) {
+          Array.prototype.forEach.call(grid.querySelectorAll('.palette-card'), function (card) {
+            var palId = card.getAttribute('data-palette-id');
+            card.addEventListener('mouseenter', function () { renderPaletteDeckMeta(palId); });
+            card.addEventListener('focus', function () { renderPaletteDeckMeta(palId); });
+            card.addEventListener('blur', function () { renderPaletteDeckMeta(getActivePalette()); });
+          });
+          grid.addEventListener('mouseleave', function () { renderPaletteDeckMeta(getActivePalette()); });
+        }
+
+        window.addEventListener('resize', function () {
+          if (isOpen()) clampPaletteMenu();
+        }, { passive: true });
+
+        document.addEventListener('click', function (e) {
+          if (e.target === document.documentElement && document.documentElement.classList.contains('vt-palette')) return;
+          if (isOpen() && !wrap.contains(e.target)) closeMenu();
+        });
+
+        window.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && isOpen()) {
+            closeMenu();
+            btn.focus();
+          }
+        });
+      }
+
+      function applyTheme(theme, persist) {
+        var next = theme === 'dark' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        syncMetaThemeColor();
+        if (persist !== false) {
+          try {
+            localStorage.setItem('nyairo-theme', next);
+            localStorage.setItem('chiyo-theme', next);
+          } catch (e) {}
+        }
         if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
         var btnEl = document.getElementById('theme-toggle');
         if (btnEl) {
           btnEl.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
           btnEl.setAttribute('title', next === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode');
         }
+        Array.prototype.forEach.call(document.querySelectorAll('#palette-menu [data-theme-pick]'), function (modeBtn) {
+          var active = modeBtn.getAttribute('data-theme-pick') === next;
+          modeBtn.classList.toggle('is-active', active);
+          modeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
       }
 
-      function switchTheme(nextTheme, clickEvt) {
+      function switchTheme(nextTheme) {
+        var seq = ++themeVtSeq;
+        if (activePaletteAnim) {
+          ++paletteVtSeq;
+          try { activePaletteAnim.cancel(); } catch (e) {}
+          activePaletteAnim = null;
+          var beam = document.getElementById('palette-wash-beam');
+          if (beam) beam.style.opacity = '0';
+        }
+        if (activeThemeVt) {
+          try { activeThemeVt.skipTransition(); } catch (e) {}
+          activeThemeVt = null;
+        }
         if (!document.startViewTransition || isReducedMotion()) {
           applyTheme(nextTheme);
           return;
         }
-        var btnEl = document.getElementById('theme-toggle');
-        var cx = window.innerWidth - 48;
-        var cy = 28;
-        if (clickEvt && Number.isFinite(clickEvt.clientX) && (clickEvt.clientX > 0 || clickEvt.clientY > 0)) {
-          cx = clickEvt.clientX;
-          cy = clickEvt.clientY;
-        } else if (btnEl) {
-          var r = btnEl.getBoundingClientRect();
-          if (r.width > 0) {
-            cx = r.left + r.width / 2;
-            cy = r.top + r.height / 2;
-          }
-        }
-        var endRadius = Math.hypot(Math.max(cx, window.innerWidth - cx), Math.max(cy, window.innerHeight - cy));
         document.documentElement.classList.add('vt-switching');
         var vt = document.startViewTransition(function () {
           applyTheme(nextTheme);
         });
+        activeThemeVt = vt;
         vt.ready.then(function () {
+          if (seq !== themeVtSeq) return;
           document.documentElement.animate(
-            {
-              clipPath: [
-                'circle(0px at ' + cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px)',
-                'circle(' + endRadius.toFixed(1) + 'px at ' + cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px)'
-              ]
-            },
-            { duration: 400, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both', pseudoElement: '::view-transition-new(root)' }
+            { opacity: [0, 1] },
+            { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' }
           );
         }).catch(function () {});
         Promise.resolve(vt.finished).finally(function () {
+          if (seq !== themeVtSeq) return;
+          activeThemeVt = null;
           document.documentElement.classList.remove('vt-switching');
         });
       }
 
       function initTheme() {
-        var saved = 'dark';
+        var saved = 'light';
         try {
-          saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'dark';
+          saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'light';
         } catch (e) {}
-        applyTheme(saved);
+        applyTheme(saved, false);
+        initPaletteDropdown();
         requestAnimationFrame(function () {
           requestAnimationFrame(function () {
             document.documentElement.classList.add('theme-ready');
@@ -3103,7 +3615,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
         var themeBtn = document.getElementById('theme-toggle');
         if (themeBtn) {
           themeBtn.addEventListener('click', function (e) {
-            var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+            var cur = document.documentElement.getAttribute('data-theme') || 'light';
             switchTheme(cur === 'dark' ? 'light' : 'dark', e);
           });
         }
@@ -3139,6 +3651,15 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
         if (langDropdown && langToggle && langMenu) {
           langToggle.addEventListener('click', function (e) {
             e.stopPropagation();
+            var palMenu = document.getElementById('palette-menu');
+            var palCap = document.getElementById('palette-capsule');
+            var palBtn = document.getElementById('palette-btn');
+            if (palMenu && palMenu.classList.contains('is-open')) {
+              palMenu.classList.remove('is-open');
+              if (palCap) palCap.classList.remove('is-open');
+              palMenu.setAttribute('aria-hidden', 'true');
+              if (palBtn) palBtn.setAttribute('aria-expanded', 'false');
+            }
             var willOpen = langMenu.hidden;
             langMenu.hidden = !willOpen;
             langToggle.setAttribute('aria-expanded', String(willOpen));
@@ -3264,7 +3785,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
 
         function syncStageVideos(restartFromZero) {
           if (!darkV && !lightV) return;
-          var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+          var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
           var activeV = theme === 'light' ? lightV : darkV;
           var idleV = theme === 'light' ? darkV : lightV;
           var prevTime = idleV && Number.isFinite(idleV.currentTime) ? idleV.currentTime : 0;
@@ -3521,7 +4042,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
 
           var syncLbMedia = function (meta) {
             var isVideo = meta && meta.kind === 'video' && backdrop.classList.contains('show');
-            var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+            var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
             if (isVideo && vidDark && vidLight) {
               imgDark.hidden = true;
               imgLight.hidden = true;

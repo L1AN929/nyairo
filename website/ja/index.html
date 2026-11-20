@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja" data-theme="dark" translate="no" class="notranslate">
+<html lang="ja" data-theme="light" translate="no" class="notranslate">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -14,21 +14,35 @@
   <link rel="alternate" hreflang="en" href="https://nyairo.com/en/">
   <link rel="alternate" hreflang="x-default" href="https://nyairo.com/">
   <meta name="google" content="notranslate">
-  <meta name="theme-color" id="meta-theme-color" content="#0b0b0c">
+  <meta name="theme-color" id="meta-theme-color" content="#f5efea">
 
   <script>
     (function () {
+      var PALETTE_BG = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c' }
+      };
       try {
         var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        var savedPal = localStorage.getItem('nyairo-palette');
         if (saved === 'light' || saved === 'dark') {
           document.documentElement.setAttribute('data-theme', saved);
-          var metaTheme = document.getElementById('meta-theme-color');
-          if (metaTheme) metaTheme.setAttribute('content', saved === 'light' ? '#fafafa' : '#0b0b0c');
         }
+        if (savedPal && PALETTE_BG[savedPal]) {
+          document.documentElement.setAttribute('data-palette', savedPal);
+        }
+        var activeTheme = (saved === 'light' || saved === 'dark') ? saved : 'light';
+        var activePal = (savedPal && PALETTE_BG[savedPal]) ? savedPal : 'deep-sea-sakura';
+        var metaTheme = document.getElementById('meta-theme-color');
+        if (metaTheme) metaTheme.setAttribute('content', PALETTE_BG[activePal][activeTheme]);
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../style.css?v=20261118-v070-41">
+  <link rel="stylesheet" href="../style.css?v=20261120-v070-55">
   <link rel="icon" href="../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../assets/favicon-16.png">
@@ -52,7 +66,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="nyairo · AI にひとつの世界を。自分の日常を生きるために。">
-  <meta name="twitter:description" content="ローカル SQLite 記憶、歩き回れる街と部屋、BYOK / Ollama 対応、約 5.6 MB の Windows デスクトップアプリを備えたオープンソース AI 個体フレームワーク。">
+  <meta name="twitter:description" content="ローカル SQLite 記憶、歩き回れる街と部屋、BYOK / Ollama 対応、約 5.8 MB の Windows デスクトップアプリを備えたオープンソース AI 個体フレームワーク。">
   <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
   <meta name="twitter:image:alt" content="nyairo · AI にひとつの世界を。自分の日常を生きるために。">
 
@@ -100,7 +114,7 @@
             "name": "高性能な GPU（グラフィックボード）がなくても快適に動きますか？",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "はい、不要です。DeepSeek・OpenAI・Claude・Qwen などのクラウド API を利用する場合、推論処理はクラウド側で行われ、手元の PC では約 5.6 MB の軽量デスクトップアプリとローカル SQLite 記憶帳簿のみが動作します。一般的なノート PC（内蔵グラフィックス）でも静かに常駐できます。"
+              "text": "はい、不要です。DeepSeek・OpenAI・Claude・Qwen などのクラウド API を利用する場合、推論処理はクラウド側で行われ、手元の PC では約 5.8 MB の軽量デスクトップアプリとローカル SQLite 記憶帳簿のみが動作します。一般的なノート PC（内蔵グラフィックス）でも静かに常駐できます。"
             }
           },
           {
@@ -160,58 +174,73 @@
 
   <style>
     /* ==========================================================================
-       Magpie Editorial Monochrome Override & Self-Contained Japanese Layout
-       - Pure monochrome palette, 1px hairlines, zero glow blobs, zero emojis
-       - Transform: none at rest for razor-sharp CJK subpixel rendering
+       Noir Sakura Dark (#0c0b0d × #f4c2d1) & Deep Sea Light (#f5efea × #122e8a)
+       - Dark: Noir Charcoal (#0c0b0d) / Soft Sakura Blush (#f4c2d1)
+       - Light: Soft Milk White (#f5efea) / Deep Sea Ultramarine (#122e8a)
        ========================================================================== */
     :root,
     html[data-theme="dark"] {
       color-scheme: dark;
-      --bg: #0b0b0c;
-      --bg-elev: #121214;
-      --header-bg: rgba(11, 11, 12, 0.86);
-      --card: #161618;
-      --card-2: #1c1c1f;
-      --card-hover: #202024;
-      --code-bg: #111113;
-      --inp: #111113;
-      --glass: #161618;
+      --bg: #0c0b0d;
+      --bg-elev: #141216;
+      --header-bg: rgba(12, 11, 13, 0.86);
+      --card: #18151b;
+      --card-2: #201c24;
+      --card-hover: #241f29;
+      --code-bg: #121015;
+      --inp: #110f14;
+      --glass: #18151b;
 
-      --line: #26262a;
-      --line-2: #34343a;
+      --line: rgba(244, 194, 209, 0.11);
+      --line-2: rgba(244, 194, 209, 0.23);
 
-      --fg: #f2f2f3;
-      --fg-2: #b3b3ba;
-      --muted: #7a7a82;
+      --fg: #f7f1f3;
+      --fg-2: #cabdc3;
+      --muted: #91828a;
 
-      --btn: #f2f2f3;
-      --btn-ink: #0b0b0c;
+      --btn: #f4c2d1;
+      --btn-ink: #161015;
 
-      --seg-bg: #121214;
-      --seg-thumb: #242429;
-      --seg-thumb-border: #34343a;
+      --seg-bg: #121015;
+      --seg-thumb: #252029;
+      --seg-thumb-border: rgba(244, 194, 209, 0.22);
 
-      /* Restrained Monochrome Accents (zero neon / zero glow) */
-      --accent: #f2f2f3;
-      --accent-btn: #f2f2f3;
-      --accent-btn-hover: #dcdce0;
-      --accent-fg: #0b0b0c;
-      --accent-soft: rgba(242, 242, 243, 0.08);
-      --accent-line: #3e3e46;
+      /* Soft Sakura Blush & Mist Indigo Accents */
+      --accent: #b8cdf2;
+      --accent-btn: #f4c2d1;
+      --accent-btn-hover: #f9d5e0;
+      --accent-fg: #161015;
+      --accent-soft: rgba(184, 205, 242, 0.11);
+      --accent-line: rgba(184, 205, 242, 0.28);
       --accent-glow: transparent;
 
-      --green: #d4d4d8;
-      --green-soft: rgba(242, 242, 243, 0.07);
-      --green-line: #3a3a42;
-      --warm: #d8d8de;
-      --warm-soft: rgba(242, 242, 243, 0.07);
-      --warm-line: #3a3a42;
+      --green: #86cfb5;
+      --green-soft: rgba(134, 207, 181, 0.11);
+      --green-line: rgba(134, 207, 181, 0.28);
+      --warm: #f4b6c8;
+      --warm-soft: rgba(244, 182, 200, 0.12);
+      --warm-line: rgba(244, 182, 200, 0.30);
+
+      --pal-light: #122e8a;
+      --pal-dark: #f4c2d1;
+      --hero-h1: #f7f1f3;
+      --hero-h1-muted: #f4c2d1;
+      --cta-bg: #f4c2d1;
+      --cta-border: rgba(244, 194, 209, 0.42);
+      --cta-shadow: 0 22px 60px -18px rgba(0, 0, 0, 0.64);
+      --cta-fg: #181217;
+      --cta-sub: rgba(24, 18, 23, 0.78);
+      --cta-btn-bg: #181217;
+      --cta-btn-fg: #f7eef1;
+      --cta-ghost-border: rgba(24, 18, 23, 0.30);
+      --cta-ghost-hover: rgba(24, 18, 23, 0.08);
+      --cta-ghost-hover-border: rgba(24, 18, 23, 0.50);
 
       --header-h: 60px;
       --container-w: 1080px;
       --shadow-sm: none;
       --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.42);
-      --shadow-stage: 0 16px 40px rgba(0, 0, 0, 0.48);
+      --shadow-stage: 0 20px 54px -16px rgba(0, 0, 0, 0.56);
 
       --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "BIZ UDPGothic", "Yu Gothic", Meiryo, sans-serif;
       --font-mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", "Cascadia Mono", Consolas, Menlo, monospace;
@@ -219,48 +248,63 @@
 
     html[data-theme="light"] {
       color-scheme: light;
-      --bg: #fafafa;
-      --bg-elev: #f1f1f2;
-      --header-bg: rgba(250, 250, 250, 0.88);
-      --card: #ffffff;
-      --card-2: #f4f4f5;
-      --card-hover: #f4f4f5;
-      --code-bg: #f4f4f5;
-      --inp: #f4f4f5;
-      --glass: #ffffff;
+      --bg: #f5efea;
+      --bg-elev: #ece5de;
+      --header-bg: rgba(245, 239, 234, 0.88);
+      --card: #fcfaf7;
+      --card-2: #f0eae3;
+      --card-hover: #f7f2ed;
+      --code-bg: #ede6df;
+      --inp: #f1ebe5;
+      --glass: #fcfaf7;
 
-      --line: #e4e4e7;
-      --line-2: #d4d4d8;
+      --line: rgba(18, 46, 138, 0.12);
+      --line-2: rgba(18, 46, 138, 0.24);
 
-      --fg: #111112;
-      --fg-2: #4a4a50;
-      --muted: #85858c;
+      --fg: #11225c;
+      --fg-2: #435280;
+      --muted: #727ea3;
 
-      --btn: #111112;
-      --btn-ink: #fafafa;
+      --btn: #122e8a;
+      --btn-ink: #f5efea;
 
-      --seg-bg: #f1f1f2;
-      --seg-thumb: #ffffff;
-      --seg-thumb-border: #d4d4d8;
+      --seg-bg: #eae2da;
+      --seg-thumb: #fcfaf7;
+      --seg-thumb-border: rgba(18, 46, 138, 0.18);
 
-      --accent: #111112;
-      --accent-btn: #111112;
-      --accent-btn-hover: #27272a;
-      --accent-fg: #fafafa;
-      --accent-soft: rgba(17, 17, 18, 0.05);
-      --accent-line: #bcbcc4;
+      --accent: #1d46bf;
+      --accent-btn: #122e8a;
+      --accent-btn-hover: #0e246e;
+      --accent-fg: #f5efea;
+      --accent-soft: rgba(29, 70, 191, 0.08);
+      --accent-line: rgba(29, 70, 191, 0.25);
       --accent-glow: transparent;
 
-      --green: #27272a;
-      --green-soft: rgba(17, 17, 18, 0.05);
-      --green-line: #c8c8d0;
-      --warm: #27272a;
-      --warm-soft: rgba(17, 17, 18, 0.05);
-      --warm-line: #c8c8d0;
+      --green: #187a64;
+      --green-soft: rgba(24, 122, 100, 0.09);
+      --green-line: rgba(24, 122, 100, 0.24);
+      --warm: #122e8a;
+      --warm-soft: rgba(18, 46, 138, 0.08);
+      --warm-line: rgba(18, 46, 138, 0.26);
+
+      --pal-light: #122e8a;
+      --pal-dark: #f4c2d1;
+      --hero-h1: #122e8a;
+      --hero-h1-muted: #3d56a8;
+      --cta-bg: #122e8a;
+      --cta-border: rgba(245, 239, 234, 0.18);
+      --cta-shadow: 0 20px 56px -18px rgba(18, 46, 138, 0.34);
+      --cta-fg: #f5efea;
+      --cta-sub: rgba(245, 239, 234, 0.82);
+      --cta-btn-bg: #f5efea;
+      --cta-btn-fg: #122e8a;
+      --cta-ghost-border: rgba(245, 239, 234, 0.36);
+      --cta-ghost-hover: rgba(245, 239, 234, 0.12);
+      --cta-ghost-hover-border: rgba(245, 239, 234, 0.56);
 
       --shadow-sm: none;
-      --shadow-md: 0 8px 24px rgba(17, 17, 18, 0.07);
-      --shadow-stage: 0 14px 36px rgba(17, 17, 18, 0.07);
+      --shadow-md: 0 8px 24px rgba(18, 46, 138, 0.10);
+      --shadow-stage: 0 16px 42px -12px rgba(18, 46, 138, 0.16);
     }
 
     html {
@@ -610,6 +654,12 @@
       align-items: flex-start;
       gap: 20px;
     }
+    .ja-hero .hero-kicker-pill {
+      margin-bottom: 0;
+    }
+    .ja-hero .hero-spec-rail {
+      margin-top: 10px;
+    }
 
     .ja-hero-title {
       margin: 0;
@@ -624,8 +674,9 @@
     }
 
     .ja-hero-title .ink-muted {
-      color: var(--muted);
-      font-weight: 650;
+      color: var(--fg-2);
+      font-weight: 420;
+      opacity: 0.86;
     }
 
     .ja-hero-subtitle {
@@ -722,23 +773,38 @@
       line-height: 1.6;
     }
 
-    /* Monochrome Desktop Stage Overrides */
+    /* Sumi & Washi Hardware Frame & Editorial Section Rhythm */
     .stage-window-dots span {
       background: var(--line-2) !important;
     }
+    .app-stage-halo {
+      padding: 7px;
+      border-radius: 22px;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-stage);
+    }
     .app-stage {
-      border-radius: 16px !important;
-      border: 1px solid var(--line) !important;
+      border-radius: 15px !important;
+      border: 1px solid var(--line-2) !important;
       background: var(--card) !important;
+      box-shadow: none !important;
     }
     .stage-auto-bar {
-      background: var(--fg) !important;
-      opacity: 0.5 !important;
+      background: var(--warm) !important;
+      opacity: 0.75 !important;
+    }
+    .stage-caption-cell .caption-label {
+      color: var(--warm) !important;
+      font-family: var(--font-mono);
+      letter-spacing: 0.05em;
     }
 
     /* Calm Editorial Section Rhythm */
-    .section-block {
-      margin-top: 112px !important;
+    .section-block:not(.section-preview-lead) {
+      margin-top: 88px !important;
+      padding-top: 64px;
+      border-top: 1px solid var(--line);
     }
     .section-block.section-preview-lead {
       margin-top: 8px !important;
@@ -753,13 +819,24 @@
       flex-wrap: wrap;
     }
     .section-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
       font-family: var(--font-mono);
-      font-size: 0.75rem !important;
+      font-size: 0.74rem !important;
       font-weight: 600;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--muted) !important;
+      color: var(--warm) !important;
       margin-bottom: 8px;
+    }
+    .section-eyebrow::before {
+      content: "";
+      display: inline-block;
+      width: 16px;
+      height: 1px;
+      background: var(--warm);
+      flex-shrink: 0;
     }
     .section-title {
       margin: 0;
@@ -1188,15 +1265,21 @@
       min-width: 0;
     }
     .bento-icon {
-      width: 34px;
-      height: 34px;
+      width: 32px;
+      height: 32px;
       border-radius: 8px;
-      border: 1px solid var(--line-2);
+      border: 1px solid var(--line);
       background: var(--bg-elev);
-      color: var(--fg);
+      color: var(--fg-2);
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
+    }
+    .magpie-bento-cell:hover .bento-icon {
+      border-color: var(--warm-line);
+      color: var(--warm);
+      background: var(--warm-soft);
     }
     .bento-title {
       margin: 12px 0 6px;
@@ -1246,6 +1329,10 @@
     }
     .world-hairline-card.is-procedural {
       background: var(--bg-elev);
+      box-shadow: inset 0 2px 0 0 var(--warm);
+    }
+    .world-hairline-card.is-procedural .world-card-kicker {
+      color: var(--warm);
     }
     .world-card-kicker {
       font-family: var(--font-mono);
@@ -1382,6 +1469,12 @@
     }
     .dl-hairline-card.is-primary {
       background: var(--bg-elev);
+      box-shadow: inset 0 2px 0 0 var(--warm);
+    }
+    .dl-hairline-card.is-primary .byok-badge {
+      background: var(--warm-soft);
+      border-color: var(--warm-line);
+      color: var(--warm);
     }
     .dl-cmd-bar {
       padding: 10px 12px !important;
@@ -1526,12 +1619,14 @@
     }
 
     /* Magpie Closing Emblem CTA & Crisp 1-Row Footer */
-    .magpie-closing {
+    .magpie-closing,
+    html[data-theme="light"] .magpie-closing {
       margin-top: 112px;
-      padding: 64px 24px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: var(--card);
+      padding: 68px 32px 64px;
+      border: 1px solid var(--cta-border);
+      border-radius: 24px;
+      background: var(--cta-bg);
+      box-shadow: var(--cta-shadow);
       text-align: center;
       display: flex;
       flex-direction: column;
@@ -1542,28 +1637,46 @@
       width: 48px;
       height: 48px;
       border-radius: 12px;
-      border: 1px solid var(--line-2);
-      background: var(--bg-elev);
+      border: 1px solid rgba(24, 18, 23, 0.18);
+      background: rgba(24, 18, 23, 0.07);
       display: inline-flex;
       align-items: center;
       justify-content: center;
     }
+    html[data-theme="light"] .closing-cat-emblem {
+      border-color: rgba(245, 239, 234, 0.24);
+      background: rgba(245, 239, 234, 0.10);
+    }
     .closing-cat-emblem img {
       width: 26px;
       height: 25px;
-      filter: grayscale(100%) contrast(1.08);
+      filter: none;
     }
-    .magpie-closing h2 {
+    .closing-cat-emblem .on-dark {
+      display: none !important;
+    }
+    .closing-cat-emblem .on-light {
+      display: block !important;
+    }
+    html[data-theme="light"] .closing-cat-emblem .on-dark {
+      display: block !important;
+    }
+    html[data-theme="light"] .closing-cat-emblem .on-light {
+      display: none !important;
+    }
+    .magpie-closing h2,
+    html[data-theme="light"] .magpie-closing h2 {
       margin: 0;
       font-size: clamp(1.55rem, 2.8vw, 2.15rem);
       font-weight: 700;
-      color: var(--fg);
+      color: var(--cta-fg);
     }
-    .magpie-closing p {
+    .magpie-closing p,
+    html[data-theme="light"] .magpie-closing p {
       margin: 0;
       max-width: 34em;
       font-size: 0.94rem;
-      color: var(--fg-2);
+      color: var(--cta-sub);
     }
     .closing-actions {
       margin-top: 6px;
@@ -1572,6 +1685,23 @@
       justify-content: center;
       gap: 10px;
       flex-wrap: wrap;
+    }
+    .magpie-closing .magpie-btn-primary,
+    html[data-theme="light"] .magpie-closing .magpie-btn-primary {
+      background: var(--cta-btn-bg) !important;
+      color: var(--cta-btn-fg) !important;
+      border-color: var(--cta-btn-bg) !important;
+    }
+    .magpie-closing .magpie-btn-ghost,
+    html[data-theme="light"] .magpie-closing .magpie-btn-ghost {
+      background: transparent !important;
+      color: var(--cta-fg) !important;
+      border-color: var(--cta-ghost-border) !important;
+    }
+    .magpie-closing .magpie-btn-ghost:hover,
+    html[data-theme="light"] .magpie-closing .magpie-btn-ghost:hover {
+      background: var(--cta-ghost-hover) !important;
+      border-color: var(--cta-ghost-hover-border) !important;
     }
 
     .magpie-footer-1row {
@@ -1713,6 +1843,7 @@
           <a href="#ja-capabilities" class="ja-nav-link" data-section="ja-capabilities">機能一覧</a>
           <a href="#ja-gallery" class="ja-nav-link" data-section="ja-gallery">街と人物</a>
           <a href="#ja-faq" class="ja-nav-link" data-section="ja-faq">FAQ</a>
+          <a href="docs/" class="ja-nav-link">ドキュメント</a>
         </nav>
       </div>
 
@@ -1741,22 +1872,123 @@
           </svg>
         </a>
 
-        <button id="theme-toggle" class="icon-btn" type="button" title="ライト／ダーク表示を切り替え" aria-label="ライト／ダーク表示を切り替え">
-          <svg id="theme-icon" class="theme-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <g class="theme-icon-sun">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </g>
-            <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-          </svg>
-        </button>
+        <div class="palette-dropdown" id="palette-dropdown">
+          <div class="palette-dual-capsule" id="palette-capsule">
+            <button id="palette-btn" class="palette-cap-pal" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="palette-menu" title="配色とカラーパレットトレイを開く" aria-label="配色とカラーパレットトレイを開く">
+              <svg class="palette-cap-star" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path></svg>
+              <span class="palette-cap-label" id="palette-cap-label">深海</span>
+            </button>
+            <span class="palette-cap-sep" aria-hidden="true"></span>
+            <button id="theme-toggle" class="palette-cap-theme" type="button" title="ライト／ダーク表示を切り替え" aria-label="ライト／ダーク表示を切り替え">
+              <svg id="theme-icon" class="theme-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g class="theme-icon-sun">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </g>
+                <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="palette-menu" id="palette-menu" role="dialog" aria-label="サイト配色を選択" aria-hidden="true">
+            <div class="palette-deck-head">
+              <div class="palette-deck-live">
+                <svg id="palette-stage-star" class="palette-stage-star" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path>
+                </svg>
+                <div class="palette-deck-meta">
+                  <span id="palette-stage-title" class="palette-stage-title">深海 · 淡桜</span>
+                  <span id="palette-stage-hex" class="palette-stage-hex">#122e8a · #f4c2d1</span>
+                </div>
+              </div>
+              <button type="button" id="palette-shuffle" class="palette-shuffle-btn" title="ランダムで配色を切り替え">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="16 3 21 3 21 8"></polyline>
+                  <line x1="4" y1="20" x2="21" y2="3"></line>
+                  <polyline points="21 16 21 21 16 21"></polyline>
+                  <line x1="15" y1="15" x2="21" y2="21"></line>
+                  <line x1="4" y1="4" x2="9" y2="9"></line>
+                </svg>
+                <span>ランダム</span>
+              </button>
+            </div>
+            <div class="palette-tray-grid" role="radiogroup" aria-label="昼夜ツートン配色見本">
+              <button type="button" class="palette-card is-active" role="radio" aria-checked="true" aria-label="深海 · 淡桜" data-palette-id="deep-sea-sakura" style="--dot-a:#122e8a;--dot-b:#f4c2d1;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">深海</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="森林 · ミント" data-palette-id="forest-mint" style="--dot-a:#164638;--dot-b:#a9dec6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">森林</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="深紅 · ローズ" data-palette-id="burgundy-rosewood" style="--dot-a:#73142c;--dot-b:#e6b3bd;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">深紅</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="菖蒲 · 紫" data-palette-id="iris-lilac" style="--dot-a:#3e277a;--dot-b:#d5c3f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">菖蒲</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="蒼碧 · 氷青" data-palette-id="glacier-porcelain" style="--dot-a:#164b8a;--dot-b:#b6d8f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">蒼碧</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="苺緋 · 桃霧" data-palette-id="berry-peach" style="--dot-a:#8f2d4b;--dot-b:#f8cad6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">苺緋</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="palette-deck-foot">
+              <div class="palette-mode-switch" role="group" aria-label="昼夜プレビュー切り替え">
+                <button type="button" class="palette-mode-btn is-active" data-theme-pick="light" aria-pressed="true">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <line x1="12" y1="2" x2="12" y2="4"></line>
+                    <line x1="12" y1="20" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line>
+                    <line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="4" y2="12"></line>
+                    <line x1="20" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line>
+                    <line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                  </svg>
+                  <span>ライト</span>
+                </button>
+                <button type="button" class="palette-mode-btn" data-theme-pick="dark" aria-pressed="false">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                  <span>ダーク</span>
+                </button>
+              </div>
+              <span id="palette-counter" class="palette-counter">01 / 06</span>
+            </div>
+          </div>
+        </div>
 
         <a href="#ja-downloads" class="header-dl-btn">ダウンロード</a>
       </div>
@@ -1773,6 +2005,7 @@
     <a href="#ja-gallery" class="ja-mobile-link" data-mobile-nav>街と人物</a>
     <a href="#ja-faq" class="ja-mobile-link" data-mobile-nav>FAQ</a>
     <a href="#ja-downloads" class="ja-mobile-link" data-mobile-nav>ダウンロード</a>
+    <a href="docs/" class="ja-mobile-link">ドキュメント</a>
     <div class="ja-mobile-langs" aria-label="言語切り替え">
       <a href="../" lang="zh-CN" class="ja-mobile-lang-pill">中文</a>
       <a href="../en/" lang="en" class="ja-mobile-lang-pill">English</a>
@@ -1786,8 +2019,15 @@
   <main id="top" class="home-view">
     <div class="home-container" id="main-focus" tabindex="-1">
 
-      <!-- Left-Aligned Magpie Editorial Hero -->
+      <!-- Left-Aligned Sumi & Washi Editorial Hero -->
       <div class="ja-hero">
+        <a href="#ja-capabilities" class="hero-kicker-pill">
+          <span class="hero-kicker-dot" aria-hidden="true"></span>
+          <span class="font-mono">v0.7.0</span>
+          <span class="hero-kicker-sep">·</span>
+          <span>凪浦 · オープンソース AI 個体フレームワーク</span>
+        </a>
+
         <h1 class="ja-hero-title">
           AI にひとつの世界を。<br><span class="ink-muted">自分の日常を生きるために。</span>
         </h1>
@@ -1795,12 +2035,6 @@
         <p class="ja-hero-subtitle">
           ウィンドウを閉じても、向こうの時間は止まりません。名前や口調は自由に決められ、歩き回れる街と部屋、手元の PC に残る長期記憶、昼夜のリズムを備えたオープンソースの AI 個体フレームワークです。
         </p>
-
-        <div class="hero-chips" aria-label="主な特徴">
-          <span class="hero-chip">7つの内蔵街＋完全ランダム生成</span>
-          <span class="hero-chip">12業種の店舗で自由注文</span>
-          <span class="hero-chip">ローカル SQLite 記憶 · 手数料ゼロ</span>
-        </div>
 
         <div class="hero-cta-row">
           <a href="../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe" class="magpie-btn-primary" id="win-download-btn">
@@ -1814,8 +2048,26 @@
         </div>
 
         <p class="hero-meta-line">
-          バージョン 0.7.0 · 約 5.6 MB（管理者権限不要） · Apache-2.0 オープンソース · Windows 10/11 (WSL 2) &amp; Linux
+          バージョン 0.7.0 · 約 5.8 MB（管理者権限不要） · Apache-2.0 オープンソース · Windows 10/11 (WSL 2) &amp; Linux
         </p>
+
+        <div class="hero-spec-rail" aria-label="主な特徴">
+          <div class="hero-spec-item">
+            <span class="hero-spec-idx">01 / SPATIAL WORLD</span>
+            <span class="hero-spec-val">7つの内蔵街 · 完全ランダム生成</span>
+            <span class="hero-spec-sub">道路距離に沿った徒歩時間計算（瞬間移動なし）</span>
+          </div>
+          <div class="hero-spec-item">
+            <span class="hero-spec-idx">02 / LIVING STREETS</span>
+            <span class="hero-spec-val">12業種の店舗 · 自由注文・温度湿度</span>
+            <span class="hero-spec-sub">店主の時間差営業と冷めるお茶・湿る紙片</span>
+          </div>
+          <div class="hero-spec-item">
+            <span class="hero-spec-idx">03 / LOCAL SOVEREIGNTY</span>
+            <span class="hero-spec-val">ローカル SQLite · DeepSeek / Ollama</span>
+            <span class="hero-spec-sub">公式サーバーなし・手数料ゼロで手元に完結</span>
+          </div>
+        </div>
 
         <div class="win-dl-feedback" id="win-dl-feedback" hidden>
           <span class="win-dl-dot" aria-hidden="true"></span>
@@ -1860,8 +2112,8 @@
             <div class="stage-screen-wrap" id="stage-screen-wrap" role="button" tabindex="0" aria-label="クリックして高解像度 2x Retina 画面を拡大表示">
               <!-- Scene 0: Silent 60fps Walkthrough Video -->
               <div class="stage-scene is-active" data-scene-panel="0">
-                <video id="stage-video-dark" class="stage-video on-dark" autoplay muted loop playsinline preload="auto" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ：室内の姿勢変化、凪浦の道路マップ、ストリーミング対話、原稿の行単位差分"></video>
-                <video id="stage-video-light" class="stage-video on-light" muted loop playsinline preload="metadata" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ：室内の姿勢変化、凪浦の道路マップ、ストリーミング対話、原稿の行単位差分"></video>
+                <video id="stage-video-dark" class="stage-video on-dark" muted loop playsinline preload="metadata" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ：室内の姿勢変化、凪浦の道路マップ、ストリーミング対話、原稿の行単位差分"></video>
+                <video id="stage-video-light" class="stage-video on-light" autoplay muted loop playsinline preload="auto" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps 実機デモ：室内の姿勢変化、凪浦の道路マップ、ストリーミング対話、原稿の行単位差分"></video>
                 <img class="stage-reduced-still on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo デスクトップ概要：現在地・姿勢・生活状態" width="2560" height="1600" loading="eager">
                 <img class="stage-reduced-still on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo デスクトップ概要：現在地・姿勢・生活状態" width="2560" height="1600" loading="eager">
               </div>
@@ -2237,7 +2489,7 @@
             <h2 class="section-title" id="cap-heading">静かな日常を支える、8つの実装済み機能。</h2>
             <p class="section-desc">誇張のない実働機能だけを収録。空間・物性・記憶・予算保護がひとつのローカル基盤で噛み合います。</p>
           </div>
-          <a href="../?doc=status-matrix" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">実装ステータス表 <span class="zh-doc-badge">ZH</span> →</a>
+          <a href="docs/?doc=status-matrix" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">実装ステータス表 →</a>
         </div>
 
         <div class="magpie-bento-grid" data-reveal>
@@ -2400,7 +2652,7 @@
         <div class="personas-hairline-wrap" data-reveal>
           <div class="personas-head-bar">
             <span>すぐ使える 4つの <code>SOUL.md</code> 人物テンプレート（名前・一人称・口調はすべて自由に変更可能）</span>
-            <a href="../?doc=configuration" style="color:var(--fg-2);font-size:0.8rem;text-decoration:none;">設定ガイド <span class="zh-doc-badge">ZH</span> →</a>
+            <a href="docs/?doc=configuration" style="color:var(--fg-2);font-size:0.8rem;text-decoration:none;">設定ガイド →</a>
           </div>
 
           <div class="personas-grid-2x2">
@@ -2462,7 +2714,7 @@
           <div>
             <div class="section-eyebrow">ダウンロードと導入 · v0.7.0</div>
             <h2 class="section-title" id="downloads-heading">環境に合わせた3つの導入方法。</h2>
-            <p class="section-desc">Windows 10 / 11 なら管理者権限不要の約 5.6 MB デスクトップ版ですぐ始められます。Linux / WSL 2 のワンライナー導入や、コーディングエージェントへの自動構築指示にも対応しています。</p>
+            <p class="section-desc">Windows 10 / 11 なら管理者権限不要の約 5.8 MB デスクトップ版ですぐ始められます。Linux / WSL 2 のワンライナー導入や、コーディングエージェントへの自動構築指示にも対応しています。</p>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a href="../downloads/latest.json" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:36px;padding:0 12px;font-size:0.8rem;">latest.json <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
@@ -2502,7 +2754,7 @@
                 <span>ダウンロード開始 · SmartScreen が出た場合は下の図解どおり「詳細情報 → 実行」を選んでください。</span>
               </div>
               <div class="dl-card-foot" style="margin-top:12px;">
-                <span>Windows 10 / 11 (64-bit) · 約 5.6 MB</span>
+                <span>Windows 10 / 11 (64-bit) · 約 5.8 MB</span>
                 <button type="button" class="sha-copy-btn" id="copy-setup-sha" data-sha="174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8" title="SHA256 ハッシュ全文をコピー">
                   <span>SHA256: 174e4597...14dd8</span>
                   <span id="sha-copy-label">コピー</span>
@@ -2540,7 +2792,7 @@
               </div>
               <div class="dl-card-foot" style="margin-top:12px;">
                 <span>Ubuntu / Debian / WSL 2</span>
-                <a href="../?doc=quickstart" style="color:var(--fg-2);font-size:0.76rem;">導入手順 <span class="zh-doc-badge">ZH</span> →</a>
+                <a href="docs/?doc=quickstart" style="color:var(--fg-2);font-size:0.76rem;">導入手順 →</a>
               </div>
             </div>
           </div>
@@ -2577,7 +2829,7 @@
               </div>
               <div class="dl-card-foot" style="margin-top:12px;">
                 <span>事前確認・SHA256 検証必須</span>
-                <a href="../?doc=agent-install" style="color:var(--fg-2);font-size:0.76rem;">仕様 <span class="zh-doc-badge">ZH</span> →</a>
+                <a href="docs/?doc=agent-install" style="color:var(--fg-2);font-size:0.76rem;">仕様 →</a>
               </div>
             </div>
           </div>
@@ -2710,7 +2962,7 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
             <h2 class="section-title" id="faq-heading">導入前に気になるところを、率直に。</h2>
             <p class="section-desc">動作環境、費用、プライバシー境界、街のカスタマイズ、アップデート時の記憶保護について。</p>
           </div>
-          <a href="../?doc=troubleshooting" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">トラブルシューティング <span class="zh-doc-badge">ZH</span> →</a>
+          <a href="docs/?doc=troubleshooting" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.84rem;">トラブルシューティング →</a>
         </div>
 
         <div class="faq-grid" data-reveal>
@@ -2721,7 +2973,7 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
-                はい、不要です。DeepSeek・OpenAI・Claude・Qwen などのオンライン API を使う場合、推論計算はクラウド側で行われ、手元の PC では約 5.6 MB のデスクトップクライアントとローカル SQLite 記憶帳簿だけが動きます。内蔵グラフィックスの一般的なノート PC でも静かに常駐します（ローカル Ollama モデルを手元で動かす場合のみ PC 側の性能を使用します）。
+                はい、不要です。DeepSeek・OpenAI・Claude・Qwen などのオンライン API を使う場合、推論計算はクラウド側で行われ、手元の PC では約 5.8 MB のデスクトップクライアントとローカル SQLite 記憶帳簿だけが動きます。内蔵グラフィックスの一般的なノート PC でも静かに常駐します（ローカル Ollama モデルを手元で動かす場合のみ PC 側の性能を使用します）。
               </div>
             </details>
 
@@ -2802,6 +3054,7 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
           <span>v0.7.0 · Apache-2.0 Open Source</span>
         </div>
         <div class="magpie-footer-links">
+          <a href="docs/">ドキュメント</a>
           <a href="../" lang="zh-CN">中文</a>
           <a href="../en/" lang="en">English</a>
           <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -3042,67 +3295,341 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
         }
       }
 
-      /* 1. Theme Switcher (Magpie #0b0b0c / #fafafa + Circular View Transition) */
-      function applyTheme(theme) {
-        var next = theme === 'light' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
+      /* 1. Theme & 6-Palette Studio Fan Switcher */
+      var PALETTE_ORDER = [
+        'deep-sea-sakura',
+        'forest-mint',
+        'burgundy-rosewood',
+        'iris-lilac',
+        'glacier-porcelain',
+        'berry-peach'
+      ];
+
+      var PALETTE_META = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d', dayInk: '#122e8a', nightInk: '#f4c2d1', short: '深海', title: '深海 · 淡桜', index: '01 / 06' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d', dayInk: '#164638', nightInk: '#a9dec6', short: '森林', title: '森林 · ミント', index: '02 / 06' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c', dayInk: '#73142c', nightInk: '#e6b3bd', short: '深紅', title: '深紅 · ローズ', index: '03 / 06' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10', dayInk: '#3e277a', nightInk: '#d5c3f8', short: '菖蒲', title: '菖蒲 · 紫', index: '04 / 06' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10', dayInk: '#164b8a', nightInk: '#b6d8f8', short: '蒼碧', title: '蒼碧 · 氷青', index: '05 / 06' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c', dayInk: '#8f2d4b', nightInk: '#f8cad6', short: '苺緋', title: '苺緋 · 桃霧', index: '06 / 06' }
+      };
+
+      var paletteVtSeq = 0;
+      var activePaletteAnim = null;
+      var themeVtSeq = 0;
+      var activeThemeVt = null;
+      var paletteFeedbackTimers = { shuffle: null, star: null, sheen: null };
+
+      function getActivePalette() {
+        var cur = document.documentElement.getAttribute('data-palette');
+        return cur && PALETTE_META[cur] ? cur : 'deep-sea-sakura';
+      }
+
+      function syncMetaThemeColor() {
         var metaTheme = document.getElementById('meta-theme-color');
-        if (metaTheme) metaTheme.setAttribute('content', next === 'light' ? '#fafafa' : '#0b0b0c');
-        try {
-          localStorage.setItem('nyairo-theme', next);
-          localStorage.setItem('chiyo-theme', next);
-        } catch (e) {}
+        if (!metaTheme) return;
+        var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        var pal = getActivePalette();
+        metaTheme.setAttribute('content', PALETTE_META[pal][theme]);
+      }
+
+      function ensurePaletteWashBeam() {
+        var beam = document.getElementById('palette-wash-beam');
+        if (!beam && document.body) {
+          beam = document.createElement('div');
+          beam.id = 'palette-wash-beam';
+          beam.className = 'palette-wash-beam';
+          beam.setAttribute('aria-hidden', 'true');
+          document.body.appendChild(beam);
+        }
+        return beam;
+      }
+
+      function renderPaletteDeckMeta(paletteId) {
+        var meta = PALETTE_META[paletteId] || PALETTE_META['deep-sea-sakura'];
+        var titleEl = document.getElementById('palette-stage-title');
+        var hexEl = document.getElementById('palette-stage-hex');
+        var counterEl = document.getElementById('palette-counter');
+        if (titleEl) titleEl.textContent = meta.title;
+        if (hexEl) hexEl.textContent = meta.dayInk + ' · ' + meta.nightInk;
+        if (counterEl) counterEl.textContent = meta.index;
+      }
+
+      function triggerPaletteFeedback(sourceCard) {
+        var btn = document.getElementById('palette-btn');
+        var star = document.getElementById('palette-stage-star');
+        if (btn) {
+          btn.classList.remove('is-shuffling');
+          void btn.offsetWidth;
+          btn.classList.add('is-shuffling');
+          clearTimeout(paletteFeedbackTimers.shuffle);
+          paletteFeedbackTimers.shuffle = setTimeout(function () { btn.classList.remove('is-shuffling'); }, 480);
+        }
+        if (star) {
+          star.classList.remove('is-popping');
+          void star.offsetWidth;
+          star.classList.add('is-popping');
+          clearTimeout(paletteFeedbackTimers.star);
+          paletteFeedbackTimers.star = setTimeout(function () { star.classList.remove('is-popping'); }, 380);
+        }
+        var cardEl = sourceCard || document.querySelector('#palette-menu .palette-card.is-active');
+        if (cardEl) {
+          cardEl.classList.remove('is-sheen');
+          void cardEl.offsetWidth;
+          cardEl.classList.add('is-sheen');
+          clearTimeout(paletteFeedbackTimers.sheen);
+          paletteFeedbackTimers.sheen = setTimeout(function () { cardEl.classList.remove('is-sheen'); }, 540);
+        }
+      }
+
+      function applyPalette(paletteId) {
+        var next = paletteId && PALETTE_META[paletteId] ? paletteId : 'deep-sea-sakura';
+        if (next === 'deep-sea-sakura') {
+          document.documentElement.removeAttribute('data-palette');
+        } else {
+          document.documentElement.setAttribute('data-palette', next);
+        }
+        try { localStorage.setItem('nyairo-palette', next); } catch (e) {}
+        syncMetaThemeColor();
+        var capLabel = document.getElementById('palette-cap-label');
+        if (capLabel) capLabel.textContent = PALETTE_META[next].short;
+        var menu = document.getElementById('palette-menu');
+        if (menu) {
+          Array.prototype.forEach.call(menu.querySelectorAll('.palette-card'), function (card) {
+            var active = card.getAttribute('data-palette-id') === next;
+            card.classList.toggle('is-active', active);
+            card.setAttribute('aria-checked', active ? 'true' : 'false');
+          });
+        }
+        renderPaletteDeckMeta(next);
+      }
+
+      function switchPalette(paletteId, sourceCard) {
+        var next = paletteId && PALETTE_META[paletteId] ? paletteId : 'deep-sea-sakura';
+        if (next === getActivePalette()) return;
+        var seq = ++paletteVtSeq;
+        if (activePaletteAnim) {
+          try { activePaletteAnim.cancel(); } catch (e) {}
+          activePaletteAnim = null;
+        }
+        if (activeThemeVt) {
+          ++themeVtSeq;
+          try { activeThemeVt.skipTransition(); } catch (e) {}
+          activeThemeVt = null;
+          document.documentElement.classList.remove('vt-switching');
+        }
+        triggerPaletteFeedback(sourceCard);
+        applyPalette(next);
+        if (isReducedMotion()) return;
+        var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        var beamPrimary = theme === 'light' ? PALETTE_META[next].dayInk : PALETTE_META[next].nightInk;
+        var beamSecondary = theme === 'light' ? PALETTE_META[next].nightInk : PALETTE_META[next].dayInk;
+        var beam = ensurePaletteWashBeam();
+        if (beam && typeof beam.animate === 'function') {
+          beam.style.setProperty('--beam-primary', beamPrimary);
+          beam.style.setProperty('--beam-secondary', beamSecondary);
+          beam.style.opacity = '1';
+          var anim = beam.animate(
+            [
+              { transform: 'translate3d(64vw, 0, 0)', opacity: 0 },
+              { transform: 'translate3d(18vw, 0, 0)', opacity: 0.94, offset: 0.3 },
+              { transform: 'translate3d(-68vw, 0, 0)', opacity: 0 }
+            ],
+            { duration: 580, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+          );
+          activePaletteAnim = anim;
+          Promise.resolve(anim.finished).catch(function () {}).finally(function () {
+            if (seq === paletteVtSeq) {
+              beam.style.opacity = '0';
+              activePaletteAnim = null;
+            }
+          });
+        }
+      }
+
+      function initPaletteDropdown() {
+        var wrap = document.getElementById('palette-dropdown');
+        var capsule = document.getElementById('palette-capsule');
+        var btn = document.getElementById('palette-btn');
+        var menu = document.getElementById('palette-menu');
+        var savedPal = 'deep-sea-sakura';
+        try { savedPal = localStorage.getItem('nyairo-palette') || 'deep-sea-sakura'; } catch (e) {}
+        applyPalette(savedPal);
+        if (!wrap || !btn || !menu) return;
+        function isOpen() {
+          return menu.classList.contains('is-open');
+        }
+        function clampPaletteMenu() {
+          var wrapRect = wrap.getBoundingClientRect();
+          var menuWidth = menu.offsetWidth || Math.min(372, window.innerWidth - 24);
+          var pad = 12;
+          var idealRight = wrapRect.right;
+          var idealLeft = idealRight - menuWidth;
+          var shiftX = 0;
+          if (idealLeft < pad) {
+            shiftX = pad - idealLeft;
+          } else if (idealRight > window.innerWidth - pad) {
+            shiftX = (window.innerWidth - pad) - idealRight;
+          }
+          menu.style.setProperty('--menu-shift-x', Math.round(shiftX) + 'px');
+        }
+        function openMenu() {
+          clampPaletteMenu();
+          renderPaletteDeckMeta(getActivePalette());
+          menu.classList.add('is-open');
+          if (capsule) capsule.classList.add('is-open');
+          menu.setAttribute('aria-hidden', 'false');
+          btn.setAttribute('aria-expanded', 'true');
+        }
+        function closeMenu() {
+          if (!isOpen()) return;
+          menu.classList.remove('is-open');
+          if (capsule) capsule.classList.remove('is-open');
+          menu.setAttribute('aria-hidden', 'true');
+          btn.setAttribute('aria-expanded', 'false');
+          renderPaletteDeckMeta(getActivePalette());
+        }
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var langMenu = document.getElementById('lang-menu');
+          var langBtn = document.getElementById('lang-btn');
+          if (langMenu && !langMenu.hidden) {
+            langMenu.hidden = true;
+            if (langBtn) langBtn.setAttribute('aria-expanded', 'false');
+          }
+          if (isOpen()) {
+            closeMenu();
+          } else {
+            openMenu();
+          }
+        });
+        menu.addEventListener('click', function (e) {
+          var card = e.target.closest('[data-palette-id]');
+          if (card) {
+            e.stopPropagation();
+            switchPalette(card.getAttribute('data-palette-id'), card);
+            return;
+          }
+          var modeBtn = e.target.closest('[data-theme-pick]');
+          if (modeBtn) {
+            e.stopPropagation();
+            var pick = modeBtn.getAttribute('data-theme-pick');
+            var curTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+            if (pick !== curTheme) {
+              switchTheme(pick, e);
+            }
+            return;
+          }
+          var shuffleBtn = e.target.closest('#palette-shuffle');
+          if (shuffleBtn) {
+            e.stopPropagation();
+            shuffleBtn.classList.remove('is-spinning');
+            void shuffleBtn.offsetWidth;
+            shuffleBtn.classList.add('is-spinning');
+            setTimeout(function () { shuffleBtn.classList.remove('is-spinning'); }, 440);
+            var cur = getActivePalette();
+            var candidates = PALETTE_ORDER.filter(function (id) { return id !== cur; });
+            var next = candidates[Math.floor(Math.random() * candidates.length)];
+            var nextCard = menu.querySelector('[data-palette-id="' + next + '"]');
+            switchPalette(next, nextCard);
+          }
+        });
+        var grid = menu.querySelector('.palette-tray-grid');
+        if (grid) {
+          Array.prototype.forEach.call(grid.querySelectorAll('.palette-card'), function (card) {
+            var palId = card.getAttribute('data-palette-id');
+            card.addEventListener('mouseenter', function () { renderPaletteDeckMeta(palId); });
+            card.addEventListener('focus', function () { renderPaletteDeckMeta(palId); });
+            card.addEventListener('blur', function () { renderPaletteDeckMeta(getActivePalette()); });
+          });
+          grid.addEventListener('mouseleave', function () { renderPaletteDeckMeta(getActivePalette()); });
+        }
+        window.addEventListener('resize', function () {
+          if (isOpen()) clampPaletteMenu();
+        }, { passive: true });
+        document.addEventListener('click', function (e) {
+          if (e.target === document.documentElement && document.documentElement.classList.contains('vt-palette')) return;
+          if (isOpen() && !wrap.contains(e.target)) closeMenu();
+        });
+        window.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && isOpen()) {
+            closeMenu();
+            btn.focus();
+          }
+        });
+      }
+
+      function applyTheme(theme, persist) {
+        var next = theme === 'dark' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        syncMetaThemeColor();
+        if (persist !== false) {
+          try {
+            localStorage.setItem('nyairo-theme', next);
+            localStorage.setItem('chiyo-theme', next);
+          } catch (e) {}
+        }
         if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
         var btnEl = document.getElementById('theme-toggle');
         if (btnEl) {
           btnEl.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
           btnEl.setAttribute('title', next === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え');
         }
+        Array.prototype.forEach.call(document.querySelectorAll('#palette-menu [data-theme-pick]'), function (modeBtn) {
+          var active = modeBtn.getAttribute('data-theme-pick') === next;
+          modeBtn.classList.toggle('is-active', active);
+          modeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
       }
 
-      function switchTheme(nextTheme, clickEvt) {
+      function switchTheme(nextTheme) {
+        var seq = ++themeVtSeq;
+        if (activePaletteAnim) {
+          ++paletteVtSeq;
+          try { activePaletteAnim.cancel(); } catch (e) {}
+          activePaletteAnim = null;
+          var beam = document.getElementById('palette-wash-beam');
+          if (beam) beam.style.opacity = '0';
+        }
+        if (activeThemeVt) {
+          try { activeThemeVt.skipTransition(); } catch (e) {}
+          activeThemeVt = null;
+        }
         if (!document.startViewTransition || isReducedMotion()) {
           applyTheme(nextTheme);
           return;
         }
-        var btnEl = document.getElementById('theme-toggle');
-        var cx = window.innerWidth - 72;
-        var cy = 30;
-        if (clickEvt && Number.isFinite(clickEvt.clientX) && (clickEvt.clientX > 0 || clickEvt.clientY > 0)) {
-          cx = clickEvt.clientX;
-          cy = clickEvt.clientY;
-        } else if (btnEl) {
-          var r = btnEl.getBoundingClientRect();
-          if (r.width > 0) {
-            cx = r.left + r.width / 2;
-            cy = r.top + r.height / 2;
-          }
-        }
-        var endRadius = Math.hypot(Math.max(cx, window.innerWidth - cx), Math.max(cy, window.innerHeight - cy));
         document.documentElement.classList.add('vt-switching');
-        var vt = document.startViewTransition(function () { applyTheme(nextTheme); });
+        var vt = document.startViewTransition(function () {
+          applyTheme(nextTheme);
+        });
+        activeThemeVt = vt;
         vt.ready.then(function () {
+          if (seq !== themeVtSeq) return;
           document.documentElement.animate(
-            { clipPath: ['circle(0px at ' + cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px)', 'circle(' + endRadius.toFixed(1) + 'px at ' + cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px)'] },
-            { duration: 380, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both', pseudoElement: '::view-transition-new(root)' }
+            { opacity: [0, 1] },
+            { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' }
           );
         }).catch(function () {});
         Promise.resolve(vt.finished).finally(function () {
+          if (seq !== themeVtSeq) return;
+          activeThemeVt = null;
           document.documentElement.classList.remove('vt-switching');
         });
       }
 
       function initThemeAndHeader() {
-        var saved = 'dark';
-        try { saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'dark'; } catch (e) {}
-        applyTheme(saved);
+        var saved = 'light';
+        try { saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'light'; } catch (e) {}
+        applyTheme(saved, false);
+        initPaletteDropdown();
         requestAnimationFrame(function () {
           requestAnimationFrame(function () { document.documentElement.classList.add('theme-ready'); });
         });
         var themeBtn = document.getElementById('theme-toggle');
         if (themeBtn) {
           themeBtn.addEventListener('click', function (e) {
-            var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+            var cur = document.documentElement.getAttribute('data-theme') || 'light';
             switchTheme(cur === 'dark' ? 'light' : 'dark', e);
           });
         }
@@ -3119,6 +3646,15 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
         if (langBtn && langMenu && langDropdown) {
           langBtn.addEventListener('click', function (e) {
             e.stopPropagation();
+            var palMenu = document.getElementById('palette-menu');
+            var palCap = document.getElementById('palette-capsule');
+            var palBtn = document.getElementById('palette-btn');
+            if (palMenu && palMenu.classList.contains('is-open')) {
+              palMenu.classList.remove('is-open');
+              if (palCap) palCap.classList.remove('is-open');
+              palMenu.setAttribute('aria-hidden', 'true');
+              if (palBtn) palBtn.setAttribute('aria-expanded', 'false');
+            }
             var willOpen = langMenu.hidden;
             langMenu.hidden = !willOpen;
             langBtn.setAttribute('aria-expanded', String(willOpen));
@@ -3208,7 +3744,7 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
 
         function syncStageVideos(restartFromZero) {
           if (!darkV && !lightV) return;
-          var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+          var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
           var activeV = theme === 'light' ? lightV : darkV;
           var idleV = theme === 'light' ? darkV : lightV;
           var prevTime = idleV && Number.isFinite(idleV.currentTime) ? idleV.currentTime : 0;
@@ -3450,7 +3986,7 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
 
           var syncLbMedia = function (meta) {
             var isVideo = meta && meta.kind === 'video' && backdrop.classList.contains('show');
-            var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+            var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
             if (isVideo && vidDark && vidLight) {
               imgDark.hidden = true; imgLight.hidden = true;
               vidDark.hidden = false; vidLight.hidden = false;
