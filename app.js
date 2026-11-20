@@ -174,6 +174,7 @@ let jumpStageSceneWorldFn = null;
 function bootstrap() {
   initTheme();
   initLangDropdown();
+  initPaletteDropdown();
   initHeaderPhysics();
   initSegmentedControls();
   initInstallDock();
@@ -195,6 +196,284 @@ function bootstrap() {
   initBackToTop();
 }
 
+const PALETTE_ORDER = [
+  'deep-sea-sakura',
+  'forest-mint',
+  'burgundy-rosewood',
+  'iris-lilac',
+  'glacier-porcelain',
+  'berry-peach'
+];
+
+const PALETTE_META = {
+  'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d', dayInk: '#122e8a', nightInk: '#f4c2d1', short: '深海', title: '深海 · 淡樱', index: '01 / 06' },
+  'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d', dayInk: '#164638', nightInk: '#a9dec6', short: '森林', title: '森林 · 薄荷', index: '02 / 06' },
+  'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c', dayInk: '#73142c', nightInk: '#e6b3bd', short: '酒红', title: '酒红 · 玫瑰', index: '03 / 06' },
+  'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10', dayInk: '#3e277a', nightInk: '#d5c3f8', short: '鸢尾', title: '鸢尾 · 丁香', index: '04 / 06' },
+  'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10', dayInk: '#164b8a', nightInk: '#b6d8f8', short: '霁青', title: '霁青 · 冰蓝', index: '05 / 06' },
+  'berry-peach': { light: '#faf4f5', dark: '#0e0b0c', dayInk: '#8f2d4b', nightInk: '#f8cad6', short: '莓绯', title: '莓绯 · 蜜桃', index: '06 / 06' }
+};
+
+let paletteVtSeq = 0;
+let activePaletteAnim = null;
+let themeVtSeq = 0;
+let activeThemeVt = null;
+let paletteFeedbackTimers = { shuffle: null, star: null, sheen: null };
+
+function getActivePalette() {
+  const cur = document.documentElement.getAttribute('data-palette');
+  return cur && PALETTE_META[cur] ? cur : 'deep-sea-sakura';
+}
+
+function syncMetaThemeColor() {
+  const metaTheme = document.getElementById('meta-theme-color');
+  if (!metaTheme) return;
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const pal = getActivePalette();
+  metaTheme.setAttribute('content', PALETTE_META[pal][theme]);
+}
+
+function ensurePaletteWashBeam() {
+  let beam = document.getElementById('palette-wash-beam');
+  if (!beam && document.body) {
+    beam = document.createElement('div');
+    beam.id = 'palette-wash-beam';
+    beam.className = 'palette-wash-beam';
+    beam.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(beam);
+  }
+  return beam;
+}
+
+function renderPaletteDeckMeta(paletteId) {
+  const meta = PALETTE_META[paletteId] || PALETTE_META['deep-sea-sakura'];
+  const titleEl = document.getElementById('palette-stage-title');
+  const hexEl = document.getElementById('palette-stage-hex');
+  const counterEl = document.getElementById('palette-counter');
+  if (titleEl) titleEl.textContent = meta.title;
+  if (hexEl) hexEl.textContent = `${meta.dayInk} · ${meta.nightInk}`;
+  if (counterEl) counterEl.textContent = meta.index;
+}
+
+function triggerPaletteFeedback(sourceCard) {
+  const btn = document.getElementById('palette-btn');
+  const star = document.getElementById('palette-stage-star');
+  if (btn) {
+    btn.classList.remove('is-shuffling');
+    void btn.offsetWidth;
+    btn.classList.add('is-shuffling');
+    clearTimeout(paletteFeedbackTimers.shuffle);
+    paletteFeedbackTimers.shuffle = setTimeout(() => btn.classList.remove('is-shuffling'), 480);
+  }
+  if (star) {
+    star.classList.remove('is-popping');
+    void star.offsetWidth;
+    star.classList.add('is-popping');
+    clearTimeout(paletteFeedbackTimers.star);
+    paletteFeedbackTimers.star = setTimeout(() => star.classList.remove('is-popping'), 380);
+  }
+  const cardEl = sourceCard || document.querySelector('#palette-menu .palette-card.is-active');
+  if (cardEl) {
+    cardEl.classList.remove('is-sheen');
+    void cardEl.offsetWidth;
+    cardEl.classList.add('is-sheen');
+    clearTimeout(paletteFeedbackTimers.sheen);
+    paletteFeedbackTimers.sheen = setTimeout(() => cardEl.classList.remove('is-sheen'), 540);
+  }
+}
+
+function applyPalette(paletteId) {
+  const next = paletteId && PALETTE_META[paletteId] ? paletteId : 'deep-sea-sakura';
+  if (next === 'deep-sea-sakura') {
+    document.documentElement.removeAttribute('data-palette');
+  } else {
+    document.documentElement.setAttribute('data-palette', next);
+  }
+  try {
+    localStorage.setItem('nyairo-palette', next);
+  } catch {}
+  syncMetaThemeColor();
+
+  const capLabel = document.getElementById('palette-cap-label');
+  if (capLabel) capLabel.textContent = PALETTE_META[next].short;
+
+  const menu = document.getElementById('palette-menu');
+  if (menu) {
+    menu.querySelectorAll('.palette-card').forEach(card => {
+      const active = card.getAttribute('data-palette-id') === next;
+      card.classList.toggle('is-active', active);
+      card.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+  }
+  renderPaletteDeckMeta(next);
+}
+
+function switchPalette(paletteId, sourceCard = null) {
+  const next = paletteId && PALETTE_META[paletteId] ? paletteId : 'deep-sea-sakura';
+  if (next === getActivePalette()) return;
+
+  const seq = ++paletteVtSeq;
+  if (activePaletteAnim) {
+    try { activePaletteAnim.cancel(); } catch {}
+    activePaletteAnim = null;
+  }
+  if (activeThemeVt) {
+    ++themeVtSeq;
+    try { activeThemeVt.skipTransition(); } catch {}
+    activeThemeVt = null;
+    document.documentElement.classList.remove('vt-switching');
+  }
+
+  triggerPaletteFeedback(sourceCard);
+  applyPalette(next);
+
+  if (isReducedMotion()) return;
+
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const beamPrimary = theme === 'light' ? PALETTE_META[next].dayInk : PALETTE_META[next].nightInk;
+  const beamSecondary = theme === 'light' ? PALETTE_META[next].nightInk : PALETTE_META[next].dayInk;
+  const beam = ensurePaletteWashBeam();
+  if (beam && typeof beam.animate === 'function') {
+    beam.style.setProperty('--beam-primary', beamPrimary);
+    beam.style.setProperty('--beam-secondary', beamSecondary);
+    beam.style.opacity = '1';
+    const anim = beam.animate(
+      [
+        { transform: 'translate3d(64vw, 0, 0)', opacity: 0 },
+        { transform: 'translate3d(18vw, 0, 0)', opacity: 0.94, offset: 0.3 },
+        { transform: 'translate3d(-68vw, 0, 0)', opacity: 0 }
+      ],
+      { duration: 580, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+    );
+    activePaletteAnim = anim;
+    Promise.resolve(anim.finished).catch(() => {}).finally(() => {
+      if (seq === paletteVtSeq) {
+        beam.style.opacity = '0';
+        activePaletteAnim = null;
+      }
+    });
+  }
+}
+
+function initPaletteDropdown() {
+  const wrap = document.getElementById('palette-dropdown');
+  const capsule = document.getElementById('palette-capsule');
+  const btn = document.getElementById('palette-btn');
+  const menu = document.getElementById('palette-menu');
+  let savedPal = 'deep-sea-sakura';
+  try {
+    savedPal = localStorage.getItem('nyairo-palette') || 'deep-sea-sakura';
+  } catch {}
+  applyPalette(savedPal);
+  if (!wrap || !btn || !menu) return;
+
+  const isOpen = () => menu.classList.contains('is-open');
+  const clampPaletteMenu = () => {
+    const wrapRect = wrap.getBoundingClientRect();
+    const menuWidth = menu.offsetWidth || Math.min(372, window.innerWidth - 24);
+    const pad = 12;
+    const idealRight = wrapRect.right;
+    const idealLeft = idealRight - menuWidth;
+    let shiftX = 0;
+    if (idealLeft < pad) {
+      shiftX = pad - idealLeft;
+    } else if (idealRight > window.innerWidth - pad) {
+      shiftX = (window.innerWidth - pad) - idealRight;
+    }
+    menu.style.setProperty('--menu-shift-x', `${Math.round(shiftX)}px`);
+  };
+  const openMenu = () => {
+    clampPaletteMenu();
+    renderPaletteDeckMeta(getActivePalette());
+    menu.classList.add('is-open');
+    if (capsule) capsule.classList.add('is-open');
+    menu.setAttribute('aria-hidden', 'false');
+    btn.setAttribute('aria-expanded', 'true');
+  };
+  const closeMenu = () => {
+    if (!isOpen()) return;
+    menu.classList.remove('is-open');
+    if (capsule) capsule.classList.remove('is-open');
+    menu.setAttribute('aria-hidden', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    renderPaletteDeckMeta(getActivePalette());
+  };
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const langMenu = document.getElementById('lang-menu');
+    const langBtn = document.getElementById('lang-btn');
+    if (langMenu && !langMenu.hidden) {
+      langMenu.hidden = true;
+      if (langBtn) langBtn.setAttribute('aria-expanded', 'false');
+    }
+    if (isOpen()) {
+      closeMenu();
+    } else {
+      openMenu();
+    }
+  });
+
+  menu.addEventListener('click', e => {
+    const card = e.target.closest('[data-palette-id]');
+    if (card) {
+      e.stopPropagation();
+      switchPalette(card.getAttribute('data-palette-id'), card);
+      return;
+    }
+    const modeBtn = e.target.closest('[data-theme-pick]');
+    if (modeBtn) {
+      e.stopPropagation();
+      const pick = modeBtn.getAttribute('data-theme-pick');
+      const curTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      if (pick !== curTheme) {
+        switchTheme(pick, e);
+      }
+      return;
+    }
+    const shuffleBtn = e.target.closest('#palette-shuffle');
+    if (shuffleBtn) {
+      e.stopPropagation();
+      shuffleBtn.classList.remove('is-spinning');
+      void shuffleBtn.offsetWidth;
+      shuffleBtn.classList.add('is-spinning');
+      setTimeout(() => shuffleBtn.classList.remove('is-spinning'), 440);
+      const cur = getActivePalette();
+      const candidates = PALETTE_ORDER.filter(id => id !== cur);
+      const next = candidates[Math.floor(Math.random() * candidates.length)];
+      const nextCard = menu.querySelector(`[data-palette-id="${next}"]`);
+      switchPalette(next, nextCard);
+    }
+  });
+
+  const grid = menu.querySelector('.palette-tray-grid');
+  if (grid) {
+    grid.querySelectorAll('.palette-card').forEach(card => {
+      const palId = card.getAttribute('data-palette-id');
+      card.addEventListener('mouseenter', () => renderPaletteDeckMeta(palId));
+      card.addEventListener('focus', () => renderPaletteDeckMeta(palId));
+      card.addEventListener('blur', () => renderPaletteDeckMeta(getActivePalette()));
+    });
+    grid.addEventListener('mouseleave', () => renderPaletteDeckMeta(getActivePalette()));
+  }
+
+  window.addEventListener('resize', () => {
+    if (isOpen()) clampPaletteMenu();
+  }, { passive: true });
+
+  document.addEventListener('click', e => {
+    if (e.target === document.documentElement && document.documentElement.classList.contains('vt-palette')) return;
+    if (!wrap.contains(e.target)) closeMenu();
+  });
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && isOpen()) {
+      closeMenu();
+      btn.focus();
+    }
+  });
+}
+
 function initLangDropdown() {
   const wrap = document.getElementById('lang-dropdown');
   const btn = document.getElementById('lang-btn');
@@ -209,12 +488,22 @@ function initLangDropdown() {
 
   btn.addEventListener('click', e => {
     e.stopPropagation();
+    const palMenu = document.getElementById('palette-menu');
+    const palCap = document.getElementById('palette-capsule');
+    const palBtn = document.getElementById('palette-btn');
+    if (palMenu && palMenu.classList.contains('is-open')) {
+      palMenu.classList.remove('is-open');
+      if (palCap) palCap.classList.remove('is-open');
+      palMenu.setAttribute('aria-hidden', 'true');
+      if (palBtn) palBtn.setAttribute('aria-expanded', 'false');
+    }
     const nextOpen = menu.hidden;
     menu.hidden = !nextOpen;
     btn.setAttribute('aria-expanded', String(nextOpen));
   });
 
   document.addEventListener('click', e => {
+    if (e.target === document.documentElement && document.documentElement.classList.contains('vt-palette')) return;
     if (!wrap.contains(e.target)) closeMenu();
   });
 
@@ -237,11 +526,11 @@ if (document.readyState === 'loading') {
    ========================================================================== */
 function initTheme() {
   const themeBtn = document.getElementById('theme-toggle');
-  let saved = 'dark';
+  let saved = 'light';
   try {
-    saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'dark';
+    saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme') || 'light';
   } catch {}
-  applyTheme(saved);
+  applyTheme(saved, false);
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       document.documentElement.classList.add('theme-ready');
@@ -250,79 +539,63 @@ function initTheme() {
 
   if (themeBtn) {
     themeBtn.addEventListener('click', e => {
-      const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+      const cur = document.documentElement.getAttribute('data-theme') || 'light';
       switchTheme(cur === 'dark' ? 'light' : 'dark', e);
     });
   }
 }
 
-function switchTheme(nextTheme, clickEvt = null) {
+function switchTheme(nextTheme) {
+  const seq = ++themeVtSeq;
+  if (activePaletteAnim) {
+    ++paletteVtSeq;
+    try { activePaletteAnim.cancel(); } catch {}
+    activePaletteAnim = null;
+    const beam = document.getElementById('palette-wash-beam');
+    if (beam) beam.style.opacity = '0';
+  }
+  if (activeThemeVt) {
+    try { activeThemeVt.skipTransition(); } catch {}
+    activeThemeVt = null;
+  }
+
   const reduced = isReducedMotion();
   if (!document.startViewTransition || reduced) {
     applyTheme(nextTheme);
     return;
   }
 
-  const btnEl = document.getElementById('theme-toggle');
-  let cx = window.innerWidth - 48;
-  let cy = 28;
-  if (clickEvt && Number.isFinite(clickEvt.clientX) && (clickEvt.clientX > 0 || clickEvt.clientY > 0)) {
-    cx = clickEvt.clientX;
-    cy = clickEvt.clientY;
-  } else if (btnEl) {
-    const r = btnEl.getBoundingClientRect();
-    if (r.width > 0) {
-      cx = r.left + r.width / 2;
-      cy = r.top + r.height / 2;
-    }
-  }
-  const endRadius = Math.hypot(
-    Math.max(cx, window.innerWidth - cx),
-    Math.max(cy, window.innerHeight - cy)
-  );
-
   document.documentElement.classList.add('vt-switching');
   const transition = document.startViewTransition(() => {
     applyTheme(nextTheme);
   });
+  activeThemeVt = transition;
 
   transition.ready.then(() => {
-    const easing = 'cubic-bezier(0.22, 1, 0.36, 1)';
+    if (seq !== themeVtSeq) return;
     document.documentElement.animate(
-      {
-        clipPath: [
-          `circle(0px at ${cx.toFixed(1)}px ${cy.toFixed(1)}px)`,
-          `circle(${endRadius.toFixed(1)}px at ${cx.toFixed(1)}px ${cy.toFixed(1)}px)`
-        ]
-      },
-      { duration: 420, easing, fill: 'both', pseudoElement: '::view-transition-new(root)' }
+      { opacity: [0, 1] },
+      { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' }
     );
-    const iconEl = document.getElementById('theme-icon');
-    if (iconEl && typeof iconEl.animate === 'function') {
-      iconEl.animate(
-        [
-          { transform: 'rotate(-28deg) scale(0.88)' },
-          { transform: 'rotate(0deg) scale(1)' }
-        ],
-        { duration: 380, easing }
-      );
-    }
   }).catch(() => {});
 
   Promise.resolve(transition.finished).finally(() => {
+    if (seq !== themeVtSeq) return;
+    activeThemeVt = null;
     document.documentElement.classList.remove('vt-switching');
   });
 }
 
-function applyTheme(theme) {
-  const next = theme === 'light' ? 'light' : 'dark';
+function applyTheme(theme, persist = true) {
+  const next = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
-  const metaTheme = document.getElementById('meta-theme-color');
-  if (metaTheme) metaTheme.setAttribute('content', next === 'light' ? '#fafafa' : '#0b0b0c');
-  try {
-    localStorage.setItem('nyairo-theme', next);
-    localStorage.setItem('chiyo-theme', next);
-  } catch {}
+  syncMetaThemeColor();
+  if (persist) {
+    try {
+      localStorage.setItem('nyairo-theme', next);
+      localStorage.setItem('chiyo-theme', next);
+    } catch {}
+  }
   if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
   const backdrop = document.getElementById('stage-lightbox');
   if (backdrop && backdrop.classList.contains('show')) {
@@ -330,9 +603,16 @@ function applyTheme(theme) {
   }
 
   const btnEl = document.getElementById('theme-toggle');
-  if (!btnEl) return;
-  btnEl.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
-  btnEl.setAttribute('title', next === 'dark' ? '切换为亮色模式' : '切换为暗色模式');
+  if (btnEl) {
+    btnEl.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
+    btnEl.setAttribute('title', next === 'dark' ? '切换为亮色模式' : '切换为暗色模式');
+  }
+
+  document.querySelectorAll('#palette-menu [data-theme-pick]').forEach(modeBtn => {
+    const active = modeBtn.getAttribute('data-theme-pick') === next;
+    modeBtn.classList.toggle('is-active', active);
+    modeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
 /* ==========================================================================
@@ -673,7 +953,7 @@ function initProductStage() {
 
   function syncStageVideos(restartFromZero = false) {
     if (!darkV && !lightV) return;
-    const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
     const activeV = theme === 'light' ? lightV : darkV;
     const idleV = theme === 'light' ? darkV : lightV;
     const prevTime = idleV && Number.isFinite(idleV.currentTime) ? idleV.currentTime : 0;
@@ -987,7 +1267,7 @@ function initStageLightbox() {
   function syncLightboxMedia(meta, animateSwitch = false) {
     const reduced = isReducedMotion();
     const isVideo = meta?.kind === 'video' && backdrop.classList.contains('show');
-    const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
     if (isVideo && vidDark && vidLight) {
       imgDark.hidden = true;
       imgLight.hidden = true;
@@ -2392,6 +2672,7 @@ function routeHash(autoCloseSidebar = true) {
     if (activeHomeNav) activeHomeNav.classList.add('active');
     document.title = 'nyairo · 以虚拟世界为核心的 AI 个体框架';
     updateCanonicalUrl(null);
+    updateLangSwitchLinks(null);
     requestAnimationFrame(() => layoutSyncFns.forEach(fn => fn()));
     if (typeof syncStageVideosFn === 'function') syncStageVideosFn();
     if (target.startsWith('home-')) {
@@ -2432,6 +2713,17 @@ function updateCanonicalUrl(docId = null) {
   link.setAttribute('href', docId ? `https://nyairo.com/?doc=${encodeURIComponent(docId)}` : 'https://nyairo.com/');
 }
 
+function updateLangSwitchLinks(docId = null) {
+  const enHref = docId ? `en/docs/#${encodeURIComponent(docId)}` : 'en/';
+  const jaHref = docId ? `ja/docs/#${encodeURIComponent(docId)}` : 'ja/';
+  document.querySelectorAll('#lang-menu a[lang="en"], .sidebar-mobile-chip[lang="en"]').forEach(el => {
+    el.setAttribute('href', enHref);
+  });
+  document.querySelectorAll('#lang-menu a[lang="ja"], .sidebar-mobile-chip[lang="ja"]').forEach(el => {
+    el.setAttribute('href', jaHref);
+  });
+}
+
 let lastLoadedDocId = null;
 
 function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
@@ -2443,6 +2735,7 @@ function loadDoc(docId, anchor = null, autoCloseSidebar = true) {
 
   document.title = `${doc.title} · nyairo 文档`;
   updateCanonicalUrl(targetId);
+  updateLangSwitchLinks(targetId);
 
   const sidebarContainer = document.getElementById('docs-sidebar');
   let activeSidebarLink = null;
@@ -2872,7 +3165,7 @@ function initCommandPalette() {
   const quickCommands = [
     {
       group: '快捷操作',
-      title: '下载 Windows 桌面客户端 (v0.7.0 · 5.6 MB)',
+      title: '下载 Windows 桌面客户端 (v0.7.0 · 5.8 MB)',
       summary: '直接获取 nyairo-0.7.0-setup.exe 安装包（免管理员权限）',
       badge: '下载',
       run: () => {
@@ -2900,7 +3193,7 @@ function initCommandPalette() {
       summary: '即时切换全站与实机展台的亮暗显示风格',
       badge: '主题',
       run: () => {
-        const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+        const cur = document.documentElement.getAttribute('data-theme') || 'light';
         switchTheme(cur === 'dark' ? 'light' : 'dark');
       }
     },
@@ -2953,7 +3246,7 @@ function initCommandPalette() {
     {
       group: '常用文档',
       title: 'v0.7.0 版本动态与更新说明',
-      summary: '查看全随机专属世界、街区点单、拒绝边界、无损旅行箱及公开测试边界说明',
+      summary: '查看个人手艺本、换模型对照、深度自主、房间实录及公开测试边界说明',
       badge: 'NEW',
       href: '#changelog-v0-7-0'
     },
