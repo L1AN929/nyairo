@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>已完成与未完成清单 · nyairo 文档</title>
+  <meta name="description" content="不画饼、不掺水：一页看清当前 v0.7.0 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。">
+  <meta name="author" content="nyairo contributors">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <link rel="canonical" href="https://nyairo.com/docs/status-matrix/">
+  <link rel="alternate" hreflang="zh-CN" href="https://nyairo.com/docs/status-matrix/">
+  <link rel="alternate" hreflang="en" href="https://nyairo.com/en/docs/status-matrix/">
+  <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/docs/status-matrix/">
+  <link rel="alternate" hreflang="x-default" href="https://nyairo.com/docs/status-matrix/">
+  <meta name="theme-color" id="meta-theme-color" content="#f5efea">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="nyairo">
+  <meta property="og:title" content="已完成与未完成清单 · nyairo 文档">
+  <meta property="og:description" content="不画饼、不掺水：一页看清当前 v0.7.0 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。">
+  <meta property="og:url" content="https://nyairo.com/docs/status-matrix/">
+  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta property="og:locale" content="zh_CN">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="已完成与未完成清单 · nyairo 文档">
+  <meta name="twitter:description" content="不画饼、不掺水：一页看清当前 v0.7.0 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。">
+  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "已完成与未完成清单",
+      "description": "不画饼、不掺水：一页看清当前 v0.7.0 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。",
+      "url": "https://nyairo.com/docs/status-matrix/",
+      "inLanguage": "zh-CN",
+      "dateModified": "2026-11-21",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "nyairo",
+        "url": "https://nyairo.com/"
+      },
+      "author": {
+        "@type": "Organization",
+        "name": "nyairo contributors",
+        "url": "https://nyairo.com/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "nyairo",
+          "item": "https://nyairo.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "文档",
+          "item": "https://nyairo.com/docs/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "已完成与未完成清单",
+          "item": "https://nyairo.com/docs/status-matrix/"
+        }
+      ]
+    }
+  ]
+}
+  </script>
+  <script>
+    (function () {
+      var PALETTE_BG = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c' }
+      };
+      try {
+        var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        var savedPal = localStorage.getItem('nyairo-palette');
+        if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+        if (savedPal && PALETTE_BG[savedPal]) document.documentElement.setAttribute('data-palette', savedPal);
+        var t = (saved === 'light' || saved === 'dark') ? saved : 'light';
+        var p = (savedPal && PALETTE_BG[savedPal]) ? savedPal : 'deep-sea-sakura';
+        var m = document.getElementById('meta-theme-color');
+        if (m) m.setAttribute('content', PALETTE_BG[p][t]);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../../style.css?v=20261121-v070-56">
+  <link rel="icon" href="../../assets/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
+  <link rel="apple-touch-icon" href="../../assets/apple-touch-icon.png">
+</head>
+<body>
+  <a href="#static-doc-main" class="skip-link">跳到正文</a>
+
+  <header class="site-header">
+    <div class="scroll-progress-bar" id="scroll-progress-bar" aria-hidden="true"></div>
+    <div class="header-container">
+      <div class="header-left">
+        <button id="mobile-toggle" class="mobile-toggle" type="button" aria-label="打开导航与文档目录" aria-controls="docs-sidebar" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <a href="../../" class="site-brand">
+          <span class="brand-logo">
+            <img class="on-dark" src="../../assets/nyairo-icon-light-66.webp" alt="" width="22" height="21">
+            <img class="on-light" src="../../assets/nyairo-icon-66.webp" alt="" width="22" height="21">
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">nyairo</span>
+            <span class="brand-tag font-mono">v0.7.0</span>
+          </span>
+        </a>
+
+        <span class="header-divider" aria-hidden="true"></span>
+
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="../../" class="nav-link">首页</a>
+          <a href="../" class="nav-link active">文档</a>
+          <a href="../../#status-matrix" class="nav-link">交互式阅读器</a>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <div class="lang-dropdown" id="lang-dropdown">
+          <button type="button" class="icon-btn lang-btn" id="lang-btn" aria-expanded="false" aria-haspopup="true" title="切换语言 · 中文 / English / 日本語" aria-label="切换语言">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </button>
+          <div class="lang-menu" id="lang-menu" role="menu" hidden>
+            <a href="../../docs/status-matrix/" lang="zh-CN" hreflang="zh-CN" role="menuitem" aria-current="page" class="is-current"><span>中文</span><svg class="lang-check-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg></a>
+            <a href="../../en/docs/status-matrix/" lang="en" hreflang="en" role="menuitem"><span>English</span></a>
+            <a href="../../ja/docs/status-matrix/" lang="ja" hreflang="ja" role="menuitem"><span>日本語</span></a>
+          </div>
+        </div>
+
+        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub" aria-label="GitHub">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+          </svg>
+        </a>
+
+        <div class="palette-dropdown" id="palette-dropdown">
+          <div class="palette-dual-capsule" id="palette-capsule">
+            <button id="palette-btn" class="palette-cap-pal" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="palette-menu" title="配色与主题托盘" aria-label="配色与主题托盘">
+              <svg class="palette-cap-star" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path></svg>
+              <span class="palette-cap-label" id="palette-cap-label">深海</span>
+            </button>
+            <span class="palette-cap-sep" aria-hidden="true"></span>
+            <button id="theme-toggle" class="palette-cap-theme" type="button" title="切换浅色 / 深色模式" aria-label="切换浅色 / 深色模式">
+              <svg id="theme-icon" class="theme-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g class="theme-icon-sun">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </g>
+                <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="palette-menu" id="palette-menu" role="dialog" aria-label="配色与主题托盘" aria-hidden="true">
+            <div class="palette-deck-head">
+              <div class="palette-deck-live">
+                <svg class="palette-stage-star" id="palette-stage-star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path>
+                </svg>
+                <div class="palette-deck-meta">
+                  <span class="palette-stage-title" id="palette-stage-title">深海 · 淡樱</span>
+                  <span class="palette-stage-hex" id="palette-stage-hex">#122e8a · #f4c2d1</span>
+                </div>
+              </div>
+              <button type="button" class="palette-shuffle-btn" id="palette-shuffle" title="随机" aria-label="随机">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="16 3 21 3 21 8"></polyline>
+                  <line x1="4" y1="20" x2="21" y2="3"></line>
+                  <polyline points="21 16 21 21 16 21"></polyline>
+                  <line x1="15" y1="15" x2="21" y2="21"></line>
+                  <line x1="4" y1="4" x2="9" y2="9"></line>
+                </svg>
+                <span>随机</span>
+              </button>
+            </div>
+            <div class="palette-tray-grid" role="radiogroup">
+              <button type="button" class="palette-card is-active" role="radio" aria-checked="true" aria-label="深海 · 淡樱" data-palette-id="deep-sea-sakura" style="--dot-a:#122e8a;--dot-b:#f4c2d1;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">深海</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="森林 · 薄荷" data-palette-id="forest-mint" style="--dot-a:#164638;--dot-b:#a9dec6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">森林</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="酒红 · 玫瑰" data-palette-id="burgundy-rosewood" style="--dot-a:#73142c;--dot-b:#e6b3bd;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">酒红</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="鸢尾 · 丁香" data-palette-id="iris-lilac" style="--dot-a:#3e277a;--dot-b:#d5c3f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">鸢尾</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="霁青 · 冰蓝" data-palette-id="glacier-porcelain" style="--dot-a:#164b8a;--dot-b:#b6d8f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">霁青</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="莓绯 · 蜜桃" data-palette-id="berry-peach" style="--dot-a:#8f2d4b;--dot-b:#f8cad6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">莓绯</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="palette-deck-foot">
+              <div class="palette-mode-switch" role="group">
+                <button type="button" class="palette-mode-btn is-active" data-theme-pick="light" aria-pressed="true">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                  </svg>
+                  <span>日间</span>
+                </button>
+                <button type="button" class="palette-mode-btn" data-theme-pick="dark" aria-pressed="false">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                  <span>暗夜</span>
+                </button>
+              </div>
+              <span id="palette-counter" class="palette-counter">01 / 06</span>
+            </div>
+          </div>
+        </div>
+
+        <a href="../../#home-downloads" class="header-dl-btn">下载客户端</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <aside id="docs-sidebar" class="docs-sidebar" aria-label="文档">
+      <div class="sidebar-group">
+        <div class="sidebar-title">起步与安装</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../intro/" class="sidebar-link" data-id="intro">
+            <span>项目介绍与核心能力</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../changelog/" class="sidebar-link" data-id="changelog">
+            <span>版本动态与更新说明</span>
+            <span class="sidebar-badge">NEW</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../quickstart/" class="sidebar-link" data-id="quickstart">
+            <span>第一次使用，从这里开始</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../installation/" class="sidebar-link" data-id="installation">
+            <span>安装前准备与系统要求</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../windows/" class="sidebar-link" data-id="windows">
+            <span>在 Windows 上安装</span>
+            <span class="sidebar-badge">桌面端</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../linux/" class="sidebar-link" data-id="linux">
+            <span>Linux 与手动安装</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../agent-install/" class="sidebar-link" data-id="agent-install">
+            <span>交给 AI 助手自动安装</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../configuration/" class="sidebar-link" data-id="configuration">
+            <span>日常启动、人设与模型</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../weixin/" class="sidebar-link" data-id="weixin">
+            <span>接入微信</span>
+            <span class="sidebar-badge">推荐</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../telegram/" class="sidebar-link" data-id="telegram">
+            <span>接入 Telegram 与 QQ</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">功能与日常使用</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../desktop-guide/" class="sidebar-link" data-id="desktop-guide">
+            <span>桌面客户端使用指南</span>
+            <span class="sidebar-badge">桌面端</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../daily-companions/" class="sidebar-link" data-id="daily-companions">
+            <span>共读、文稿、相册与节律</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../world-editor/" class="sidebar-link" data-id="world-editor">
+            <span>地图编辑器与世界包</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../cli-reference/" class="sidebar-link" data-id="cli-reference">
+            <span>常用命令与记忆管理</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../modules/" class="sidebar-link" data-id="modules">
+            <span>独立推演与底层服务</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">维护与规划</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../update/" class="sidebar-link" data-id="update">
+            <span>版本升级与一键回滚</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../data/" class="sidebar-link" data-id="data">
+            <span>数据目录、备份与卸载</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../troubleshooting/" class="sidebar-link" data-id="troubleshooting">
+            <span>常见问题排查</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../status-matrix/" class="sidebar-link active" data-id="status-matrix">
+            <span>已完成与未完成清单</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../roadmap/" class="sidebar-link" data-id="roadmap">
+            <span>未来规划：初遇引导与四季</span>
+            <span class="sidebar-badge">规划</span>
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">隐私与开源</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../privacy/" class="sidebar-link" data-id="privacy">
+            <span>隐私与数据边界</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../testing/" class="sidebar-link" data-id="testing">
+            <span>测试范围与发行说明</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../release/" class="sidebar-link" data-id="release">
+            <span>开源许可与站点维护</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../contributing/" class="sidebar-link" data-id="contributing">
+            <span>问题反馈与参与贡献</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../acknowledgments/" class="sidebar-link" data-id="acknowledgments">
+            <span>致谢</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+    </aside>
+    <main class="docs-content" id="static-doc-main">
+      <div class="content-inner">
+        <header class="doc-page-header">
+          <div class="doc-header-top">
+            <div class="breadcrumbs">
+              <a href="../../">首页</a>
+              <span>/</span>
+              <a href="../">文档</a>
+              <span>/</span>
+              <span class="crumb-cat">维护与规划</span>
+              <span>/</span>
+              <span class="crumb-cur">已完成与未完成清单</span>
+            </div>
+            <span class="doc-meta-pill">约 5 分钟阅读 · 4 节</span>
+          </div>
+          <h1 class="page-title">已完成与未完成清单</h1>
+          <p class="page-summary">不画饼、不掺水：一页看清当前 v0.7.0 公开测试版哪些已经能用、哪些要手动开、哪些还只是规划。</p>
+        </header>
+
+        <details class="mobile-toc-bar">
+         <summary><span>本页目录（4 节）</span><span>▾</span></summary>
+         <ul class="mobile-toc-list">
+           <li><a href="#status-matrix-section-0">已经跑通、直接可用的功能</a></li><li><a href="#status-matrix-section-1">需要手动开启或配置的功能</a></li><li><a href="#status-matrix-section-2">有意保持的边界与尚未完成的规划</a></li><li><a href="#status-matrix-section-3">发行包来源与验证说明</a></li>
+         </ul>
+       </details>
+
+        <article class="markdown-body">
+          <h2 id="status-matrix-section-0">已经跑通、直接可用的功能（v0.7.0）</h2>
+<ul>
+<li><strong>双层回忆灯与本地长期记忆闭环</strong>：跨会话自动沉淀重要事实进本机 SQLite，双层回忆灯严格保护原始记录零篡改，支持 <code>/chiyo_memory list</code> 查看、<code>correct</code> 纠错与 <code>delete</code> 停止召回。</li>
+<li><strong>连续出行、12 类街区店铺与包袋物态</strong>：支持多段路网寻路、真实步行计时与断点续走；覆盖 12 类街区店铺与开放柜台自由点单（如去便利店买热关东煮），旧书店与咖啡屋店主独立错峰作息与吧台杯垫留言；随身包袋最多 3 层嵌套收纳，具备热茶放凉、窗边纸条遇雨微潮晕字等冷热干湿物态。</li>
+<li><strong>免选风貌全随机专属世界、7 套内置世界与深浅双色离线编辑器</strong>：除海滨「凪浦」（凪读作「止」zhǐ）、温泉「汤川」、田园「穗村」、街区「栞泽」（栞读作「刊」kān）等 7 套世界与 4 种主题风格外，支持<strong>免选风貌的全随机专属世界一键生成</strong>（6 种地貌混搭、4 种异构路网、8 类商业店铺与多房间住宅）及深浅双色离线可视化地图编辑器。</li>
+<li><strong>去工具人化拒绝边界、异步回信与无损搬家旅行箱</strong>：不想帮的忙干脆拒绝，不念客服式道歉模板也不记仇；按真实日程隔几小时异步回信，睡眠/外出/专注时将非急事收入手机待回匣，真急事可敲门找 TA；支持导出 <code>.nyairo-suitcase.zip</code> 无损搬家旅行箱连同世界切片与迁移损失清单整套带走。</li>
+<li><strong>相册、双人共读与文稿对比</strong>：支持旅途相册查看、导入读物或示范书同步记录页码批注，以及文稿多版本历史快照与差异比对。</li>
+<li><strong>多端入口</strong>：提供免管理员 Windows 原生桌面端（<code>nyairo-0.7.0-setup.exe</code>）、Linux / WSL 命令行，支持手机微信扫码直连与 Telegram 机器人绑定。</li>
+<li><strong>平滑升级与回滚</strong>：支持 <code>nyairo update</code> 整包更新与 <code>--rollback</code> 保留新聊天记录回退。</li>
+</ul>
+
+<h2 id="status-matrix-section-1">需要手动开启或配置的功能</h2>
+<ul>
+<li><strong>大模型接口配置</strong>：框架不捆绑售卖算力，可花 5–10 元配好 DeepSeek API Key，或直连免费的本机 Ollama（<code>http://127.0.0.1:11434</code>，见 <a href="../configuration/#configuration-beginner-model">新手零门槛模型教程</a>）。</li>
+<li><strong>后台无人值守自主活动</strong>：默认关闭（避免后台悄悄跑流量费），需要体验「你不找 TA 时 TA 自己散步写随笔」可在设置或命令行加上显式开关并设好预算上限（见 <a href="../daily-companions/">共读、文稿、相册与节律</a>）。</li>
+<li><strong>本地相机拍照生图</strong>：需用户自行在本机启动 Stable Diffusion WebUI（<code>127.0.0.1:7860</code>）与本地提示词转换服务（<code>127.0.0.1:18190</code>），未启动时如实提示不可用。</li>
+<li><strong><code>/chiyo_consider</code> 独立推演</strong>：默认关闭，按 <a href="../modules/">独立推演与底层服务</a> 修改两行配置即可开启。</li>
+<li><strong>QQ 官方机器人私聊</strong>：除填写 AppID / AppSecret 外，需在会话白名单中放行对应的 <code>qqbot</code> 私聊标识（见 <a href="../telegram/#qqbot-setup">QQ 接入说明</a>）。</li>
+</ul>
+
+<h2 id="status-matrix-section-2">有意保持的边界与尚未完成的规划</h2>
+<ul>
+<li><strong>无交互时不主动向微信 / Telegram 弹窗推送（有意保持的防打扰边界）</strong>：虽然支持手机待回匣异步回信与后台自主起居，但不会在未交互、未约定前提下主动往微信、Telegram 或 QQ 推送消息打扰你。</li>
+<li><strong>后台自主生活经历不支持直接改写正文（真实性边界）</strong>：对话记忆可通过 <code>correct</code> 纠正，但后台自主生活沉淀的经历仅支持 <code>delete</code> 停止后续召回，不支持直接篡改正文。</li>
+<li><strong>首次启动零配置初遇向导、跨季节物候与世界工坊（规划中）</strong>：全随机专属世界一键生成与无损搬家旅行箱已就位；首次打开免点选的沉浸式初遇向导、更深层的跨季节物候节律以及社区世界包分享仍在后续路线图中（见 <a href="../roadmap/">未来规划</a>）。</li>
+<li><strong>不做生存数值游戏与物理磁盘粉碎</strong>：当前的休息与补给只是四档轻量日常节律，关机不倒扣惩罚；<code>/chiyo_memory delete</code> 的作用是停止后续检索召回，原始会话日志与历史备份仍保留在你的本机磁盘上。</li>
+<li><strong>macOS 与 Docker 整包方案</strong>：尚未完成独立打包与全流程验证。</li>
+</ul>
+
+<h2 id="status-matrix-section-3">发行包来源与验证说明</h2>
+<p>当前公开测试版源码与校验压缩包均发布在 <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0" target="_blank" rel="noopener noreferrer">GitHub Releases v0.7.0</a>，Windows 桌面安装器由官网同源分发并附 SHA256 校验文件。历史版本（<code>v0.6.0</code>、<code>v0.5.1</code>、<code>v0.4.0</code>、<code>v0.3.0</code>、<code>v0.2.0-rc3</code> 等）保留原样供对比或回退。各版本具体跑过哪些测试、没跑哪些测试，详见 <a href="../testing/">测试范围与发行说明</a>。</p>
+        </article>
+
+        <nav class="page-pager" aria-label="Chapter navigation">
+          <a href="../troubleshooting/" class="pager-btn pager-prev"><span class="pager-dir">上一篇</span><span class="pager-title">← 常见问题排查</span></a>
+          <a href="../roadmap/" class="pager-btn pager-next"><span class="pager-dir">下一篇</span><span class="pager-title">未来规划：初遇引导与四季 →</span></a>
+        </nav>
+
+        <div class="doc-community-bar">
+          <span>遇到配置疑问或文档疏漏？</span>
+          <div class="doc-community-links">
+            <button type="button" class="doc-copy-qq" data-copy-qq="1126943805" title="点击复制官方 QQ 群号">
+              <span>QQ 群 · 1126943805</span>
+              <span class="doc-qq-status">复制</span>
+            </button>
+            <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer">Telegram @nyairoai ↗</a>
+            <a href="https://github.com/L1AN929/nyairo/issues" target="_blank" rel="noopener noreferrer">GitHub Issues ↗</a>
+          </div>
+        </div>
+      </div>
+    </main>
+    <aside class="docs-aside" aria-label="本页目录">
+      <div class="aside-title">本页目录</div>
+      <ul id="toc-list" class="toc-list"><li class="toc-active-rail" id="toc-active-rail" aria-hidden="true"></li>
+    <li class="toc-item">
+      <a href="#status-matrix-section-0" class="toc-link active" data-anchor="status-matrix-section-0">已经跑通、直接可用的功能</a>
+    </li>
+    <li class="toc-item">
+      <a href="#status-matrix-section-1" class="toc-link" data-anchor="status-matrix-section-1">需要手动开启或配置的功能</a>
+    </li>
+    <li class="toc-item">
+      <a href="#status-matrix-section-2" class="toc-link" data-anchor="status-matrix-section-2">有意保持的边界与尚未完成的规划</a>
+    </li>
+    <li class="toc-item">
+      <a href="#status-matrix-section-3" class="toc-link" data-anchor="status-matrix-section-3">发行包来源与验证说明</a>
+    </li></ul>
+    </aside>
+  </div>
+
+  <button type="button" id="back-to-top" class="back-to-top" aria-label="Top" title="Top">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script>
+  (function () {
+    var PAL_ORDER = ["deep-sea-sakura","forest-mint","burgundy-rosewood","iris-lilac","glacier-porcelain","berry-peach"];
+    var PAL_META = {"deep-sea-sakura":{"short":"深海","title":"深海 · 淡樱","dayInk":"#122e8a","nightInk":"#f4c2d1","light":"#f5efea","dark":"#0c0b0d","index":"01 / 06"},"forest-mint":{"short":"森林","title":"森林 · 薄荷","dayInk":"#164638","nightInk":"#a9dec6","light":"#f4f1ea","dark":"#0a0e0d","index":"02 / 06"},"burgundy-rosewood":{"short":"酒红","title":"酒红 · 玫瑰","dayInk":"#73142c","nightInk":"#e6b3bd","light":"#f7f1ee","dark":"#0d0a0c","index":"03 / 06"},"iris-lilac":{"short":"鸢尾","title":"鸢尾 · 丁香","dayInk":"#3e277a","nightInk":"#d5c3f8","light":"#f5f2f8","dark":"#0b0a10","index":"04 / 06"},"glacier-porcelain":{"short":"霁青","title":"霁青 · 冰蓝","dayInk":"#164b8a","nightInk":"#b6d8f8","light":"#f2f5f9","dark":"#0a0c10","index":"05 / 06"},"berry-peach":{"short":"莓绯","title":"莓绯 · 蜜桃","dayInk":"#8f2d4b","nightInk":"#f8cad6","light":"#faf4f5","dark":"#0e0b0c","index":"06 / 06"}};
+    var COPY_TXT = "复制";
+    var COPIED_TXT = "已复制 ✓";
+    var vtSeq = 0, activeVt = null, palSeq = 0, activeAnim = null;
+
+    function rm() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    function getPal() {
+      var c = document.documentElement.getAttribute('data-palette');
+      return c && PAL_META[c] ? c : 'deep-sea-sakura';
+    }
+    function syncMeta() {
+      var m = document.getElementById('meta-theme-color');
+      if (!m) return;
+      var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      m.setAttribute('content', PAL_META[getPal()][t]);
+    }
+    function applyPal(id, save) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === 'deep-sea-sakura') document.documentElement.removeAttribute('data-palette');
+      else document.documentElement.setAttribute('data-palette', next);
+      if (save !== false) { try { localStorage.setItem('nyairo-palette', next); } catch (e) {} }
+      syncMeta();
+      var lbl = document.getElementById('palette-cap-label');
+      if (lbl) lbl.textContent = PAL_META[next].short;
+      var tEl = document.getElementById('palette-stage-title');
+      var hEl = document.getElementById('palette-stage-hex');
+      var cEl = document.getElementById('palette-counter');
+      if (tEl) tEl.textContent = PAL_META[next].title;
+      if (hEl) hEl.textContent = PAL_META[next].dayInk + ' · ' + PAL_META[next].nightInk;
+      if (cEl) cEl.textContent = PAL_META[next].index;
+      document.querySelectorAll('#palette-menu .palette-card').forEach(function (c) {
+        var on = c.getAttribute('data-palette-id') === next;
+        c.classList.toggle('is-active', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+    }
+    function switchPal(id) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === getPal()) return;
+      var seq = ++palSeq;
+      if (activeAnim) { try { activeAnim.cancel(); } catch (e) {} activeAnim = null; }
+      applyPal(next, true);
+      if (rm()) return;
+      var b = document.getElementById('palette-wash-beam');
+      if (!b && document.body) {
+        b = document.createElement('div');
+        b.id = 'palette-wash-beam';
+        b.className = 'palette-wash-beam';
+        b.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(b);
+      }
+      if (b && b.animate) {
+        var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        b.style.setProperty('--beam-primary', t === 'light' ? PAL_META[next].dayInk : PAL_META[next].nightInk);
+        b.style.setProperty('--beam-secondary', t === 'light' ? PAL_META[next].nightInk : PAL_META[next].dayInk);
+        b.style.opacity = '1';
+        activeAnim = b.animate(
+          [{ transform: 'translate3d(64vw,0,0)', opacity: 0 }, { transform: 'translate3d(18vw,0,0)', opacity: 0.94, offset: 0.3 }, { transform: 'translate3d(-68vw,0,0)', opacity: 0 }],
+          { duration: 560, easing: 'cubic-bezier(0.22,1,0.36,1)' }
+        );
+        Promise.resolve(activeAnim.finished).catch(function () {}).finally(function () {
+          if (seq === palSeq) { b.style.opacity = '0'; activeAnim = null; }
+        });
+      }
+    }
+    function applyTheme(theme, save) {
+      var next = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      syncMeta();
+      if (save !== false) { try { localStorage.setItem('nyairo-theme', next); } catch (e) {} }
+      document.querySelectorAll('#palette-menu [data-theme-pick]').forEach(function (b) {
+        var on = b.getAttribute('data-theme-pick') === next;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    function switchTheme(next) {
+      var seq = ++vtSeq;
+      if (activeVt) { try { activeVt.skipTransition(); } catch (e) {} activeVt = null; }
+      if (!document.startViewTransition || rm()) { applyTheme(next, true); return; }
+      document.documentElement.classList.add('vt-switching');
+      var vt = document.startViewTransition(function () { applyTheme(next, true); });
+      activeVt = vt;
+      vt.ready.then(function () {
+        if (seq !== vtSeq) return;
+        document.documentElement.animate({ opacity: [0, 1] }, { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' });
+      }).catch(function () {});
+      Promise.resolve(vt.finished).finally(function () {
+        if (seq !== vtSeq) return;
+        activeVt = null;
+        document.documentElement.classList.remove('vt-switching');
+      });
+    }
+
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
+    applyPal(getPal(), false);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('theme-ready'); }); });
+
+    var tBtn = document.getElementById('theme-toggle');
+    if (tBtn) tBtn.addEventListener('click', function () {
+      switchTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+
+    var pWrap = document.getElementById('palette-dropdown'), pCap = document.getElementById('palette-capsule'), pBtn = document.getElementById('palette-btn'), pMenu = document.getElementById('palette-menu');
+    if (pWrap && pBtn && pMenu) {
+      var closeP = function () {
+        pMenu.classList.remove('is-open');
+        if (pCap) pCap.classList.remove('is-open');
+        pMenu.setAttribute('aria-hidden', 'true');
+        pBtn.setAttribute('aria-expanded', 'false');
+      };
+      pBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !pMenu.classList.contains('is-open');
+        pMenu.classList.toggle('is-open', open);
+        if (pCap) pCap.classList.toggle('is-open', open);
+        pMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        pBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      pMenu.addEventListener('click', function (e) {
+        var c = e.target.closest('[data-palette-id]');
+        if (c) { e.stopPropagation(); switchPal(c.getAttribute('data-palette-id')); return; }
+        var m = e.target.closest('[data-theme-pick]');
+        if (m) {
+          e.stopPropagation();
+          var pk = m.getAttribute('data-theme-pick');
+          var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          if (pk !== cur) switchTheme(pk);
+          return;
+        }
+        var sh = e.target.closest('#palette-shuffle');
+        if (sh) {
+          e.stopPropagation();
+          var cur = getPal();
+          var opts = PAL_ORDER.filter(function (x) { return x !== cur; });
+          switchPal(opts[Math.floor(Math.random() * opts.length)]);
+        }
+      });
+      document.addEventListener('click', function (e) { if (!pWrap.contains(e.target)) closeP(); });
+      window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeP(); });
+    }
+
+    var lWrap = document.getElementById('lang-dropdown'), lBtn = document.getElementById('lang-btn'), lMenu = document.getElementById('lang-menu');
+    if (lWrap && lBtn && lMenu) {
+      lBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = lMenu.hasAttribute('hidden');
+        if (open) lMenu.removeAttribute('hidden'); else lMenu.setAttribute('hidden', '');
+        lBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (e) {
+        if (!lWrap.contains(e.target)) { lMenu.setAttribute('hidden', ''); lBtn.setAttribute('aria-expanded', 'false'); }
+      });
+    }
+
+    var mobBtn = document.getElementById('mobile-toggle'), sb = document.getElementById('docs-sidebar'), bd = document.getElementById('sidebar-backdrop');
+    if (mobBtn && sb) {
+      var closeSb = function () {
+        sb.classList.remove('open');
+        mobBtn.setAttribute('aria-expanded', 'false');
+        if (bd) bd.classList.remove('show');
+      };
+      mobBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !sb.classList.contains('open');
+        sb.classList.toggle('open', open);
+        mobBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (bd) bd.classList.toggle('show', open);
+      });
+      if (bd) bd.addEventListener('click', closeSb);
+    }
+
+    function copyTxt(str) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(str).then(function () { return true; }).catch(function () { return false; });
+      }
+      return Promise.resolve(false);
+    }
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var code = btn.closest('.code-block') && btn.closest('.code-block').querySelector('code');
+        if (!code) return;
+        copyTxt(code.innerText || code.textContent || '').then(function (ok) {
+          if (!ok) return;
+          btn.textContent = COPIED_TXT;
+          btn.classList.add('is-copied');
+          setTimeout(function () { btn.textContent = COPY_TXT; btn.classList.remove('is-copied'); }, 1800);
+        });
+      });
+    });
+    document.querySelectorAll('.doc-copy-qq').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var st = btn.querySelector('.doc-qq-status');
+        copyTxt(btn.getAttribute('data-copy-qq') || '1126943805').then(function () {
+          btn.classList.add('is-copied');
+          if (st) st.textContent = COPIED_TXT;
+          setTimeout(function () { btn.classList.remove('is-copied'); if (st) st.textContent = COPY_TXT; }, 1800);
+        });
+      });
+    });
+
+    var topBtn = document.getElementById('back-to-top');
+    var bar = document.getElementById('scroll-progress-bar');
+    var tocLinks = Array.prototype.slice.call(document.querySelectorAll('#toc-list .toc-link'));
+    var rail = document.getElementById('toc-active-rail');
+    var tocList = document.getElementById('toc-list');
+    function syncToc() {
+      if (!rail || !tocList) return;
+      var act = tocList.querySelector('.toc-link.active');
+      if (!act || !act.offsetHeight) return;
+      tocList.classList.add('has-rail');
+      rail.style.height = Math.max(12, act.offsetHeight - 8) + 'px';
+      rail.style.transform = 'translate3d(0,' + (act.offsetTop + 4) + 'px,0)';
+    }
+    syncToc();
+    window.addEventListener('scroll', function () {
+      var sy = window.scrollY || 0;
+      if (topBtn) topBtn.classList.toggle('is-visible', sy > 520);
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      if (bar) bar.style.transform = max > 120 ? 'scaleX(' + Math.min(1, Math.max(0, sy / max)).toFixed(4) + ')' : 'scaleX(0)';
+      if (tocLinks.length) {
+        var cur = tocLinks[0];
+        tocLinks.forEach(function (l) {
+          var target = document.getElementById(l.getAttribute('data-anchor'));
+          if (target && target.getBoundingClientRect().top <= 118) cur = l;
+        });
+        tocLinks.forEach(function (l) { l.classList.toggle('active', l === cur); });
+        syncToc();
+      }
+    }, { passive: true });
+    if (topBtn) topBtn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: rm() ? 'auto' : 'smooth' }); });
+  })();
+  </script>
+</body>
+</html>

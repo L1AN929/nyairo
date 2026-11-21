@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light" translate="no" class="notranslate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>はじめての方へ：ここからスタート · nyairo ドキュメント</title>
+  <meta name="description" content="お使いの PC に合わせた一番手軽な導入方法を選べます。Windows ならデスクトップ版をインストールするだけで始められ、初心者の方でも数百円の DeepSeek キーまたは無料のローカル Ollama を繋げばすぐに対話を開始できます。">
+  <meta name="author" content="nyairo contributors">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <link rel="canonical" href="https://nyairo.com/ja/docs/quickstart/">
+  <link rel="alternate" hreflang="zh-CN" href="https://nyairo.com/docs/quickstart/">
+  <link rel="alternate" hreflang="en" href="https://nyairo.com/en/docs/quickstart/">
+  <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/docs/quickstart/">
+  <link rel="alternate" hreflang="x-default" href="https://nyairo.com/docs/quickstart/">
+  <meta name="theme-color" id="meta-theme-color" content="#f5efea">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="nyairo">
+  <meta property="og:title" content="はじめての方へ：ここからスタート · nyairo ドキュメント">
+  <meta property="og:description" content="お使いの PC に合わせた一番手軽な導入方法を選べます。Windows ならデスクトップ版をインストールするだけで始められ、初心者の方でも数百円の DeepSeek キーまたは無料のローカル Ollama を繋げばすぐに対話を開始できます。">
+  <meta property="og:url" content="https://nyairo.com/ja/docs/quickstart/">
+  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="はじめての方へ：ここからスタート · nyairo ドキュメント">
+  <meta name="twitter:description" content="お使いの PC に合わせた一番手軽な導入方法を選べます。Windows ならデスクトップ版をインストールするだけで始められ、初心者の方でも数百円の DeepSeek キーまたは無料のローカル Ollama を繋げばすぐに対話を開始できます。">
+  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "はじめての方へ：ここからスタート",
+      "description": "お使いの PC に合わせた一番手軽な導入方法を選べます。Windows ならデスクトップ版をインストールするだけで始められ、初心者の方でも数百円の DeepSeek キーまたは無料のローカル Ollama を繋げばすぐに対話を開始できます。",
+      "url": "https://nyairo.com/ja/docs/quickstart/",
+      "inLanguage": "ja",
+      "dateModified": "2026-11-21",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "nyairo",
+        "url": "https://nyairo.com/"
+      },
+      "author": {
+        "@type": "Organization",
+        "name": "nyairo contributors",
+        "url": "https://nyairo.com/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "nyairo",
+          "item": "https://nyairo.com/ja/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "ドキュメント",
+          "item": "https://nyairo.com/ja/docs/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "はじめての方へ：ここからスタート",
+          "item": "https://nyairo.com/ja/docs/quickstart/"
+        }
+      ]
+    }
+  ]
+}
+  </script>
+  <script>
+    (function () {
+      var PALETTE_BG = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c' }
+      };
+      try {
+        var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        var savedPal = localStorage.getItem('nyairo-palette');
+        if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+        if (savedPal && PALETTE_BG[savedPal]) document.documentElement.setAttribute('data-palette', savedPal);
+        var t = (saved === 'light' || saved === 'dark') ? saved : 'light';
+        var p = (savedPal && PALETTE_BG[savedPal]) ? savedPal : 'deep-sea-sakura';
+        var m = document.getElementById('meta-theme-color');
+        if (m) m.setAttribute('content', PALETTE_BG[p][t]);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-56">
+  <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
+  <link rel="apple-touch-icon" href="../../../assets/apple-touch-icon.png">
+</head>
+<body>
+  <a href="#static-doc-main" class="skip-link">本文へスキップ</a>
+
+  <header class="site-header">
+    <div class="scroll-progress-bar" id="scroll-progress-bar" aria-hidden="true"></div>
+    <div class="header-container">
+      <div class="header-left">
+        <button id="mobile-toggle" class="mobile-toggle" type="button" aria-label="ナビゲーションとドキュメント目次を開く" aria-controls="docs-sidebar" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <a href="../../" class="site-brand">
+          <span class="brand-logo">
+            <img class="on-dark" src="../../../assets/nyairo-icon-light-66.webp" alt="" width="22" height="21">
+            <img class="on-light" src="../../../assets/nyairo-icon-66.webp" alt="" width="22" height="21">
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">nyairo</span>
+            <span class="brand-tag font-mono">v0.7.0</span>
+          </span>
+        </a>
+
+        <span class="header-divider" aria-hidden="true"></span>
+
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="../../" class="nav-link">← ホーム</a>
+          <a href="../" class="nav-link active">ドキュメント</a>
+          <a href="../#quickstart" class="nav-link">検索付きリーダー</a>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <div class="lang-dropdown" id="lang-dropdown">
+          <button type="button" class="icon-btn lang-btn" id="lang-btn" aria-expanded="false" aria-haspopup="true" title="言語を選択 · 中文 / English / 日本語" aria-label="言語を選択">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </button>
+          <div class="lang-menu" id="lang-menu" role="menu" hidden>
+            <a href="../../../docs/quickstart/" lang="zh-CN" hreflang="zh-CN" role="menuitem"><span>中文</span></a>
+            <a href="../../../en/docs/quickstart/" lang="en" hreflang="en" role="menuitem"><span>English</span></a>
+            <a href="../../../ja/docs/quickstart/" lang="ja" hreflang="ja" role="menuitem" aria-current="page" class="is-current"><span>日本語</span><svg class="lang-check-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg></a>
+          </div>
+        </div>
+
+        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub リポジトリ" aria-label="GitHub リポジトリ">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+          </svg>
+        </a>
+
+        <div class="palette-dropdown" id="palette-dropdown">
+          <div class="palette-dual-capsule" id="palette-capsule">
+            <button id="palette-btn" class="palette-cap-pal" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="palette-menu" title="配色とカラーパレットトレイを開く" aria-label="配色とカラーパレットトレイを開く">
+              <svg class="palette-cap-star" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path></svg>
+              <span class="palette-cap-label" id="palette-cap-label">深海</span>
+            </button>
+            <span class="palette-cap-sep" aria-hidden="true"></span>
+            <button id="theme-toggle" class="palette-cap-theme" type="button" title="ライト／ダーク表示を切り替え" aria-label="ライト／ダーク表示を切り替え">
+              <svg id="theme-icon" class="theme-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g class="theme-icon-sun">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </g>
+                <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="palette-menu" id="palette-menu" role="dialog" aria-label="配色とカラーパレットトレイを開く" aria-hidden="true">
+            <div class="palette-deck-head">
+              <div class="palette-deck-live">
+                <svg class="palette-stage-star" id="palette-stage-star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path>
+                </svg>
+                <div class="palette-deck-meta">
+                  <span class="palette-stage-title" id="palette-stage-title">深海 · 淡桜</span>
+                  <span class="palette-stage-hex" id="palette-stage-hex">#122e8a · #f4c2d1</span>
+                </div>
+              </div>
+              <button type="button" class="palette-shuffle-btn" id="palette-shuffle" title="ランダム" aria-label="ランダム">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="16 3 21 3 21 8"></polyline>
+                  <line x1="4" y1="20" x2="21" y2="3"></line>
+                  <polyline points="21 16 21 21 16 21"></polyline>
+                  <line x1="15" y1="15" x2="21" y2="21"></line>
+                  <line x1="4" y1="4" x2="9" y2="9"></line>
+                </svg>
+                <span>ランダム</span>
+              </button>
+            </div>
+            <div class="palette-tray-grid" role="radiogroup">
+              <button type="button" class="palette-card is-active" role="radio" aria-checked="true" aria-label="深海 · 淡桜" data-palette-id="deep-sea-sakura" style="--dot-a:#122e8a;--dot-b:#f4c2d1;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">深海</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="森林 · ミント" data-palette-id="forest-mint" style="--dot-a:#164638;--dot-b:#a9dec6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">森林</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="深紅 · ローズ" data-palette-id="burgundy-rosewood" style="--dot-a:#73142c;--dot-b:#e6b3bd;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">深紅</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="菖蒲 · 紫" data-palette-id="iris-lilac" style="--dot-a:#3e277a;--dot-b:#d5c3f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">菖蒲</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="蒼碧 · 氷青" data-palette-id="glacier-porcelain" style="--dot-a:#164b8a;--dot-b:#b6d8f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">蒼碧</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="苺緋 · 桃霧" data-palette-id="berry-peach" style="--dot-a:#8f2d4b;--dot-b:#f8cad6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">苺緋</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="palette-deck-foot">
+              <div class="palette-mode-switch" role="group">
+                <button type="button" class="palette-mode-btn is-active" data-theme-pick="light" aria-pressed="true">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                  </svg>
+                  <span>ライト</span>
+                </button>
+                <button type="button" class="palette-mode-btn" data-theme-pick="dark" aria-pressed="false">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                  <span>ダーク</span>
+                </button>
+              </div>
+              <span id="palette-counter" class="palette-counter">01 / 06</span>
+            </div>
+          </div>
+        </div>
+
+        <a href="../../#ja-downloads" class="header-dl-btn">ダウンロード</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <aside id="docs-sidebar" class="docs-sidebar" aria-label="ドキュメント">
+      <div class="sidebar-group">
+        <div class="sidebar-title">はじめに・インストール</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../intro/" class="sidebar-link" data-id="intro">
+            <span>プロジェクト概要と主な機能</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../changelog/" class="sidebar-link" data-id="changelog">
+            <span>リリース情報とアップデート履歴</span>
+            <span class="sidebar-badge">NEW</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../quickstart/" class="sidebar-link active" data-id="quickstart">
+            <span>はじめての方へ：ここからスタート</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../installation/" class="sidebar-link" data-id="installation">
+            <span>導入前の準備と動作環境</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../windows/" class="sidebar-link" data-id="windows">
+            <span>Windows へのインストール</span>
+            <span class="sidebar-badge">デスクトップ</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../linux/" class="sidebar-link" data-id="linux">
+            <span>Linux 環境および手動インストール</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../agent-install/" class="sidebar-link" data-id="agent-install">
+            <span>AI アシスタントに任せて自動インストール</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../configuration/" class="sidebar-link" data-id="configuration">
+            <span>普段の起動・人物設定・モデル設定</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../weixin/" class="sidebar-link" data-id="weixin">
+            <span>WeChat 連携</span>
+            <span class="sidebar-badge">推奨</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../telegram/" class="sidebar-link" data-id="telegram">
+            <span>Telegram・QQ との連携</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">機能と日常の使い方</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../desktop-guide/" class="sidebar-link" data-id="desktop-guide">
+            <span>デスクトップクライアント利用ガイド</span>
+            <span class="sidebar-badge">デスクトップ</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../daily-companions/" class="sidebar-link" data-id="daily-companions">
+            <span>共読・原稿・アルバムと生活リズム</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../world-editor/" class="sidebar-link" data-id="world-editor">
+            <span>マップエディタとワールドパック</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../cli-reference/" class="sidebar-link" data-id="cli-reference">
+            <span>よく使うコマンドと記憶の管理</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../modules/" class="sidebar-link" data-id="modules">
+            <span>独立推論とバックエンドサービス</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">メンテナンスとロードマップ</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../update/" class="sidebar-link" data-id="update">
+            <span>アップデートとワンコマンド・ロールバック</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../data/" class="sidebar-link" data-id="data">
+            <span>データディレクトリ、バックアップとアンインストール</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../troubleshooting/" class="sidebar-link" data-id="troubleshooting">
+            <span>よくあるトラブルシューティング</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../status-matrix/" class="sidebar-link" data-id="status-matrix">
+            <span>実装済み・未実装ステータス一覧</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../roadmap/" class="sidebar-link" data-id="roadmap">
+            <span>今後のロードマップ</span>
+            <span class="sidebar-badge">計画中</span>
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">プライバシーとオープンソース</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../privacy/" class="sidebar-link" data-id="privacy">
+            <span>プライバシーとデータの境界線</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../testing/" class="sidebar-link" data-id="testing">
+            <span>テスト範囲とリリースノート</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../release/" class="sidebar-link" data-id="release">
+            <span>オープンソースライセンスとサイト運用</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../contributing/" class="sidebar-link" data-id="contributing">
+            <span>不具合報告とコントリビュート</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../acknowledgments/" class="sidebar-link" data-id="acknowledgments">
+            <span>謝辞</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+    </aside>
+    <main class="docs-content" id="static-doc-main">
+      <div class="content-inner">
+        <header class="doc-page-header">
+          <div class="doc-header-top">
+            <div class="breadcrumbs">
+              <a href="../../">ホーム</a>
+              <span>/</span>
+              <a href="../">ドキュメント</a>
+              <span>/</span>
+              <span class="crumb-cat">はじめに・インストール</span>
+              <span>/</span>
+              <span class="crumb-cur">はじめての方へ：ここからスタート</span>
+            </div>
+            <span class="doc-meta-pill">読了目安 約 9 分 · 6 項目</span>
+          </div>
+          <h1 class="page-title">はじめての方へ：ここからスタート</h1>
+          <p class="page-summary">お使いの PC に合わせた一番手軽な導入方法を選べます。Windows ならデスクトップ版をインストールするだけで始められ、初心者の方でも数百円の DeepSeek キーまたは無料のローカル Ollama を繋げばすぐに対話を開始できます。</p>
+        </header>
+
+        <details class="mobile-toc-bar">
+         <summary><span>このページの内容（6 項目）</span><span>▾</span></summary>
+         <ul class="mobile-toc-list">
+           <li><a href="#quickstart-section-0">まず環境に合った導入方法を選ぶ</a></li><li><a href="#quickstart-smartscreen">Windows 初回起動時に「Windows によって PC が保護されました」と出た場合の2ステップ図解</a></li><li><a href="#quickstart-guided-0">Linux / WSL のワンライナー導入</a></li><li><a href="#quickstart-model-beginner">初心者向けモデル設定：数百円の DeepSeek キーまたは無料 Ollama</a></li><li><a href="#quickstart-section-1">インストール後のチャット方法</a></li><li><a href="#quickstart-section-2">パートナーに名前を付け、性格を設定する</a></li>
+         </ul>
+       </details>
+
+        <article class="markdown-body">
+          <h2 id="quickstart-section-0">まず環境に合った導入方法を選ぶ</h2>
+<p>始める前に必要なものは、インターネットにつながる PC 1台と LLM API（数百円チャージの DeepSeek API キー、または PC 上の無料 Ollama のどちらでも可）だけです。お使いの OS に合わせてお選びください。</p>
+<ul>
+<li><strong>Windows 10 / 11 をお使いの場合（推奨）</strong>：約 5.8 MB の <a href="../../../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe"><strong>Windows デスクトップ版インストーラー</strong></a> をダウンロードしてダブルクリックするだけで、WSL 2 を自動検出し、バックグラウンド環境の構築まで案内してくれます。ターミナルコマンドを覚える必要はありません。詳しい手順は <a href="../windows/">Windows へのインストール</a>、画面の使い方は <a href="../desktop-guide/">デスクトップクライアント利用ガイド</a> をご覧ください。</li>
+<li><strong>Linux をお使いの場合、またはターミナル操作に慣れている場合</strong>：すぐ下のワンライナー導入手順へお進みください。</li>
+<li><strong>普段 Claude Code や Codex などのコーディングアシスタントを使っている場合</strong>：<a href="../agent-install/">AI アシスタントに自動導入を任せる</a> にある標準プロンプトをそのままコピーして渡すだけで導入を代行してもらえます。</li>
+</ul>
+
+<h2 id="quickstart-smartscreen">Windows 初回起動時に「Windows によって PC が保護されました」と出た場合の2ステップ図解</h2>
+<p>nyairo は個人・独立系のオープンソースプロジェクトであり、高額な商用 EV コード署名証明書をまだ取得していないため、初回に <code>nyairo-0.7.0-setup.exe</code> をダブルクリックした際、Windows SmartScreen の通常の確認画面が表示されることがあります。以下の2ステップでそのまま開けます（管理者権限は不要です）：</p>
+<ol>
+<li>まず画面の案内文の下にある「<strong>詳細情報</strong>」をクリックしてインストーラーの詳細を展開します。</li>
+<li>念のためインストーラーの SHA256 が公式サイト公開値の <code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code> と一致することを確認し、右下に現れる「<strong>実行</strong>」をクリックするとセットアップウィザードへ進みます。</li>
+</ol>
+<div class="smartscreen-guide" style="margin: 16px 0 20px;">
+<svg viewBox="0 0 680 232" role="img" aria-label="Windows SmartScreen の2ステップ許可図解：ステップ1で詳細情報を押し、ステップ2で SHA256 を確認して実行を押す" style="width: 100%; max-width: 680px; height: auto; display: block; color: var(--fg);">
+  <rect x="4" y="6" width="312" height="220" rx="10" fill="var(--card)" stroke="var(--line)" stroke-width="1"/>
+  <line x1="4" y1="38" x2="316" y2="38" stroke="var(--line)" stroke-width="1"/>
+  <text x="20" y="26" fill="var(--accent)" font-size="11" font-weight="600" font-family="var(--font-sans, sans-serif)">STEP 01 · 「詳細情報」を押す</text>
+  <g style="color: var(--muted);" opacity="0.7">
+    <line x1="292" y1="18" x2="300" y2="26" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+    <line x1="300" y1="18" x2="292" y2="26" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+  </g>
+  <text x="22" y="64" fill="var(--fg)" font-size="14" font-weight="600" font-family="var(--font-sans, sans-serif)">Windows によって PC が保護されました</text>
+  <text x="22" y="88" fill="var(--muted)" font-size="11.5" font-family="var(--font-sans, sans-serif)">Microsoft Defender SmartScreen が起動を停止</text>
+  <text x="22" y="106" fill="var(--muted)" font-size="11.5" font-family="var(--font-sans, sans-serif)">認識されないアプリ（商用署名なし OSS 版）</text>
+  <rect x="20" y="122" width="84" height="26" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+  <text x="62" y="139" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600" font-family="var(--font-sans, sans-serif)">詳細情報</text>
+  <g style="color: var(--accent);">
+    <path d="M138 135H112m6-5-6 5 6 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="144" y="139" fill="var(--accent)" font-size="11.5" font-weight="600" font-family="var(--font-sans, sans-serif)">1. ここを押して展開</text>
+  <rect x="222" y="182" width="78" height="28" rx="5" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
+  <text x="261" y="200" text-anchor="middle" fill="var(--muted)" font-size="11.5" font-family="var(--font-sans, sans-serif)">実行しない</text>
+  <g style="color: var(--accent);">
+    <path d="M325 116h28m-6-6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <rect x="364" y="6" width="312" height="220" rx="10" fill="var(--card)" stroke="var(--line)" stroke-width="1"/>
+  <line x1="364" y1="38" x2="676" y2="38" stroke="var(--line)" stroke-width="1"/>
+  <text x="380" y="26" fill="var(--accent)" font-size="11" font-weight="600" font-family="var(--font-sans, sans-serif)">STEP 02 · 「実行」を押す</text>
+  <g style="color: var(--muted);" opacity="0.7">
+    <line x1="652" y1="18" x2="660" y2="26" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+    <line x1="660" y1="18" x2="652" y2="26" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+  </g>
+  <text x="382" y="64" fill="var(--fg)" font-size="14" font-weight="600" font-family="var(--font-sans, sans-serif)">Windows によって PC が保護されました</text>
+  <rect x="382" y="78" width="276" height="66" rx="6" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
+  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">アプリ: nyairo-0.7.0-setup.exe</text>
+  <text x="394" y="116" fill="var(--muted)" font-size="11" font-family="var(--font-sans, sans-serif)">発行元: 不明な発行元（公式ハッシュ一致で安全）</text>
+  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 174e4597...14dd8</text>
+  <text x="528" y="169" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600" font-family="var(--font-sans, sans-serif)">2. 次に「実行」を押す</text>
+  <rect x="482" y="182" width="92" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+  <text x="528" y="200" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600" font-family="var(--font-sans, sans-serif)">実行</text>
+  <rect x="582" y="182" width="76" height="28" rx="5" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
+  <text x="620" y="200" text-anchor="middle" fill="var(--muted)" font-size="11.5" font-family="var(--font-sans, sans-serif)">実行しない</text>
+</svg>
+</div>
+
+<h2 id="quickstart-guided-0">Linux / WSL のワンライナー導入</h2>
+<p>Linux ターミナル（Windows でターミナル版を使う場合は先に <strong>Ubuntu</strong> ウィンドウ）を開き、次のコマンドをコピーして Enter を押してください：</p>
+<div class="code-block">
+<div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
+<pre><code>curl -fsSL https://nyairo.com/install.sh | bash</code></pre>
+</div>
+<p>実行前にハッシュ検証を行いたい場合は、公式アーカイブとチェックサムファイルを段階的にダウンロードできます：</p>
+<div class="code-block">
+<div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
+<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
+sha256sum -c nyairo-v0.7.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
+cd "$HOME/apps/nyairo-v0.7.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
+</div>
+<p>事前に Python や Git を入れておく必要はありません。スクリプトが公式の <code>v0.7.0</code> リリースパッケージを自動取得・検証し、Python 3.13 の実行環境を整えたうえで、<code>~/.nyairo</code> 配下に個人用データディレクトリを作成します。</p>
+<p>ターミナルに <code>[5/5] 程序安装完成</code>（インストール完了）と表示されると、自動的にモデル設定ウィザードへ進みます：</p>
+<ol>
+<li>上下の矢印キーで利用するモデルプロバイダーを選択します。</li>
+<li>ご自身の <strong>API キー</strong>を貼り付けます（サードパーティの互換エンドポイントを使う場合は、あわせて Base URL も入力してください）。</li>
+<li>Enter キーで保存するとそのまま対話画面に入ります。「こんにちは」などと送ってみて、返事が届けば導入完了です。</li>
+</ol>
+<div class="callout callout-info"><div class="callout-title">curl が見つからないと表示された場合</div><p>ごく一部の初期状態の Ubuntu イメージには <code>curl</code> が入っていないことがあります。その場合は先に <code>sudo apt update &amp;&amp; sudo apt install -y curl</code> を実行してから、上のインストールコマンドを再度お試しください。</p></div>
+
+<h2 id="quickstart-model-beginner">初心者向けモデル設定：数百円の DeepSeek キーまたは無料 Ollama</h2>
+<p>これまで API キーを発行したことがなくてもご安心ください。nyairo の決定論的基盤は高価なモデルを必要としないため、次の2つの手軽な方法のどちらでもすぐに動かせます。</p>
+<ul>
+<li><strong>方法 A（おまかせ推奨 · GPU 不要）：数百円（5〜10元）で DeepSeek キーを取得する</strong>：ブラウザで <a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">platform.deepseek.com</a> を開いて登録・ログインし、チャージページ（Top up）から 5〜10 元（数百円程度、日常の会話は1回わずか数分の1円ほどなので長期間使えます）をチャージします。左メニューの「API keys → Create new API key（作成）」から生成した <code>sk-...</code> キーをコピーし、デスクトップクライアントの「<strong>設定 → モデル</strong>」（モデルは <code>deepseek-chat</code> を選択）に貼り付けて「保存」と「接続テスト」を押せば完了です。</li>
+<li><strong>方法 B（完全無料 · 外部通信ゼロ）：ローカルの Ollama を直接接続する</strong>：<a href="https://ollama.com" target="_blank" rel="noopener noreferrer">ollama.com</a> から Ollama をインストールし、軽量モデルを取得します（例：<code>ollama pull qwen2.5:7b</code>）。バックグラウンドで <code>http://127.0.0.1:11434</code> が待ち受けている状態で、デスクトップ版の「<strong>設定 → モデル</strong>」からローカル Ollama / OpenAI 互換エンドポイントを選び、URL に <code>http://127.0.0.1:11434/v1</code>、API キーに <code>ollama</code> と入力すれば、会話データが一切 PC の外へ出ない環境が整います（詳しい手順は <a href="../configuration/#configuration-beginner-model">日常の起動・人物設定とモデル</a> をご覧ください）。</li>
+</ul>
+
+<h2 id="quickstart-section-1">インストール後のチャット方法</h2>
+<ul>
+<li><strong>デスクトップ版をご利用の場合</strong>：デスクトップまたは画面右下タスクトレイの <strong>nyairo</strong> アイコンをクリックするとウィンドウが開きます。サイドバーから「概要」「対話」「街区」「記憶」「設定」を切り替えられます。</li>
+<li><strong>ターミナルをご利用の場合</strong>：普段はターミナルを開いて <code>nyairo</code> と入力して Enter を押すだけで前回の続きから話せます。<code>/chiyo_status</code> を打つと記憶（<code>READY</code>）や生活状態（<code>IDLE</code>）がオンラインか確認でき、モデルを変更したいときはいつでも <code>nyairo setup model</code> を実行できます。</li>
+<li><strong>スマホの WeChat と連携する</strong>：外出先でもスマートフォンから話しかけたい場合は、<a href="../weixin/">WeChat 連携手順</a> に沿って QR コードをスキャンするだけで紐づけできます。</li>
+</ul>
+
+<h2 id="quickstart-section-2">パートナーに名前を付け、性格を設定する</h2>
+<p>初期状態の人物設定はまっさらな白紙ベースです。名前を付けたり、話し方やふたりの間の呼び方を決めたりしたい場合は、個人用ディレクトリにある <code>SOUL.md</code> をエディタで開いて編集します：</p>
+<div class="code-block">
+<div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
+<pre><code>nano "$HOME/.nyairo/SOUL.md"</code></pre>
+</div>
+<p>普段使っている自然な日本語で、パートナーの名前や、落ち着いた性格か明るめの性格か、あなたのことをどう呼ぶかなどをそのまま書き込んでください。書き終えたら <code>Ctrl + O</code> を押して Enter で保存し、<code>Ctrl + X</code> で閉じると、次回の対話から新しい設定が反映されます。</p>
+        </article>
+
+        <nav class="page-pager" aria-label="Chapter navigation">
+          <a href="../changelog/" class="pager-btn pager-prev"><span class="pager-dir">前へ</span><span class="pager-title">← リリース情報とアップデート履歴</span></a>
+          <a href="../installation/" class="pager-btn pager-next"><span class="pager-dir">次へ</span><span class="pager-title">導入前の準備と動作環境 →</span></a>
+        </nav>
+
+        <div class="doc-community-bar">
+          <span>導入でお困りですか？</span>
+          <div class="doc-community-links">
+            <button type="button" class="doc-copy-qq" data-copy-qq="1126943805" title="クリックして公式 QQ グループ番号をコピー">
+              <span>QQ グループ · 1126943805</span>
+              <span class="doc-qq-status">コピー</span>
+            </button>
+            <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer">Telegram @nyairoai ↗</a>
+            <a href="https://github.com/L1AN929/nyairo/issues" target="_blank" rel="noopener noreferrer">GitHub Issues ↗</a>
+          </div>
+        </div>
+      </div>
+    </main>
+    <aside class="docs-aside" aria-label="このページの内容">
+      <div class="aside-title">このページの内容</div>
+      <ul id="toc-list" class="toc-list"><li class="toc-active-rail" id="toc-active-rail" aria-hidden="true"></li>
+    <li class="toc-item">
+      <a href="#quickstart-section-0" class="toc-link active" data-anchor="quickstart-section-0">まず環境に合った導入方法を選ぶ</a>
+    </li>
+    <li class="toc-item">
+      <a href="#quickstart-smartscreen" class="toc-link" data-anchor="quickstart-smartscreen">Windows 初回起動時に「Windows によって PC が保護されました」と出た場合の2ステップ図解</a>
+    </li>
+    <li class="toc-item">
+      <a href="#quickstart-guided-0" class="toc-link" data-anchor="quickstart-guided-0">Linux / WSL のワンライナー導入</a>
+    </li>
+    <li class="toc-item">
+      <a href="#quickstart-model-beginner" class="toc-link" data-anchor="quickstart-model-beginner">初心者向けモデル設定：数百円の DeepSeek キーまたは無料 Ollama</a>
+    </li>
+    <li class="toc-item">
+      <a href="#quickstart-section-1" class="toc-link" data-anchor="quickstart-section-1">インストール後のチャット方法</a>
+    </li>
+    <li class="toc-item">
+      <a href="#quickstart-section-2" class="toc-link" data-anchor="quickstart-section-2">パートナーに名前を付け、性格を設定する</a>
+    </li></ul>
+    </aside>
+  </div>
+
+  <button type="button" id="back-to-top" class="back-to-top" aria-label="Top" title="Top">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script>
+  (function () {
+    var PAL_ORDER = ["deep-sea-sakura","forest-mint","burgundy-rosewood","iris-lilac","glacier-porcelain","berry-peach"];
+    var PAL_META = {"deep-sea-sakura":{"short":"深海","title":"深海 · 淡桜","dayInk":"#122e8a","nightInk":"#f4c2d1","light":"#f5efea","dark":"#0c0b0d","index":"01 / 06"},"forest-mint":{"short":"森林","title":"森林 · ミント","dayInk":"#164638","nightInk":"#a9dec6","light":"#f4f1ea","dark":"#0a0e0d","index":"02 / 06"},"burgundy-rosewood":{"short":"深紅","title":"深紅 · ローズ","dayInk":"#73142c","nightInk":"#e6b3bd","light":"#f7f1ee","dark":"#0d0a0c","index":"03 / 06"},"iris-lilac":{"short":"菖蒲","title":"菖蒲 · 紫","dayInk":"#3e277a","nightInk":"#d5c3f8","light":"#f5f2f8","dark":"#0b0a10","index":"04 / 06"},"glacier-porcelain":{"short":"蒼碧","title":"蒼碧 · 氷青","dayInk":"#164b8a","nightInk":"#b6d8f8","light":"#f2f5f9","dark":"#0a0c10","index":"05 / 06"},"berry-peach":{"short":"苺緋","title":"苺緋 · 桃霧","dayInk":"#8f2d4b","nightInk":"#f8cad6","light":"#faf4f5","dark":"#0e0b0c","index":"06 / 06"}};
+    var COPY_TXT = "コピー";
+    var COPIED_TXT = "コピー済み ✓";
+    var vtSeq = 0, activeVt = null, palSeq = 0, activeAnim = null;
+
+    function rm() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    function getPal() {
+      var c = document.documentElement.getAttribute('data-palette');
+      return c && PAL_META[c] ? c : 'deep-sea-sakura';
+    }
+    function syncMeta() {
+      var m = document.getElementById('meta-theme-color');
+      if (!m) return;
+      var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      m.setAttribute('content', PAL_META[getPal()][t]);
+    }
+    function applyPal(id, save) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === 'deep-sea-sakura') document.documentElement.removeAttribute('data-palette');
+      else document.documentElement.setAttribute('data-palette', next);
+      if (save !== false) { try { localStorage.setItem('nyairo-palette', next); } catch (e) {} }
+      syncMeta();
+      var lbl = document.getElementById('palette-cap-label');
+      if (lbl) lbl.textContent = PAL_META[next].short;
+      var tEl = document.getElementById('palette-stage-title');
+      var hEl = document.getElementById('palette-stage-hex');
+      var cEl = document.getElementById('palette-counter');
+      if (tEl) tEl.textContent = PAL_META[next].title;
+      if (hEl) hEl.textContent = PAL_META[next].dayInk + ' · ' + PAL_META[next].nightInk;
+      if (cEl) cEl.textContent = PAL_META[next].index;
+      document.querySelectorAll('#palette-menu .palette-card').forEach(function (c) {
+        var on = c.getAttribute('data-palette-id') === next;
+        c.classList.toggle('is-active', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+    }
+    function switchPal(id) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === getPal()) return;
+      var seq = ++palSeq;
+      if (activeAnim) { try { activeAnim.cancel(); } catch (e) {} activeAnim = null; }
+      applyPal(next, true);
+      if (rm()) return;
+      var b = document.getElementById('palette-wash-beam');
+      if (!b && document.body) {
+        b = document.createElement('div');
+        b.id = 'palette-wash-beam';
+        b.className = 'palette-wash-beam';
+        b.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(b);
+      }
+      if (b && b.animate) {
+        var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        b.style.setProperty('--beam-primary', t === 'light' ? PAL_META[next].dayInk : PAL_META[next].nightInk);
+        b.style.setProperty('--beam-secondary', t === 'light' ? PAL_META[next].nightInk : PAL_META[next].dayInk);
+        b.style.opacity = '1';
+        activeAnim = b.animate(
+          [{ transform: 'translate3d(64vw,0,0)', opacity: 0 }, { transform: 'translate3d(18vw,0,0)', opacity: 0.94, offset: 0.3 }, { transform: 'translate3d(-68vw,0,0)', opacity: 0 }],
+          { duration: 560, easing: 'cubic-bezier(0.22,1,0.36,1)' }
+        );
+        Promise.resolve(activeAnim.finished).catch(function () {}).finally(function () {
+          if (seq === palSeq) { b.style.opacity = '0'; activeAnim = null; }
+        });
+      }
+    }
+    function applyTheme(theme, save) {
+      var next = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      syncMeta();
+      if (save !== false) { try { localStorage.setItem('nyairo-theme', next); } catch (e) {} }
+      document.querySelectorAll('#palette-menu [data-theme-pick]').forEach(function (b) {
+        var on = b.getAttribute('data-theme-pick') === next;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    function switchTheme(next) {
+      var seq = ++vtSeq;
+      if (activeVt) { try { activeVt.skipTransition(); } catch (e) {} activeVt = null; }
+      if (!document.startViewTransition || rm()) { applyTheme(next, true); return; }
+      document.documentElement.classList.add('vt-switching');
+      var vt = document.startViewTransition(function () { applyTheme(next, true); });
+      activeVt = vt;
+      vt.ready.then(function () {
+        if (seq !== vtSeq) return;
+        document.documentElement.animate({ opacity: [0, 1] }, { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' });
+      }).catch(function () {});
+      Promise.resolve(vt.finished).finally(function () {
+        if (seq !== vtSeq) return;
+        activeVt = null;
+        document.documentElement.classList.remove('vt-switching');
+      });
+    }
+
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
+    applyPal(getPal(), false);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('theme-ready'); }); });
+
+    var tBtn = document.getElementById('theme-toggle');
+    if (tBtn) tBtn.addEventListener('click', function () {
+      switchTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+
+    var pWrap = document.getElementById('palette-dropdown'), pCap = document.getElementById('palette-capsule'), pBtn = document.getElementById('palette-btn'), pMenu = document.getElementById('palette-menu');
+    if (pWrap && pBtn && pMenu) {
+      var closeP = function () {
+        pMenu.classList.remove('is-open');
+        if (pCap) pCap.classList.remove('is-open');
+        pMenu.setAttribute('aria-hidden', 'true');
+        pBtn.setAttribute('aria-expanded', 'false');
+      };
+      pBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !pMenu.classList.contains('is-open');
+        pMenu.classList.toggle('is-open', open);
+        if (pCap) pCap.classList.toggle('is-open', open);
+        pMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        pBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      pMenu.addEventListener('click', function (e) {
+        var c = e.target.closest('[data-palette-id]');
+        if (c) { e.stopPropagation(); switchPal(c.getAttribute('data-palette-id')); return; }
+        var m = e.target.closest('[data-theme-pick]');
+        if (m) {
+          e.stopPropagation();
+          var pk = m.getAttribute('data-theme-pick');
+          var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          if (pk !== cur) switchTheme(pk);
+          return;
+        }
+        var sh = e.target.closest('#palette-shuffle');
+        if (sh) {
+          e.stopPropagation();
+          var cur = getPal();
+          var opts = PAL_ORDER.filter(function (x) { return x !== cur; });
+          switchPal(opts[Math.floor(Math.random() * opts.length)]);
+        }
+      });
+      document.addEventListener('click', function (e) { if (!pWrap.contains(e.target)) closeP(); });
+      window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeP(); });
+    }
+
+    var lWrap = document.getElementById('lang-dropdown'), lBtn = document.getElementById('lang-btn'), lMenu = document.getElementById('lang-menu');
+    if (lWrap && lBtn && lMenu) {
+      lBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = lMenu.hasAttribute('hidden');
+        if (open) lMenu.removeAttribute('hidden'); else lMenu.setAttribute('hidden', '');
+        lBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (e) {
+        if (!lWrap.contains(e.target)) { lMenu.setAttribute('hidden', ''); lBtn.setAttribute('aria-expanded', 'false'); }
+      });
+    }
+
+    var mobBtn = document.getElementById('mobile-toggle'), sb = document.getElementById('docs-sidebar'), bd = document.getElementById('sidebar-backdrop');
+    if (mobBtn && sb) {
+      var closeSb = function () {
+        sb.classList.remove('open');
+        mobBtn.setAttribute('aria-expanded', 'false');
+        if (bd) bd.classList.remove('show');
+      };
+      mobBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !sb.classList.contains('open');
+        sb.classList.toggle('open', open);
+        mobBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (bd) bd.classList.toggle('show', open);
+      });
+      if (bd) bd.addEventListener('click', closeSb);
+    }
+
+    function copyTxt(str) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(str).then(function () { return true; }).catch(function () { return false; });
+      }
+      return Promise.resolve(false);
+    }
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var code = btn.closest('.code-block') && btn.closest('.code-block').querySelector('code');
+        if (!code) return;
+        copyTxt(code.innerText || code.textContent || '').then(function (ok) {
+          if (!ok) return;
+          btn.textContent = COPIED_TXT;
+          btn.classList.add('is-copied');
+          setTimeout(function () { btn.textContent = COPY_TXT; btn.classList.remove('is-copied'); }, 1800);
+        });
+      });
+    });
+    document.querySelectorAll('.doc-copy-qq').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var st = btn.querySelector('.doc-qq-status');
+        copyTxt(btn.getAttribute('data-copy-qq') || '1126943805').then(function () {
+          btn.classList.add('is-copied');
+          if (st) st.textContent = COPIED_TXT;
+          setTimeout(function () { btn.classList.remove('is-copied'); if (st) st.textContent = COPY_TXT; }, 1800);
+        });
+      });
+    });
+
+    var topBtn = document.getElementById('back-to-top');
+    var bar = document.getElementById('scroll-progress-bar');
+    var tocLinks = Array.prototype.slice.call(document.querySelectorAll('#toc-list .toc-link'));
+    var rail = document.getElementById('toc-active-rail');
+    var tocList = document.getElementById('toc-list');
+    function syncToc() {
+      if (!rail || !tocList) return;
+      var act = tocList.querySelector('.toc-link.active');
+      if (!act || !act.offsetHeight) return;
+      tocList.classList.add('has-rail');
+      rail.style.height = Math.max(12, act.offsetHeight - 8) + 'px';
+      rail.style.transform = 'translate3d(0,' + (act.offsetTop + 4) + 'px,0)';
+    }
+    syncToc();
+    window.addEventListener('scroll', function () {
+      var sy = window.scrollY || 0;
+      if (topBtn) topBtn.classList.toggle('is-visible', sy > 520);
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      if (bar) bar.style.transform = max > 120 ? 'scaleX(' + Math.min(1, Math.max(0, sy / max)).toFixed(4) + ')' : 'scaleX(0)';
+      if (tocLinks.length) {
+        var cur = tocLinks[0];
+        tocLinks.forEach(function (l) {
+          var target = document.getElementById(l.getAttribute('data-anchor'));
+          if (target && target.getBoundingClientRect().top <= 118) cur = l;
+        });
+        tocLinks.forEach(function (l) { l.classList.toggle('active', l === cur); });
+        syncToc();
+      }
+    }, { passive: true });
+    if (topBtn) topBtn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: rm() ? 'auto' : 'smooth' }); });
+  })();
+  </script>
+</body>
+</html>

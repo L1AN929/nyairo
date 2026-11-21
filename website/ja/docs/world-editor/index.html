@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light" translate="no" class="notranslate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>マップエディタとワールドパック · nyairo ドキュメント</title>
+  <meta name="description" content="テンプレート選択不要の完全ランダム専用ワールドのワンクリック生成、7 種の内蔵ワールドと 4 種のテーマスタイルの切り替え、ライト／ダーク両対応オフラインマップエディタを使った店舗や部屋の改築、そして現在の実装上の境界線について解説します。">
+  <meta name="author" content="nyairo contributors">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <link rel="canonical" href="https://nyairo.com/ja/docs/world-editor/">
+  <link rel="alternate" hreflang="zh-CN" href="https://nyairo.com/docs/world-editor/">
+  <link rel="alternate" hreflang="en" href="https://nyairo.com/en/docs/world-editor/">
+  <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/docs/world-editor/">
+  <link rel="alternate" hreflang="x-default" href="https://nyairo.com/docs/world-editor/">
+  <meta name="theme-color" id="meta-theme-color" content="#f5efea">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="nyairo">
+  <meta property="og:title" content="マップエディタとワールドパック · nyairo ドキュメント">
+  <meta property="og:description" content="テンプレート選択不要の完全ランダム専用ワールドのワンクリック生成、7 種の内蔵ワールドと 4 種のテーマスタイルの切り替え、ライト／ダーク両対応オフラインマップエディタを使った店舗や部屋の改築、そして現在の実装上の境界線について解説します。">
+  <meta property="og:url" content="https://nyairo.com/ja/docs/world-editor/">
+  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="マップエディタとワールドパック · nyairo ドキュメント">
+  <meta name="twitter:description" content="テンプレート選択不要の完全ランダム専用ワールドのワンクリック生成、7 種の内蔵ワールドと 4 種のテーマスタイルの切り替え、ライト／ダーク両対応オフラインマップエディタを使った店舗や部屋の改築、そして現在の実装上の境界線について解説します。">
+  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "マップエディタとワールドパック",
+      "description": "テンプレート選択不要の完全ランダム専用ワールドのワンクリック生成、7 種の内蔵ワールドと 4 種のテーマスタイルの切り替え、ライト／ダーク両対応オフラインマップエディタを使った店舗や部屋の改築、そして現在の実装上の境界線について解説します。",
+      "url": "https://nyairo.com/ja/docs/world-editor/",
+      "inLanguage": "ja",
+      "dateModified": "2026-11-21",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "nyairo",
+        "url": "https://nyairo.com/"
+      },
+      "author": {
+        "@type": "Organization",
+        "name": "nyairo contributors",
+        "url": "https://nyairo.com/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "nyairo",
+          "item": "https://nyairo.com/ja/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "ドキュメント",
+          "item": "https://nyairo.com/ja/docs/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "マップエディタとワールドパック",
+          "item": "https://nyairo.com/ja/docs/world-editor/"
+        }
+      ]
+    }
+  ]
+}
+  </script>
+  <script>
+    (function () {
+      var PALETTE_BG = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c' }
+      };
+      try {
+        var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        var savedPal = localStorage.getItem('nyairo-palette');
+        if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+        if (savedPal && PALETTE_BG[savedPal]) document.documentElement.setAttribute('data-palette', savedPal);
+        var t = (saved === 'light' || saved === 'dark') ? saved : 'light';
+        var p = (savedPal && PALETTE_BG[savedPal]) ? savedPal : 'deep-sea-sakura';
+        var m = document.getElementById('meta-theme-color');
+        if (m) m.setAttribute('content', PALETTE_BG[p][t]);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-56">
+  <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
+  <link rel="apple-touch-icon" href="../../../assets/apple-touch-icon.png">
+</head>
+<body>
+  <a href="#static-doc-main" class="skip-link">本文へスキップ</a>
+
+  <header class="site-header">
+    <div class="scroll-progress-bar" id="scroll-progress-bar" aria-hidden="true"></div>
+    <div class="header-container">
+      <div class="header-left">
+        <button id="mobile-toggle" class="mobile-toggle" type="button" aria-label="ナビゲーションとドキュメント目次を開く" aria-controls="docs-sidebar" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <a href="../../" class="site-brand">
+          <span class="brand-logo">
+            <img class="on-dark" src="../../../assets/nyairo-icon-light-66.webp" alt="" width="22" height="21">
+            <img class="on-light" src="../../../assets/nyairo-icon-66.webp" alt="" width="22" height="21">
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">nyairo</span>
+            <span class="brand-tag font-mono">v0.7.0</span>
+          </span>
+        </a>
+
+        <span class="header-divider" aria-hidden="true"></span>
+
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="../../" class="nav-link">← ホーム</a>
+          <a href="../" class="nav-link active">ドキュメント</a>
+          <a href="../#world-editor" class="nav-link">検索付きリーダー</a>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <div class="lang-dropdown" id="lang-dropdown">
+          <button type="button" class="icon-btn lang-btn" id="lang-btn" aria-expanded="false" aria-haspopup="true" title="言語を選択 · 中文 / English / 日本語" aria-label="言語を選択">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </button>
+          <div class="lang-menu" id="lang-menu" role="menu" hidden>
+            <a href="../../../docs/world-editor/" lang="zh-CN" hreflang="zh-CN" role="menuitem"><span>中文</span></a>
+            <a href="../../../en/docs/world-editor/" lang="en" hreflang="en" role="menuitem"><span>English</span></a>
+            <a href="../../../ja/docs/world-editor/" lang="ja" hreflang="ja" role="menuitem" aria-current="page" class="is-current"><span>日本語</span><svg class="lang-check-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg></a>
+          </div>
+        </div>
+
+        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub リポジトリ" aria-label="GitHub リポジトリ">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+          </svg>
+        </a>
+
+        <div class="palette-dropdown" id="palette-dropdown">
+          <div class="palette-dual-capsule" id="palette-capsule">
+            <button id="palette-btn" class="palette-cap-pal" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="palette-menu" title="配色とカラーパレットトレイを開く" aria-label="配色とカラーパレットトレイを開く">
+              <svg class="palette-cap-star" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path></svg>
+              <span class="palette-cap-label" id="palette-cap-label">深海</span>
+            </button>
+            <span class="palette-cap-sep" aria-hidden="true"></span>
+            <button id="theme-toggle" class="palette-cap-theme" type="button" title="ライト／ダーク表示を切り替え" aria-label="ライト／ダーク表示を切り替え">
+              <svg id="theme-icon" class="theme-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g class="theme-icon-sun">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </g>
+                <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="palette-menu" id="palette-menu" role="dialog" aria-label="配色とカラーパレットトレイを開く" aria-hidden="true">
+            <div class="palette-deck-head">
+              <div class="palette-deck-live">
+                <svg class="palette-stage-star" id="palette-stage-star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path>
+                </svg>
+                <div class="palette-deck-meta">
+                  <span class="palette-stage-title" id="palette-stage-title">深海 · 淡桜</span>
+                  <span class="palette-stage-hex" id="palette-stage-hex">#122e8a · #f4c2d1</span>
+                </div>
+              </div>
+              <button type="button" class="palette-shuffle-btn" id="palette-shuffle" title="ランダム" aria-label="ランダム">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="16 3 21 3 21 8"></polyline>
+                  <line x1="4" y1="20" x2="21" y2="3"></line>
+                  <polyline points="21 16 21 21 16 21"></polyline>
+                  <line x1="15" y1="15" x2="21" y2="21"></line>
+                  <line x1="4" y1="4" x2="9" y2="9"></line>
+                </svg>
+                <span>ランダム</span>
+              </button>
+            </div>
+            <div class="palette-tray-grid" role="radiogroup">
+              <button type="button" class="palette-card is-active" role="radio" aria-checked="true" aria-label="深海 · 淡桜" data-palette-id="deep-sea-sakura" style="--dot-a:#122e8a;--dot-b:#f4c2d1;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">深海</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="森林 · ミント" data-palette-id="forest-mint" style="--dot-a:#164638;--dot-b:#a9dec6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">森林</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="深紅 · ローズ" data-palette-id="burgundy-rosewood" style="--dot-a:#73142c;--dot-b:#e6b3bd;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">深紅</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="菖蒲 · 紫" data-palette-id="iris-lilac" style="--dot-a:#3e277a;--dot-b:#d5c3f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">菖蒲</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="蒼碧 · 氷青" data-palette-id="glacier-porcelain" style="--dot-a:#164b8a;--dot-b:#b6d8f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">蒼碧</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="苺緋 · 桃霧" data-palette-id="berry-peach" style="--dot-a:#8f2d4b;--dot-b:#f8cad6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">苺緋</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="palette-deck-foot">
+              <div class="palette-mode-switch" role="group">
+                <button type="button" class="palette-mode-btn is-active" data-theme-pick="light" aria-pressed="true">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                  </svg>
+                  <span>ライト</span>
+                </button>
+                <button type="button" class="palette-mode-btn" data-theme-pick="dark" aria-pressed="false">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                  <span>ダーク</span>
+                </button>
+              </div>
+              <span id="palette-counter" class="palette-counter">01 / 06</span>
+            </div>
+          </div>
+        </div>
+
+        <a href="../../#ja-downloads" class="header-dl-btn">ダウンロード</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <aside id="docs-sidebar" class="docs-sidebar" aria-label="ドキュメント">
+      <div class="sidebar-group">
+        <div class="sidebar-title">はじめに・インストール</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../intro/" class="sidebar-link" data-id="intro">
+            <span>プロジェクト概要と主な機能</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../changelog/" class="sidebar-link" data-id="changelog">
+            <span>リリース情報とアップデート履歴</span>
+            <span class="sidebar-badge">NEW</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../quickstart/" class="sidebar-link" data-id="quickstart">
+            <span>はじめての方へ：ここからスタート</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../installation/" class="sidebar-link" data-id="installation">
+            <span>導入前の準備と動作環境</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../windows/" class="sidebar-link" data-id="windows">
+            <span>Windows へのインストール</span>
+            <span class="sidebar-badge">デスクトップ</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../linux/" class="sidebar-link" data-id="linux">
+            <span>Linux 環境および手動インストール</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../agent-install/" class="sidebar-link" data-id="agent-install">
+            <span>AI アシスタントに任せて自動インストール</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../configuration/" class="sidebar-link" data-id="configuration">
+            <span>普段の起動・人物設定・モデル設定</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../weixin/" class="sidebar-link" data-id="weixin">
+            <span>WeChat 連携</span>
+            <span class="sidebar-badge">推奨</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../telegram/" class="sidebar-link" data-id="telegram">
+            <span>Telegram・QQ との連携</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">機能と日常の使い方</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../desktop-guide/" class="sidebar-link" data-id="desktop-guide">
+            <span>デスクトップクライアント利用ガイド</span>
+            <span class="sidebar-badge">デスクトップ</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../daily-companions/" class="sidebar-link" data-id="daily-companions">
+            <span>共読・原稿・アルバムと生活リズム</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../world-editor/" class="sidebar-link active" data-id="world-editor">
+            <span>マップエディタとワールドパック</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../cli-reference/" class="sidebar-link" data-id="cli-reference">
+            <span>よく使うコマンドと記憶の管理</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../modules/" class="sidebar-link" data-id="modules">
+            <span>独立推論とバックエンドサービス</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">メンテナンスとロードマップ</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../update/" class="sidebar-link" data-id="update">
+            <span>アップデートとワンコマンド・ロールバック</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../data/" class="sidebar-link" data-id="data">
+            <span>データディレクトリ、バックアップとアンインストール</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../troubleshooting/" class="sidebar-link" data-id="troubleshooting">
+            <span>よくあるトラブルシューティング</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../status-matrix/" class="sidebar-link" data-id="status-matrix">
+            <span>実装済み・未実装ステータス一覧</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../roadmap/" class="sidebar-link" data-id="roadmap">
+            <span>今後のロードマップ</span>
+            <span class="sidebar-badge">計画中</span>
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">プライバシーとオープンソース</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../privacy/" class="sidebar-link" data-id="privacy">
+            <span>プライバシーとデータの境界線</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../testing/" class="sidebar-link" data-id="testing">
+            <span>テスト範囲とリリースノート</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../release/" class="sidebar-link" data-id="release">
+            <span>オープンソースライセンスとサイト運用</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../contributing/" class="sidebar-link" data-id="contributing">
+            <span>不具合報告とコントリビュート</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../acknowledgments/" class="sidebar-link" data-id="acknowledgments">
+            <span>謝辞</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+    </aside>
+    <main class="docs-content" id="static-doc-main">
+      <div class="content-inner">
+        <header class="doc-page-header">
+          <div class="doc-header-top">
+            <div class="breadcrumbs">
+              <a href="../../">ホーム</a>
+              <span>/</span>
+              <a href="../">ドキュメント</a>
+              <span>/</span>
+              <span class="crumb-cat">機能と日常の使い方</span>
+              <span>/</span>
+              <span class="crumb-cur">マップエディタとワールドパック</span>
+            </div>
+            <span class="doc-meta-pill">読了目安 約 9 分 · 4 項目</span>
+          </div>
+          <h1 class="page-title">マップエディタとワールドパック</h1>
+          <p class="page-summary">テンプレート選択不要の完全ランダム専用ワールドのワンクリック生成、7 種の内蔵ワールドと 4 種のテーマスタイルの切り替え、ライト／ダーク両対応オフラインマップエディタを使った店舗や部屋の改築、そして現在の実装上の境界線について解説します。</p>
+        </header>
+
+        <details class="mobile-toc-bar">
+         <summary><span>このページの内容（4 項目）</span><span>▾</span></summary>
+         <ul class="mobile-toc-list">
+           <li><a href="#we-packs">同梱の 7 種のワールドと 12 業種の街角ショップ</a></li><li><a href="#we-editor">ライト／ダーク両対応オフラインマップエディタ：間取り描画と店舗設定</a></li><li><a href="#we-cli">テーマ選択不要の完全ランダム専用ワールドとシード値生成</a></li><li><a href="#we-limits">現在の実際の制限事項（未対応の仕様）</a></li>
+         </ul>
+       </details>
+
+        <article class="markdown-body">
+          <h2 id="we-packs">同梱の 7 種のワールドと 12 業種の街角ショップ</h2>
+<p>初回インストール時のデフォルトワールドは海辺の町「凪浦（なぎうら）」です。リリースパッケージの <code>examples/worlds/</code> ディレクトリには地形や雰囲気の異なる 7 種の完全なワールドパック（加えてエディタで改築したデモパック <code>nagiura-edited</code> 1 種）が同梱されており、<strong>12 業種の商業・公共店舗およびオープンカウンターでの自由注文</strong>（たとえばコンビニで温かいおでんを買うことができ、古書店や喫茶店の店主はそれぞれ独立した時間差の営業時間で出勤し、カウンターのコースターにメッセージを残せる仕組み）を備えています。</p>
+<ul>
+<li><strong>海辺の町・凪浦（<code>nagiura</code>、なぎうら）</strong>：標準のサンプルワールドで、自宅、書店、カモメ珈琲、公園、ビーチなど 17 か所の地点と 18 本の道路を含みます（ほかに改築デモ版 <code>nagiura-edited</code>：18 地点・19 道路を同梱）。</li>
+<li><strong>山あいの温泉街・湯川（<code>onsawa</code>）と嶺谷（<code>mountain_town-demo</code>）</strong>：翠沢の湯屋（<code>hot_spring</code>）、山の石段、渓谷の景色など各 15 か所の地点を含みます。</li>
+<li><strong>水車の里・穂村（<code>inobe</code>）と沢郷（<code>rural_farming-demo</code>）</strong>：水車公園、田んぼのあぜ道、集落の工房など各 14–15 か所の地点を含みます。</li>
+<li><strong>暮らしの街角・栞沢（<code>wakaba</code>）と日常街区・一（<code>daily_neighborhood_v1</code>）</strong>：前者には栞沢書店を含む 16 か所の生活エリアが、後者には営業時間や読書コーナー付きの軽量な 7 地点の生活圏が収録されています。各ワールドディレクトリには <code>preview.html</code> が同梱されており、ダブルクリックするだけでブラウザ上で道路網トポロジー図を確認できます。</li>
+</ul>
+
+<h2 id="we-editor">ライト／ダーク両対応オフラインマップエディタ：間取り描画と店舗設定</h2>
+<p>リポジトリ内の <code>components/world-editor/</code> には、<strong>ライトテーマとダークテーマの切り替え</strong>に対応して刷新された純ローカルのビジュアル空間エディタが内蔵されています（ローカルマシン <code>127.0.0.1</code> のみで待ち受けるため、インターネット接続不要でモデルのトークンも消費しません）。デスクトップ版の「街区 → エディタ」タブからそのまま開けるほか、ターミナルから手動で起動することもできます。</p>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>cd ~/.local/share/nyairo/releases/v0.7.0/components/world-editor
+python3 server.py --port 8766</code></pre></div>
+<p>続いてブラウザで <code>http://127.0.0.1:8766</code> を開けば、ワールドの改築を始められます。</p>
+<ol>
+<li><strong>既存のワールドパックをエディタ形式へ変換する</strong>：<code>python3 -m components.worldgen editor-export examples/worlds/nagiura</code> を実行すると、パック内に <code>editor-world.json</code> が生成されます。</li>
+<li><strong>ビジュアル編集と店舗注文メニューの設定</strong>：ブラウザからこのファイルをインポートすると、ライト／ダーク外観をいつでも切り替えながら、書店の名前や営業時間の変更、道路リンクの追加・削除、カスタム店舗のオープンカウンターメニュー（<code>sale_spec</code>）の設定を自由に行えます。さらに室内ビューに切り替えて壁を描いたり、ドアや窓を開けたり、収納機能や物性特性を持った机・ケトル・デスクランプなどを配置したりでき、「AI 視点プレビュー」をクリックすればパートナーが部屋の中でどの家具を視認できるかも確認できます。</li>
+<li><strong>ワンクリック書き戻しと整合性チェック</strong>：画面上の「<strong>nyairo ワールドパックを書き出し</strong>」（または CLI の <code>editor-import</code>）を実行すると、変更したフィールドだけが差分更新され、既存の NPC や環境イベントはそのまま保持されます。同時に連結性チェックも自動で行われ、誤って唯一の出口を切断してしまったり、まだ NPC が出勤する店舗を削除してしまったりした場合は、平易なメッセージで具体的な競合箇所を指摘して破損データの書き出しを防ぎます。</li>
+</ol>
+
+<h2 id="we-cli">テーマ選択不要の完全ランダム専用ワールドとシード値生成</h2>
+<p><code>v0.7.0</code> では、「海辺の坂道タウン（<code>coastal_town</code>）」「山あいの温泉町（<code>mountain_town</code>）」「郊外の住宅街（<code>residential_town</code>）」「田園の農村（<code>rural_farming</code>）」の 4 種類のテーマに沿った生成に加えて、デスクトップ版の「<strong>街区 → 新しい街を生成</strong>」から<strong>テーマ選択不要の完全ランダム専用ワールドをワンクリックで生成</strong>できるようになりました（<code>procedural</code> モード）。あらかじめスタイルを選ばなくても、ジェネレーターがシード値にもとづいて <strong>6 種の地形</strong>（岬の坂道・運河と水路の路地・山麓の渓谷・鉄道の駅町・果樹園の台地・森の湖畔）から調和する景観を掛け合わせ、<strong>4 種の異なるトポロジーの連結道路網</strong>（放射状ハブ型・環状ルート・一本道プロムナード・分岐大通り）、<strong>8 業種の商業店舗</strong>、および<strong>複数部屋の自宅</strong>（寝室に加えてリビング、縁側、ミニキッチン、書斎コーナー、さらに温冷・乾湿の物性を持つ家具を自動組み合わせ）を構築し、「生成後すぐホットスイッチで反映」にも対応しています。</p>
+<p>Linux / WSL のターミナルでお使いの場合も、<code>components.worldgen</code> に <code>--theme procedural</code>（または任意のテーマ）と数値シードを指定して、決定論的な専用ワールドをコマンド一発で生成できます。</p>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+cd "$REL"
+# テーマ選択なしでシード値から完全ランダム専用ワールドを生成・検証し、プレビューマップを出力
+"$REL/vendor/hermes/.venv/bin/python" -m components.worldgen generate \
+  --theme procedural --seed 20261118 --out "$HOME/my-world"
+"$REL/vendor/hermes/.venv/bin/python" -m components.worldgen validate "$HOME/my-world"
+"$REL/vendor/hermes/.venv/bin/python" -m components.worldgen preview "$HOME/my-world" --out "$HOME/my-world/preview.html"</code></pre></div>
+<p>同じモードとシード値を使えば、生成される道路の所要時間、店舗メニュー、自宅の部屋構成はバイト単位まで完全に再現可能です（この処理で LLM は一切呼び出されません）。ワールドサービス起動時に環境変数 <code>CHIYO_WORLD_PACKAGE="$HOME/my-world"</code> を指定するだけで、そのワールドパックをマウントできます。</p>
+
+<h2 id="we-limits">現在の実際の制限事項（未対応の仕様）</h2>
+<p>エディタやジェネレーターの挙動について誤解が生じないよう、現時点でまだ対応が完了していない実装上の境界線をあらかじめ共有します。</p>
+<ul>
+<li><strong>初回起動時の選択なしゼロ設定ワールド生成は現在ブラッシュアップ中</strong>：デスクトップ版の「新しい街を生成」および CLI の <code>--theme procedural</code> ではテーマ選択不要の完全ランダム専用ワールドがすでに利用できますが、初回インストール直後にクライアントを開いた瞬間の質問ゼロ自動生成オンボーディングやコミュニティのワールドパック共有機能は <a href="../roadmap/">今後のロードマップ</a> で開発を進めています。</li>
+<li><strong>壁や床材は現時点では移動を遮りません</strong>：エディタで描いた壁面や床材は <code>scene.json</code> に保存され、ビジュアル表示と再編集時の復元に利用されます。下層のランタイムは現在「建物の入口 ↔ 室内の各エリア（寝室・リビングなど、移動所要 30 秒）」というノードグラフ上で経路探索を行っており、ピクセル単位の壁回避コリジョン判定はまだ実装されていません。</li>
+<li><strong>店舗の営業時間で日をまたぐ表記には未対応</strong>：生成ワールドとエディタのカスタム店舗のどちらでもオープンカウンター注文（<code>sale_spec</code>）は動作しますが、店舗の営業時間に深夜 0 時をまたぐ時間帯（例：<code>22:00–06:00</code>）を指定することはまだできず、書き戻し時に非対応である旨が明示的に通知されます。</li>
+</ul>
+        </article>
+
+        <nav class="page-pager" aria-label="Chapter navigation">
+          <a href="../daily-companions/" class="pager-btn pager-prev"><span class="pager-dir">前へ</span><span class="pager-title">← 共読・原稿・アルバムと生活リズム</span></a>
+          <a href="../cli-reference/" class="pager-btn pager-next"><span class="pager-dir">次へ</span><span class="pager-title">よく使うコマンドと記憶の管理 →</span></a>
+        </nav>
+
+        <div class="doc-community-bar">
+          <span>導入でお困りですか？</span>
+          <div class="doc-community-links">
+            <button type="button" class="doc-copy-qq" data-copy-qq="1126943805" title="クリックして公式 QQ グループ番号をコピー">
+              <span>QQ グループ · 1126943805</span>
+              <span class="doc-qq-status">コピー</span>
+            </button>
+            <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer">Telegram @nyairoai ↗</a>
+            <a href="https://github.com/L1AN929/nyairo/issues" target="_blank" rel="noopener noreferrer">GitHub Issues ↗</a>
+          </div>
+        </div>
+      </div>
+    </main>
+    <aside class="docs-aside" aria-label="このページの内容">
+      <div class="aside-title">このページの内容</div>
+      <ul id="toc-list" class="toc-list"><li class="toc-active-rail" id="toc-active-rail" aria-hidden="true"></li>
+    <li class="toc-item">
+      <a href="#we-packs" class="toc-link active" data-anchor="we-packs">同梱の 7 種のワールドと 12 業種の街角ショップ</a>
+    </li>
+    <li class="toc-item">
+      <a href="#we-editor" class="toc-link" data-anchor="we-editor">ライト／ダーク両対応オフラインマップエディタ：間取り描画と店舗設定</a>
+    </li>
+    <li class="toc-item">
+      <a href="#we-cli" class="toc-link" data-anchor="we-cli">テーマ選択不要の完全ランダム専用ワールドとシード値生成</a>
+    </li>
+    <li class="toc-item">
+      <a href="#we-limits" class="toc-link" data-anchor="we-limits">現在の実際の制限事項（未対応の仕様）</a>
+    </li></ul>
+    </aside>
+  </div>
+
+  <button type="button" id="back-to-top" class="back-to-top" aria-label="Top" title="Top">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script>
+  (function () {
+    var PAL_ORDER = ["deep-sea-sakura","forest-mint","burgundy-rosewood","iris-lilac","glacier-porcelain","berry-peach"];
+    var PAL_META = {"deep-sea-sakura":{"short":"深海","title":"深海 · 淡桜","dayInk":"#122e8a","nightInk":"#f4c2d1","light":"#f5efea","dark":"#0c0b0d","index":"01 / 06"},"forest-mint":{"short":"森林","title":"森林 · ミント","dayInk":"#164638","nightInk":"#a9dec6","light":"#f4f1ea","dark":"#0a0e0d","index":"02 / 06"},"burgundy-rosewood":{"short":"深紅","title":"深紅 · ローズ","dayInk":"#73142c","nightInk":"#e6b3bd","light":"#f7f1ee","dark":"#0d0a0c","index":"03 / 06"},"iris-lilac":{"short":"菖蒲","title":"菖蒲 · 紫","dayInk":"#3e277a","nightInk":"#d5c3f8","light":"#f5f2f8","dark":"#0b0a10","index":"04 / 06"},"glacier-porcelain":{"short":"蒼碧","title":"蒼碧 · 氷青","dayInk":"#164b8a","nightInk":"#b6d8f8","light":"#f2f5f9","dark":"#0a0c10","index":"05 / 06"},"berry-peach":{"short":"苺緋","title":"苺緋 · 桃霧","dayInk":"#8f2d4b","nightInk":"#f8cad6","light":"#faf4f5","dark":"#0e0b0c","index":"06 / 06"}};
+    var COPY_TXT = "コピー";
+    var COPIED_TXT = "コピー済み ✓";
+    var vtSeq = 0, activeVt = null, palSeq = 0, activeAnim = null;
+
+    function rm() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    function getPal() {
+      var c = document.documentElement.getAttribute('data-palette');
+      return c && PAL_META[c] ? c : 'deep-sea-sakura';
+    }
+    function syncMeta() {
+      var m = document.getElementById('meta-theme-color');
+      if (!m) return;
+      var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      m.setAttribute('content', PAL_META[getPal()][t]);
+    }
+    function applyPal(id, save) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === 'deep-sea-sakura') document.documentElement.removeAttribute('data-palette');
+      else document.documentElement.setAttribute('data-palette', next);
+      if (save !== false) { try { localStorage.setItem('nyairo-palette', next); } catch (e) {} }
+      syncMeta();
+      var lbl = document.getElementById('palette-cap-label');
+      if (lbl) lbl.textContent = PAL_META[next].short;
+      var tEl = document.getElementById('palette-stage-title');
+      var hEl = document.getElementById('palette-stage-hex');
+      var cEl = document.getElementById('palette-counter');
+      if (tEl) tEl.textContent = PAL_META[next].title;
+      if (hEl) hEl.textContent = PAL_META[next].dayInk + ' · ' + PAL_META[next].nightInk;
+      if (cEl) cEl.textContent = PAL_META[next].index;
+      document.querySelectorAll('#palette-menu .palette-card').forEach(function (c) {
+        var on = c.getAttribute('data-palette-id') === next;
+        c.classList.toggle('is-active', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+    }
+    function switchPal(id) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === getPal()) return;
+      var seq = ++palSeq;
+      if (activeAnim) { try { activeAnim.cancel(); } catch (e) {} activeAnim = null; }
+      applyPal(next, true);
+      if (rm()) return;
+      var b = document.getElementById('palette-wash-beam');
+      if (!b && document.body) {
+        b = document.createElement('div');
+        b.id = 'palette-wash-beam';
+        b.className = 'palette-wash-beam';
+        b.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(b);
+      }
+      if (b && b.animate) {
+        var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        b.style.setProperty('--beam-primary', t === 'light' ? PAL_META[next].dayInk : PAL_META[next].nightInk);
+        b.style.setProperty('--beam-secondary', t === 'light' ? PAL_META[next].nightInk : PAL_META[next].dayInk);
+        b.style.opacity = '1';
+        activeAnim = b.animate(
+          [{ transform: 'translate3d(64vw,0,0)', opacity: 0 }, { transform: 'translate3d(18vw,0,0)', opacity: 0.94, offset: 0.3 }, { transform: 'translate3d(-68vw,0,0)', opacity: 0 }],
+          { duration: 560, easing: 'cubic-bezier(0.22,1,0.36,1)' }
+        );
+        Promise.resolve(activeAnim.finished).catch(function () {}).finally(function () {
+          if (seq === palSeq) { b.style.opacity = '0'; activeAnim = null; }
+        });
+      }
+    }
+    function applyTheme(theme, save) {
+      var next = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      syncMeta();
+      if (save !== false) { try { localStorage.setItem('nyairo-theme', next); } catch (e) {} }
+      document.querySelectorAll('#palette-menu [data-theme-pick]').forEach(function (b) {
+        var on = b.getAttribute('data-theme-pick') === next;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    function switchTheme(next) {
+      var seq = ++vtSeq;
+      if (activeVt) { try { activeVt.skipTransition(); } catch (e) {} activeVt = null; }
+      if (!document.startViewTransition || rm()) { applyTheme(next, true); return; }
+      document.documentElement.classList.add('vt-switching');
+      var vt = document.startViewTransition(function () { applyTheme(next, true); });
+      activeVt = vt;
+      vt.ready.then(function () {
+        if (seq !== vtSeq) return;
+        document.documentElement.animate({ opacity: [0, 1] }, { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' });
+      }).catch(function () {});
+      Promise.resolve(vt.finished).finally(function () {
+        if (seq !== vtSeq) return;
+        activeVt = null;
+        document.documentElement.classList.remove('vt-switching');
+      });
+    }
+
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
+    applyPal(getPal(), false);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('theme-ready'); }); });
+
+    var tBtn = document.getElementById('theme-toggle');
+    if (tBtn) tBtn.addEventListener('click', function () {
+      switchTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+
+    var pWrap = document.getElementById('palette-dropdown'), pCap = document.getElementById('palette-capsule'), pBtn = document.getElementById('palette-btn'), pMenu = document.getElementById('palette-menu');
+    if (pWrap && pBtn && pMenu) {
+      var closeP = function () {
+        pMenu.classList.remove('is-open');
+        if (pCap) pCap.classList.remove('is-open');
+        pMenu.setAttribute('aria-hidden', 'true');
+        pBtn.setAttribute('aria-expanded', 'false');
+      };
+      pBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !pMenu.classList.contains('is-open');
+        pMenu.classList.toggle('is-open', open);
+        if (pCap) pCap.classList.toggle('is-open', open);
+        pMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        pBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      pMenu.addEventListener('click', function (e) {
+        var c = e.target.closest('[data-palette-id]');
+        if (c) { e.stopPropagation(); switchPal(c.getAttribute('data-palette-id')); return; }
+        var m = e.target.closest('[data-theme-pick]');
+        if (m) {
+          e.stopPropagation();
+          var pk = m.getAttribute('data-theme-pick');
+          var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          if (pk !== cur) switchTheme(pk);
+          return;
+        }
+        var sh = e.target.closest('#palette-shuffle');
+        if (sh) {
+          e.stopPropagation();
+          var cur = getPal();
+          var opts = PAL_ORDER.filter(function (x) { return x !== cur; });
+          switchPal(opts[Math.floor(Math.random() * opts.length)]);
+        }
+      });
+      document.addEventListener('click', function (e) { if (!pWrap.contains(e.target)) closeP(); });
+      window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeP(); });
+    }
+
+    var lWrap = document.getElementById('lang-dropdown'), lBtn = document.getElementById('lang-btn'), lMenu = document.getElementById('lang-menu');
+    if (lWrap && lBtn && lMenu) {
+      lBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = lMenu.hasAttribute('hidden');
+        if (open) lMenu.removeAttribute('hidden'); else lMenu.setAttribute('hidden', '');
+        lBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (e) {
+        if (!lWrap.contains(e.target)) { lMenu.setAttribute('hidden', ''); lBtn.setAttribute('aria-expanded', 'false'); }
+      });
+    }
+
+    var mobBtn = document.getElementById('mobile-toggle'), sb = document.getElementById('docs-sidebar'), bd = document.getElementById('sidebar-backdrop');
+    if (mobBtn && sb) {
+      var closeSb = function () {
+        sb.classList.remove('open');
+        mobBtn.setAttribute('aria-expanded', 'false');
+        if (bd) bd.classList.remove('show');
+      };
+      mobBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !sb.classList.contains('open');
+        sb.classList.toggle('open', open);
+        mobBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (bd) bd.classList.toggle('show', open);
+      });
+      if (bd) bd.addEventListener('click', closeSb);
+    }
+
+    function copyTxt(str) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(str).then(function () { return true; }).catch(function () { return false; });
+      }
+      return Promise.resolve(false);
+    }
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var code = btn.closest('.code-block') && btn.closest('.code-block').querySelector('code');
+        if (!code) return;
+        copyTxt(code.innerText || code.textContent || '').then(function (ok) {
+          if (!ok) return;
+          btn.textContent = COPIED_TXT;
+          btn.classList.add('is-copied');
+          setTimeout(function () { btn.textContent = COPY_TXT; btn.classList.remove('is-copied'); }, 1800);
+        });
+      });
+    });
+    document.querySelectorAll('.doc-copy-qq').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var st = btn.querySelector('.doc-qq-status');
+        copyTxt(btn.getAttribute('data-copy-qq') || '1126943805').then(function () {
+          btn.classList.add('is-copied');
+          if (st) st.textContent = COPIED_TXT;
+          setTimeout(function () { btn.classList.remove('is-copied'); if (st) st.textContent = COPY_TXT; }, 1800);
+        });
+      });
+    });
+
+    var topBtn = document.getElementById('back-to-top');
+    var bar = document.getElementById('scroll-progress-bar');
+    var tocLinks = Array.prototype.slice.call(document.querySelectorAll('#toc-list .toc-link'));
+    var rail = document.getElementById('toc-active-rail');
+    var tocList = document.getElementById('toc-list');
+    function syncToc() {
+      if (!rail || !tocList) return;
+      var act = tocList.querySelector('.toc-link.active');
+      if (!act || !act.offsetHeight) return;
+      tocList.classList.add('has-rail');
+      rail.style.height = Math.max(12, act.offsetHeight - 8) + 'px';
+      rail.style.transform = 'translate3d(0,' + (act.offsetTop + 4) + 'px,0)';
+    }
+    syncToc();
+    window.addEventListener('scroll', function () {
+      var sy = window.scrollY || 0;
+      if (topBtn) topBtn.classList.toggle('is-visible', sy > 520);
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      if (bar) bar.style.transform = max > 120 ? 'scaleX(' + Math.min(1, Math.max(0, sy / max)).toFixed(4) + ')' : 'scaleX(0)';
+      if (tocLinks.length) {
+        var cur = tocLinks[0];
+        tocLinks.forEach(function (l) {
+          var target = document.getElementById(l.getAttribute('data-anchor'));
+          if (target && target.getBoundingClientRect().top <= 118) cur = l;
+        });
+        tocLinks.forEach(function (l) { l.classList.toggle('active', l === cur); });
+        syncToc();
+      }
+    }, { passive: true });
+    if (topBtn) topBtn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: rm() ? 'auto' : 'smooth' }); });
+  })();
+  </script>
+</body>
+</html>

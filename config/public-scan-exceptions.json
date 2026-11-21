@@ -968,6 +968,24 @@
       "reason": "Public upstream fixture/example or generic user tutorial path"
     },
     {
+      "path": "website/docs/linux/index.html",
+      "pattern": "wsl_home",
+      "match_sha256": "e23b0301d62034e1e7f4038e8e06d26a30ddfafade1766f23f26c8027201c43f",
+      "reason": "Static SEO doc page mirroring approved WSL path placeholder in website/docs-data.js (2026-11-21)"
+    },
+    {
+      "path": "website/en/docs/linux/index.html",
+      "pattern": "wsl_home",
+      "match_sha256": "856bd58b55aa1fdc1cfdcf9572ecea51cee0bd6d2907c07a7c6445ddf7adf616",
+      "reason": "Static SEO doc page mirroring approved WSL path placeholder in website/en/docs-data.js (2026-11-21)"
+    },
+    {
+      "path": "website/ja/docs/linux/index.html",
+      "pattern": "wsl_home",
+      "match_sha256": "6c50ce3f6eb5fabb6666edcd84942979fdf576d02e220ee0c88cafffe9520388",
+      "reason": "Static SEO doc page mirroring approved WSL path placeholder in website/ja/docs-data.js (2026-11-21)"
+    },
+    {
       "path": "website/index.html",
       "pattern": "redacted_infra_host",
       "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",

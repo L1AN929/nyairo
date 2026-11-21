@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light" translate="no" class="notranslate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Changelog &amp; Release Notes · nyairo Docs</title>
+  <meta name="description" content="An honest record of what changed, what was fixed, and what boundaries remain unfinished in each release. The latest public prerelease is v0.7.0; earlier ta...">
+  <meta name="author" content="nyairo contributors">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <link rel="canonical" href="https://nyairo.com/en/docs/changelog/">
+  <link rel="alternate" hreflang="zh-CN" href="https://nyairo.com/docs/changelog/">
+  <link rel="alternate" hreflang="en" href="https://nyairo.com/en/docs/changelog/">
+  <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/docs/changelog/">
+  <link rel="alternate" hreflang="x-default" href="https://nyairo.com/docs/changelog/">
+  <meta name="theme-color" id="meta-theme-color" content="#f5efea">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="nyairo">
+  <meta property="og:title" content="Changelog &amp; Release Notes · nyairo Docs">
+  <meta property="og:description" content="An honest record of what changed, what was fixed, and what boundaries remain unfinished in each release. The latest public prerelease is v0.7.0; earlier ta...">
+  <meta property="og:url" content="https://nyairo.com/en/docs/changelog/">
+  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta property="og:locale" content="en_US">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Changelog &amp; Release Notes · nyairo Docs">
+  <meta name="twitter:description" content="An honest record of what changed, what was fixed, and what boundaries remain unfinished in each release. The latest public prerelease is v0.7.0; earlier ta...">
+  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Changelog & Release Notes",
+      "description": "An honest record of what changed, what was fixed, and what boundaries remain unfinished in each release. The latest public prerelease is v0.7.0; earlier ta...",
+      "url": "https://nyairo.com/en/docs/changelog/",
+      "inLanguage": "en",
+      "dateModified": "2026-11-21",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "nyairo",
+        "url": "https://nyairo.com/"
+      },
+      "author": {
+        "@type": "Organization",
+        "name": "nyairo contributors",
+        "url": "https://nyairo.com/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "nyairo",
+          "item": "https://nyairo.com/en/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Docs",
+          "item": "https://nyairo.com/en/docs/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Changelog & Release Notes",
+          "item": "https://nyairo.com/en/docs/changelog/"
+        }
+      ]
+    }
+  ]
+}
+  </script>
+  <script>
+    (function () {
+      var PALETTE_BG = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c' }
+      };
+      try {
+        var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        var savedPal = localStorage.getItem('nyairo-palette');
+        if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+        if (savedPal && PALETTE_BG[savedPal]) document.documentElement.setAttribute('data-palette', savedPal);
+        var t = (saved === 'light' || saved === 'dark') ? saved : 'light';
+        var p = (savedPal && PALETTE_BG[savedPal]) ? savedPal : 'deep-sea-sakura';
+        var m = document.getElementById('meta-theme-color');
+        if (m) m.setAttribute('content', PALETTE_BG[p][t]);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-56">
+  <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
+  <link rel="apple-touch-icon" href="../../../assets/apple-touch-icon.png">
+</head>
+<body>
+  <a href="#static-doc-main" class="skip-link">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="scroll-progress-bar" id="scroll-progress-bar" aria-hidden="true"></div>
+    <div class="header-container">
+      <div class="header-left">
+        <button id="mobile-toggle" class="mobile-toggle" type="button" aria-label="Open navigation and docs outline" aria-controls="docs-sidebar" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <a href="../../" class="site-brand">
+          <span class="brand-logo">
+            <img class="on-dark" src="../../../assets/nyairo-icon-light-66.webp" alt="" width="22" height="21">
+            <img class="on-light" src="../../../assets/nyairo-icon-66.webp" alt="" width="22" height="21">
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">nyairo</span>
+            <span class="brand-tag font-mono">v0.7.0</span>
+          </span>
+        </a>
+
+        <span class="header-divider" aria-hidden="true"></span>
+
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="../../" class="nav-link">← Home</a>
+          <a href="../" class="nav-link active">Docs</a>
+          <a href="../#changelog" class="nav-link">Interactive Search</a>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <div class="lang-dropdown" id="lang-dropdown">
+          <button type="button" class="icon-btn lang-btn" id="lang-btn" aria-expanded="false" aria-haspopup="true" title="Switch language · 中文 / English / 日本語" aria-label="Switch language">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </button>
+          <div class="lang-menu" id="lang-menu" role="menu" hidden>
+            <a href="../../../docs/changelog/" lang="zh-CN" hreflang="zh-CN" role="menuitem"><span>中文</span></a>
+            <a href="../../../en/docs/changelog/" lang="en" hreflang="en" role="menuitem" aria-current="page" class="is-current"><span>English</span><svg class="lang-check-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg></a>
+            <a href="../../../ja/docs/changelog/" lang="ja" hreflang="ja" role="menuitem"><span>日本語</span></a>
+          </div>
+        </div>
+
+        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub Repo" aria-label="GitHub Repo">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+          </svg>
+        </a>
+
+        <div class="palette-dropdown" id="palette-dropdown">
+          <div class="palette-dual-capsule" id="palette-capsule">
+            <button id="palette-btn" class="palette-cap-pal" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="palette-menu" title="Open palette &amp; theme tray" aria-label="Open palette &amp; theme tray">
+              <svg class="palette-cap-star" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path></svg>
+              <span class="palette-cap-label" id="palette-cap-label">Sea</span>
+            </button>
+            <span class="palette-cap-sep" aria-hidden="true"></span>
+            <button id="theme-toggle" class="palette-cap-theme" type="button" title="Toggle Light / Dark theme" aria-label="Toggle Light / Dark theme">
+              <svg id="theme-icon" class="theme-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g class="theme-icon-sun">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </g>
+                <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="palette-menu" id="palette-menu" role="dialog" aria-label="Open palette &amp; theme tray" aria-hidden="true">
+            <div class="palette-deck-head">
+              <div class="palette-deck-live">
+                <svg class="palette-stage-star" id="palette-stage-star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path>
+                </svg>
+                <div class="palette-deck-meta">
+                  <span class="palette-stage-title" id="palette-stage-title">Deep Sea · Sakura</span>
+                  <span class="palette-stage-hex" id="palette-stage-hex">#122e8a · #f4c2d1</span>
+                </div>
+              </div>
+              <button type="button" class="palette-shuffle-btn" id="palette-shuffle" title="Shuffle" aria-label="Shuffle">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="16 3 21 3 21 8"></polyline>
+                  <line x1="4" y1="20" x2="21" y2="3"></line>
+                  <polyline points="21 16 21 21 16 21"></polyline>
+                  <line x1="15" y1="15" x2="21" y2="21"></line>
+                  <line x1="4" y1="4" x2="9" y2="9"></line>
+                </svg>
+                <span>Shuffle</span>
+              </button>
+            </div>
+            <div class="palette-tray-grid" role="radiogroup">
+              <button type="button" class="palette-card is-active" role="radio" aria-checked="true" aria-label="Deep Sea · Sakura" data-palette-id="deep-sea-sakura" style="--dot-a:#122e8a;--dot-b:#f4c2d1;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Sea</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Forest · Mint" data-palette-id="forest-mint" style="--dot-a:#164638;--dot-b:#a9dec6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Mint</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Burgundy · Rose" data-palette-id="burgundy-rosewood" style="--dot-a:#73142c;--dot-b:#e6b3bd;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Rose</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Iris · Lilac" data-palette-id="iris-lilac" style="--dot-a:#3e277a;--dot-b:#d5c3f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Iris</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Glacier · Ice" data-palette-id="glacier-porcelain" style="--dot-a:#164b8a;--dot-b:#b6d8f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Ice</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Berry · Peach" data-palette-id="berry-peach" style="--dot-a:#8f2d4b;--dot-b:#f8cad6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Peach</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="palette-deck-foot">
+              <div class="palette-mode-switch" role="group">
+                <button type="button" class="palette-mode-btn is-active" data-theme-pick="light" aria-pressed="true">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                  </svg>
+                  <span>Light</span>
+                </button>
+                <button type="button" class="palette-mode-btn" data-theme-pick="dark" aria-pressed="false">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                  <span>Dark</span>
+                </button>
+              </div>
+              <span id="palette-counter" class="palette-counter">01 / 06</span>
+            </div>
+          </div>
+        </div>
+
+        <a href="../../#en-downloads" class="header-dl-btn">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <aside id="docs-sidebar" class="docs-sidebar" aria-label="Docs">
+      <div class="sidebar-group">
+        <div class="sidebar-title">Getting Started &amp; Install</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../intro/" class="sidebar-link" data-id="intro">
+            <span>Project Overview &amp; Core Capabilities</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../changelog/" class="sidebar-link active" data-id="changelog">
+            <span>Changelog &amp; Release Notes</span>
+            <span class="sidebar-badge">NEW</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../quickstart/" class="sidebar-link" data-id="quickstart">
+            <span>Getting Started: Your First Run</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../installation/" class="sidebar-link" data-id="installation">
+            <span>Prerequisites &amp; System Requirements</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../windows/" class="sidebar-link" data-id="windows">
+            <span>Installing on Windows</span>
+            <span class="sidebar-badge">Desktop</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../linux/" class="sidebar-link" data-id="linux">
+            <span>Linux &amp; Manual Installation</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../agent-install/" class="sidebar-link" data-id="agent-install">
+            <span>Automated Setup via an AI Coding Assistant</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../configuration/" class="sidebar-link" data-id="configuration">
+            <span>Daily Launch, Persona, and Models</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../weixin/" class="sidebar-link" data-id="weixin">
+            <span>Connect WeChat</span>
+            <span class="sidebar-badge">Recommended</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../telegram/" class="sidebar-link" data-id="telegram">
+            <span>Connect Telegram &amp; QQ</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">Features &amp; Daily Life</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../desktop-guide/" class="sidebar-link" data-id="desktop-guide">
+            <span>Desktop Client User Guide</span>
+            <span class="sidebar-badge">Desktop</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../daily-companions/" class="sidebar-link" data-id="daily-companions">
+            <span>Co-Reading, Drafts, Album &amp; Rhythms</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../world-editor/" class="sidebar-link" data-id="world-editor">
+            <span>World Editor &amp; World Packs</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../cli-reference/" class="sidebar-link" data-id="cli-reference">
+            <span>Common Commands &amp; Memory Management</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../modules/" class="sidebar-link" data-id="modules">
+            <span>Standalone Reasoning &amp; Core Services</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">Maintenance &amp; Roadmap</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../update/" class="sidebar-link" data-id="update">
+            <span>Upgrading &amp; One-Command Rollback</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../data/" class="sidebar-link" data-id="data">
+            <span>Data Directories, Backups &amp; Uninstall</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../troubleshooting/" class="sidebar-link" data-id="troubleshooting">
+            <span>Troubleshooting</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../status-matrix/" class="sidebar-link" data-id="status-matrix">
+            <span>What Works &amp; What's Next</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../roadmap/" class="sidebar-link" data-id="roadmap">
+            <span>Roadmap: What's Next</span>
+            <span class="sidebar-badge">Planned</span>
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">Privacy &amp; Open Source</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../privacy/" class="sidebar-link" data-id="privacy">
+            <span>Privacy &amp; Data Boundaries</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../testing/" class="sidebar-link" data-id="testing">
+            <span>Testing Scope &amp; Release Notes</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../release/" class="sidebar-link" data-id="release">
+            <span>Open-Source License &amp; Site Maintenance</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../contributing/" class="sidebar-link" data-id="contributing">
+            <span>Bug Reports &amp; Contributing</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../acknowledgments/" class="sidebar-link" data-id="acknowledgments">
+            <span>Acknowledgments</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+    </aside>
+    <main class="docs-content" id="static-doc-main">
+      <div class="content-inner">
+        <header class="doc-page-header">
+          <div class="doc-header-top">
+            <div class="breadcrumbs">
+              <a href="../../">Home</a>
+              <span>/</span>
+              <a href="../">Docs</a>
+              <span>/</span>
+              <span class="crumb-cat">Getting Started &amp; Install</span>
+              <span>/</span>
+              <span class="crumb-cur">Changelog &amp; Release Notes</span>
+            </div>
+            <span class="doc-meta-pill">~12 min read · 12 sections</span>
+          </div>
+          <h1 class="page-title">Changelog &amp; Release Notes</h1>
+          <p class="page-summary">An honest record of what changed, what was fixed, and what boundaries remain unfinished in each release. The latest public prerelease is v0.7.0; earlier tags and archives remain available on GitHub Releases.</p>
+        </header>
+
+        <details class="mobile-toc-bar">
+         <summary><span>On this page (12)</span><span>▾</span></summary>
+         <ul class="mobile-toc-list">
+           <li><a href="#changelog-v0-7-0">v0.7.0 · A More Grounded Companion with Boundaries</a></li><li><a href="#changelog-v0-6-0">v0.6.0 · Interaction Receipts, Future Questions &amp; Shared Reading</a></li><li><a href="#changelog-v0-5-1">v0.5.1 · Body Rhythms, Morning/Evening Streets &amp; Desktop App</a></li><li><a href="#changelog-v0-4-0">v0.4.0 · Multi-Leg Travel &amp; Deferred Tasks</a></li><li><a href="#changelog-v0-3-0">v0.3.0 · Travel, Spending &amp; Continuous Loop</a></li><li><a href="#changelog-v0-2-0-rc3">v0.2.0-rc3 · In-Chat Movement &amp; Transit Awareness</a></li><li><a href="#changelog-v0-2-0-rc2">v0.2.0-rc2 · Install &amp; Upgrade Metadata Fixes</a></li><li><a href="#changelog-v0-2-0-rc1">v0.2.0-rc1 · Autonomous Routine &amp; Map Editor</a></li><li><a href="#changelog-v0-1-0-rc9">v0.1.0-rc9 · Agent-Assisted Install &amp; Community</a></li><li><a href="#changelog-v0-1-0-rc6">v0.1.0-rc6 · One-Command Update &amp; Rollback</a></li><li><a href="#changelog-v0-1-0-rc5">v0.1.0-rc5 · Custom Persona &amp; Privacy Hardening</a></li><li><a href="#changelog-v0-1-0-rc4">v0.1.0-rc4 · First Public Preview</a></li>
+         </ul>
+       </details>
+
+        <article class="markdown-body">
+          <div class="callout callout-info"><div class="callout-title">Release Note</div><p>The latest release is <strong>v0.7.0</strong> (a public GitHub prerelease, not yet a final stable release), alongside a native Windows desktop installer (<code>nyairo-0.7.0-setup.exe</code>). Earlier tags and archives—including <code>v0.6.0</code>, <code>v0.5.1</code>, <code>v0.4.0</code>, <code>v0.3.0</code>, and <code>v0.2.0-rc3</code>—remain preserved as-is. We recommend backing up your <code>~/.nyairo</code> directory before upgrading.</p></div>
+
+<h2 id="changelog-v0-7-0">v0.7.0 · Fully Randomized Worlds, Open Shops, Boundaries &amp; Lossless Suitcase (GitHub prerelease)</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Public prerelease · Zero-setup procedural worlds, 12 shop types with free-form ordering, autonomous refusal &amp; async replies, nested bag item states &amp; cross-device migration</p>
+<p>This release closes the full loop across spatial freedom, lifelike conversational pacing, physical item states, and lossless cross-machine migration:</p>
+<ul>
+<li><strong>Zero-Setup Randomized Personal Worlds &amp; Light/Dark Offline Editor</strong>: Alongside 7 built-in worlds and 4 theme styles, adds one-click generation of fully randomized personal worlds (6 terrain mixes, 4 heterogeneous street networks, 8 commercial shop categories, and multi-room residences), paired with an updated offline visual world editor supporting light and dark workspace themes.</li>
+<li><strong>12 Neighborhood Shop Types &amp; Staggered Owner Routines</strong>: Opens 12 neighborhood shop categories and free-form open-counter ordering (for instance, walking to a convenience store to buy hot oden). Used bookstore and coffee shop owners keep independent staggered work schedules and support leaving coaster notes at the counter.</li>
+<li><strong>Non-Servile Autonomous Refusal Boundaries &amp; Real-Schedule Async Replies</strong>: When asked for a favor they would rather not do, they decline plainly without canned customer-service apologies or holding grudges. Supports asynchronous replies spaced hours apart on a real schedule, routing non-urgent messages to a phone reply inbox while sleeping, out, or focused—while still letting you knock on their door for real emergencies.</li>
+<li><strong>3-Level Nested Carry Bags &amp; Thermal/Moisture Item States</strong>: Carry bags and storage boxes support up to 3 nesting levels with strict container-scope isolation. Items carry realistic thermal and moisture states—hot tea beside a desk cools down naturally, and paper notes by a window turn slightly damp with blurred ink in the rain.</li>
+<li><strong>Dual-Layer Memory Lamp &amp; Lossless Moving Suitcase</strong>: The dual-layer memory lamp strictly prevents tampering with raw conversation transcripts. The lossless moving suitcase (<code>.nyairo-suitcase.zip</code>) packs everything—including custom or randomized world slices plus a migration loss manifest (automatically stripping API keys and local paths, with a two-step pre-import safety check).</li>
+<li><strong>Daily Token Cap &amp; Desktop Hardening</strong>: Adds a default daily 50,000-token budget cap with wake-ticket reconciliation to prevent overspending, alongside upgraded Windows desktop onboarding and gateway mutual-exclusion protection.</li>
+</ul>
+<p>Related links: <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0" target="_blank" rel="noopener noreferrer">GitHub Release v0.7.0</a> · <a href="../windows/">Windows Desktop Install</a></p>
+
+<h2 id="changelog-v0-6-0">v0.6.0 · Daily Interaction Receipts, Future Questions &amp; Shared Reading (GitHub prerelease)</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Public prerelease · Everyday interaction and desktop client polish</p>
+<p>This release focuses on refining everyday chat, neighborhood walks, two-person shared reading, and desktop client ergonomics:</p>
+<ul>
+<li><strong>Live Presence &amp; Action Receipts in Chat</strong>: The top of the chat window displays their current room or street, body posture, and active progress in real time. Whenever conversation triggers a real action—like heading out for a walk, writing an essay, or adding a bookmark—a clickable jump pill appears below the message bubble to jump straight to the matching map location or manuscript.</li>
+<li><strong>Future Questions &amp; Recurring Conversation Starters</strong>: Under "Memory → Coexistence &amp; Practice" in the desktop app, you can jot down questions they want to ask you later, answer or cross them off anytime, and distill recurring shared understandings into habitual starters for one-click insertion from "Overview".</li>
+<li><strong>Shared Reading Demo Book &amp; Starter Walkthrough</strong>: The shared bookshelf supports one-click loading for "Nagiura Sea Breeze Notes (Shared Reading Demo)" so you can immediately try page turning, bookmarks, and page-level annotations. Fresh worlds also offer a light four-step starter flow: waking up, drinking water, writing an essay, and browsing the bookstore.</li>
+<li><strong>One-Click Model Connectivity Test</strong>: The desktop "Settings" page adds a direct model endpoint test button that immediately returns response latency or exact error reasons—saving you from blind troubleshooting.</li>
+</ul>
+<p>Related links: <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.6.0" target="_blank" rel="noopener noreferrer">GitHub Release v0.6.0</a> · <a href="../windows/">Windows Desktop Install</a></p>
+
+<h2 id="changelog-v0-5-1">v0.5.1 · Body Rhythms, Morning/Evening Streets &amp; Desktop App (GitHub prerelease)</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Public prerelease · Segmented test suites and release manifest checks passed · Launches alongside the Windows desktop app</p>
+<p>This release bundles recent work around daily routines, neighborhood details, carry-along photos and manuscripts, and the desktop client into a ready-to-install prerelease:</p>
+<ul>
+<li><strong>Native Windows Desktop Client</strong>: Introduces a ~5 MB admin-free installer (<a href="../windows/">installation guide</a>) that lives in the system tray, auto-detects WSL 2 on first launch and guides environment setup, and includes Overview, streaming quote-reply chat, street &amp; interior floorplans, manuscript diffs, and a WeChat QR login panel.</li>
+<li><strong>Rest &amp; Sustenance Rhythms</strong>: Adds time-based rhythms for drowsiness/rest, drinking water, and light meals, with actions advancing over real elapsed time (currently a lightweight rhythm rather than a full hunger/nutrition stat system).</li>
+<li><strong>Morning/Evening Streets &amp; Readable Landmarks</strong>: The same street shifts in appearance between morning and evening, and roadside fixtures and reading corners let you stop and read their contents in detail.</li>
+<li><strong>Photo Album, Journal &amp; Manuscript Continuation</strong>: Rounds out camera snapshots, album browsing, shared reading annotations, and pausing/resuming unfinished manuscripts with historical revision diffs.</li>
+<li><strong>Engineering Cleanup &amp; Sanitization</strong>: Standardizes installer version numbers and explicit memory module configuration, and thoroughly strips internal test addresses from the public source.</li>
+</ul>
+<div class="callout callout-info"><div class="callout-title">v0.5.1 Historical Scope &amp; Boundaries</div><p>Completed targeted segmented test suites, 9 offline sanitization checks, <code>MANIFEST.json</code> and ZIP hash verification, and live desktop integration testing. That round did not re-run the legacy 40,000+ host full regression suite or run a 24-hour continuous live-LLM soak test (note: the randomized worlds and moving suitcase still pending at that point later landed in <code>v0.7.0</code>).</p></div>
+<p>Related links: <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.5.1" target="_blank" rel="noopener noreferrer">GitHub Release v0.5.1</a> · <a href="../windows/">Windows Desktop Install</a></p>
+
+<h2 id="changelog-v0-4-0">v0.4.0 · Multi-Leg Travel &amp; Deferred Tasks (GitHub prerelease)</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Public prerelease · 263 world &amp; body tests passing</p>
+<p>Building on v0.3's single-trip loop, v0.4 solves multi-leg journeys and interleaving multiple tasks on hand:</p>
+<ul>
+<li><strong>Continuous Multi-Leg Journeys</strong>: Trips to distant spots automatically split into sequential segments (e.g., Bedroom → Living Room → Street → Bookstore), saving progress after each leg so stopping midway never causes erratic jumps.</li>
+<li><strong>Suspend Multiple Tasks, Focus on One at a Time</strong>: Unfinished tasks can be parked with their wait conditions while working on something else, then picked back up once conditions are met—only one task ever runs in the foreground.</li>
+<li><strong>Multi-Day Weather &amp; Neighborhood Happenings</strong>: Weather shifts and small neighborhood events span multiple days, evolve in phases, and wrap up naturally instead of looping endlessly.</li>
+<li><strong>Clearer Status Receipts</strong>: Fixed occasional action-ID mix-ups across activities, and clearly separated "action rejected" from "outcome temporarily unknown" instead of collapsing both into one generic error.</li>
+<li><strong>Manuscript Version Diffs</strong>: Added revision history lists and line-by-line addition/deletion views for managed manuscripts, automatically referencing the previous version's summary when resuming.</li>
+</ul>
+
+<h2 id="changelog-v0-3-0">v0.3.0 · Travel, Spending &amp; Continuous Loop (GitHub prerelease)</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Public prerelease · 8 groups / 51 core mechanism checks passing</p>
+<p>Connects heading out, waiting in transit, changing plans midway, shopping in stores, and returning home to resume prior work into a pauseable, resumable continuous loop:</p>
+<ul>
+<li><strong>Real Map-Graph Pathfinding</strong>: Resolves locations and room doorways directly from the active map; ambiguous names or blocked paths are reported honestly instead of relying on hardcoded teleports.</li>
+<li><strong>Pause Mid-Trip Without Re-walking</strong>: Pausing only halts upcoming legs—the leg already underway finishes accurately, and resuming picks up from that exact checkpoint.</li>
+<li><strong>No Duplicate Execution Under Network Jitter</strong>: If an action receipt is lost after submission, the engine reconciles against the ledger first instead of blindly retrying and executing the same action twice.</li>
+<li><strong>Daily Model Call Budgets</strong>: Supports per-day and per-session request caps, guaranteeing zero silent background quota drain while paused.</li>
+<li><strong>In-Shop Spending &amp; Persistent Traces</strong>: Drinks or reading material bought in shops are genuinely consumed and logged in carry records, informing subsequent chats and choices; also supports checking shop opening schedules for upcoming days.</li>
+</ul>
+
+<h2 id="changelog-v0-2-0-rc3">v0.2.0-rc3 · In-Chat Movement &amp; Transit Awareness</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Released: October 14, 2026</p>
+<ul>
+<li><strong>Send Them Out in One Line</strong>: Added the <code>world_move</code> tool so you can tell them directly in the terminal, WeChat, or Telegram to head to the convenience store or park—non-adjacent locations route automatically via streets.</li>
+<li><strong>Realistic Walking Times</strong>: Each leg takes 5 to 13 minutes depending on distance; message them along the way and they can tell you roughly how many minutes remain until arrival.</li>
+<li><strong>Permission Fix &amp; Test Coverage</strong>: Fixed memory safety rules falsely blocking the movement tool, and added 16 targeted tests plus file manifest validation.</li>
+</ul>
+
+<h2 id="changelog-v0-2-0-rc2">v0.2.0-rc2 · Install &amp; Upgrade Metadata Fixes</h2>
+<p>Fixed stale version numbers left in the rc1 archive's upgrade manifest, added an automated packaging verification script to prevent version mismatches, and corrected a command typo in the Telegram binding guide.</p>
+
+<h2 id="changelog-v0-2-0-rc1">v0.2.0-rc1 · Autonomous Routine &amp; Map Editor</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Released: October 13, 2026</p>
+<ul>
+<li><strong>Background Autonomous Rhythm (Off by Default)</strong>: When enabled, even when no one texts them, they wake on schedule to look around, go for a walk, or continue an unfinished essay.</li>
+<li><strong>Verified Outcomes Only</strong>: Prevents the LLM from claiming "I finished writing it" when nothing was saved—actions are only recorded in the ledger after the underlying service confirms success, and uncertain states are marked honestly.</li>
+<li><strong>Built-in Offline Map Editor</strong>: Ships with a visual spatial editor and multiple town templates so you can draw walls, place doors, and arrange furniture right in your browser.</li>
+</ul>
+
+<h2 id="changelog-v0-1-0-rc9">v0.1.0-rc9 · Agent-Assisted Install &amp; Community</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Released: October 10, 2026</p>
+<ul>
+<li><strong>AI Agent Install Spec</strong>: Published <a href="../../../AGENT_INSTALL.zh-CN.md">AGENT_INSTALL.zh-CN.md</a> so you can copy standard instructions to tools like Claude Code or Codex for automated environment checks, instance isolation, and SHA256-verified installation.</li>
+<li><strong>Community Channels</strong>: Opened the official QQ community group (<code>1126943805</code>) and Telegram channel (<code>@nyairoai</code>) for issue feedback and configuration tips.</li>
+<li><strong>Docs Site Polish</strong>: Refined the homepage hero and documentation reading typography.</li>
+</ul>
+
+<h2 id="changelog-v0-1-0-rc6">v0.1.0-rc6 · One-Command Update &amp; Rollback</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Released: October 6, 2026</p>
+<ul>
+<li><strong>Smooth In-Place Upgrades</strong>: Added <code>nyairo update</code>, which replaces only the program directory under <code>~/.local/share/nyairo</code> while leaving chat logs, memories, keys, and <code>SOUL.md</code> in <code>~/.nyairo</code> intact.</li>
+<li><strong>One-Command Rollback &amp; Recovery</strong>: Roll back to the previous version anytime with <code>nyairo update --rollback</code> without losing new chats from the interim, or repair an interrupted download with <code>nyairo update --recover</code>.</li>
+</ul>
+
+<h2 id="changelog-v0-1-0-rc5">v0.1.0-rc5 · Custom Persona &amp; Privacy Hardening</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Released: October 4, 2026</p>
+<ul>
+<li><strong>Decoupled Persona Template</strong>: New instances default to a clean, neutral <code>SOUL.md</code> template so you can freely configure name, form of address, and personality.</li>
+<li><strong>Short-Turn Context Fix &amp; Tool Guardrails</strong>: Fixed occasional missed context in brief exchanges, and restricted arbitrary file-reading tools by default in memory mode so the model cannot bypass "stop recalling" settings by reading old logs.</li>
+</ul>
+
+<h2 id="changelog-v0-1-0-rc4">v0.1.0-rc4 · First Public Preview</h2>
+<p class="doc-date" style="color: var(--muted); font-size: 0.84rem; margin-bottom: 14px;">Released: October 2, 2026</p>
+<p>Built nyairo's foundational skeleton: local SQLite long-term memory, daily state persisted across restarts, and the initial location and posture awareness interface.</p>
+        </article>
+
+        <nav class="page-pager" aria-label="Chapter navigation">
+          <a href="../intro/" class="pager-btn pager-prev"><span class="pager-dir">Previous</span><span class="pager-title">← Project Overview &amp; Core Capabilities</span></a>
+          <a href="../quickstart/" class="pager-btn pager-next"><span class="pager-dir">Next</span><span class="pager-title">Getting Started: Your First Run →</span></a>
+        </nav>
+
+        <div class="doc-community-bar">
+          <span>Hit a setup snag or spot a doc issue?</span>
+          <div class="doc-community-links">
+            <button type="button" class="doc-copy-qq" data-copy-qq="1126943805" title="Click to copy official QQ group number">
+              <span>QQ Group · 1126943805</span>
+              <span class="doc-qq-status">Copy</span>
+            </button>
+            <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer">Telegram @nyairoai ↗</a>
+            <a href="https://github.com/L1AN929/nyairo/issues" target="_blank" rel="noopener noreferrer">GitHub Issues ↗</a>
+          </div>
+        </div>
+      </div>
+    </main>
+    <aside class="docs-aside" aria-label="On this page">
+      <div class="aside-title">On this page</div>
+      <ul id="toc-list" class="toc-list"><li class="toc-active-rail" id="toc-active-rail" aria-hidden="true"></li>
+    <li class="toc-item">
+      <a href="#changelog-v0-7-0" class="toc-link active" data-anchor="changelog-v0-7-0">v0.7.0 · A More Grounded Companion with Boundaries</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-6-0" class="toc-link" data-anchor="changelog-v0-6-0">v0.6.0 · Interaction Receipts, Future Questions &amp; Shared Reading</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-5-1" class="toc-link" data-anchor="changelog-v0-5-1">v0.5.1 · Body Rhythms, Morning/Evening Streets &amp; Desktop App</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-4-0" class="toc-link" data-anchor="changelog-v0-4-0">v0.4.0 · Multi-Leg Travel &amp; Deferred Tasks</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-3-0" class="toc-link" data-anchor="changelog-v0-3-0">v0.3.0 · Travel, Spending &amp; Continuous Loop</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-2-0-rc3" class="toc-link" data-anchor="changelog-v0-2-0-rc3">v0.2.0-rc3 · In-Chat Movement &amp; Transit Awareness</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-2-0-rc2" class="toc-link" data-anchor="changelog-v0-2-0-rc2">v0.2.0-rc2 · Install &amp; Upgrade Metadata Fixes</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-2-0-rc1" class="toc-link" data-anchor="changelog-v0-2-0-rc1">v0.2.0-rc1 · Autonomous Routine &amp; Map Editor</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-1-0-rc9" class="toc-link" data-anchor="changelog-v0-1-0-rc9">v0.1.0-rc9 · Agent-Assisted Install &amp; Community</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-1-0-rc6" class="toc-link" data-anchor="changelog-v0-1-0-rc6">v0.1.0-rc6 · One-Command Update &amp; Rollback</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-1-0-rc5" class="toc-link" data-anchor="changelog-v0-1-0-rc5">v0.1.0-rc5 · Custom Persona &amp; Privacy Hardening</a>
+    </li>
+    <li class="toc-item">
+      <a href="#changelog-v0-1-0-rc4" class="toc-link" data-anchor="changelog-v0-1-0-rc4">v0.1.0-rc4 · First Public Preview</a>
+    </li></ul>
+    </aside>
+  </div>
+
+  <button type="button" id="back-to-top" class="back-to-top" aria-label="Top" title="Top">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script>
+  (function () {
+    var PAL_ORDER = ["deep-sea-sakura","forest-mint","burgundy-rosewood","iris-lilac","glacier-porcelain","berry-peach"];
+    var PAL_META = {"deep-sea-sakura":{"short":"Sea","title":"Deep Sea · Sakura","dayInk":"#122e8a","nightInk":"#f4c2d1","light":"#f5efea","dark":"#0c0b0d","index":"01 / 06"},"forest-mint":{"short":"Mint","title":"Forest · Mint","dayInk":"#164638","nightInk":"#a9dec6","light":"#f4f1ea","dark":"#0a0e0d","index":"02 / 06"},"burgundy-rosewood":{"short":"Rose","title":"Burgundy · Rose","dayInk":"#73142c","nightInk":"#e6b3bd","light":"#f7f1ee","dark":"#0d0a0c","index":"03 / 06"},"iris-lilac":{"short":"Iris","title":"Iris · Lilac","dayInk":"#3e277a","nightInk":"#d5c3f8","light":"#f5f2f8","dark":"#0b0a10","index":"04 / 06"},"glacier-porcelain":{"short":"Ice","title":"Glacier · Ice","dayInk":"#164b8a","nightInk":"#b6d8f8","light":"#f2f5f9","dark":"#0a0c10","index":"05 / 06"},"berry-peach":{"short":"Peach","title":"Berry · Peach","dayInk":"#8f2d4b","nightInk":"#f8cad6","light":"#faf4f5","dark":"#0e0b0c","index":"06 / 06"}};
+    var COPY_TXT = "Copy";
+    var COPIED_TXT = "Copied ✓";
+    var vtSeq = 0, activeVt = null, palSeq = 0, activeAnim = null;
+
+    function rm() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    function getPal() {
+      var c = document.documentElement.getAttribute('data-palette');
+      return c && PAL_META[c] ? c : 'deep-sea-sakura';
+    }
+    function syncMeta() {
+      var m = document.getElementById('meta-theme-color');
+      if (!m) return;
+      var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      m.setAttribute('content', PAL_META[getPal()][t]);
+    }
+    function applyPal(id, save) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === 'deep-sea-sakura') document.documentElement.removeAttribute('data-palette');
+      else document.documentElement.setAttribute('data-palette', next);
+      if (save !== false) { try { localStorage.setItem('nyairo-palette', next); } catch (e) {} }
+      syncMeta();
+      var lbl = document.getElementById('palette-cap-label');
+      if (lbl) lbl.textContent = PAL_META[next].short;
+      var tEl = document.getElementById('palette-stage-title');
+      var hEl = document.getElementById('palette-stage-hex');
+      var cEl = document.getElementById('palette-counter');
+      if (tEl) tEl.textContent = PAL_META[next].title;
+      if (hEl) hEl.textContent = PAL_META[next].dayInk + ' · ' + PAL_META[next].nightInk;
+      if (cEl) cEl.textContent = PAL_META[next].index;
+      document.querySelectorAll('#palette-menu .palette-card').forEach(function (c) {
+        var on = c.getAttribute('data-palette-id') === next;
+        c.classList.toggle('is-active', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+    }
+    function switchPal(id) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === getPal()) return;
+      var seq = ++palSeq;
+      if (activeAnim) { try { activeAnim.cancel(); } catch (e) {} activeAnim = null; }
+      applyPal(next, true);
+      if (rm()) return;
+      var b = document.getElementById('palette-wash-beam');
+      if (!b && document.body) {
+        b = document.createElement('div');
+        b.id = 'palette-wash-beam';
+        b.className = 'palette-wash-beam';
+        b.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(b);
+      }
+      if (b && b.animate) {
+        var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        b.style.setProperty('--beam-primary', t === 'light' ? PAL_META[next].dayInk : PAL_META[next].nightInk);
+        b.style.setProperty('--beam-secondary', t === 'light' ? PAL_META[next].nightInk : PAL_META[next].dayInk);
+        b.style.opacity = '1';
+        activeAnim = b.animate(
+          [{ transform: 'translate3d(64vw,0,0)', opacity: 0 }, { transform: 'translate3d(18vw,0,0)', opacity: 0.94, offset: 0.3 }, { transform: 'translate3d(-68vw,0,0)', opacity: 0 }],
+          { duration: 560, easing: 'cubic-bezier(0.22,1,0.36,1)' }
+        );
+        Promise.resolve(activeAnim.finished).catch(function () {}).finally(function () {
+          if (seq === palSeq) { b.style.opacity = '0'; activeAnim = null; }
+        });
+      }
+    }
+    function applyTheme(theme, save) {
+      var next = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      syncMeta();
+      if (save !== false) { try { localStorage.setItem('nyairo-theme', next); } catch (e) {} }
+      document.querySelectorAll('#palette-menu [data-theme-pick]').forEach(function (b) {
+        var on = b.getAttribute('data-theme-pick') === next;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    function switchTheme(next) {
+      var seq = ++vtSeq;
+      if (activeVt) { try { activeVt.skipTransition(); } catch (e) {} activeVt = null; }
+      if (!document.startViewTransition || rm()) { applyTheme(next, true); return; }
+      document.documentElement.classList.add('vt-switching');
+      var vt = document.startViewTransition(function () { applyTheme(next, true); });
+      activeVt = vt;
+      vt.ready.then(function () {
+        if (seq !== vtSeq) return;
+        document.documentElement.animate({ opacity: [0, 1] }, { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' });
+      }).catch(function () {});
+      Promise.resolve(vt.finished).finally(function () {
+        if (seq !== vtSeq) return;
+        activeVt = null;
+        document.documentElement.classList.remove('vt-switching');
+      });
+    }
+
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
+    applyPal(getPal(), false);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('theme-ready'); }); });
+
+    var tBtn = document.getElementById('theme-toggle');
+    if (tBtn) tBtn.addEventListener('click', function () {
+      switchTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+
+    var pWrap = document.getElementById('palette-dropdown'), pCap = document.getElementById('palette-capsule'), pBtn = document.getElementById('palette-btn'), pMenu = document.getElementById('palette-menu');
+    if (pWrap && pBtn && pMenu) {
+      var closeP = function () {
+        pMenu.classList.remove('is-open');
+        if (pCap) pCap.classList.remove('is-open');
+        pMenu.setAttribute('aria-hidden', 'true');
+        pBtn.setAttribute('aria-expanded', 'false');
+      };
+      pBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !pMenu.classList.contains('is-open');
+        pMenu.classList.toggle('is-open', open);
+        if (pCap) pCap.classList.toggle('is-open', open);
+        pMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        pBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      pMenu.addEventListener('click', function (e) {
+        var c = e.target.closest('[data-palette-id]');
+        if (c) { e.stopPropagation(); switchPal(c.getAttribute('data-palette-id')); return; }
+        var m = e.target.closest('[data-theme-pick]');
+        if (m) {
+          e.stopPropagation();
+          var pk = m.getAttribute('data-theme-pick');
+          var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          if (pk !== cur) switchTheme(pk);
+          return;
+        }
+        var sh = e.target.closest('#palette-shuffle');
+        if (sh) {
+          e.stopPropagation();
+          var cur = getPal();
+          var opts = PAL_ORDER.filter(function (x) { return x !== cur; });
+          switchPal(opts[Math.floor(Math.random() * opts.length)]);
+        }
+      });
+      document.addEventListener('click', function (e) { if (!pWrap.contains(e.target)) closeP(); });
+      window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeP(); });
+    }
+
+    var lWrap = document.getElementById('lang-dropdown'), lBtn = document.getElementById('lang-btn'), lMenu = document.getElementById('lang-menu');
+    if (lWrap && lBtn && lMenu) {
+      lBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = lMenu.hasAttribute('hidden');
+        if (open) lMenu.removeAttribute('hidden'); else lMenu.setAttribute('hidden', '');
+        lBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (e) {
+        if (!lWrap.contains(e.target)) { lMenu.setAttribute('hidden', ''); lBtn.setAttribute('aria-expanded', 'false'); }
+      });
+    }
+
+    var mobBtn = document.getElementById('mobile-toggle'), sb = document.getElementById('docs-sidebar'), bd = document.getElementById('sidebar-backdrop');
+    if (mobBtn && sb) {
+      var closeSb = function () {
+        sb.classList.remove('open');
+        mobBtn.setAttribute('aria-expanded', 'false');
+        if (bd) bd.classList.remove('show');
+      };
+      mobBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !sb.classList.contains('open');
+        sb.classList.toggle('open', open);
+        mobBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (bd) bd.classList.toggle('show', open);
+      });
+      if (bd) bd.addEventListener('click', closeSb);
+    }
+
+    function copyTxt(str) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(str).then(function () { return true; }).catch(function () { return false; });
+      }
+      return Promise.resolve(false);
+    }
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var code = btn.closest('.code-block') && btn.closest('.code-block').querySelector('code');
+        if (!code) return;
+        copyTxt(code.innerText || code.textContent || '').then(function (ok) {
+          if (!ok) return;
+          btn.textContent = COPIED_TXT;
+          btn.classList.add('is-copied');
+          setTimeout(function () { btn.textContent = COPY_TXT; btn.classList.remove('is-copied'); }, 1800);
+        });
+      });
+    });
+    document.querySelectorAll('.doc-copy-qq').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var st = btn.querySelector('.doc-qq-status');
+        copyTxt(btn.getAttribute('data-copy-qq') || '1126943805').then(function () {
+          btn.classList.add('is-copied');
+          if (st) st.textContent = COPIED_TXT;
+          setTimeout(function () { btn.classList.remove('is-copied'); if (st) st.textContent = COPY_TXT; }, 1800);
+        });
+      });
+    });
+
+    var topBtn = document.getElementById('back-to-top');
+    var bar = document.getElementById('scroll-progress-bar');
+    var tocLinks = Array.prototype.slice.call(document.querySelectorAll('#toc-list .toc-link'));
+    var rail = document.getElementById('toc-active-rail');
+    var tocList = document.getElementById('toc-list');
+    function syncToc() {
+      if (!rail || !tocList) return;
+      var act = tocList.querySelector('.toc-link.active');
+      if (!act || !act.offsetHeight) return;
+      tocList.classList.add('has-rail');
+      rail.style.height = Math.max(12, act.offsetHeight - 8) + 'px';
+      rail.style.transform = 'translate3d(0,' + (act.offsetTop + 4) + 'px,0)';
+    }
+    syncToc();
+    window.addEventListener('scroll', function () {
+      var sy = window.scrollY || 0;
+      if (topBtn) topBtn.classList.toggle('is-visible', sy > 520);
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      if (bar) bar.style.transform = max > 120 ? 'scaleX(' + Math.min(1, Math.max(0, sy / max)).toFixed(4) + ')' : 'scaleX(0)';
+      if (tocLinks.length) {
+        var cur = tocLinks[0];
+        tocLinks.forEach(function (l) {
+          var target = document.getElementById(l.getAttribute('data-anchor'));
+          if (target && target.getBoundingClientRect().top <= 118) cur = l;
+        });
+        tocLinks.forEach(function (l) { l.classList.toggle('active', l === cur); });
+        syncToc();
+      }
+    }, { passive: true });
+    if (topBtn) topBtn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: rm() ? 'auto' : 'smooth' }); });
+  })();
+  </script>
+</body>
+</html>
