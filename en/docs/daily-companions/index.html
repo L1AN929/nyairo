@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light" translate="no" class="notranslate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Co-Reading, Drafts, Album &amp; Rhythms · nyairo Docs</title>
+  <meta name="description" content="A detailed guide to co-reading, draft version diffs, the Dual-Layer Memory Lantern and collapsed diaries, nested bags and thermal/humidity matter states, p...">
+  <meta name="author" content="nyairo contributors">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <link rel="canonical" href="https://nyairo.com/en/docs/daily-companions/">
+  <link rel="alternate" hreflang="zh-CN" href="https://nyairo.com/docs/daily-companions/">
+  <link rel="alternate" hreflang="en" href="https://nyairo.com/en/docs/daily-companions/">
+  <link rel="alternate" hreflang="ja" href="https://nyairo.com/ja/docs/daily-companions/">
+  <link rel="alternate" hreflang="x-default" href="https://nyairo.com/docs/daily-companions/">
+  <meta name="theme-color" id="meta-theme-color" content="#f5efea">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="nyairo">
+  <meta property="og:title" content="Co-Reading, Drafts, Album &amp; Rhythms · nyairo Docs">
+  <meta property="og:description" content="A detailed guide to co-reading, draft version diffs, the Dual-Layer Memory Lantern and collapsed diaries, nested bags and thermal/humidity matter states, p...">
+  <meta property="og:url" content="https://nyairo.com/en/docs/daily-companions/">
+  <meta property="og:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <meta property="og:locale" content="en_US">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Co-Reading, Drafts, Album &amp; Rhythms · nyairo Docs">
+  <meta name="twitter:description" content="A detailed guide to co-reading, draft version diffs, the Dual-Layer Memory Lantern and collapsed diaries, nested bags and thermal/humidity matter states, p...">
+  <meta name="twitter:image" content="https://nyairo.com/assets/og-cover.png?v=20261118-v070-34">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Co-Reading, Drafts, Album & Rhythms",
+      "description": "A detailed guide to co-reading, draft version diffs, the Dual-Layer Memory Lantern and collapsed diaries, nested bags and thermal/humidity matter states, p...",
+      "url": "https://nyairo.com/en/docs/daily-companions/",
+      "inLanguage": "en",
+      "dateModified": "2026-11-21",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "nyairo",
+        "url": "https://nyairo.com/"
+      },
+      "author": {
+        "@type": "Organization",
+        "name": "nyairo contributors",
+        "url": "https://nyairo.com/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "nyairo",
+          "item": "https://nyairo.com/en/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Docs",
+          "item": "https://nyairo.com/en/docs/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Co-Reading, Drafts, Album & Rhythms",
+          "item": "https://nyairo.com/en/docs/daily-companions/"
+        }
+      ]
+    }
+  ]
+}
+  </script>
+  <script>
+    (function () {
+      var PALETTE_BG = {
+        'deep-sea-sakura': { light: '#f5efea', dark: '#0c0b0d' },
+        'forest-mint': { light: '#f4f1ea', dark: '#0a0e0d' },
+        'burgundy-rosewood': { light: '#f7f1ee', dark: '#0d0a0c' },
+        'iris-lilac': { light: '#f5f2f8', dark: '#0b0a10' },
+        'glacier-porcelain': { light: '#f2f5f9', dark: '#0a0c10' },
+        'berry-peach': { light: '#faf4f5', dark: '#0e0b0c' }
+      };
+      try {
+        var saved = localStorage.getItem('nyairo-theme') || localStorage.getItem('chiyo-theme');
+        var savedPal = localStorage.getItem('nyairo-palette');
+        if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+        if (savedPal && PALETTE_BG[savedPal]) document.documentElement.setAttribute('data-palette', savedPal);
+        var t = (saved === 'light' || saved === 'dark') ? saved : 'light';
+        var p = (savedPal && PALETTE_BG[savedPal]) ? savedPal : 'deep-sea-sakura';
+        var m = document.getElementById('meta-theme-color');
+        if (m) m.setAttribute('content', PALETTE_BG[p][t]);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-56">
+  <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
+  <link rel="apple-touch-icon" href="../../../assets/apple-touch-icon.png">
+</head>
+<body>
+  <a href="#static-doc-main" class="skip-link">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="scroll-progress-bar" id="scroll-progress-bar" aria-hidden="true"></div>
+    <div class="header-container">
+      <div class="header-left">
+        <button id="mobile-toggle" class="mobile-toggle" type="button" aria-label="Open navigation and docs outline" aria-controls="docs-sidebar" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <a href="../../" class="site-brand">
+          <span class="brand-logo">
+            <img class="on-dark" src="../../../assets/nyairo-icon-light-66.webp" alt="" width="22" height="21">
+            <img class="on-light" src="../../../assets/nyairo-icon-66.webp" alt="" width="22" height="21">
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">nyairo</span>
+            <span class="brand-tag font-mono">v0.7.0</span>
+          </span>
+        </a>
+
+        <span class="header-divider" aria-hidden="true"></span>
+
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="../../" class="nav-link">← Home</a>
+          <a href="../" class="nav-link active">Docs</a>
+          <a href="../#daily-companions" class="nav-link">Interactive Search</a>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <div class="lang-dropdown" id="lang-dropdown">
+          <button type="button" class="icon-btn lang-btn" id="lang-btn" aria-expanded="false" aria-haspopup="true" title="Switch language · 中文 / English / 日本語" aria-label="Switch language">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </button>
+          <div class="lang-menu" id="lang-menu" role="menu" hidden>
+            <a href="../../../docs/daily-companions/" lang="zh-CN" hreflang="zh-CN" role="menuitem"><span>中文</span></a>
+            <a href="../../../en/docs/daily-companions/" lang="en" hreflang="en" role="menuitem" aria-current="page" class="is-current"><span>English</span><svg class="lang-check-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg></a>
+            <a href="../../../ja/docs/daily-companions/" lang="ja" hreflang="ja" role="menuitem"><span>日本語</span></a>
+          </div>
+        </div>
+
+        <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub Repo" aria-label="GitHub Repo">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+          </svg>
+        </a>
+
+        <div class="palette-dropdown" id="palette-dropdown">
+          <div class="palette-dual-capsule" id="palette-capsule">
+            <button id="palette-btn" class="palette-cap-pal" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="palette-menu" title="Open palette &amp; theme tray" aria-label="Open palette &amp; theme tray">
+              <svg class="palette-cap-star" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path></svg>
+              <span class="palette-cap-label" id="palette-cap-label">Sea</span>
+            </button>
+            <span class="palette-cap-sep" aria-hidden="true"></span>
+            <button id="theme-toggle" class="palette-cap-theme" type="button" title="Toggle Light / Dark theme" aria-label="Toggle Light / Dark theme">
+              <svg id="theme-icon" class="theme-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g class="theme-icon-sun">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </g>
+                <path class="theme-icon-moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="palette-menu" id="palette-menu" role="dialog" aria-label="Open palette &amp; theme tray" aria-hidden="true">
+            <div class="palette-deck-head">
+              <div class="palette-deck-live">
+                <svg class="palette-stage-star" id="palette-stage-star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 C12.8 8.2 15.8 11.2 22 12 C15.8 12.8 12.8 15.8 12 22 C11.2 15.8 8.2 12.8 2 12 C8.2 11.2 11.2 8.2 12 2 Z"></path>
+                </svg>
+                <div class="palette-deck-meta">
+                  <span class="palette-stage-title" id="palette-stage-title">Deep Sea · Sakura</span>
+                  <span class="palette-stage-hex" id="palette-stage-hex">#122e8a · #f4c2d1</span>
+                </div>
+              </div>
+              <button type="button" class="palette-shuffle-btn" id="palette-shuffle" title="Shuffle" aria-label="Shuffle">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="16 3 21 3 21 8"></polyline>
+                  <line x1="4" y1="20" x2="21" y2="3"></line>
+                  <polyline points="21 16 21 21 16 21"></polyline>
+                  <line x1="15" y1="15" x2="21" y2="21"></line>
+                  <line x1="4" y1="4" x2="9" y2="9"></line>
+                </svg>
+                <span>Shuffle</span>
+              </button>
+            </div>
+            <div class="palette-tray-grid" role="radiogroup">
+              <button type="button" class="palette-card is-active" role="radio" aria-checked="true" aria-label="Deep Sea · Sakura" data-palette-id="deep-sea-sakura" style="--dot-a:#122e8a;--dot-b:#f4c2d1;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Sea</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Forest · Mint" data-palette-id="forest-mint" style="--dot-a:#164638;--dot-b:#a9dec6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Mint</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Burgundy · Rose" data-palette-id="burgundy-rosewood" style="--dot-a:#73142c;--dot-b:#e6b3bd;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Rose</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Iris · Lilac" data-palette-id="iris-lilac" style="--dot-a:#3e277a;--dot-b:#d5c3f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Iris</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Glacier · Ice" data-palette-id="glacier-porcelain" style="--dot-a:#164b8a;--dot-b:#b6d8f8;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Ice</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="palette-card" role="radio" aria-checked="false" aria-label="Berry · Peach" data-palette-id="berry-peach" style="--dot-a:#8f2d4b;--dot-b:#f8cad6;">
+                <span class="pc-lead">
+                  <span class="pc-pair" aria-hidden="true"><span class="pc-dot-sub"></span><span class="pc-dot-main"></span></span>
+                  <span class="pc-name">Peach</span>
+                </span>
+                <span class="pc-dot-on" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="palette-deck-foot">
+              <div class="palette-mode-switch" role="group">
+                <button type="button" class="palette-mode-btn is-active" data-theme-pick="light" aria-pressed="true">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                  </svg>
+                  <span>Light</span>
+                </button>
+                <button type="button" class="palette-mode-btn" data-theme-pick="dark" aria-pressed="false">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                  <span>Dark</span>
+                </button>
+              </div>
+              <span id="palette-counter" class="palette-counter">01 / 06</span>
+            </div>
+          </div>
+        </div>
+
+        <a href="../../#en-downloads" class="header-dl-btn">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    <aside id="docs-sidebar" class="docs-sidebar" aria-label="Docs">
+      <div class="sidebar-group">
+        <div class="sidebar-title">Getting Started &amp; Install</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../intro/" class="sidebar-link" data-id="intro">
+            <span>Project Overview &amp; Core Capabilities</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../changelog/" class="sidebar-link" data-id="changelog">
+            <span>Changelog &amp; Release Notes</span>
+            <span class="sidebar-badge">NEW</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../quickstart/" class="sidebar-link" data-id="quickstart">
+            <span>Getting Started: Your First Run</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../installation/" class="sidebar-link" data-id="installation">
+            <span>Prerequisites &amp; System Requirements</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../windows/" class="sidebar-link" data-id="windows">
+            <span>Installing on Windows</span>
+            <span class="sidebar-badge">Desktop</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../linux/" class="sidebar-link" data-id="linux">
+            <span>Linux &amp; Manual Installation</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../agent-install/" class="sidebar-link" data-id="agent-install">
+            <span>Automated Setup via an AI Coding Assistant</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../configuration/" class="sidebar-link" data-id="configuration">
+            <span>Daily Launch, Persona, and Models</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../weixin/" class="sidebar-link" data-id="weixin">
+            <span>Connect WeChat</span>
+            <span class="sidebar-badge">Recommended</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../telegram/" class="sidebar-link" data-id="telegram">
+            <span>Connect Telegram &amp; QQ</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">Features &amp; Daily Life</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../desktop-guide/" class="sidebar-link" data-id="desktop-guide">
+            <span>Desktop Client User Guide</span>
+            <span class="sidebar-badge">Desktop</span>
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../daily-companions/" class="sidebar-link active" data-id="daily-companions">
+            <span>Co-Reading, Drafts, Album &amp; Rhythms</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../world-editor/" class="sidebar-link" data-id="world-editor">
+            <span>World Editor &amp; World Packs</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../cli-reference/" class="sidebar-link" data-id="cli-reference">
+            <span>Common Commands &amp; Memory Management</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../modules/" class="sidebar-link" data-id="modules">
+            <span>Standalone Reasoning &amp; Core Services</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">Maintenance &amp; Roadmap</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../update/" class="sidebar-link" data-id="update">
+            <span>Upgrading &amp; One-Command Rollback</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../data/" class="sidebar-link" data-id="data">
+            <span>Data Directories, Backups &amp; Uninstall</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../troubleshooting/" class="sidebar-link" data-id="troubleshooting">
+            <span>Troubleshooting</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../status-matrix/" class="sidebar-link" data-id="status-matrix">
+            <span>What Works &amp; What's Next</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../roadmap/" class="sidebar-link" data-id="roadmap">
+            <span>Roadmap: What's Next</span>
+            <span class="sidebar-badge">Planned</span>
+          </a>
+        </li>
+        </ul>
+      </div>
+      <div class="sidebar-group">
+        <div class="sidebar-title">Privacy &amp; Open Source</div>
+        <ul class="sidebar-list">
+        <li class="sidebar-item">
+          <a href="../privacy/" class="sidebar-link" data-id="privacy">
+            <span>Privacy &amp; Data Boundaries</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../testing/" class="sidebar-link" data-id="testing">
+            <span>Testing Scope &amp; Release Notes</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../release/" class="sidebar-link" data-id="release">
+            <span>Open-Source License &amp; Site Maintenance</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../contributing/" class="sidebar-link" data-id="contributing">
+            <span>Bug Reports &amp; Contributing</span>
+            
+          </a>
+        </li>
+        <li class="sidebar-item">
+          <a href="../acknowledgments/" class="sidebar-link" data-id="acknowledgments">
+            <span>Acknowledgments</span>
+            
+          </a>
+        </li>
+        </ul>
+      </div>
+    </aside>
+    <main class="docs-content" id="static-doc-main">
+      <div class="content-inner">
+        <header class="doc-page-header">
+          <div class="doc-header-top">
+            <div class="breadcrumbs">
+              <a href="../../">Home</a>
+              <span>/</span>
+              <a href="../">Docs</a>
+              <span>/</span>
+              <span class="crumb-cat">Features &amp; Daily Life</span>
+              <span>/</span>
+              <span class="crumb-cur">Co-Reading, Drafts, Album &amp; Rhythms</span>
+            </div>
+            <span class="doc-meta-pill">~6 min read · 4 sections</span>
+          </div>
+          <h1 class="page-title">Co-Reading, Drafts, Album &amp; Rhythms</h1>
+          <p class="page-summary">A detailed guide to co-reading, draft version diffs, the Dual-Layer Memory Lantern and collapsed diaries, nested bags and thermal/humidity matter states, plus autonomous refusals, async replies, and spending caps.</p>
+        </header>
+
+        <details class="mobile-toc-bar">
+         <summary><span>On this page (4)</span><span>▾</span></summary>
+         <ul class="mobile-toc-list">
+           <li><a href="#dc-notes">Essays &amp; Managed Drafts: Version Diffs and External Edits</a></li><li><a href="#dc-reading-diary">Co-Reading, Dual-Layer Memory Lantern, and Diary Boundaries</a></li><li><a href="#dc-camera">Album &amp; Real Prerequisites for Local Camera Generation</a></li><li><a href="#dc-autonomy-budget">Autonomous Refusals, Async Replies, Bag Matter States &amp; Spending Caps</a></li>
+         </ul>
+       </details>
+
+        <article class="markdown-body">
+          <h2 id="dc-notes">Essays &amp; Managed Drafts: Version Diffs and External Edits</h2>
+<p>Beyond everyday conversation, your companion can maintain long-form essays, reading notes, or topic drafts you work on together (under <strong>Memory → Essays &amp; Writings</strong> on desktop, or via <code>/chiyo_note</code> on the command line):</p>
+<ul>
+<li><strong>Version Snapshots &amp; Line Diffs</strong>: Every revision is saved as a separate snapshot so you can select any two versions in the desktop app to inspect a line-by-line diff of additions and deletions. If your companion pauses halfway through a long piece to tend to something else, the work-in-progress stays suspended and resumes cleanly from the previous summary rather than starting over.</li>
+<li><strong>What Happens If You Edit the File Externally</strong>: The <code>.md</code> file in your workspace is a local projection of the managed draft. If you edit that file directly in VS Code or Notepad, the system will neither silently overwrite your companion's original draft nor pretend they wrote your edits—instead, it flags the changes as an "External Edit Candidate", creates a new version only after you explicitly confirm the import, and accurately records the source as externally imported.</li>
+</ul>
+
+<h2 id="dc-reading-diary">Co-Reading, Dual-Layer Memory Lantern, and Diary Boundaries</h2>
+<ul>
+<li><strong>Placing Books or Articles on the Co-Reading Shelf</strong>: You can import local text files (such as <code>.txt</code> files or Markdown chapters) under <strong>Memory → Album &amp; Co-Reading</strong> on desktop. The design principle here is <strong>"hand it to them, don't force-feed it"</strong>—putting a file on the shelf simply means the book is on the desk to read. Your companion browses it at their own natural pace during free moments, bookmarking where they left off and jotting down marginalia rather than spitting out a robotic summary one second after upload.</li>
+<li><strong>Dual-Layer Memory Lantern Keeps Original Transcripts Unaltered</strong>: Verbatim conversation logs and corrected memories are stored in separate tiers under the Dual-Layer Memory Lantern—when you fix a misremembered detail with <code>/chiyo_memory correct</code>, only the upper active knowledge layer updates, while the underlying raw transcript remains strictly untouched without fabricating words never spoken.</li>
+<li><strong>Their Diary (Body Collapsed by Default)</strong>: When autonomous routines are enabled, your companion occasionally writes diary entries on their own. To preserve a bit of breathing room, the daily status panel and overview endpoints list only the entry titles, dates, and word counts by default instead of sprawling full diary entries across the home screen. (Of course, because all data lives on your own machine, diary files are still stored in plain text inside your local directory—there is no encryption lock hiding anything from the computer's owner.)</li>
+</ul>
+
+<h2 id="dc-camera">Album &amp; Real Prerequisites for Local Camera Generation</h2>
+<p>Many first-time users opening the Album wonder whether their companion can actually snap a photo and send it over. Here is an honest breakdown of what works out of the box and what hard prerequisites apply:</p>
+<ul>
+<li><strong>Album Browsing Works Out of the Box</strong>: Activity cards captured during neighborhood outings and existing album images can be browsed directly in the desktop client.</li>
+<li><strong>Local Camera Image Generation (<code>local_generated</code>) Requires Your Own Local Image Services</strong>: If you want your companion to actually press the shutter and generate a snapshot reflecting their current street scene and weather, note that <strong>nyairo neither bundles multi-gigabyte diffusion models nor calls paid cloud image APIs</strong>. You must run two loopback services locally on your machine:
+  <ol>
+    <li>A local Stable Diffusion WebUI API (listening on <code>127.0.0.1:7860</code> by default);</li>
+    <li>A local prompt-translation helper service (listening on <code>127.0.0.1:18190</code> by default).</li>
+  </ol>
+  Whenever either local service is offline, the camera cleanly reports "currently unavailable"—it will never pass off pre-canned stock images as freshly taken photos, nor will it crash with an unhandled error.</li>
+</ul>
+
+<h2 id="dc-autonomy-budget">Autonomous Refusals, Async Replies, Bag Matter States &amp; Spending Caps</h2>
+<ul>
+<li><strong>Autonomous Everyday Refusals &amp; Async Replies</strong>: Your companion is not an always-obliging helpdesk bot—they decline requests they do not want to take on plainly, without boilerplate apologies or lingering resentment. When they are asleep, out shopping, or focused on a task, non-urgent messages wait in their <strong>Phone Reply Tray</strong> for schedule-aware async replies a few hours later, while genuine emergencies let you explicitly <strong>knock to reach them</strong>.</li>
+<li><strong>3-Layer Nested Bags &amp; Thermal/Humidity Matter States</strong>: Snacks picked up on errands or small everyday trinkets can be tucked into totes, pencil cases, and drawers (supporting up to <strong>3 layers of nested storage</strong> with strict closed-container visibility isolation). Items carry realistic thermal and moisture states—hot tea brewed on a desk cools gradually over time, hot oden from the convenience store loses warmth, and paper notes left near an open window turn slightly damp and smudge in the rain.</li>
+<li><strong>No Silent Background Traffic: Live Model Actions Require Explicit Opt-In</strong>: By default, when you are not actively talking to your companion, the background daemon sends zero requests to any LLM (0 extra token cost). Only when you enable autonomous routines in the desktop app, or explicitly pass <code>--live-model</code> when running <code>scripts/nyairo_day.py run-day</code> on the CLI, will your companion independently decide to head out or write during idle time.</li>
+<li><strong>Dual Budget Brakes</strong>: When enabling background routines, you can simultaneously enforce a <strong>maximum runtime in seconds</strong> (<code>--duration-seconds</code>) and a <strong>maximum new request count</strong> (<code>--max-new-requests</code>), backed by the instance's persistent daily token quota ledger. Once a limit is reached, execution halts immediately—even failed requests will never spin in an infinite retry loop and run up your bill.</li>
+<li><strong>Optional Lightweight Bodily Rhythms</strong>: When a new instance explicitly enables lived bodily needs (<code>--lived-needs</code>), active daytime hours gradually build mild sleepiness, thirst, or appetite across four natural levels ("None / Mild / Noticeable / Strong" rather than MMO health bars). <strong>Offline or powered-off intervals are never retroactively penalized, and there are no illness or death penalties</strong>—it simply adds grounded everyday warmth to their daily rhythm.</li>
+</ul>
+        </article>
+
+        <nav class="page-pager" aria-label="Chapter navigation">
+          <a href="../desktop-guide/" class="pager-btn pager-prev"><span class="pager-dir">Previous</span><span class="pager-title">← Desktop Client User Guide</span></a>
+          <a href="../world-editor/" class="pager-btn pager-next"><span class="pager-dir">Next</span><span class="pager-title">World Editor &amp; World Packs →</span></a>
+        </nav>
+
+        <div class="doc-community-bar">
+          <span>Hit a setup snag or spot a doc issue?</span>
+          <div class="doc-community-links">
+            <button type="button" class="doc-copy-qq" data-copy-qq="1126943805" title="Click to copy official QQ group number">
+              <span>QQ Group · 1126943805</span>
+              <span class="doc-qq-status">Copy</span>
+            </button>
+            <a href="https://t.me/nyairoai" target="_blank" rel="noopener noreferrer">Telegram @nyairoai ↗</a>
+            <a href="https://github.com/L1AN929/nyairo/issues" target="_blank" rel="noopener noreferrer">GitHub Issues ↗</a>
+          </div>
+        </div>
+      </div>
+    </main>
+    <aside class="docs-aside" aria-label="On this page">
+      <div class="aside-title">On this page</div>
+      <ul id="toc-list" class="toc-list"><li class="toc-active-rail" id="toc-active-rail" aria-hidden="true"></li>
+    <li class="toc-item">
+      <a href="#dc-notes" class="toc-link active" data-anchor="dc-notes">Essays &amp; Managed Drafts: Version Diffs and External Edits</a>
+    </li>
+    <li class="toc-item">
+      <a href="#dc-reading-diary" class="toc-link" data-anchor="dc-reading-diary">Co-Reading, Dual-Layer Memory Lantern, and Diary Boundaries</a>
+    </li>
+    <li class="toc-item">
+      <a href="#dc-camera" class="toc-link" data-anchor="dc-camera">Album &amp; Real Prerequisites for Local Camera Generation</a>
+    </li>
+    <li class="toc-item">
+      <a href="#dc-autonomy-budget" class="toc-link" data-anchor="dc-autonomy-budget">Autonomous Refusals, Async Replies, Bag Matter States &amp; Spending Caps</a>
+    </li></ul>
+    </aside>
+  </div>
+
+  <button type="button" id="back-to-top" class="back-to-top" aria-label="Top" title="Top">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script>
+  (function () {
+    var PAL_ORDER = ["deep-sea-sakura","forest-mint","burgundy-rosewood","iris-lilac","glacier-porcelain","berry-peach"];
+    var PAL_META = {"deep-sea-sakura":{"short":"Sea","title":"Deep Sea · Sakura","dayInk":"#122e8a","nightInk":"#f4c2d1","light":"#f5efea","dark":"#0c0b0d","index":"01 / 06"},"forest-mint":{"short":"Mint","title":"Forest · Mint","dayInk":"#164638","nightInk":"#a9dec6","light":"#f4f1ea","dark":"#0a0e0d","index":"02 / 06"},"burgundy-rosewood":{"short":"Rose","title":"Burgundy · Rose","dayInk":"#73142c","nightInk":"#e6b3bd","light":"#f7f1ee","dark":"#0d0a0c","index":"03 / 06"},"iris-lilac":{"short":"Iris","title":"Iris · Lilac","dayInk":"#3e277a","nightInk":"#d5c3f8","light":"#f5f2f8","dark":"#0b0a10","index":"04 / 06"},"glacier-porcelain":{"short":"Ice","title":"Glacier · Ice","dayInk":"#164b8a","nightInk":"#b6d8f8","light":"#f2f5f9","dark":"#0a0c10","index":"05 / 06"},"berry-peach":{"short":"Peach","title":"Berry · Peach","dayInk":"#8f2d4b","nightInk":"#f8cad6","light":"#faf4f5","dark":"#0e0b0c","index":"06 / 06"}};
+    var COPY_TXT = "Copy";
+    var COPIED_TXT = "Copied ✓";
+    var vtSeq = 0, activeVt = null, palSeq = 0, activeAnim = null;
+
+    function rm() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    function getPal() {
+      var c = document.documentElement.getAttribute('data-palette');
+      return c && PAL_META[c] ? c : 'deep-sea-sakura';
+    }
+    function syncMeta() {
+      var m = document.getElementById('meta-theme-color');
+      if (!m) return;
+      var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      m.setAttribute('content', PAL_META[getPal()][t]);
+    }
+    function applyPal(id, save) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === 'deep-sea-sakura') document.documentElement.removeAttribute('data-palette');
+      else document.documentElement.setAttribute('data-palette', next);
+      if (save !== false) { try { localStorage.setItem('nyairo-palette', next); } catch (e) {} }
+      syncMeta();
+      var lbl = document.getElementById('palette-cap-label');
+      if (lbl) lbl.textContent = PAL_META[next].short;
+      var tEl = document.getElementById('palette-stage-title');
+      var hEl = document.getElementById('palette-stage-hex');
+      var cEl = document.getElementById('palette-counter');
+      if (tEl) tEl.textContent = PAL_META[next].title;
+      if (hEl) hEl.textContent = PAL_META[next].dayInk + ' · ' + PAL_META[next].nightInk;
+      if (cEl) cEl.textContent = PAL_META[next].index;
+      document.querySelectorAll('#palette-menu .palette-card').forEach(function (c) {
+        var on = c.getAttribute('data-palette-id') === next;
+        c.classList.toggle('is-active', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+    }
+    function switchPal(id) {
+      var next = id && PAL_META[id] ? id : 'deep-sea-sakura';
+      if (next === getPal()) return;
+      var seq = ++palSeq;
+      if (activeAnim) { try { activeAnim.cancel(); } catch (e) {} activeAnim = null; }
+      applyPal(next, true);
+      if (rm()) return;
+      var b = document.getElementById('palette-wash-beam');
+      if (!b && document.body) {
+        b = document.createElement('div');
+        b.id = 'palette-wash-beam';
+        b.className = 'palette-wash-beam';
+        b.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(b);
+      }
+      if (b && b.animate) {
+        var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        b.style.setProperty('--beam-primary', t === 'light' ? PAL_META[next].dayInk : PAL_META[next].nightInk);
+        b.style.setProperty('--beam-secondary', t === 'light' ? PAL_META[next].nightInk : PAL_META[next].dayInk);
+        b.style.opacity = '1';
+        activeAnim = b.animate(
+          [{ transform: 'translate3d(64vw,0,0)', opacity: 0 }, { transform: 'translate3d(18vw,0,0)', opacity: 0.94, offset: 0.3 }, { transform: 'translate3d(-68vw,0,0)', opacity: 0 }],
+          { duration: 560, easing: 'cubic-bezier(0.22,1,0.36,1)' }
+        );
+        Promise.resolve(activeAnim.finished).catch(function () {}).finally(function () {
+          if (seq === palSeq) { b.style.opacity = '0'; activeAnim = null; }
+        });
+      }
+    }
+    function applyTheme(theme, save) {
+      var next = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      syncMeta();
+      if (save !== false) { try { localStorage.setItem('nyairo-theme', next); } catch (e) {} }
+      document.querySelectorAll('#palette-menu [data-theme-pick]').forEach(function (b) {
+        var on = b.getAttribute('data-theme-pick') === next;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    function switchTheme(next) {
+      var seq = ++vtSeq;
+      if (activeVt) { try { activeVt.skipTransition(); } catch (e) {} activeVt = null; }
+      if (!document.startViewTransition || rm()) { applyTheme(next, true); return; }
+      document.documentElement.classList.add('vt-switching');
+      var vt = document.startViewTransition(function () { applyTheme(next, true); });
+      activeVt = vt;
+      vt.ready.then(function () {
+        if (seq !== vtSeq) return;
+        document.documentElement.animate({ opacity: [0, 1] }, { duration: 190, easing: 'ease-out', fill: 'both', pseudoElement: '::view-transition-new(root)' });
+      }).catch(function () {});
+      Promise.resolve(vt.finished).finally(function () {
+        if (seq !== vtSeq) return;
+        activeVt = null;
+        document.documentElement.classList.remove('vt-switching');
+      });
+    }
+
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
+    applyPal(getPal(), false);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('theme-ready'); }); });
+
+    var tBtn = document.getElementById('theme-toggle');
+    if (tBtn) tBtn.addEventListener('click', function () {
+      switchTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+
+    var pWrap = document.getElementById('palette-dropdown'), pCap = document.getElementById('palette-capsule'), pBtn = document.getElementById('palette-btn'), pMenu = document.getElementById('palette-menu');
+    if (pWrap && pBtn && pMenu) {
+      var closeP = function () {
+        pMenu.classList.remove('is-open');
+        if (pCap) pCap.classList.remove('is-open');
+        pMenu.setAttribute('aria-hidden', 'true');
+        pBtn.setAttribute('aria-expanded', 'false');
+      };
+      pBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !pMenu.classList.contains('is-open');
+        pMenu.classList.toggle('is-open', open);
+        if (pCap) pCap.classList.toggle('is-open', open);
+        pMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        pBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      pMenu.addEventListener('click', function (e) {
+        var c = e.target.closest('[data-palette-id]');
+        if (c) { e.stopPropagation(); switchPal(c.getAttribute('data-palette-id')); return; }
+        var m = e.target.closest('[data-theme-pick]');
+        if (m) {
+          e.stopPropagation();
+          var pk = m.getAttribute('data-theme-pick');
+          var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          if (pk !== cur) switchTheme(pk);
+          return;
+        }
+        var sh = e.target.closest('#palette-shuffle');
+        if (sh) {
+          e.stopPropagation();
+          var cur = getPal();
+          var opts = PAL_ORDER.filter(function (x) { return x !== cur; });
+          switchPal(opts[Math.floor(Math.random() * opts.length)]);
+        }
+      });
+      document.addEventListener('click', function (e) { if (!pWrap.contains(e.target)) closeP(); });
+      window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeP(); });
+    }
+
+    var lWrap = document.getElementById('lang-dropdown'), lBtn = document.getElementById('lang-btn'), lMenu = document.getElementById('lang-menu');
+    if (lWrap && lBtn && lMenu) {
+      lBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = lMenu.hasAttribute('hidden');
+        if (open) lMenu.removeAttribute('hidden'); else lMenu.setAttribute('hidden', '');
+        lBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (e) {
+        if (!lWrap.contains(e.target)) { lMenu.setAttribute('hidden', ''); lBtn.setAttribute('aria-expanded', 'false'); }
+      });
+    }
+
+    var mobBtn = document.getElementById('mobile-toggle'), sb = document.getElementById('docs-sidebar'), bd = document.getElementById('sidebar-backdrop');
+    if (mobBtn && sb) {
+      var closeSb = function () {
+        sb.classList.remove('open');
+        mobBtn.setAttribute('aria-expanded', 'false');
+        if (bd) bd.classList.remove('show');
+      };
+      mobBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = !sb.classList.contains('open');
+        sb.classList.toggle('open', open);
+        mobBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (bd) bd.classList.toggle('show', open);
+      });
+      if (bd) bd.addEventListener('click', closeSb);
+    }
+
+    function copyTxt(str) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(str).then(function () { return true; }).catch(function () { return false; });
+      }
+      return Promise.resolve(false);
+    }
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var code = btn.closest('.code-block') && btn.closest('.code-block').querySelector('code');
+        if (!code) return;
+        copyTxt(code.innerText || code.textContent || '').then(function (ok) {
+          if (!ok) return;
+          btn.textContent = COPIED_TXT;
+          btn.classList.add('is-copied');
+          setTimeout(function () { btn.textContent = COPY_TXT; btn.classList.remove('is-copied'); }, 1800);
+        });
+      });
+    });
+    document.querySelectorAll('.doc-copy-qq').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var st = btn.querySelector('.doc-qq-status');
+        copyTxt(btn.getAttribute('data-copy-qq') || '1126943805').then(function () {
+          btn.classList.add('is-copied');
+          if (st) st.textContent = COPIED_TXT;
+          setTimeout(function () { btn.classList.remove('is-copied'); if (st) st.textContent = COPY_TXT; }, 1800);
+        });
+      });
+    });
+
+    var topBtn = document.getElementById('back-to-top');
+    var bar = document.getElementById('scroll-progress-bar');
+    var tocLinks = Array.prototype.slice.call(document.querySelectorAll('#toc-list .toc-link'));
+    var rail = document.getElementById('toc-active-rail');
+    var tocList = document.getElementById('toc-list');
+    function syncToc() {
+      if (!rail || !tocList) return;
+      var act = tocList.querySelector('.toc-link.active');
+      if (!act || !act.offsetHeight) return;
+      tocList.classList.add('has-rail');
+      rail.style.height = Math.max(12, act.offsetHeight - 8) + 'px';
+      rail.style.transform = 'translate3d(0,' + (act.offsetTop + 4) + 'px,0)';
+    }
+    syncToc();
+    window.addEventListener('scroll', function () {
+      var sy = window.scrollY || 0;
+      if (topBtn) topBtn.classList.toggle('is-visible', sy > 520);
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      if (bar) bar.style.transform = max > 120 ? 'scaleX(' + Math.min(1, Math.max(0, sy / max)).toFixed(4) + ')' : 'scaleX(0)';
+      if (tocLinks.length) {
+        var cur = tocLinks[0];
+        tocLinks.forEach(function (l) {
+          var target = document.getElementById(l.getAttribute('data-anchor'));
+          if (target && target.getBoundingClientRect().top <= 118) cur = l;
+        });
+        tocLinks.forEach(function (l) { l.classList.toggle('active', l === cur); });
+        syncToc();
+      }
+    }, { passive: true });
+    if (topBtn) topBtn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: rm() ? 'auto' : 'smooth' }); });
+  })();
+  </script>
+</body>
+</html>

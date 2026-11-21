@@ -2494,6 +2494,34 @@ function initHomeSectionLinks() {
    ========================================================================== */
 let ANCHOR_TO_DOC_MAP = null;
 let activeTocCleanup = null;
+let docsLoadPromise = null;
+let docRouteSeq = 0;
+
+function ensureDocsLoaded() {
+  if (typeof DOCS_CONTENT !== 'undefined' && typeof DOCS_TREE !== 'undefined') {
+    return Promise.resolve(true);
+  }
+  if (docsLoadPromise) return docsLoadPromise;
+  const appScript = document.querySelector('script[data-docs-src]');
+  const src = (appScript && appScript.getAttribute('data-docs-src')) || 'docs-data.js?v=20261121-v070-56';
+  docsLoadPromise = new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = false;
+    s.onload = () => {
+      ANCHOR_TO_DOC_MAP = null;
+      SEARCH_INDEX = null;
+      renderSidebar();
+      resolve(true);
+    };
+    s.onerror = () => {
+      docsLoadPromise = null;
+      resolve(false);
+    };
+    document.head.appendChild(s);
+  });
+  return docsLoadPromise;
+}
 
 function renderSidebar() {
   const sidebarEl = document.getElementById('docs-sidebar');
@@ -2619,6 +2647,12 @@ function resolveDocAndAnchor(hash) {
 function initRouting() {
   window.addEventListener('hashchange', () => routeHash());
   window.addEventListener('popstate', () => routeHash());
+  ['nav-docs', 'nav-roadmap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('pointerenter', () => ensureDocsLoaded(), { once: true, passive: true });
+    el.addEventListener('focus', () => ensureDocsLoaded(), { once: true, passive: true });
+  });
   routeHash();
 }
 
@@ -2696,6 +2730,31 @@ function routeHash(autoCloseSidebar = true) {
     }
   }
 
+  const seq = ++docRouteSeq;
+  if (typeof DOCS_CONTENT === 'undefined') {
+    if (target === 'roadmap' || target.startsWith('rm-') ? navRoadmap : navDocs) {
+      (target === 'roadmap' || target.startsWith('rm-') ? navRoadmap : navDocs).classList.add('active');
+    }
+    if (syncHeaderLampFn) requestAnimationFrame(syncHeaderLampFn);
+    const container = document.getElementById('doc-container');
+    if (container) {
+      container.innerHTML = '<div class="doc-page-header"><h1 class="page-title">正在加载文档…</h1><p class="page-summary">正在从文档包载入章节内容，请稍候。</p></div>';
+    }
+    ensureDocsLoaded().then(loaded => {
+      if (seq !== docRouteSeq || !loaded) return;
+      const { docId, anchor } = resolveDocAndAnchor(target);
+      allNavLinks.forEach(n => n.classList.remove('active'));
+      if (docId === 'roadmap' && navRoadmap) {
+        navRoadmap.classList.add('active');
+      } else if (navDocs) {
+        navDocs.classList.add('active');
+      }
+      if (syncHeaderLampFn) requestAnimationFrame(syncHeaderLampFn);
+      loadDoc(docId, anchor, autoCloseSidebar);
+    });
+    return;
+  }
+
   const { docId, anchor } = resolveDocAndAnchor(target);
   if (docId === 'roadmap' && navRoadmap) {
     navRoadmap.classList.add('active');
@@ -2710,7 +2769,7 @@ function routeHash(autoCloseSidebar = true) {
 function updateCanonicalUrl(docId = null) {
   const link = document.getElementById('canonical-link') || document.querySelector('link[rel="canonical"]');
   if (!link) return;
-  link.setAttribute('href', docId ? `https://nyairo.com/?doc=${encodeURIComponent(docId)}` : 'https://nyairo.com/');
+  link.setAttribute('href', docId ? `https://nyairo.com/docs/${encodeURIComponent(docId)}/` : 'https://nyairo.com/');
 }
 
 function updateLangSwitchLinks(docId = null) {
@@ -3281,6 +3340,11 @@ function initCommandPalette() {
     input.value = '';
     renderList('');
     setTimeout(() => input.focus(), 30);
+    ensureDocsLoaded().then(loaded => {
+      if (loaded && backdrop.classList.contains('show')) {
+        renderList(input.value);
+      }
+    });
   }
 
   function closeModal(restoreFocus = true) {
@@ -3515,6 +3579,7 @@ function initMobileMenu() {
   toggleBtn.addEventListener('click', e => {
     e.stopPropagation();
     const isOpening = !sidebarEl.classList.contains('open');
+    if (isOpening) ensureDocsLoaded();
     if (isOpening && docsView && docsView.classList.contains('is-hidden')) {
       // Overlay mobile drawer above #view-home without navigating away from homepage
       docsView.classList.add('drawer-only');

@@ -974,7 +974,7 @@ function routeHash(autoCloseSidebar = true) {
 function updateCanonicalUrl(docId) {
   const link = document.getElementById('canonical-link') || document.querySelector('link[rel="canonical"]');
   if (!link) return;
-  link.setAttribute('href', docId && docId !== 'intro' ? `${T.canonicalBase}?doc=${encodeURIComponent(docId)}` : T.canonicalBase);
+  link.setAttribute('href', docId ? `${T.canonicalBase}${encodeURIComponent(docId)}/` : T.canonicalBase);
 }
 
 function loadDoc(docId, anchor = null, autoCloseSidebar = true) {

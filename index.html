@@ -43,7 +43,8 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261120-v070-55">
+  <link rel="stylesheet" href="style.css?v=20261121-v070-56">
+  <link rel="preload" as="image" href="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" fetchpriority="high">
   <link rel="icon" href="assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
@@ -471,10 +472,10 @@
           <div class="stage-screen-wrap" id="stage-screen-wrap" role="button" tabindex="0" aria-label="点击放大查看桌面端实机截图">
             <!-- Scene 0: Silent 60fps Walkthrough Video -->
             <div class="stage-scene is-active" data-scene-panel="0">
-              <video id="stage-video-dark" class="stage-video on-dark" muted loop playsinline preload="metadata" src="assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比"></video>
-              <video id="stage-video-light" class="stage-video on-light" autoplay muted loop playsinline preload="auto" src="assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比"></video>
-              <img class="stage-reduced-still on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="eager">
-              <img class="stage-reduced-still on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="eager">
+              <video id="stage-video-dark" class="stage-video on-dark" muted loop playsinline preload="none" src="assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比"></video>
+              <video id="stage-video-light" class="stage-video on-light" autoplay muted loop playsinline preload="metadata" src="assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示：切换姿态、点选凪浦街区、流式对话与文稿历史对比"></video>
+              <img class="stage-reduced-still on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="lazy">
+              <img class="stage-reduced-still on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo 桌面端：状态总览、身体姿态与快捷对话" width="2560" height="1600" loading="lazy">
             </div>
             <!-- Scene 1: Overview -->
             <div class="stage-scene" data-scene-panel="1">
@@ -2006,6 +2007,7 @@
         <div class="footer-bottom">
           <span class="footer-copy">Apache-2.0 Open Source · 当前公开测试版 v0.7.0（配套宿主保留 MIT 许可）</span>
           <div class="footer-bottom-links">
+            <a href="docs/">文档目录</a>
             <a href="en/" lang="en" hreflang="en">English</a>
             <a href="ja/" lang="ja" hreflang="ja">日本語</a>
             <a href="https://github.com/L1AN929/nyairo" target="_blank" rel="noopener noreferrer">GitHub 源码</a>
@@ -2060,8 +2062,8 @@
       </div>
       <div class="lightbox-canvas" id="lightbox-canvas">
         <button type="button" class="lightbox-nav prev" id="lightbox-prev" aria-label="上一张截图">‹</button>
-        <video id="lightbox-video-dark" class="lightbox-video on-dark" muted loop playsinline controls preload="metadata" src="assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示"></video>
-        <video id="lightbox-video-light" class="lightbox-video on-light" muted loop playsinline controls preload="metadata" src="assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示"></video>
+        <video id="lightbox-video-dark" class="lightbox-video on-dark" muted loop playsinline controls preload="none" src="assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示"></video>
+        <video id="lightbox-video-light" class="lightbox-video on-light" muted loop playsinline controls preload="none" src="assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 桌面端 60 帧实机交互演示"></video>
         <img id="lightbox-img-dark" class="on-dark" src="assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo 桌面客户端高清实机预览" hidden>
         <img id="lightbox-img-light" class="on-light" src="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo 桌面客户端高清实机预览" hidden>
         <button type="button" class="lightbox-nav next" id="lightbox-next" aria-label="下一张截图">›</button>
@@ -2097,8 +2099,7 @@
     </svg>
   </button>
 
-  <script src="docs-data.js?v=20261120-v070-55"></script>
-  <script src="app.js?v=20261120-v070-55"></script>
+  <script src="app.js?v=20261121-v070-56" data-docs-src="docs-data.js?v=20261121-v070-56" defer></script>
 
   <noscript>
     <div style="max-width: 880px; margin: 40px auto; padding: 24px; border: 1px solid #333; border-radius: 10px; line-height: 1.7;">

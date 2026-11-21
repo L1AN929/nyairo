@@ -42,7 +42,8 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../style.css?v=20261120-v070-55">
+  <link rel="stylesheet" href="../style.css?v=20261121-v070-56">
+  <link rel="preload" as="image" href="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" fetchpriority="high">
   <link rel="icon" href="../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../assets/favicon-16.png">
@@ -1999,10 +2000,10 @@
             <div class="stage-screen-wrap" id="stage-screen-wrap" role="button" tabindex="0" aria-label="Click to inspect full-resolution 2x Retina capture">
               <!-- Scene 0: Silent 60fps Walkthrough Video -->
               <div class="stage-scene is-active" data-scene-panel="0">
-                <video id="stage-video-dark" class="stage-video on-dark" muted loop playsinline preload="metadata" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
-                <video id="stage-video-light" class="stage-video on-light" autoplay muted loop playsinline preload="auto" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
-                <img class="stage-reduced-still on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo desktop overview: room presence, posture, and live status" width="2560" height="1600" loading="eager">
-                <img class="stage-reduced-still on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo desktop overview: room presence, posture, and live status" width="2560" height="1600" loading="eager">
+                <video id="stage-video-dark" class="stage-video on-dark" muted loop playsinline preload="none" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
+                <video id="stage-video-light" class="stage-video on-light" autoplay muted loop playsinline preload="metadata" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough: posture transitions, Nagiura town map, streaming talk, and draft version diffs"></video>
+                <img class="stage-reduced-still on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo desktop overview: room presence, posture, and live status" width="2560" height="1600" loading="lazy">
+                <img class="stage-reduced-still on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo desktop overview: room presence, posture, and live status" width="2560" height="1600" loading="lazy">
               </div>
               <!-- Scene 1: Overview -->
               <div class="stage-scene" data-scene-panel="1">
@@ -3059,8 +3060,8 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
       </div>
       <div class="lightbox-canvas" id="lightbox-canvas">
         <button type="button" class="lightbox-nav prev" id="lightbox-prev" aria-label="Previous scene">‹</button>
-        <video id="lightbox-video-dark" class="lightbox-video on-dark" muted loop playsinline controls preload="metadata" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough"></video>
-        <video id="lightbox-video-light" class="lightbox-video on-light" muted loop playsinline controls preload="metadata" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough"></video>
+        <video id="lightbox-video-dark" class="lightbox-video on-dark" muted loop playsinline controls preload="none" src="../assets/screenshots/desktop-demo-dark.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough"></video>
+        <video id="lightbox-video-light" class="lightbox-video on-light" muted loop playsinline controls preload="none" src="../assets/screenshots/desktop-demo-light.mp4?v=20261118-v070-36" poster="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" width="2560" height="1600" aria-label="nyairo 60fps desktop walkthrough"></video>
         <img id="lightbox-img-dark" class="on-dark" src="../assets/screenshots/desktop-overview-dark.webp?v=20261118-v070-35" alt="nyairo high-resolution desktop preview" hidden>
         <img id="lightbox-img-light" class="on-light" src="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" alt="nyairo high-resolution desktop preview" hidden>
         <button type="button" class="lightbox-nav next" id="lightbox-next" aria-label="Next scene">›</button>
