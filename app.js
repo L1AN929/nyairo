@@ -2503,7 +2503,7 @@ function ensureDocsLoaded() {
   }
   if (docsLoadPromise) return docsLoadPromise;
   const appScript = document.querySelector('script[data-docs-src]');
-  const src = (appScript && appScript.getAttribute('data-docs-src')) || 'docs-data.js?v=20261121-v070-56';
+  const src = (appScript && appScript.getAttribute('data-docs-src')) || 'docs-data.js?v=20261121-v070-57';
   docsLoadPromise = new Promise(resolve => {
     const s = document.createElement('script');
     s.src = src;

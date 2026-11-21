@@ -263,6 +263,8 @@ button {
 .on-dark { display: block; }
 html[data-theme="light"] .on-dark { display: none; }
 html[data-theme="light"] .on-light { display: block; }
+.on-dark[hidden],
+.on-light[hidden] { display: none !important; }
 
 /* ==========================================================================
    Top Sticky Header
@@ -1372,7 +1374,6 @@ html[data-theme="light"] .hero-title .accent-word {
 
 .stage-scene video.stage-video,
 .stage-scene img {
-  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
