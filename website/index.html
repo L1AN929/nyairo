@@ -43,7 +43,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20261121-v070-57">
+  <link rel="stylesheet" href="style.css?v=20261121-v070-58">
   <link rel="preload" as="image" href="assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" fetchpriority="high">
   <link rel="icon" href="assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
@@ -374,11 +374,12 @@
       <!-- 第 1 屏：Magpie 风格左对齐大字排版 Hero -->
       <div class="hero-section">
         <div class="hero-copy-stage" id="hero-copy-stage">
-          <a href="#home-evolution" class="hero-kicker-pill hero-stagger" style="--stagger: 0">
+          <a href="#home-evolution" class="hero-kicker-pill hero-stagger" id="hero-release-pill" data-home-scroll="home-evolution" style="--stagger: 0">
             <span class="hero-kicker-dot" aria-hidden="true"></span>
             <span class="font-mono">v0.7.0</span>
-            <span class="hero-kicker-sep">·</span>
-            <span>凪浦临海小镇 · 开源本地个体框架</span>
+            <span class="hero-kicker-sep" aria-hidden="true">·</span>
+            <span class="hero-kicker-cadence" id="hero-release-label">每周日更新</span>
+            <span class="hero-kicker-countdown font-mono" id="hero-release-timer" aria-live="off">每周日 20:00</span>
           </a>
 
           <h1 class="hero-title hero-stagger" style="--stagger: 0">
@@ -1412,6 +1413,36 @@
           </div>
         </div>
 
+        <div class="release-cadence-bar spotlight-surface" id="weekly-release-bar" data-reveal>
+          <div class="rcb-top">
+            <div class="rcb-lead">
+              <div class="rcb-title-row">
+                <span class="rcb-dot" aria-hidden="true"></span>
+                <span class="rcb-title">每周日定时发版</span>
+                <span class="rcb-cadence-tag">周日 20:00</span>
+              </div>
+              <div class="rcb-sub" id="rcb-sub">下次预计更新 · 每周日 20:00（北京时间）</div>
+            </div>
+            <div class="rcb-timer" id="rcb-timer" aria-label="距离下次周日发版倒计时">
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-days">--</span><span class="rcb-lbl">天</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-hours">--</span><span class="rcb-lbl">时</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-mins">--</span><span class="rcb-lbl">分</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-secs">--</span><span class="rcb-lbl">秒</span></span>
+            </div>
+            <div class="rcb-live-badge" id="rcb-live-badge" role="status">今日发版 · 新版本上线中</div>
+          </div>
+          <div class="rcb-progress-wrap" aria-hidden="true">
+            <div class="rcb-track"><div class="rcb-fill" id="rcb-fill"></div></div>
+            <div class="rcb-progress-meta">
+              <span id="rcb-progress-label">本周打磨进度 · --%</span>
+              <span id="rcb-target-label">周日 20:00 UTC+8</span>
+            </div>
+          </div>
+        </div>
+
         <div class="evo-card spotlight-surface" id="evo-stage" data-reveal>
           <div class="evo-stepper" id="evo-stepper" role="tablist" aria-label="版本演进里程碑">
             <div class="evo-thumb" id="evo-thumb" aria-hidden="true"></div>
@@ -2099,7 +2130,7 @@
     </svg>
   </button>
 
-  <script src="app.js?v=20261121-v070-57" data-docs-src="docs-data.js?v=20261121-v070-57" defer></script>
+  <script src="app.js?v=20261121-v070-58" data-docs-src="docs-data.js?v=20261121-v070-58" defer></script>
 
   <noscript>
     <div style="max-width: 880px; margin: 40px auto; padding: 24px; border: 1px solid #333; border-radius: 10px; line-height: 1.7;">

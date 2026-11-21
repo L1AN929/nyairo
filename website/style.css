@@ -8680,9 +8680,11 @@ html[data-theme="light"] .app-stage {
 .hero-kicker-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 29px;
-  padding: 0 12px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 29px;
+  max-width: 100%;
+  padding: 4px 12px;
   margin-bottom: 22px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -10129,6 +10131,250 @@ html.vt-palette .palette-wash-beam {
   .palette-shuffle-btn svg {
     transition: none !important;
     animation: none !important;
+  }
+}
+
+/* ==========================================================================
+   v070-58 Weekly Sunday Release Countdown (Pill & Cadence Progress Bar)
+   ========================================================================== */
+.hero-kicker-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1.45;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hero-kicker-pill.is-release-day .hero-kicker-dot,
+.release-pill.is-release-day .status-dot {
+  background: var(--accent);
+}
+
+.hero-kicker-pill.is-release-day .hero-kicker-countdown,
+.release-pill.is-release-day .hero-kicker-countdown {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg, #ffffff);
+}
+
+.release-cadence-bar {
+  position: relative;
+  margin-bottom: 20px;
+  padding: 16px 20px 15px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  scroll-margin-top: 84px;
+  transition: border-color 0.2s var(--ease);
+}
+
+html[data-theme="light"] .release-cadence-bar {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.release-cadence-bar.is-release-day {
+  border-color: var(--accent-line);
+}
+
+.rcb-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 20px;
+  flex-wrap: wrap;
+}
+
+.rcb-lead {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rcb-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rcb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warm);
+  flex-shrink: 0;
+  animation: ny-lamp-breathe 3.6s ease-in-out infinite;
+}
+
+.release-cadence-bar.is-release-day .rcb-dot {
+  background: var(--accent);
+}
+
+.rcb-title {
+  font-size: 0.9rem;
+  font-weight: 620;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+.rcb-cadence-tag {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  white-space: nowrap;
+}
+
+.rcb-sub {
+  font-size: 0.8rem;
+  color: var(--fg-2);
+  line-height: 1.45;
+}
+
+.rcb-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.rcb-unit {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  min-width: 52px;
+  justify-content: center;
+}
+
+.rcb-num {
+  font-family: var(--font-mono);
+  font-size: 0.96rem;
+  font-weight: 650;
+  color: var(--fg);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.rcb-lbl {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.rcb-colon {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--muted);
+  opacity: 0.65;
+  user-select: none;
+}
+
+.rcb-live-badge {
+  display: none;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.release-cadence-bar.is-release-day .rcb-timer {
+  display: none;
+}
+
+.release-cadence-bar.is-release-day .rcb-live-badge {
+  display: inline-flex;
+}
+
+.rcb-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rcb-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.rcb-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.6s var(--ease-smooth);
+}
+
+.rcb-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.73rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .release-pill {
+    white-space: normal;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .release-cadence-bar {
+    padding: 14px 15px;
+  }
+  .rcb-timer {
+    width: 100%;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .rcb-unit {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 6px;
+  }
+  .rcb-colon {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rcb-dot,
+  .rcb-fill {
+    animation: none !important;
+    transition: none !important;
   }
 }
 
