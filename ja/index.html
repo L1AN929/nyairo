@@ -42,7 +42,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../style.css?v=20261121-v070-57">
+  <link rel="stylesheet" href="../style.css?v=20261121-v070-58">
   <link rel="preload" as="image" href="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" fetchpriority="high">
   <link rel="icon" href="../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
@@ -2022,11 +2022,12 @@
 
       <!-- Left-Aligned Sumi & Washi Editorial Hero -->
       <div class="ja-hero">
-        <a href="#ja-capabilities" class="hero-kicker-pill">
+        <a href="#weekly-release-bar" class="hero-kicker-pill" id="hero-release-pill">
           <span class="hero-kicker-dot" aria-hidden="true"></span>
           <span class="font-mono">v0.7.0</span>
-          <span class="hero-kicker-sep">·</span>
-          <span>凪浦 · オープンソース AI 個体フレームワーク</span>
+          <span class="hero-kicker-sep" aria-hidden="true">·</span>
+          <span id="hero-release-label">毎週日曜アップデート</span>
+          <span class="hero-kicker-countdown font-mono" id="hero-release-timer" aria-live="off">日曜 20:00</span>
         </a>
 
         <h1 class="ja-hero-title">
@@ -2720,6 +2721,36 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a href="../downloads/latest.json" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:36px;padding:0 12px;font-size:0.8rem;">latest.json <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
             <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0" target="_blank" rel="noopener noreferrer" class="magpie-btn-ghost" style="height:36px;padding:0 14px;font-size:0.82rem;">GitHub Release v0.7.0 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+          </div>
+        </div>
+
+        <div class="release-cadence-bar spotlight-surface" id="weekly-release-bar" data-reveal>
+          <div class="rcb-top">
+            <div class="rcb-lead">
+              <div class="rcb-title-row">
+                <span class="rcb-dot" aria-hidden="true"></span>
+                <span class="rcb-title">毎週日曜リリース</span>
+                <span class="rcb-cadence-tag">日曜 20:00 CST / 21:00 JST</span>
+              </div>
+              <div class="rcb-sub" id="rcb-sub">次回予定 · 毎週日曜 20:00（日本時間 21:00）</div>
+            </div>
+            <div class="rcb-timer" id="rcb-timer" aria-label="次回の日曜リリースまでのカウントダウン">
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-days">--</span><span class="rcb-lbl">日</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-hours">--</span><span class="rcb-lbl">時間</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-mins">--</span><span class="rcb-lbl">分</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-secs">--</span><span class="rcb-lbl">秒</span></span>
+            </div>
+            <div class="rcb-live-badge" id="rcb-live-badge" role="status">本日リリース · 新バージョン公開中</div>
+          </div>
+          <div class="rcb-progress-wrap" aria-hidden="true">
+            <div class="rcb-track"><div class="rcb-fill" id="rcb-fill"></div></div>
+            <div class="rcb-progress-meta">
+              <span id="rcb-progress-label">今週の進捗 · --%</span>
+              <span id="rcb-target-label">日曜 20:00 UTC+8 / 21:00 JST</span>
+            </div>
           </div>
         </div>
 
@@ -4801,11 +4832,124 @@ WSL のないネイティブ Windows の場合は公式デスクトップ版（h
         });
       }
 
+      function computeWeeklyReleaseState(nowMs) {
+        var BJT_OFFSET = 8 * 3600000;
+        var WEEK_MS = 7 * 86400000;
+        var bj = new Date(nowMs + BJT_OFFSET);
+        var dow = bj.getUTCDay();
+        var bjHour = bj.getUTCHours();
+        var isReleaseWindow = dow === 0 && bjHour >= 20;
+
+        var todayMidnightShifted = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate());
+        var daysToSun = dow === 0 ? 0 : 7 - dow;
+        var targetShifted = todayMidnightShifted + daysToSun * 86400000 + 20 * 3600000;
+        var targetUtcMs = targetShifted - BJT_OFFSET;
+
+        var remainingMs = isReleaseWindow ? 0 : Math.max(0, targetUtcMs - nowMs);
+        var totalSec = Math.floor(remainingMs / 1000);
+        var days = Math.floor(totalSec / 86400);
+        var hours = Math.floor((totalSec % 86400) / 3600);
+        var mins = Math.floor((totalSec % 3600) / 60);
+        var secs = totalSec % 60;
+
+        var elapsedMs = isReleaseWindow ? WEEK_MS : Math.max(0, Math.min(WEEK_MS, WEEK_MS - remainingMs));
+        var progressPct = isReleaseWindow ? 100 : Math.max(0, Math.min(100, (elapsedMs / WEEK_MS) * 100));
+        var targetDate = new Date(targetShifted);
+
+        return {
+          isReleaseWindow: isReleaseWindow,
+          days: days,
+          hours: hours,
+          mins: mins,
+          secs: secs,
+          progressPct: progressPct,
+          targetMonth: targetDate.getUTCMonth() + 1,
+          targetDay: targetDate.getUTCDate()
+        };
+      }
+
+      function initWeeklyReleaseCountdown() {
+        var pill = document.getElementById('hero-release-pill');
+        var pillLabel = document.getElementById('hero-release-label');
+        var pillTimer = document.getElementById('hero-release-timer');
+        var bar = document.getElementById('weekly-release-bar');
+        var sub = document.getElementById('rcb-sub');
+        var daysEl = document.getElementById('rcb-days');
+        var hoursEl = document.getElementById('rcb-hours');
+        var minsEl = document.getElementById('rcb-mins');
+        var secsEl = document.getElementById('rcb-secs');
+        var fillEl = document.getElementById('rcb-fill');
+        var progLabel = document.getElementById('rcb-progress-label');
+        if (!pill && !bar) return;
+
+        var pad2 = function (n) { return String(n).padStart(2, '0'); };
+        var timerId = null;
+
+        function render() {
+          var s = computeWeeklyReleaseState(Date.now());
+          var hh = pad2(s.hours);
+          var mm = pad2(s.mins);
+          var ss = pad2(s.secs);
+
+          if (pill) {
+            pill.classList.toggle('is-release-day', s.isReleaseWindow);
+            if (pillLabel) pillLabel.textContent = s.isReleaseWindow ? '日曜リリース日' : '毎週日曜アップデート';
+            if (pillTimer) {
+              pillTimer.textContent = s.isReleaseWindow
+                ? '本日公開中'
+                : (s.days + '日 ' + hh + ':' + mm + ':' + ss);
+            }
+          }
+
+          if (bar) {
+            bar.classList.toggle('is-release-day', s.isReleaseWindow);
+            if (sub) {
+              sub.textContent = s.isReleaseWindow
+                ? '本日リリース日 · 新バージョンを順次公開中です'
+                : ('次回予定 · ' + s.targetMonth + '月' + s.targetDay + '日 20:00（日本時間 21:00）');
+            }
+            if (daysEl) daysEl.textContent = String(s.days);
+            if (hoursEl) hoursEl.textContent = hh;
+            if (minsEl) minsEl.textContent = mm;
+            if (secsEl) secsEl.textContent = ss;
+            if (fillEl) fillEl.style.width = s.progressPct.toFixed(1) + '%';
+            if (progLabel) {
+              progLabel.textContent = s.isReleaseWindow
+                ? '今週の進捗 · 100%（公開中）'
+                : ('今週の進捗 · ' + Math.round(s.progressPct) + '%');
+            }
+          }
+        }
+
+        function startTick() {
+          if (timerId !== null) return;
+          timerId = setInterval(render, 1000);
+        }
+
+        function stopTick() {
+          if (timerId === null) return;
+          clearInterval(timerId);
+          timerId = null;
+        }
+
+        render();
+        if (!document.hidden) startTick();
+        document.addEventListener('visibilitychange', function () {
+          if (document.hidden) {
+            stopTick();
+          } else {
+            render();
+            startTick();
+          }
+        });
+      }
+
       function bootstrap() {
         initThemeAndHeader();
         initDesktopStageAndLightbox();
         initSandbox();
         initContrastAndActions();
+        initWeeklyReleaseCountdown();
       }
 
       if (document.readyState === 'loading') {

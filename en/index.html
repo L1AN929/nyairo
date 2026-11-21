@@ -42,7 +42,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../style.css?v=20261121-v070-57">
+  <link rel="stylesheet" href="../style.css?v=20261121-v070-58">
   <link rel="preload" as="image" href="../assets/screenshots/desktop-overview-light.webp?v=20261118-v070-35" fetchpriority="high">
   <link rel="icon" href="../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
@@ -1897,11 +1897,12 @@
       <div class="hero-section">
         <div class="hero-copy-stage" id="hero-copy-stage">
           <div class="hero-emblem-row hero-stagger" style="--stagger: 0">
-            <a href="#en-capabilities" class="release-pill" title="Explore what shipped in v0.7.0">
+            <a href="#weekly-release-bar" class="release-pill" id="hero-release-pill" title="Jump to weekly Sunday release countdown">
               <span class="status-dot" aria-hidden="true"></span>
               <span class="release-ver font-mono">v0.7.0</span>
-              <span class="release-sep">·</span>
-              <span>Spatial continuity, matter physics, procedural worlds &amp; native desktop</span>
+              <span class="release-sep" aria-hidden="true">·</span>
+              <span id="hero-release-label">Weekly Sunday release</span>
+              <span class="hero-kicker-countdown font-mono" id="hero-release-timer" aria-live="off">Sun 20:00</span>
               <svg class="arrow-nudge" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="5" y1="12" x2="19" y2="12"></line>
                 <polyline points="12 5 19 12 12 19"></polyline>
@@ -2622,6 +2623,36 @@
             <p class="section-desc">Windows 10/11 users can start directly with the ~5.8 MB no-admin desktop installer; Linux / WSL 2 users and developers can install via one-line CLI or delegate to an AI coding agent.</p>
           </div>
           <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0" target="_blank" rel="noopener noreferrer" class="btn-outline">GitHub Release v0.7.0 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
+        </div>
+
+        <div class="release-cadence-bar spotlight-surface" id="weekly-release-bar" data-reveal>
+          <div class="rcb-top">
+            <div class="rcb-lead">
+              <div class="rcb-title-row">
+                <span class="rcb-dot" aria-hidden="true"></span>
+                <span class="rcb-title">Weekly Sunday Release</span>
+                <span class="rcb-cadence-tag">Sun 20:00 UTC+8</span>
+              </div>
+              <div class="rcb-sub" id="rcb-sub">Next scheduled release · Sunday 20:00 (Beijing Time)</div>
+            </div>
+            <div class="rcb-timer" id="rcb-timer" aria-label="Countdown to next Sunday release">
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-days">--</span><span class="rcb-lbl">d</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-hours">--</span><span class="rcb-lbl">h</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-mins">--</span><span class="rcb-lbl">m</span></span>
+              <span class="rcb-colon" aria-hidden="true">:</span>
+              <span class="rcb-unit"><span class="rcb-num" id="rcb-secs">--</span><span class="rcb-lbl">s</span></span>
+            </div>
+            <div class="rcb-live-badge" id="rcb-live-badge" role="status">Release Day · New build rolling out</div>
+          </div>
+          <div class="rcb-progress-wrap" aria-hidden="true">
+            <div class="rcb-track"><div class="rcb-fill" id="rcb-fill"></div></div>
+            <div class="rcb-progress-meta">
+              <span id="rcb-progress-label">Weekly cycle · --%</span>
+              <span id="rcb-target-label">Every Sun 20:00 UTC+8</span>
+            </div>
+          </div>
         </div>
 
         <div class="downloads-grid">
@@ -4910,6 +4941,119 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
         });
       }
 
+      function computeWeeklyReleaseState(nowMs) {
+        var BJT_OFFSET = 8 * 3600000;
+        var WEEK_MS = 7 * 86400000;
+        var bj = new Date(nowMs + BJT_OFFSET);
+        var dow = bj.getUTCDay();
+        var bjHour = bj.getUTCHours();
+        var isReleaseWindow = dow === 0 && bjHour >= 20;
+
+        var todayMidnightShifted = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate());
+        var daysToSun = dow === 0 ? 0 : 7 - dow;
+        var targetShifted = todayMidnightShifted + daysToSun * 86400000 + 20 * 3600000;
+        var targetUtcMs = targetShifted - BJT_OFFSET;
+
+        var remainingMs = isReleaseWindow ? 0 : Math.max(0, targetUtcMs - nowMs);
+        var totalSec = Math.floor(remainingMs / 1000);
+        var days = Math.floor(totalSec / 86400);
+        var hours = Math.floor((totalSec % 86400) / 3600);
+        var mins = Math.floor((totalSec % 3600) / 60);
+        var secs = totalSec % 60;
+
+        var elapsedMs = isReleaseWindow ? WEEK_MS : Math.max(0, Math.min(WEEK_MS, WEEK_MS - remainingMs));
+        var progressPct = isReleaseWindow ? 100 : Math.max(0, Math.min(100, (elapsedMs / WEEK_MS) * 100));
+        var targetDate = new Date(targetShifted);
+
+        return {
+          isReleaseWindow: isReleaseWindow,
+          days: days,
+          hours: hours,
+          mins: mins,
+          secs: secs,
+          progressPct: progressPct,
+          targetMonth: targetDate.getUTCMonth() + 1,
+          targetDay: targetDate.getUTCDate()
+        };
+      }
+
+      function initWeeklyReleaseCountdown() {
+        var pill = document.getElementById('hero-release-pill');
+        var pillLabel = document.getElementById('hero-release-label');
+        var pillTimer = document.getElementById('hero-release-timer');
+        var bar = document.getElementById('weekly-release-bar');
+        var sub = document.getElementById('rcb-sub');
+        var daysEl = document.getElementById('rcb-days');
+        var hoursEl = document.getElementById('rcb-hours');
+        var minsEl = document.getElementById('rcb-mins');
+        var secsEl = document.getElementById('rcb-secs');
+        var fillEl = document.getElementById('rcb-fill');
+        var progLabel = document.getElementById('rcb-progress-label');
+        if (!pill && !bar) return;
+
+        var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        var pad2 = function (n) { return String(n).padStart(2, '0'); };
+        var timerId = null;
+
+        function render() {
+          var s = computeWeeklyReleaseState(Date.now());
+          var hh = pad2(s.hours);
+          var mm = pad2(s.mins);
+          var ss = pad2(s.secs);
+
+          if (pill) {
+            pill.classList.toggle('is-release-day', s.isReleaseWindow);
+            if (pillLabel) pillLabel.textContent = s.isReleaseWindow ? 'Sunday release' : 'Weekly Sunday release';
+            if (pillTimer) {
+              pillTimer.textContent = s.isReleaseWindow
+                ? 'Live today'
+                : (s.days + 'd ' + hh + ':' + mm + ':' + ss);
+            }
+          }
+
+          if (bar) {
+            bar.classList.toggle('is-release-day', s.isReleaseWindow);
+            if (sub) {
+              sub.textContent = s.isReleaseWindow
+                ? 'Release Day · New build rolling out, refresh later to download'
+                : ('Next scheduled release · ' + MONTHS[s.targetMonth - 1] + ' ' + s.targetDay + ', 20:00 (Beijing Time)');
+            }
+            if (daysEl) daysEl.textContent = String(s.days);
+            if (hoursEl) hoursEl.textContent = hh;
+            if (minsEl) minsEl.textContent = mm;
+            if (secsEl) secsEl.textContent = ss;
+            if (fillEl) fillEl.style.width = s.progressPct.toFixed(1) + '%';
+            if (progLabel) {
+              progLabel.textContent = s.isReleaseWindow
+                ? 'Weekly cycle · 100% (Shipping)'
+                : ('Weekly cycle · ' + Math.round(s.progressPct) + '%');
+            }
+          }
+        }
+
+        function startTick() {
+          if (timerId !== null) return;
+          timerId = setInterval(render, 1000);
+        }
+
+        function stopTick() {
+          if (timerId === null) return;
+          clearInterval(timerId);
+          timerId = null;
+        }
+
+        render();
+        if (!document.hidden) startTick();
+        document.addEventListener('visibilitychange', function () {
+          if (document.hidden) {
+            stopTick();
+          } else {
+            render();
+            startTick();
+          }
+        });
+      }
+
       function bootstrap() {
         initTheme();
         initHeaderAndMobileNav();
@@ -4917,6 +5061,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.7.0, run scripts/verify_manif
         initSandbox();
         initContrastTabs();
         initCopyActionsAndFaq();
+        initWeeklyReleaseCountdown();
       }
 
       if (document.readyState === 'loading') {

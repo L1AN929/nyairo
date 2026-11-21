@@ -194,6 +194,7 @@ function bootstrap() {
   initCommandPalette();
   initMobileMenu();
   initBackToTop();
+  initWeeklyReleaseCountdown();
 }
 
 const PALETTE_ORDER = [
@@ -2503,7 +2504,7 @@ function ensureDocsLoaded() {
   }
   if (docsLoadPromise) return docsLoadPromise;
   const appScript = document.querySelector('script[data-docs-src]');
-  const src = (appScript && appScript.getAttribute('data-docs-src')) || 'docs-data.js?v=20261121-v070-57';
+  const src = (appScript && appScript.getAttribute('data-docs-src')) || 'docs-data.js?v=20261121-v070-58';
   docsLoadPromise = new Promise(resolve => {
     const s = document.createElement('script');
     s.src = src;
@@ -3722,4 +3723,119 @@ function showToast(message) {
   activeToastTimer = setTimeout(() => {
     toast.classList.remove('is-visible');
   }, 2200);
+}
+
+/* ==========================================================================
+   Weekly Sunday 20:00 (UTC+8) Release Countdown
+   ========================================================================== */
+function computeWeeklyReleaseState(nowMs) {
+  const BJT_OFFSET = 8 * 3600000;
+  const WEEK_MS = 7 * 86400000;
+  const bj = new Date(nowMs + BJT_OFFSET);
+  const dow = bj.getUTCDay();
+  const bjHour = bj.getUTCHours();
+  const isReleaseWindow = dow === 0 && bjHour >= 20;
+
+  const todayMidnightShifted = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate());
+  const daysToSun = dow === 0 ? 0 : 7 - dow;
+  const targetShifted = todayMidnightShifted + daysToSun * 86400000 + 20 * 3600000;
+  const targetUtcMs = targetShifted - BJT_OFFSET;
+
+  const remainingMs = isReleaseWindow ? 0 : Math.max(0, targetUtcMs - nowMs);
+  const totalSec = Math.floor(remainingMs / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+
+  const elapsedMs = isReleaseWindow ? WEEK_MS : Math.max(0, Math.min(WEEK_MS, WEEK_MS - remainingMs));
+  const progressPct = isReleaseWindow ? 100 : Math.max(0, Math.min(100, (elapsedMs / WEEK_MS) * 100));
+  const targetDate = new Date(targetShifted);
+
+  return {
+    isReleaseWindow,
+    days,
+    hours,
+    mins,
+    secs,
+    progressPct,
+    targetMonth: targetDate.getUTCMonth() + 1,
+    targetDay: targetDate.getUTCDate()
+  };
+}
+
+function initWeeklyReleaseCountdown() {
+  const pill = document.getElementById('hero-release-pill');
+  const pillLabel = document.getElementById('hero-release-label');
+  const pillTimer = document.getElementById('hero-release-timer');
+  const bar = document.getElementById('weekly-release-bar');
+  const sub = document.getElementById('rcb-sub');
+  const daysEl = document.getElementById('rcb-days');
+  const hoursEl = document.getElementById('rcb-hours');
+  const minsEl = document.getElementById('rcb-mins');
+  const secsEl = document.getElementById('rcb-secs');
+  const fillEl = document.getElementById('rcb-fill');
+  const progLabel = document.getElementById('rcb-progress-label');
+  if (!pill && !bar) return;
+
+  const pad2 = n => String(n).padStart(2, '0');
+  let timerId = null;
+
+  function render() {
+    const s = computeWeeklyReleaseState(Date.now());
+    const hh = pad2(s.hours);
+    const mm = pad2(s.mins);
+    const ss = pad2(s.secs);
+
+    if (pill) {
+      pill.classList.toggle('is-release-day', s.isReleaseWindow);
+      if (pillLabel) pillLabel.textContent = s.isReleaseWindow ? '周日发版日' : '每周日更新';
+      if (pillTimer) {
+        pillTimer.textContent = s.isReleaseWindow
+          ? '今日已发版'
+          : `${s.days}天 ${hh}:${mm}:${ss}`;
+      }
+    }
+
+    if (bar) {
+      bar.classList.toggle('is-release-day', s.isReleaseWindow);
+      if (sub) {
+        sub.textContent = s.isReleaseWindow
+          ? '今日发版日 · 新版本整理发布中，稍后刷新即可获取'
+          : `下次预计更新 · ${s.targetMonth}月${s.targetDay}日 20:00（北京时间）`;
+      }
+      if (daysEl) daysEl.textContent = String(s.days);
+      if (hoursEl) hoursEl.textContent = hh;
+      if (minsEl) minsEl.textContent = mm;
+      if (secsEl) secsEl.textContent = ss;
+      if (fillEl) fillEl.style.width = `${s.progressPct.toFixed(1)}%`;
+      if (progLabel) {
+        progLabel.textContent = s.isReleaseWindow
+          ? '本周打磨进度 · 100%（发版中）'
+          : `本周打磨进度 · ${Math.round(s.progressPct)}%`;
+      }
+    }
+  }
+
+  function startTick() {
+    if (timerId !== null) return;
+    timerId = setInterval(render, 1000);
+  }
+
+  function stopTick() {
+    if (timerId === null) return;
+    clearInterval(timerId);
+    timerId = null;
+  }
+
+  render();
+  if (!document.hidden) startTick();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopTick();
+    } else {
+      render();
+      startTick();
+    }
+  });
 }
