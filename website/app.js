@@ -3726,34 +3726,61 @@ function showToast(message) {
 }
 
 /* ==========================================================================
-   Weekly Sunday 20:00 (UTC+8) Release Countdown
+   Weekly Sunday 14:00 (UTC+8) Release Countdown
    ========================================================================== */
-function computeWeeklyReleaseState(nowMs) {
+function parseBjtDateMidnightShifted(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
+  if (!m) return null;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function computeWeeklyReleaseState(nowMs, releasedDateStr) {
   const BJT_OFFSET = 8 * 3600000;
-  const WEEK_MS = 7 * 86400000;
+  const DAY_MS = 86400000;
+  const WEEK_MS = 7 * DAY_MS;
+  const RELEASE_HOUR = 14;
+
   const bj = new Date(nowMs + BJT_OFFSET);
   const dow = bj.getUTCDay();
   const bjHour = bj.getUTCHours();
-  const isReleaseWindow = dow === 0 && bjHour >= 20;
-
   const todayMidnightShifted = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate());
-  const daysToSun = dow === 0 ? 0 : 7 - dow;
-  const targetShifted = todayMidnightShifted + daysToSun * 86400000 + 20 * 3600000;
+  const daysToThisSun = dow === 0 ? 0 : 7 - dow;
+  const thisSunMidnightShifted = todayMidnightShifted + daysToThisSun * DAY_MS;
+  const weekStartMonShifted = thisSunMidnightShifted - 6 * DAY_MS;
+
+  const relMidnightShifted = parseBjtDateMidnightShifted(releasedDateStr);
+  const isReleasedToday = relMidnightShifted !== null && relMidnightShifted === todayMidnightShifted;
+  const isThisWeekAlreadyReleased =
+    relMidnightShifted !== null &&
+    relMidnightShifted >= weekStartMonShifted &&
+    relMidnightShifted <= thisSunMidnightShifted;
+
+  const targetMidnightShifted = isThisWeekAlreadyReleased
+    ? (thisSunMidnightShifted + WEEK_MS)
+    : thisSunMidnightShifted;
+  const isShippingWindow = !isThisWeekAlreadyReleased && dow === 0 && bjHour >= RELEASE_HOUR;
+  const mode = isReleasedToday ? 'released_today' : (isShippingWindow ? 'shipping' : 'countdown');
+  const isReleaseDay = mode !== 'countdown';
+
+  const targetShifted = targetMidnightShifted + RELEASE_HOUR * 3600000;
   const targetUtcMs = targetShifted - BJT_OFFSET;
 
-  const remainingMs = isReleaseWindow ? 0 : Math.max(0, targetUtcMs - nowMs);
+  const remainingMs = isReleaseDay ? 0 : Math.max(0, targetUtcMs - nowMs);
   const totalSec = Math.floor(remainingMs / 1000);
   const days = Math.floor(totalSec / 86400);
   const hours = Math.floor((totalSec % 86400) / 3600);
   const mins = Math.floor((totalSec % 3600) / 60);
   const secs = totalSec % 60;
 
-  const elapsedMs = isReleaseWindow ? WEEK_MS : Math.max(0, Math.min(WEEK_MS, WEEK_MS - remainingMs));
-  const progressPct = isReleaseWindow ? 100 : Math.max(0, Math.min(100, (elapsedMs / WEEK_MS) * 100));
+  const elapsedMs = isReleaseDay ? WEEK_MS : Math.max(0, Math.min(WEEK_MS, WEEK_MS - remainingMs));
+  const progressPct = isReleaseDay ? 100 : Math.max(0, Math.min(100, (elapsedMs / WEEK_MS) * 100));
   const targetDate = new Date(targetShifted);
 
   return {
-    isReleaseWindow,
+    mode,
+    isReleaseDay,
+    isReleasedToday,
     days,
     hours,
     mins,
@@ -3770,6 +3797,7 @@ function initWeeklyReleaseCountdown() {
   const pillTimer = document.getElementById('hero-release-timer');
   const bar = document.getElementById('weekly-release-bar');
   const sub = document.getElementById('rcb-sub');
+  const liveBadge = document.getElementById('rcb-live-badge');
   const daysEl = document.getElementById('rcb-days');
   const hoursEl = document.getElementById('rcb-hours');
   const minsEl = document.getElementById('rcb-mins');
@@ -3778,31 +3806,46 @@ function initWeeklyReleaseCountdown() {
   const progLabel = document.getElementById('rcb-progress-label');
   if (!pill && !bar) return;
 
+  let latestVersion = (bar && bar.getAttribute('data-latest-version')) || '0.8.0';
+  let releasedDate = (bar && bar.getAttribute('data-released-date')) || '2026-11-22';
+
   const pad2 = n => String(n).padStart(2, '0');
   let timerId = null;
 
   function render() {
-    const s = computeWeeklyReleaseState(Date.now());
+    const s = computeWeeklyReleaseState(Date.now(), releasedDate);
+    const verTag = `v${String(latestVersion || '0.8.0').replace(/^v+/i, '')}`;
     const hh = pad2(s.hours);
     const mm = pad2(s.mins);
     const ss = pad2(s.secs);
 
     if (pill) {
-      pill.classList.toggle('is-release-day', s.isReleaseWindow);
-      if (pillLabel) pillLabel.textContent = s.isReleaseWindow ? '周日发版日' : '每周日更新';
+      pill.classList.toggle('is-release-day', s.isReleaseDay);
+      if (pillLabel) {
+        pillLabel.textContent = s.mode === 'released_today'
+          ? '新版本上线'
+          : (s.mode === 'shipping' ? '周日发版日' : '每周日更新');
+      }
       if (pillTimer) {
-        pillTimer.textContent = s.isReleaseWindow
-          ? '今日已发版'
-          : `${s.days}天 ${hh}:${mm}:${ss}`;
+        pillTimer.textContent = s.mode === 'released_today'
+          ? '今日已发布'
+          : (s.mode === 'shipping' ? '新版本发布中' : `${s.days}天 ${hh}:${mm}:${ss}`);
       }
     }
 
     if (bar) {
-      bar.classList.toggle('is-release-day', s.isReleaseWindow);
+      bar.classList.toggle('is-release-day', s.isReleaseDay);
+      if (liveBadge) {
+        liveBadge.textContent = s.mode === 'released_today'
+          ? `${verTag} 今日已发布`
+          : '今日发版 · 新版本上线中';
+      }
       if (sub) {
-        sub.textContent = s.isReleaseWindow
-          ? '今日发版日 · 新版本整理发布中，稍后刷新即可获取'
-          : `下次预计更新 · ${s.targetMonth}月${s.targetDay}日 20:00（北京时间）`;
+        sub.textContent = s.mode === 'released_today'
+          ? `${verTag} 已于今日发布 · 下次预计更新 ${s.targetMonth}月${s.targetDay}日 14:00（北京时间）`
+          : (s.mode === 'shipping'
+            ? '今日发版日 · 新版本整理发布中，稍后刷新即可获取'
+            : `下次预计更新 · ${s.targetMonth}月${s.targetDay}日 14:00（北京时间）`);
       }
       if (daysEl) daysEl.textContent = String(s.days);
       if (hoursEl) hoursEl.textContent = hh;
@@ -3810,9 +3853,11 @@ function initWeeklyReleaseCountdown() {
       if (secsEl) secsEl.textContent = ss;
       if (fillEl) fillEl.style.width = `${s.progressPct.toFixed(1)}%`;
       if (progLabel) {
-        progLabel.textContent = s.isReleaseWindow
-          ? '本周打磨进度 · 100%（发版中）'
-          : `本周打磨进度 · ${Math.round(s.progressPct)}%`;
+        progLabel.textContent = s.mode === 'released_today'
+          ? '本周打磨进度 · 100%（已发布）'
+          : (s.mode === 'shipping'
+            ? '本周打磨进度 · 100%（发版中）'
+            : `本周打磨进度 · ${Math.round(s.progressPct)}%`);
       }
     }
   }
@@ -3838,4 +3883,22 @@ function initWeeklyReleaseCountdown() {
       startTick();
     }
   });
+
+  if (typeof fetch === 'function') {
+    fetch('downloads/latest.json', { cache: 'no-store' })
+      .then(res => (res && res.ok ? res.json() : null))
+      .then(data => {
+        if (!data || typeof data.updated_at !== 'string') return;
+        const cleanDate = data.updated_at.trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) return;
+        if (!releasedDate || cleanDate >= releasedDate) {
+          releasedDate = cleanDate;
+          if (typeof data.version === 'string' && data.version.trim()) {
+            latestVersion = data.version.trim();
+          }
+          render();
+        }
+      })
+      .catch(() => {});
+  }
 }

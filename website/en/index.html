@@ -1902,7 +1902,7 @@
               <span class="release-ver font-mono">v0.8.0</span>
               <span class="release-sep" aria-hidden="true">·</span>
               <span id="hero-release-label">Weekly Sunday release</span>
-              <span class="hero-kicker-countdown font-mono" id="hero-release-timer" aria-live="off">Sun 20:00</span>
+              <span class="hero-kicker-countdown font-mono" id="hero-release-timer" aria-live="off">Sun 14:00</span>
               <svg class="arrow-nudge" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="5" y1="12" x2="19" y2="12"></line>
                 <polyline points="12 5 19 12 12 19"></polyline>
@@ -2625,15 +2625,15 @@
           <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.8.0" target="_blank" rel="noopener noreferrer" class="btn-outline">GitHub Release v0.8.0 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-left:2px;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg></a>
         </div>
 
-        <div class="release-cadence-bar spotlight-surface" id="weekly-release-bar" data-reveal>
+        <div class="release-cadence-bar spotlight-surface" id="weekly-release-bar" data-latest-version="0.8.0" data-released-date="2026-11-22" data-reveal>
           <div class="rcb-top">
             <div class="rcb-lead">
               <div class="rcb-title-row">
                 <span class="rcb-dot" aria-hidden="true"></span>
                 <span class="rcb-title">Weekly Sunday Release</span>
-                <span class="rcb-cadence-tag">Sun 20:00 UTC+8</span>
+                <span class="rcb-cadence-tag">Sun 14:00 UTC+8</span>
               </div>
-              <div class="rcb-sub" id="rcb-sub">Next scheduled release · Sunday 20:00 (Beijing Time)</div>
+              <div class="rcb-sub" id="rcb-sub">Next scheduled release · Sunday 14:00 (Beijing Time)</div>
             </div>
             <div class="rcb-timer" id="rcb-timer" aria-label="Countdown to next Sunday release">
               <span class="rcb-unit"><span class="rcb-num" id="rcb-days">--</span><span class="rcb-lbl">d</span></span>
@@ -2644,13 +2644,13 @@
               <span class="rcb-colon" aria-hidden="true">:</span>
               <span class="rcb-unit"><span class="rcb-num" id="rcb-secs">--</span><span class="rcb-lbl">s</span></span>
             </div>
-            <div class="rcb-live-badge" id="rcb-live-badge" role="status">Release Day · New build rolling out</div>
+            <div class="rcb-live-badge" id="rcb-live-badge" role="status">v0.8.0 Released Today</div>
           </div>
           <div class="rcb-progress-wrap" aria-hidden="true">
             <div class="rcb-track"><div class="rcb-fill" id="rcb-fill"></div></div>
             <div class="rcb-progress-meta">
               <span id="rcb-progress-label">Weekly cycle · --%</span>
-              <span id="rcb-target-label">Every Sun 20:00 UTC+8</span>
+              <span id="rcb-target-label">Every Sun 14:00 UTC+8</span>
             </div>
           </div>
         </div>
@@ -4941,32 +4941,59 @@ Verify ~/.local/state/nyairo/install.json shows v0.8.0, run scripts/verify_manif
         });
       }
 
-      function computeWeeklyReleaseState(nowMs) {
+      function parseBjtDateMidnightShifted(dateStr) {
+        if (!dateStr || typeof dateStr !== 'string') return null;
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
+        if (!m) return null;
+        return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      }
+
+      function computeWeeklyReleaseState(nowMs, releasedDateStr) {
         var BJT_OFFSET = 8 * 3600000;
-        var WEEK_MS = 7 * 86400000;
+        var DAY_MS = 86400000;
+        var WEEK_MS = 7 * DAY_MS;
+        var RELEASE_HOUR = 14;
+
         var bj = new Date(nowMs + BJT_OFFSET);
         var dow = bj.getUTCDay();
         var bjHour = bj.getUTCHours();
-        var isReleaseWindow = dow === 0 && bjHour >= 20;
-
         var todayMidnightShifted = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate());
-        var daysToSun = dow === 0 ? 0 : 7 - dow;
-        var targetShifted = todayMidnightShifted + daysToSun * 86400000 + 20 * 3600000;
+        var daysToThisSun = dow === 0 ? 0 : 7 - dow;
+        var thisSunMidnightShifted = todayMidnightShifted + daysToThisSun * DAY_MS;
+        var weekStartMonShifted = thisSunMidnightShifted - 6 * DAY_MS;
+
+        var relMidnightShifted = parseBjtDateMidnightShifted(releasedDateStr);
+        var isReleasedToday = relMidnightShifted !== null && relMidnightShifted === todayMidnightShifted;
+        var isThisWeekAlreadyReleased =
+          relMidnightShifted !== null &&
+          relMidnightShifted >= weekStartMonShifted &&
+          relMidnightShifted <= thisSunMidnightShifted;
+
+        var targetMidnightShifted = isThisWeekAlreadyReleased
+          ? (thisSunMidnightShifted + WEEK_MS)
+          : thisSunMidnightShifted;
+        var isShippingWindow = !isThisWeekAlreadyReleased && dow === 0 && bjHour >= RELEASE_HOUR;
+        var mode = isReleasedToday ? 'released_today' : (isShippingWindow ? 'shipping' : 'countdown');
+        var isReleaseDay = mode !== 'countdown';
+
+        var targetShifted = targetMidnightShifted + RELEASE_HOUR * 3600000;
         var targetUtcMs = targetShifted - BJT_OFFSET;
 
-        var remainingMs = isReleaseWindow ? 0 : Math.max(0, targetUtcMs - nowMs);
+        var remainingMs = isReleaseDay ? 0 : Math.max(0, targetUtcMs - nowMs);
         var totalSec = Math.floor(remainingMs / 1000);
         var days = Math.floor(totalSec / 86400);
         var hours = Math.floor((totalSec % 86400) / 3600);
         var mins = Math.floor((totalSec % 3600) / 60);
         var secs = totalSec % 60;
 
-        var elapsedMs = isReleaseWindow ? WEEK_MS : Math.max(0, Math.min(WEEK_MS, WEEK_MS - remainingMs));
-        var progressPct = isReleaseWindow ? 100 : Math.max(0, Math.min(100, (elapsedMs / WEEK_MS) * 100));
+        var elapsedMs = isReleaseDay ? WEEK_MS : Math.max(0, Math.min(WEEK_MS, WEEK_MS - remainingMs));
+        var progressPct = isReleaseDay ? 100 : Math.max(0, Math.min(100, (elapsedMs / WEEK_MS) * 100));
         var targetDate = new Date(targetShifted);
 
         return {
-          isReleaseWindow: isReleaseWindow,
+          mode: mode,
+          isReleaseDay: isReleaseDay,
+          isReleasedToday: isReleasedToday,
           days: days,
           hours: hours,
           mins: mins,
@@ -4983,6 +5010,7 @@ Verify ~/.local/state/nyairo/install.json shows v0.8.0, run scripts/verify_manif
         var pillTimer = document.getElementById('hero-release-timer');
         var bar = document.getElementById('weekly-release-bar');
         var sub = document.getElementById('rcb-sub');
+        var liveBadge = document.getElementById('rcb-live-badge');
         var daysEl = document.getElementById('rcb-days');
         var hoursEl = document.getElementById('rcb-hours');
         var minsEl = document.getElementById('rcb-mins');
@@ -4991,32 +5019,47 @@ Verify ~/.local/state/nyairo/install.json shows v0.8.0, run scripts/verify_manif
         var progLabel = document.getElementById('rcb-progress-label');
         if (!pill && !bar) return;
 
+        var latestVersion = (bar && bar.getAttribute('data-latest-version')) || '0.8.0';
+        var releasedDate = (bar && bar.getAttribute('data-released-date')) || '2026-11-22';
+
         var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         var pad2 = function (n) { return String(n).padStart(2, '0'); };
         var timerId = null;
 
         function render() {
-          var s = computeWeeklyReleaseState(Date.now());
+          var s = computeWeeklyReleaseState(Date.now(), releasedDate);
+          var verTag = 'v' + String(latestVersion || '0.8.0').replace(/^v+/i, '');
           var hh = pad2(s.hours);
           var mm = pad2(s.mins);
           var ss = pad2(s.secs);
 
           if (pill) {
-            pill.classList.toggle('is-release-day', s.isReleaseWindow);
-            if (pillLabel) pillLabel.textContent = s.isReleaseWindow ? 'Sunday release' : 'Weekly Sunday release';
+            pill.classList.toggle('is-release-day', s.isReleaseDay);
+            if (pillLabel) {
+              pillLabel.textContent = s.mode === 'released_today'
+                ? 'New release'
+                : (s.mode === 'shipping' ? 'Sunday release' : 'Weekly Sunday release');
+            }
             if (pillTimer) {
-              pillTimer.textContent = s.isReleaseWindow
-                ? 'Live today'
-                : (s.days + 'd ' + hh + ':' + mm + ':' + ss);
+              pillTimer.textContent = s.mode === 'released_today'
+                ? 'Released today'
+                : (s.mode === 'shipping' ? 'Shipping now' : (s.days + 'd ' + hh + ':' + mm + ':' + ss));
             }
           }
 
           if (bar) {
-            bar.classList.toggle('is-release-day', s.isReleaseWindow);
+            bar.classList.toggle('is-release-day', s.isReleaseDay);
+            if (liveBadge) {
+              liveBadge.textContent = s.mode === 'released_today'
+                ? (verTag + ' Released Today')
+                : 'Release Day · New build rolling out';
+            }
             if (sub) {
-              sub.textContent = s.isReleaseWindow
-                ? 'Release Day · New build rolling out, refresh later to download'
-                : ('Next scheduled release · ' + MONTHS[s.targetMonth - 1] + ' ' + s.targetDay + ', 20:00 (Beijing Time)');
+              sub.textContent = s.mode === 'released_today'
+                ? (verTag + ' released today · Next scheduled release ' + MONTHS[s.targetMonth - 1] + ' ' + s.targetDay + ', 14:00 (Beijing Time)')
+                : (s.mode === 'shipping'
+                  ? 'Release Day · New build rolling out, refresh later to download'
+                  : ('Next scheduled release · ' + MONTHS[s.targetMonth - 1] + ' ' + s.targetDay + ', 14:00 (Beijing Time)'));
             }
             if (daysEl) daysEl.textContent = String(s.days);
             if (hoursEl) hoursEl.textContent = hh;
@@ -5024,9 +5067,11 @@ Verify ~/.local/state/nyairo/install.json shows v0.8.0, run scripts/verify_manif
             if (secsEl) secsEl.textContent = ss;
             if (fillEl) fillEl.style.width = s.progressPct.toFixed(1) + '%';
             if (progLabel) {
-              progLabel.textContent = s.isReleaseWindow
-                ? 'Weekly cycle · 100% (Shipping)'
-                : ('Weekly cycle · ' + Math.round(s.progressPct) + '%');
+              progLabel.textContent = s.mode === 'released_today'
+                ? 'Weekly cycle · 100% (Live)'
+                : (s.mode === 'shipping'
+                  ? 'Weekly cycle · 100% (Shipping)'
+                  : ('Weekly cycle · ' + Math.round(s.progressPct) + '%'));
             }
           }
         }
@@ -5052,6 +5097,24 @@ Verify ~/.local/state/nyairo/install.json shows v0.8.0, run scripts/verify_manif
             startTick();
           }
         });
+
+        if (typeof fetch === 'function') {
+          fetch('../downloads/latest.json', { cache: 'no-store' })
+            .then(function (res) { return res && res.ok ? res.json() : null; })
+            .then(function (data) {
+              if (!data || typeof data.updated_at !== 'string') return;
+              var cleanDate = data.updated_at.trim();
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) return;
+              if (!releasedDate || cleanDate >= releasedDate) {
+                releasedDate = cleanDate;
+                if (typeof data.version === 'string' && data.version.trim()) {
+                  latestVersion = data.version.trim();
+                }
+                render();
+              }
+            })
+            .catch(function () {});
+        }
       }
 
       function bootstrap() {
