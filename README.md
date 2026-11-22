@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0"><img src="https://img.shields.io/badge/release-v0.7.0-334155.svg" alt="v0.7.0"></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.8.0"><img src="https://img.shields.io/badge/release-v0.8.0-334155.svg" alt="v0.8.0"></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -17,7 +17,7 @@
 >
 > nyairo 是一个开源的数字个体框架，让 AI 拥有本地长期记忆、可自由生成与编辑的虚拟街区与房间，以及按真实时间流动的日常。你们的每一次对话，不再是一次性客套的问答，而是发生在一个看得见房间、走得出门的日常场景里（名字、人称与性格完全由你定）。
 >
-> **当前可下载安装包：v0.7.0（GitHub prerelease 公开测试版）** — 提供原生 [Windows 桌面端安装包](https://nyairo.com/downloads/nyairo-0.7.0-setup.exe)（约 5.6 MB，免管理员权限）以及 Linux / WSL 运行包。包含免选风貌的全随机专属世界一键生成与深浅双色离线地图编辑器、12 类街区店铺与开放柜台自由点单、去工具人化的日常自主拒绝边界与按真实日程异步回信、随身包袋 3 层嵌套与冷热干湿物态、双层回忆灯原稿保护与无损搬家旅行箱 `.nyairo-suitcase.zip`、每日用量预算以及双人共读批注。它不是正式稳定版，升级个人实例前请先备份 `~/.nyairo`。旧的 v0.6.0、v0.5.1、v0.4.0、v0.3.0、v0.2.0-rc3 安装包与标签保持原样，仍可下载。
+> **当前可下载安装包：v0.8.0（GitHub prerelease 公开测试版）** — 提供原生 [Windows 桌面端安装包](https://nyairo.com/downloads/nyairo-0.8.0-setup.exe)（约 6.0 MB，免管理员权限）以及 Linux / WSL 运行包。在 0.7 的全随机世界与离线地图编辑器之上，完整收口 0.2 真实生活闭环：省电休眠档与唤醒合并计数闭环、外置回滚隔离区防止恢复旧备份导致已忘记录复活、零写盘实时真实度白话回执、每轮对话自动接入伴侣侧一键遗忘暂停、工作台草稿外部改动防覆盖核对、公开残片回收夹与阶段生活小结卡片，以及 12 项跨重启/遗忘/迁移端到端验收。并重磅上线「先各自选 · 再揭晓」双边盲选与反奉承真立场保留、外接大模型「AI 脑洞上新」（兼离线免费模式）与零空转承诺驱动街坊引擎、旧物新用物理占用约束、空白起步自发明分类架，以及桌面端首页三联互动卡与聊天工具原生打通。它不是正式稳定版，升级个人实例前请先备份 `~/.nyairo`。旧的 v0.7.0、v0.6.0、v0.5.1、v0.4.0、v0.3.0、v0.2.0-rc3 安装包与标签保持原样，仍可下载。
 >
 > 在 Linux 或 Windows 的 WSL 终端里，输入这一行就能装好：
 > `curl -fsSL https://nyairo.com/install.sh | bash`
@@ -28,17 +28,17 @@
 nyairo is an open-source (Apache-2.0) digital life framework that provides an AI with a virtual world, persistent local memory, and continuous daily routines.
 
 - Local continuity: All memories, dual-layer protected transcripts, and portable `.nyairo-suitcase.zip` archives stay locally in `~/.nyairo`.
-- Virtual environment: Procedural zero-preset world generation, 7 built-in towns, a dark/light offline visual world editor, 12 shop categories with open-counter ordering, and physical matter states.
+- Virtual environment & living agency (v0.8.0): Procedural zero-preset world generation, 7 built-in towns, a dark/light offline visual world editor, 12 shop categories with open-counter ordering, external LLM dynamic shelf refresh (plus free offline mode), zero-idle commitment-driven NPC town engine, two-way SHA-256 sealed blind choices with non-sycophantic stance retention, and repurposed objects with physical occupancy guards.
 
-The recommended Windows install is the native Desktop app (~5.6 MB, no admin rights, paired with WSL 2 Ubuntu):
-`https://nyairo.com/downloads/nyairo-0.7.0-setup.exe`
+The recommended Windows install is the native Desktop app (~6.0 MB, no admin rights, paired with WSL 2 Ubuntu):
+`https://nyairo.com/downloads/nyairo-0.8.0-setup.exe`
 
 Install via Linux or WSL:
 `curl -fsSL https://nyairo.com/install.sh | bash`
 
 nyairo is BYOK-first: the deterministic spatial / walking / matter / permission backbone keeps daily life continuous without spending extra tokens on a judge model, so ordinary models such as DeepSeek, Qwen or a local Ollama work too.
 
-*Note: This is an open test version (v0.7.0), not a stable release.*
+*Note: This is an open test version (v0.8.0), not a stable release.*
 
 If you find this journey of giving AI a continuous life interesting, starring the repo is the best support for us.
 
@@ -46,6 +46,7 @@ If you find this journey of giving AI a continuous life interesting, starring th
 
 ## 核心特性
 
+- **「先各自选 · 再揭晓」真立场留痕、外接模型脑洞上新与旧物自创分类（v0.8.0）**：支持 SHA-256 暗中封存的双向盲选（揭晓前严格掩码不透题，面对硬劝坚持原选顾虑不滑跪）；支持外接大模型「AI 脑洞上新」（亦可随时切回离线免费）与零空转街坊承诺引擎；旧物可贴签改用并受物理占用约束（杯里插笔暂不可泡茶），分类架从空白起步由 TA 自己起名挪位，同时打通首页三联互动卡与聊天工具。
 - **出门真的在走路，12 类街区店铺开放点单**：告别传统聊天框里一句话瞬间瞬移的违和感。出门去便利店走 5 分钟、去公园走 9 分钟，半路问起会如实说还在路上，中转路线自动接力走完；支持 12 类街区店铺与开放柜台自由点单（比如顺路去便利店买一份热关东煮），旧书店与咖啡屋店主拥有独立错峰作息，并支持在吧台留下杯垫留言。
 - **有分寸的日常相处：自主拒绝边界与异步回信**：告别百依百顺的工具人客服模板——遇到不想应承的琐事，TA 会干脆拒绝，不念抱歉套话也不记仇；支持按真实日程隔几小时异步回信，睡眠、外出或专注时将非急事收入手机待回匣，真有急事可敲门找 TA。开启后台自主活动后还会按每日用量上限自己散步、看风景或写随笔（默认关闭，按需开启）。
 - **免选风貌全随机专属世界 + 7 套内置世界 + 深浅双色离线编辑器**：除随包附带海滨「凪浦（凪读作「止」zhǐ）」、温泉「汤川」、田园「穗村」、街区「栞泽（栞读作「刊」kān）」等 7 套世界与 4 种主题生成器外，现已支持**免选风貌的全随机专属世界一键生成**（6 种地貌混搭、4 种异构路网、8 类商业店铺与多房间住宅），并自带支持深浅双色切换的离线可视化世界编辑器画墙、装门、摆家具与设店面。
@@ -86,13 +87,13 @@ If you find this journey of giving AI a continuous life interesting, starring th
 
 ### 方式一（推荐 · Windows 原生桌面端）
 
-Windows 10 / 11 用户可直接下载约 **5.6 MB** 的原生桌面安装包，免管理员权限，双击即可安装并图形化引导配好系统自带的 WSL 2（Ubuntu）运行环境：
+Windows 10 / 11 用户可直接下载约 **6.0 MB** 的原生桌面安装包，免管理员权限，双击即可安装并图形化引导配好系统自带的 WSL 2（Ubuntu）运行环境：
 
 ```text
-https://nyairo.com/downloads/nyairo-0.7.0-setup.exe
+https://nyairo.com/downloads/nyairo-0.8.0-setup.exe
 ```
 
-- 安装包 SHA256：`174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8`（首次打开若弹出 Windows SmartScreen「Windows 已保护你的电脑」提示，点击「更多信息」核对 SHA256 后点击「仍要运行」即可，官网文档附有两步矢量图解）；
+- 安装包 SHA256：`36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8`（首次打开若弹出 Windows SmartScreen「Windows 已保护你的电脑」提示，点击「更多信息」核对 SHA256 后点击「仍要运行」即可，官网文档附有两步矢量图解）；
 - 零门槛接入模型：新手可在 DeepSeek 开放平台（`platform.deepseek.com`）充值 5–10 元创建 `sk-...` 密钥填入桌面端「设置 -> 模型」，或直连本机免费的 Ollama（`http://127.0.0.1:11434`）实现零云端流量对话；
 - 支持个人微信扫码直连，手机与桌面共用同一份本地数据与手机异步待回匣；
 - 内置免选风貌全随机专属世界一键生成、7 套风貌小镇与深浅双色离线地图编辑器，12 类街区店铺开放点单；
@@ -110,11 +111,11 @@ curl -fsSL https://nyairo.com/install.sh | bash
 想先校验再运行：
 
 ```bash
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256
-python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0" && bash scripts/bootstrap.sh
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0" && bash scripts/bootstrap.sh
 ```
 
 - 安装过程会自动准备好 Python 3.13 与运行环境，下载好校验过的版本，并为你建好独立的数据目录；
@@ -153,7 +154,7 @@ cd "$HOME/apps/nyairo-v0.7.0" && bash scripts/bootstrap.sh
 
 nyairo 把软件本身和属于你的生活数据分得很清楚：
 
-- **程序文件**：`~/.local/share/nyairo/releases/v0.7.0`（运行程序的地方，更新时会整体替换）
+- **程序文件**：`~/.local/share/nyairo/releases/v0.8.0`（运行程序的地方，更新时会整体替换）
 - **你的数据**：`~/.nyairo`（存放人设、日常数据库、双层回忆灯记忆账本与配置文件）
 - **启动入口**：`~/.local/bin/nyairo`（在终端里随时唤起对话的快捷入口）
 
@@ -178,7 +179,7 @@ nyairo 把软件本身和属于你的生活数据分得很清楚：
 - **Telegram 官方频道**：[https://t.me/nyairoai](https://t.me/nyairoai)
 - **快速起步上手指南**：[https://nyairo.com/#quickstart](https://nyairo.com/#quickstart)
 - **版本更新动态与说明**：[https://nyairo.com/#changelog](https://nyairo.com/#changelog)
-- **最新 Release 下载与校验包**：[GitHub Releases v0.7.0](https://github.com/L1AN929/nyairo/releases/tag/v0.7.0)（旧 `v0.6.0`、`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 仍在 Releases 页面）
+- **最新 Release 下载与校验包**：[GitHub Releases v0.8.0](https://github.com/L1AN929/nyairo/releases/tag/v0.8.0)（旧 `v0.7.0`、`v0.6.0`、`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 仍在 Releases 页面）
 
 ---
 

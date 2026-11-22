@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import copy
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -23,10 +24,12 @@ from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORLD_SCRIPTS = REPO_ROOT / "components" / "world" / "scripts"
-for _entry in (str(REPO_ROOT), str(_WORLD_SCRIPTS)):
+_LIFE_SCRIPTS = REPO_ROOT / "components" / "life" / "scripts"
+for _entry in (str(REPO_ROOT), str(_WORLD_SCRIPTS), str(_LIFE_SCRIPTS)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)
 
+from components.life.scripts import v02_representation_lease_forget as _rlf
 from components.world.scripts import v03_economy_illness_bridge as bridge
 
 V03_ECOLOGY_SCHEMA = "phone.v03.ecology.v1"
@@ -91,6 +94,23 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "amount_cents",
         "note",
         "shared_with_partner",
+    }),
+    "offer_item_gift": COMMON_COMMAND_FIELDS | frozenset({
+        "item_label_cn",
+        "item_kind",
+        "estimated_jpy",
+        "target_zone_id",
+        "note",
+        "context_tag",
+    }),
+    "withdraw_item_gift": COMMON_COMMAND_FIELDS | frozenset({
+        "gift_id",
+    }),
+    "decide_item_gift": COMMON_COMMAND_FIELDS | frozenset({
+        "gift_id",
+        "decision",
+        "note",
+        "private_note",
     }),
     # Module B: Embodied Strain & Multi-Day Illness Self-Healing (Ch. 05 + ADR-041)
     "record_strain_or_rest": COMMON_COMMAND_FIELDS | frozenset({
@@ -169,6 +189,8 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
 PARTNER_ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "offer_stipend",
     "withdraw_stipend",
+    "offer_item_gift",
+    "withdraw_item_gift",
     "offer_sick_care",
     "push_external_fact",
     "ack_outbound_read",
@@ -182,6 +204,7 @@ SUBJECT_ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "deliberate_purchase",
     "decide_stipend",
     "spend_from_stipend",
+    "decide_item_gift",
     "record_strain_or_rest",
     "advance_illness_recovery",
     "push_external_fact",
@@ -205,10 +228,70 @@ def _error_response(
         "command_status": "REJECTED",
         "schema": V03_ECOLOGY_SCHEMA,
         "reason_code": str(reason_code),
+        "llm_calls": 0,
     }
     if details:
         body.update(dict(details))
     return int(status_code), body
+
+
+def _apply_forget_barrier(
+    envelope: Mapping[str, Any],
+    barrier: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Filter economy, illness, and reality-bridge collections through the zero-write forget barrier."""
+    out = copy.deepcopy(dict(envelope))
+    data = out.get("data")
+    if not isinstance(data, dict):
+        return out
+    fail_closed = bool(barrier.get("fail_closed"))
+
+    eco = data.get("economy")
+    if isinstance(eco, dict):
+        for eco_list in (
+            "savings_goals",
+            "budget_deliberations",
+            "partner_stipend_escrow",
+            "item_gift_escrow",
+            "ledger_entries",
+        ):
+            if isinstance(eco.get(eco_list), list):
+                eco[eco_list] = _rlf.filter_collection_by_barrier(eco[eco_list], barrier)
+        if isinstance(eco.get("item_gift_escrow"), list) and "item_gift_escrow_pending_count" in eco:
+            eco["item_gift_escrow_pending_count"] = sum(
+                1
+                for item in eco["item_gift_escrow"]
+                if isinstance(item, Mapping)
+                and str(item.get("status") or "").strip().lower() in ("offered", "pending")
+            )
+
+    ill = data.get("illness")
+    if isinstance(ill, dict):
+        for ill_list in ("strain_events", "archived_episodes", "recovery_supports", "care_logs"):
+            if isinstance(ill.get(ill_list), list):
+                ill[ill_list] = _rlf.filter_collection_by_barrier(ill[ill_list], barrier)
+        ep_id = ill.get("episode_id")
+        if fail_closed or (isinstance(ep_id, str) and ep_id.strip() and _rlf.is_entity_forget_blocked(ill, barrier)):
+            ill["episode_id"] = None
+            ill["episode_origin"] = None
+            ill["episode_opened_at"] = None
+            if isinstance(ill.get("strain_events"), list):
+                ill["strain_events"] = []
+            if isinstance(ill.get("archived_episodes"), list):
+                ill["archived_episodes"] = []
+
+    rb = data.get("reality_bridge")
+    if isinstance(rb, dict):
+        for rb_list in ("external_claims", "slow_letters"):
+            if isinstance(rb.get(rb_list), list):
+                rb[rb_list] = _rlf.filter_collection_by_barrier(rb[rb_list], barrier)
+        og = rb.get("outbound_gate")
+        if isinstance(og, dict):
+            for og_list in ("outbound_records", "contextual_replies"):
+                if isinstance(og.get(og_list), list):
+                    og[og_list] = _rlf.filter_collection_by_barrier(og[og_list], barrier)
+
+    return out
 
 
 def read_v03_ecology_view(
@@ -217,12 +300,16 @@ def read_v03_ecology_view(
     has_subject_capability: bool = False,
     now_iso: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Read v0.3/v3.0 ecology projection with 100% zero disk writes."""
+    """Read v0.3/v3.0 ecology projection with 100% zero disk writes and unified forget barrier enforcement."""
     try:
-        envelope = bridge.project_v03_ecology(
-            Path(day_root),
-            has_subject_capability=bool(has_subject_capability),
-            now_iso=now_iso,
+        barrier = _rlf.load_unified_forget_barrier_readonly(day_root)
+        envelope = _apply_forget_barrier(
+            bridge.project_v03_ecology(
+                Path(day_root),
+                has_subject_capability=bool(has_subject_capability),
+                now_iso=now_iso,
+            ),
+            barrier,
         )
         return 200, envelope
     except bridge.V03EcologyError as exc:

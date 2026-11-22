@@ -1,4 +1,4 @@
-> **v0.7.0 公开测试版说明**：当前发行树清单校验（`scripts/verify_manifest.py`）、公开源码脱敏扫描（`scripts/scan_public_source.py`）、引导安装器一致性（`tests/test_bootstrap_installer.py`）、发行元数据对齐（`tests/test_release_metadata.py`）与门面卫生检查（`tests/test_v08_storefront_and_manifest_hygiene.py`）均作为本地自动化门禁核验。下文完整保留 `v0.3` / `v0.2` 阶段的历史验收记录与实测数据，不冒充跨版本新跑长测。
+> **v0.8.0 公开测试版说明**：当前发行树清单校验（`scripts/verify_manifest.py`）、公开源码脱敏扫描（`scripts/scan_public_source.py`）、引导安装器一致性（`tests/test_bootstrap_installer.py`）、发行元数据对齐（`tests/test_release_metadata.py`）与门面卫生检查（`tests/test_v08_storefront_and_manifest_hygiene.py`）均作为本地自动化门禁核验。下文完整保留 `v0.3` / `v0.2` 阶段的历史验收记录与实测数据，不冒充跨版本新跑长测。
 
 > **v0.3 源码验收（历史记录）**：8 组、51 个选定检查通过，零失败/错误/跳过；覆盖新行为、关键负控/恢复及一次同实例街区连续链，不是全仓测试声明。真实本地 owners + 确定性/loopback 替身；未验证新增链真实模型一天、24h、安装迁移或生产部署。[最终验收与失败历史](docs/engineering/v03-final-acceptance.md) · [对比 v0.2](docs/engineering/v03-vs-v02.md)。以下历史数字不继承为 v0.3 新运行结果。
 

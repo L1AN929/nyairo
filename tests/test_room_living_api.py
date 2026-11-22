@@ -139,8 +139,11 @@ class StubShopping:
         self.calls.append(("store",))
         return dict(self._store)
 
-    def store_purchase(self, catalog_item_id, operation_key):
-        self.calls.append(("store_purchase", catalog_item_id, operation_key))
+    def store_purchase(self, catalog_item_id, operation_key, *, item_name=None):
+        if item_name is None:
+            self.calls.append(("store_purchase", catalog_item_id, operation_key))
+        else:
+            self.calls.append(("store_purchase", catalog_item_id, operation_key, item_name))
         return dict(self._purchase)
 
 
@@ -337,6 +340,33 @@ class StorePurchaseTest(RoomAPIBase):
         self.assertEqual(rows[0]["operation_key"], "buy-1")
         self.assertEqual(rows[0]["actor"], "model")
         self.assertIs(rows[0]["ok"], True)
+
+    def test_open_counter_purchase_forwards_optional_item_name_and_validates_shape(self) -> None:
+        self.build()
+        code, doc = self.purchase(
+            {
+                "catalog_item_id": "shop_slot:convenience_store:drink:budget",
+                "item_name": "草莓牛奶",
+                "operation_key": "buy-slot-1",
+            },
+            headers={"X-Phone-Actor": "model"},
+        )
+        self.assertEqual(code, 200)
+        self.assertIs(doc["ok"], True)
+        self.assertEqual(
+            self.shopping.calls,
+            [("store_purchase", "shop_slot:convenience_store:drink:budget", "buy-slot-1", "草莓牛奶")],
+        )
+        for bad_name in ("", 123, "x" * 41):
+            with self.subTest(bad_name=bad_name):
+                code, err = self.purchase(
+                    {
+                        "catalog_item_id": "shop_slot:convenience_store:drink:budget",
+                        "item_name": bad_name,
+                        "operation_key": "buy-slot-bad",
+                    }
+                )
+                self.assertEqual((code, err["reason_code"]), (400, "ITEM_NAME_INVALID"))
 
     def test_owner_word_is_never_upgraded(self) -> None:
         for status, code_expected in (("already_applied", 200), ("rejected", 409),
@@ -714,8 +744,13 @@ class FacadeConformanceTest(unittest.TestCase):
         except Exception as exc:  # pragma: no cover - only when C's tree is absent
             self.skipTest("world_phone_shopping not importable here: %s" % type(exc).__name__)
         self.assertEqual(list(inspect.signature(wps.PhoneShopping.store).parameters), ["self"])
-        names = list(inspect.signature(wps.PhoneShopping.store_purchase).parameters)
-        self.assertEqual(names[1:], ["catalog_item_id", "operation_key"])
+        facade_params = inspect.signature(wps.PhoneShopping.store_purchase).parameters
+        service_params = inspect.signature(phone_service.PhoneService.store_purchase).parameters
+        for params in (facade_params, service_params):
+            names = list(params)
+            self.assertEqual(names[1:], ["catalog_item_id", "operation_key", "item_name"])
+            self.assertEqual(params["item_name"].kind, inspect.Parameter.KEYWORD_ONLY)
+            self.assertIsNone(params["item_name"].default)
 
     def test_room_verbs_and_param_tables_match_the_world_facade(self) -> None:
         self._world_scripts()

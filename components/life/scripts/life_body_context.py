@@ -60,6 +60,7 @@ __all__ = [
     "CAPACITY_UNKNOWN",
     "MAX_BURDEN_ENTRIES",
     "MAX_EASING_ENTRIES",
+    "MAX_THERMAL_ENTRIES",
     "RECOVERY_CLAIM_NOT_ASSERTED",
     "RECOVERY_PROGRESS_NOT_READ",
     "RECOVERY_SESSION_CLOSED",
@@ -77,6 +78,7 @@ __all__ = [
     "STATUS_OBSERVED",
     "STATUS_PARTIAL",
     "STATUS_UNKNOWN",
+    "THERMAL_SIGNAL_TYPES",
     "UNKNOWN_BURDEN",
     "UNKNOWN_BURDEN_IS_NOT_HEALTH",
     "UNKNOWN_PROGRESS",
@@ -132,6 +134,7 @@ UNKNOWN_REST_CAPABILITY = "BODY_REST_CAPABILITY_NOT_READ"
 #: How much of one signal list may enter a prompt.  Counts only -- bands are short enums.
 MAX_BURDEN_ENTRIES = 4
 MAX_EASING_ENTRIES = 3
+MAX_THERMAL_ENTRIES = 2
 
 
 def _text(value: Any, limit: int = 48) -> str:
@@ -139,9 +142,10 @@ def _text(value: Any, limit: int = 48) -> str:
 
 
 #: Non-burden vocabulary split: only the three *trend* signals are "easing".  The two thermal
-#: signals (`warmth_high` / `cold_tendency`) say nothing about capability or improvement, so they
-#: are not carried at all rather than being renamed into something they are not.
+#: signals (``warmth_high`` / ``cold_tendency``) are exposed in their own dedicated
+#: ``thermal_signals`` field instead of being conflated with capacity burden or easing.
 _THERMAL_SIGNAL_TYPES = frozenset({"warmth_high", "cold_tendency"})
+THERMAL_SIGNAL_TYPES = _THERMAL_SIGNAL_TYPES
 EASING_SIGNAL_TYPES = frozenset(
     t for t in body_capacity.NON_BURDEN_SIGNAL_TYPES if t not in _THERMAL_SIGNAL_TYPES
 )
@@ -153,10 +157,14 @@ def _signal_rows(evidence: Any, wanted: Sequence[str], limit: int) -> list[dict[
     rows: list[dict[str, Any]] = []
     seen: set = set()
     for raw in list(evidence or ()):
-        text = _text(raw, 80)
-        if not text or ":" not in text:
-            continue
-        signal, band = text.split(":", 1)
+        if isinstance(raw, Mapping):
+            signal = _text(raw.get("signal") or raw.get("signal_type"), 48)
+            band = _text(raw.get("band") or raw.get("qualitative_band"), 24)
+        else:
+            text = _text(raw, 80)
+            if not text or ":" not in text:
+                continue
+            signal, band = text.split(":", 1)
         if signal not in wanted or not band or (signal, band) in seen:
             continue
         seen.add((signal, band))
@@ -246,6 +254,7 @@ def empty_context(reason_code: str, *, detail: str = "") -> dict[str, Any]:
         "capacity": CAPACITY_UNKNOWN,
         "burden": [],
         "easing": [],
+        "thermal_signals": [],
         #: Optional virtual lived-need bands (hunger/thirst/toilet).  ``None``
         #: for every instance without an explicit profile.
         "needs": None,
@@ -270,6 +279,7 @@ def empty_context(reason_code: str, *, detail: str = "") -> dict[str, Any]:
             "reads_performed": 0,
             "max_burden": MAX_BURDEN_ENTRIES,
             "max_easing": MAX_EASING_ENTRIES,
+            "max_thermal": MAX_THERMAL_ENTRIES,
         },
         "not_authority": {
             "candidate": False,
@@ -287,6 +297,7 @@ def build(
     recovery: Optional[Mapping[str, Any]] = None,
     observed_at: Optional[str] = None,
     needs: Optional[Mapping[str, Any]] = None,
+    thermal_signals: Optional[Sequence[Any]] = None,
 ) -> dict[str, Any]:
     """Compile the body column A already read into the bounded body-situation block.
 
@@ -298,7 +309,7 @@ def build(
 
     ``recovery.progress`` is the owner's own qualitative band when it was read, otherwise
     ``NOT_READ`` with that reason in ``unknowns``.  A band is progress of a *session*, not a claim
-    that she recovered: ``claim`` stays ``NOT_ASSERTED`` either way.
+    that TA recovered: ``claim`` stays ``NOT_ASSERTED`` either way.
     """
 
     if not isinstance(body_column, Mapping) or not body_column:
@@ -319,6 +330,12 @@ def build(
     evidence = list(body_column.get("evidence") or [])
     burden = _signal_rows(evidence, body_capacity.BURDEN_SIGNAL_TYPES, MAX_BURDEN_ENTRIES)
     easing = _signal_rows(evidence, EASING_SIGNAL_TYPES, MAX_EASING_ENTRIES)
+    thermal_inputs: list[Any] = []
+    thermal_inputs.extend(list(body_column.get("thermal_signals") or ()))
+    thermal_inputs.extend(evidence)
+    if thermal_signals is not None:
+        thermal_inputs.extend(list(thermal_signals))
+    thermal_rows = _signal_rows(thermal_inputs, THERMAL_SIGNAL_TYPES, MAX_THERMAL_ENTRIES)
     if not burden:
         # No burden signal is an unread/quiet body, not a healthy one.
         unknowns.append(UNKNOWN_BURDEN_IS_NOT_HEALTH)
@@ -374,6 +391,9 @@ def build(
         "capacity_ref": _text(capacity_ref, 96) or None,
         # Qualitative bands only: what the owner noticed, not a number.
         "burden": burden,
+        # Dedicated qualitative thermal signals (warmth_high / cold_tendency),
+        # kept strictly separate from burden and easing.
+        "thermal_signals": thermal_rows,
         # Optional virtual needs (only for an explicitly enabled instance); the
         # band is the owner's own, and ``None`` is "this body has no such state".
         "needs": ({str(name): str(band) for name, band in needs.items()}
@@ -399,6 +419,7 @@ def build(
             "reads_performed": 0,
             "max_burden": MAX_BURDEN_ENTRIES,
             "max_easing": MAX_EASING_ENTRIES,
+            "max_thermal": MAX_THERMAL_ENTRIES,
         },
         "not_authority": {
             "candidate": False,

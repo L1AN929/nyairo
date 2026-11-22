@@ -51,6 +51,7 @@ import json
 import math
 import os
 import re
+import stat
 import sys
 import tempfile
 import unicodedata
@@ -59,6 +60,26 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from . import sensory_character_view as char_view
+
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
+try:  # package import
+    from ..world.scripts import instance_paths as _instance_paths  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback
+    import sys as _sys_world_paths
+
+    _WORLD_PATHS_DIR = Path(__file__).resolve().parents[1] / "world" / "scripts"
+    if str(_WORLD_PATHS_DIR) not in _sys_world_paths.path:
+        _sys_world_paths.path.insert(0, str(_WORLD_PATHS_DIR))
+    import instance_paths as _instance_paths  # type: ignore[no-redef]
 
 ADULT_INTIMACY_SCHEMA = "phone.adult.intimacy.v1"
 STATE_DIRNAME = "phone"
@@ -155,6 +176,13 @@ ROUTE_PROBE_FRESHNESS_SEC = 14 * 86400
 
 SOLO_LEDGER_TTL_SEC = 7 * 86400
 
+#: Round Q1 幂等缓存活动窗口与淘汰环窗口。淘汰只按提交序 ``op_seq`` 从旧到新，
+#: 绝不按序列化后的字典字母序（``sort_keys=True`` 会打乱 op 先后）。
+MAX_IDEMPOTENCY_CACHE = 128
+MAX_COMMITTED_OP_RING = 256
+#: 滑出 ring 窗口的已提交键只保留短摘要墓碑，用于拒绝过期重试（有界，FIFO）。
+MAX_EVICTED_OP_DIGESTS = 512
+
 # ---------------------------------------------------------------------------------------------
 # 36B-4 §9 / 36B §5.4：与共在 owner 的最小接线（T3-wave2，2026-11-14）。
 #
@@ -163,9 +191,10 @@ SOLO_LEDGER_TTL_SEC = 7 * 86400
 #   到终态关闭。**fail-open**：共在系统不可用只记录（``co_presence_binding``），绝不阻断
 #   亲密场景——36B-4 §9：场景不得因共在系统故障而卡死。
 # * 入场断点（36A §11.1 / 36B §5.4）：ACTIVE 时把"被接管的当前活动"存为 permit 记录的
-#   ``checkpoint`` 字段（``activity_ref``/``saved_at``）。本引擎读不到 Life 活动清单，
-#   ``activity_ref=None, saved=False`` 是诚实记录（"未保存"），不虚构引用；AFTERCARE/
-#   STOPPED 时标记 ``resumable=True``。恢复执行不在本批。
+#   ``checkpoint`` 字段（``activity_ref``/``saved_at``）。未显式传入时零写只读探测
+#   ``canonical_life_state.json`` 的活跃前台活动；无活跃前台活动时 ``activity_ref=None,
+#   saved=False`` 是诚实记录（"未保存"），不虚构引用；AFTERCARE/STOPPED 时标记
+#   ``resumable=True``。
 # * 过夜重决定（36B §5.4：``declared_seconds`` 上限 86400 且到期不自续）：跨日 ACTIVE 在
 #   advance_beat 入口强制暂停，``pause_reason=OVERNIGHT_RECONFIRM_REQUIRED``，走既有
 #   双方 confirm_resume 重确认路径（这就是"重新决定"）；带 reason_code。
@@ -463,6 +492,7 @@ SUPPORTED_ACTIONS = (
     "check_outbound_guard",
     "propose_scene",
     "respond_scene",
+    "save_activity_checkpoint",
     "advance_beat",
     "request_widen",
     "answer_widen",
@@ -931,6 +961,175 @@ def _read_emotional_tension_unavailable(
     return bool(dedup), {"unavailable": bool(dedup), "reasons": dedup}
 
 
+def _mood_from_s07_doc_zero_write(doc: Any, now_dt: datetime) -> Optional[str]:
+    """Map live non-expired ``s07_affect_records.json`` entries to ``MOOD_STATES`` (zero-write)."""
+
+    if isinstance(doc, Mapping):
+        explicit_top = doc.get("mood")
+        if isinstance(explicit_top, str) and explicit_top.strip().lower() in MOOD_STATES:
+            return explicit_top.strip().lower()
+        raw_records = doc.get("records")
+    elif isinstance(doc, list):
+        raw_records = doc
+    else:
+        return None
+    if not isinstance(raw_records, list):
+        return None
+
+    live_rows: list[Mapping[str, Any]] = []
+    for item in raw_records:
+        if not isinstance(item, Mapping):
+            continue
+        exp_raw = item.get("expires_at")
+        if isinstance(exp_raw, str) and exp_raw.strip():
+            exp_dt = _parse_stored_iso(exp_raw)
+            if exp_dt is not None and now_dt >= exp_dt:
+                continue
+        raw_int = item.get("intensity")
+        if isinstance(raw_int, (int, float)) and not isinstance(raw_int, bool) and float(raw_int) <= 0:
+            continue
+        live_rows.append(item)
+
+    if not live_rows:
+        return None
+
+    for item in reversed(live_rows):
+        explicit = item.get("mood")
+        if isinstance(explicit, str) and explicit.strip().lower() in MOOD_STATES:
+            return explicit.strip().lower()
+        cue_parts: list[str] = []
+        for field in ("note", "declared_scope", "kind"):
+            val = item.get(field)
+            if isinstance(val, str) and val.strip():
+                cue_parts.append(val.strip().lower())
+        srefs = item.get("source_refs")
+        if isinstance(srefs, list):
+            for sref in srefs:
+                if isinstance(sref, str) and sref.strip():
+                    cue_parts.append(sref.strip().lower())
+        blob = " ".join(cue_parts)
+        if any(tok in blob for tok in ("low", "down", "sad", "upset", "gloom", "低落", "难过", "闷闷", "沮丧", "失落")):
+            return "low"
+        if any(tok in blob for tok in ("tired", "exhaust", "weary", "sleepy", "疲惫", "犯困", "乏力", "好累")):
+            return "tired"
+        if any(tok in blob for tok in ("distract", "restless", "anxious", "busy", "分心", "烦躁", "心不在焉")):
+            return "distracted"
+        if any(tok in blob for tok in ("warm", "cozy", "happy", "fond", "温暖", "开心", "高兴", "舒展", "松弛")):
+            return "warm"
+        if any(tok in blob for tok in ("calm", "peaceful", "平稳", "平静")):
+            return "calm"
+    return None
+
+
+def _read_live_body_and_affect_zero_write(
+    root: Path | str,
+    now_dt: datetime,
+) -> dict[str, Any]:
+    """Pure 100% zero-write read of live ``runtime.json``, ``v03_ecology.json``, and ``s07_affect_records.json``.
+
+    Overlay applies ONLY when ``runtime.json`` exists, preserving standalone manual
+    ``adult_intimacy.json`` test fixtures byte-for-byte.
+    """
+
+    empty: dict[str, Any] = {
+        "runtime_present": False,
+        "fatigue": None,
+        "warmth": None,
+        "thirst": None,
+        "recovery": None,
+        "sleeping_from_recovery": False,
+        "illness_phase": None,
+        "acute_illness": False,
+        "mood": None,
+        "sources": [],
+    }
+    try:
+        paths = _instance_paths.resolve_instance_paths(root)
+    except Exception:
+        return empty
+
+    rt_path = paths.body_runtime_json
+    try:
+        if rt_path.is_symlink() or not rt_path.is_file():
+            return empty
+        rt_doc = json.loads(rt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return empty
+    if not isinstance(rt_doc, Mapping):
+        return empty
+
+    sources: list[str] = ["body_runtime"]
+    fatigue: Optional[float] = None
+    warmth: Optional[float] = None
+    thirst: Optional[float] = None
+    recovery_out: Optional[dict[str, Any]] = None
+    sleeping_from_recovery = False
+
+    somatic = rt_doc.get("somatic")
+    if isinstance(somatic, Mapping):
+        raw_fat = somatic.get("fatigue")
+        if isinstance(raw_fat, (int, float)) and not isinstance(raw_fat, bool) and math.isfinite(float(raw_fat)):
+            fatigue = round(max(0.0, min(1.0, float(raw_fat))), 4)
+        raw_warmth = somatic.get("warmth")
+        if isinstance(raw_warmth, (int, float)) and not isinstance(raw_warmth, bool) and math.isfinite(float(raw_warmth)):
+            warmth = round(max(0.0, min(1.0, float(raw_warmth))), 4)
+
+    lived_needs = rt_doc.get("lived_needs")
+    if isinstance(lived_needs, Mapping):
+        levels = lived_needs.get("levels")
+        if isinstance(levels, Mapping):
+            raw_thirst = levels.get("thirst")
+            if isinstance(raw_thirst, (int, float)) and not isinstance(raw_thirst, bool) and math.isfinite(float(raw_thirst)):
+                thirst = round(max(0.0, min(1.0, float(raw_thirst))), 4)
+
+    recovery = rt_doc.get("recovery")
+    if isinstance(recovery, Mapping):
+        rec_state = str(recovery.get("state") or "inactive").strip().lower()
+        rec_mode = str(recovery.get("mode") or "").strip().lower() or None
+        recovery_out = {"state": rec_state, "mode": rec_mode}
+        sleeping_from_recovery = rec_state == "active" and rec_mode == "sleep_like"
+
+    illness_phase: Optional[str] = None
+    acute_illness = False
+    eco_path = paths.day_root / STATE_DIRNAME / "v03_ecology.json"
+    try:
+        if eco_path.is_file() and not eco_path.is_symlink():
+            eco_doc = json.loads(eco_path.read_text(encoding="utf-8"))
+            if isinstance(eco_doc, Mapping) and isinstance(eco_doc.get("illness"), Mapping):
+                illness_phase = str(eco_doc["illness"].get("phase") or "healthy").strip().lower()
+                acute_illness = illness_phase == "acute_illness"
+                sources.append("v03_ecology")
+    except (OSError, ValueError):
+        pass
+
+    mood: Optional[str] = None
+    for s07_path in (
+        paths.day_root / "life" / "s07_affect_records.json",
+        paths.life_state_root / "s07_affect_records.json",
+    ):
+        try:
+            if s07_path.is_file() and not s07_path.is_symlink():
+                s07_doc = json.loads(s07_path.read_text(encoding="utf-8"))
+                mood = _mood_from_s07_doc_zero_write(s07_doc, now_dt)
+                sources.append("s07_affect")
+                break
+        except (OSError, ValueError):
+            continue
+
+    return {
+        "runtime_present": True,
+        "fatigue": fatigue,
+        "warmth": warmth,
+        "thirst": thirst,
+        "recovery": recovery_out,
+        "sleeping_from_recovery": sleeping_from_recovery,
+        "illness_phase": illness_phase,
+        "acute_illness": acute_illness,
+        "mood": mood,
+        "sources": sources,
+    }
+
+
 def _step_alcohol_metabolism(
     gut_msd: int,
     blood_msd: int,
@@ -1374,6 +1573,9 @@ def _default_state(char_ctx: Mapping[str, Any]) -> dict[str, Any]:
             "press_counts": {},
             "orgasm_receipts": {},
             "idempotency_cache": {},
+            "committed_op_ring": [],
+            "evicted_op_digests": [],
+            "next_op_seq": 0,
             "execution_cache": {},
             "executed_effect_ids": {},
             "outbox": [],
@@ -1625,6 +1827,7 @@ def _derive_body_and_desire(
     *,
     subject_view: bool = False,
     emotional_unavailable: bool = False,
+    live_overlay: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Pure projection of body state & natural desire/arousal subsidence (Chapter 35 + 36B-2 + 36B-9 + GAP-04)."""
     body = state["body"]
@@ -1709,9 +1912,32 @@ def _derive_body_and_desire(
     fatigue = float(body.get("fatigue") or 0.0)
     stress = float(body.get("stress") or 0.0)
     discomfort = str(body.get("discomfort") or "none")
-    discomfort_penalty = {"none": 0.0, "mild": 0.25, "marked": 0.65, "strong": 1.0}.get(discomfort, 0.0)
     awake = bool(body.get("awake", True))
     impairment = str(body.get("impairment") or "sober")
+    thirst_val = float(body.get("thirst") or 0.0)
+    acute_illness = bool(body.get("acute_illness", False))
+    mood_str = str(body.get("mood") or "calm")
+
+    overlay_applied = isinstance(live_overlay, Mapping) and live_overlay.get("runtime_present") is True
+    live_warmth: Optional[float] = None
+    if overlay_applied:
+        if live_overlay.get("fatigue") is not None:
+            fatigue = max(fatigue, float(live_overlay["fatigue"]))
+        if live_overlay.get("thirst") is not None:
+            thirst_val = max(thirst_val, float(live_overlay["thirst"]))
+        if live_overlay.get("warmth") is not None:
+            live_warmth = float(live_overlay["warmth"])
+        if live_overlay.get("sleeping_from_recovery"):
+            awake = False
+        if live_overlay.get("acute_illness"):
+            acute_illness = True
+        elif live_overlay.get("illness_phase") in ("prodrome", "convalescence") and discomfort == "none":
+            discomfort = "mild"
+        live_mood = live_overlay.get("mood")
+        if isinstance(live_mood, str) and live_mood in MOOD_STATES and mood_str == "calm":
+            mood_str = live_mood
+
+    discomfort_penalty = {"none": 0.0, "mild": 0.25, "marked": 0.65, "strong": 1.0}.get(discomfort, 0.0)
 
     if alcohol_tracked and impairment not in ("sleeping", "unconscious"):
         if alc["impairment_level"] == "INCAPACITATED":
@@ -1726,7 +1952,6 @@ def _derive_body_and_desire(
 
     if not awake and impairment in ("sober", "tipsy"):
         impairment = "sleeping"
-    acute_illness = bool(body.get("acute_illness", False))
     user_impairment_declared = (
         bool(body.get("user_impairment_declared", False))
         or bool(state["partner_limits"].get("user_impairment_declared", False))
@@ -1777,7 +2002,6 @@ def _derive_body_and_desire(
         else None
     )
 
-    mood_str = str(body.get("mood") or "calm")
     can_propose_sex = (
         not incapacitated
         and not user_impairment_declared
@@ -1827,7 +2051,7 @@ def _derive_body_and_desire(
         "mood": mood_str,
         "sweat": round(float(body.get("sweat") or 0.0), 4),
         "cleanliness": round(float(body.get("cleanliness", 1.0)), 4),
-        "thirst": round(float(body.get("thirst") or 0.0), 4),
+        "thirst": round(thirst_val, 4),
         "sleep_epoch": int(body.get("sleep_epoch") or 0),
         "care_preferences": care_preferences,
         "subject_candidates": subject_candidates,
@@ -1835,6 +2059,21 @@ def _derive_body_and_desire(
         "no_frustration_debt": True,
         "money_or_gift_unlocks_consent": False,
     }
+    if overlay_applied:
+        if live_warmth is not None:
+            proj_out["warmth"] = round(live_warmth, 4)
+        rec_info = live_overlay.get("recovery") if isinstance(live_overlay.get("recovery"), Mapping) else {}
+        proj_out["live_body_overlay"] = {
+            "applied": True,
+            "sources": list(live_overlay.get("sources") or []),
+            "runtime_fatigue": live_overlay.get("fatigue"),
+            "runtime_warmth": live_overlay.get("warmth"),
+            "runtime_thirst": live_overlay.get("thirst"),
+            "runtime_recovery_state": rec_info.get("state"),
+            "runtime_recovery_mode": rec_info.get("mode"),
+            "v03_illness_phase": live_overlay.get("illness_phase"),
+            "s07_mood": live_overlay.get("mood"),
+        }
     if subject_view:
         proj_out["optional_processes"] = opt_procs
     return proj_out
@@ -2088,8 +2327,10 @@ def _project_adult_intimacy(
     if lexicon_info is None and root is not None:
         lexicon_info = _load_validator_lexicon(root)
     emo_unavail = False
+    live_overlay: Optional[dict[str, Any]] = None
     if root is not None:
         emo_unavail, _ = _read_emotional_tension_unavailable(root, now_dt, state)
+        live_overlay = _read_live_body_and_affect_zero_write(root, now_dt)
 
     gate_proj = _evaluate_adult_gate(state, char_ctx, lexicon_info=lexicon_info)
     body_proj = _derive_body_and_desire(
@@ -2097,6 +2338,7 @@ def _project_adult_intimacy(
         now_dt,
         subject_view=subject_view,
         emotional_unavailable=emo_unavail,
+        live_overlay=live_overlay,
     )
     menu_proj = _resolve_preference_menu(state, gate_proj)
     space_proj = _derive_private_space(state, now_dt=now_dt)
@@ -2519,6 +2761,176 @@ def _intimacy_co_presence_session_id(rec: Mapping[str, Any]) -> str:
     return "copint:%s" % str(rec.get("permit_id") or "")
 
 
+_NON_ACTIVE_LIFE_ACTIVITY_STATES = frozenset({
+    "COMPLETED",
+    "FAILED",
+    "ABANDONED",
+    "CANCELLED",
+    "CANCELED",
+    "EXPIRED",
+    "STOPPED",
+    "ENDED",
+    "IDLE",
+    "PAUSED",
+    "WAITING",
+    "BLOCKED",
+})
+
+
+def _is_safe_regular_file_zero_write(path: Path, *, anchor: Optional[Path] = None) -> bool:
+    """True when ``path`` is an existing regular file with no symlink hops up to ``anchor``."""
+    try:
+        if path.is_symlink():
+            return False
+        cur = path.parent
+        visited = 0
+        while cur is not None and visited < 16:
+            if cur.is_symlink():
+                return False
+            if anchor is not None and cur == anchor:
+                break
+            if anchor is None or cur.parent == cur:
+                break
+            cur = cur.parent
+            visited += 1
+        st = path.lstat()
+        return stat.S_ISREG(st.st_mode)
+    except OSError:
+        return False
+
+
+def _life_state_root(day_root: Path | str) -> Path:
+    """Resolve the instance's Life state root without creating directories or files."""
+    base = Path(day_root)
+    instance_file = base / "one-day" / "instance.json"
+    try:
+        if not base.is_symlink() and _is_safe_regular_file_zero_write(instance_file, anchor=base):
+            data = json.loads(instance_file.read_text(encoding="utf-8"))
+            if isinstance(data, Mapping):
+                env = data.get("environment")
+                if isinstance(env, Mapping):
+                    recorded = str(env.get("NYA02_RESIDENT_STATE") or "").strip()
+                    if recorded:
+                        return Path(recorded)
+    except (OSError, ValueError, TypeError):
+        pass
+    return base / "one-day" / "life" / "state"
+
+
+def _read_active_foreground_activity_zero_write(
+    day_root: Path | str | None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Read-only, 100% zero-write capture of an ACTIVE foreground Life activity.
+
+    Checks candidate ``canonical_life_state.json`` locations under ``day_root``,
+    rejecting symlinks and never creating directories or files. Returns
+    ``(foreground_activity_ref, activity_title_or_none)`` when an active
+    foreground activity is present, else ``(None, None)``.
+    """
+    if day_root is None:
+        return (None, None)
+    try:
+        base = Path(day_root)
+        if base.is_symlink():
+            return (None, None)
+    except (OSError, TypeError, ValueError):
+        return (None, None)
+
+    resolved_sr = _life_state_root(base)
+    sr_under_base = False
+    try:
+        sr_under_base = resolved_sr.is_relative_to(base)
+    except (OSError, TypeError, ValueError):
+        sr_under_base = False
+
+    raw_candidates: list[tuple[Path, Optional[Path]]] = [
+        (resolved_sr / "canonical_life_state.json", base if sr_under_base else None),
+        (base / "one-day" / "life" / "state" / "canonical_life_state.json", base),
+        (base / "life" / "state" / "canonical_life_state.json", base),
+        (base / "state" / "canonical_life_state.json", base),
+        (base / "canonical_life_state.json", base),
+    ]
+    seen_paths: set[str] = set()
+    for cand_path, anchor in raw_candidates:
+        key = str(cand_path)
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        if not _is_safe_regular_file_zero_write(cand_path, anchor=anchor):
+            continue
+        try:
+            doc = json.loads(cand_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(doc, Mapping):
+            continue
+        raw_fg = doc.get("foreground_activity_ref")
+        if not (isinstance(raw_fg, str) and raw_fg.strip()):
+            continue
+        fg_ref = raw_fg.strip()[:200]
+
+        activities = doc.get("activities")
+        entry: Optional[Mapping[str, Any]] = None
+        if isinstance(activities, Mapping):
+            direct = activities.get(fg_ref)
+            if not isinstance(direct, Mapping) and raw_fg != fg_ref:
+                direct = activities.get(raw_fg)
+            if isinstance(direct, Mapping):
+                entry = direct
+            else:
+                for val in activities.values():
+                    if isinstance(val, Mapping) and (
+                        str(val.get("activity_id") or "").strip() == fg_ref
+                        or str(val.get("activity_ref") or "").strip() == fg_ref
+                        or str(val.get("id") or "").strip() == fg_ref
+                    ):
+                        entry = val
+                        break
+        elif isinstance(activities, list):
+            for val in activities:
+                if isinstance(val, Mapping) and (
+                    str(val.get("activity_id") or "").strip() == fg_ref
+                    or str(val.get("activity_ref") or "").strip() == fg_ref
+                    or str(val.get("id") or "").strip() == fg_ref
+                ):
+                    entry = val
+                    break
+
+        if entry is not None:
+            raw_status = entry.get("status") if entry.get("status") is not None else entry.get("state")
+            if isinstance(raw_status, str) and raw_status.strip():
+                if raw_status.strip().upper() != "ACTIVE":
+                    continue
+            else:
+                if entry.get("ended_at") or entry.get("terminal_reason_code"):
+                    continue
+            title: Optional[str] = None
+            for t_key in ("title", "activity_title", "summary"):
+                raw_t = entry.get(t_key)
+                if isinstance(raw_t, str) and raw_t.strip():
+                    title = raw_t.strip()[:120]
+                    break
+            return (fg_ref, title)
+
+        top_state_raw = (
+            doc.get("life_state")
+            if doc.get("life_state") is not None
+            else (doc.get("status") if doc.get("status") is not None else doc.get("state"))
+        )
+        if isinstance(top_state_raw, str) and top_state_raw.strip():
+            if top_state_raw.strip().upper() in _NON_ACTIVE_LIFE_ACTIVITY_STATES:
+                continue
+        top_title_raw = doc.get("foreground_activity_title") or doc.get("activity_title")
+        top_title = (
+            top_title_raw.strip()[:120]
+            if isinstance(top_title_raw, str) and top_title_raw.strip()
+            else None
+        )
+        return (fg_ref, top_title)
+
+    return (None, None)
+
+
 def _resolve_co_presence_root(root: Path) -> Path:
     """本实例共在槽位（``co_presence.json``）所在目录 = Life state root 的最小复刻。
 
@@ -2528,15 +2940,7 @@ def _resolve_co_presence_root(root: Path) -> Path:
     补全待决项，这里按实例默认布局接线，路径只决定 ``co_presence.json`` 落点，
     fail-open 不阻断场景。
     """
-    instance_file = Path(root) / "one-day" / "instance.json"
-    try:
-        data = json.loads(instance_file.read_text(encoding="utf-8"))
-        recorded = str((data.get("environment") or {}).get("NYA02_RESIDENT_STATE") or "").strip()
-        if recorded:
-            return Path(recorded)
-    except (OSError, ValueError):
-        pass
-    return Path(root) / "one-day" / "life" / "state"
+    return _life_state_root(root)
 
 
 def _import_life_co_presence() -> Optional[Any]:
@@ -3146,6 +3550,21 @@ ALLOWED_ACTION_KEYS: dict[str, frozenset[str]] = {
         "operation_key",
         "execution_id",
         "monotonic_ms",
+        # 36A §11.1: callers that DO know the interrupted Life activity may hand the入场断点
+        # ref in; absent/blank keeps the honest saved=False record unchanged.
+        "checkpoint_activity_ref",
+        "activity_ref",
+    }),
+    "save_activity_checkpoint": frozenset({
+        "action",
+        "permit_id",
+        "activity_ref",
+        "checkpoint_activity_ref",
+        "step_summary",
+        "activity_title",
+        "expected_revision",
+        "operation_key",
+        "execution_id",
     }),
     "advance_beat": frozenset({
         "action",
@@ -3323,6 +3742,128 @@ ALLOWED_ACTION_KEYS: dict[str, frozenset[str]] = {
 }
 
 
+# ---------------------------------------------------------------------------------------------
+# Idempotency cache: bounded commit-order eviction + ``committed_op_ring`` replay (Round Q1)
+# ---------------------------------------------------------------------------------------------
+
+
+def _permit_op_seq_floor(permits: Mapping[str, Any]) -> int:
+    """Highest committed ``op_seq`` known across the active cache, ring and counter."""
+    highest = 0
+    raw = permits.get("next_op_seq")
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > highest:
+        highest = raw
+    for field in ("idempotency_cache", "committed_op_ring"):
+        rows = permits.get(field)
+        if isinstance(rows, Mapping):
+            iterable: Any = rows.values()
+        elif isinstance(rows, list):
+            iterable = rows
+        else:
+            continue
+        for row in iterable:
+            if not isinstance(row, Mapping):
+                continue
+            seq = row.get("op_seq")
+            if isinstance(seq, int) and not isinstance(seq, bool) and seq > highest:
+                highest = seq
+    return highest
+
+
+def _lookup_committed_op_ring(
+    state: Mapping[str, Any], operation_key: str
+) -> Optional[dict[str, Any]]:
+    """Return the evicted receipt row for ``operation_key`` from the bounded ring."""
+    permits = state.get("permits") or {}
+    ring = permits.get("committed_op_ring")
+    if not isinstance(ring, list):
+        return None
+    for row in reversed(ring):
+        if (
+            isinstance(row, Mapping)
+            and row.get("operation_key") == operation_key
+            and "receipt" in row
+        ):
+            return dict(row)
+    return None
+
+
+def _op_key_expired_from_ring(state: Mapping[str, Any], operation_key: str) -> bool:
+    """True when the key was committed once but has slid out of the ring window."""
+    permits = state.get("permits") or {}
+    digests = permits.get("evicted_op_digests")
+    if not isinstance(digests, list):
+        return False
+    return _stable_hash_hex("idem_evicted", operation_key, length=16) in digests
+
+
+def _stamp_and_trim_idempotency_cache(state: dict[str, Any]) -> None:
+    """Stamp new cache rows with commit-order ``op_seq`` and evict by it, never by key order.
+
+    Called from ``_commit`` right before the atomic persist so every committed
+    write leaves the active cache bounded at ``MAX_IDEMPOTENCY_CACHE`` and the
+    bounded ``committed_op_ring`` mirrors the freshest evictions for safe
+    idempotent replay. Keys that slide out of the ring leave only a short digest
+    tombstone so an ancient retry is refused instead of silently re-applied.
+    """
+    permits = state.setdefault("permits", {})
+    cache = permits.get("idempotency_cache")
+    if not isinstance(cache, dict):
+        cache = {}
+        permits["idempotency_cache"] = cache
+    ring = permits.get("committed_op_ring")
+    if not isinstance(ring, list):
+        ring = []
+        permits["committed_op_ring"] = ring
+    digests = permits.get("evicted_op_digests")
+    if not isinstance(digests, list):
+        digests = []
+        permits["evicted_op_digests"] = digests
+
+    # Stamp only rows that were written without a commit sequence; dict order equals
+    # write order inside one transaction, so the oldest unstamped row gets the lowest seq.
+    for row in cache.values():
+        if not isinstance(row, dict):
+            continue
+        seq = row.get("op_seq")
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            continue
+        seq = _permit_op_seq_floor(permits) + 1
+        permits["next_op_seq"] = seq
+        row["op_seq"] = seq
+
+    while len(cache) > MAX_IDEMPOTENCY_CACHE:
+        key, row = min(
+            cache.items(),
+            key=lambda item: (
+                int(item[1].get("op_seq") or 0) if isinstance(item[1], Mapping) else 0,
+                str(item[0]),
+            ),
+        )
+        del cache[key]
+        summary: dict[str, Any] = {"operation_key": str(key)}
+        if isinstance(row, Mapping):
+            summary["op_seq"] = row.get("op_seq")
+            summary["fingerprint"] = row.get("fingerprint")
+            summary["receipt"] = copy.deepcopy(row.get("receipt"))
+            if "validation" in row:
+                summary["validation"] = copy.deepcopy(row.get("validation"))
+            if "has_exec_or_facts" in row:
+                summary["has_exec_or_facts"] = row.get("has_exec_or_facts")
+        ring.append(summary)
+
+    while len(ring) > MAX_COMMITTED_OP_RING:
+        dropped = ring.pop(0)
+        if isinstance(dropped, Mapping) and dropped.get("operation_key") is not None:
+            digest = _stable_hash_hex(
+                "idem_evicted", str(dropped.get("operation_key")), length=16
+            )
+            if digest not in digests:
+                digests.append(digest)
+    while len(digests) > MAX_EVICTED_OP_DIGESTS:
+        del digests[0]
+
+
 def apply_adult_intimacy_action(
     root: Path | str,
     payload: Mapping[str, Any],
@@ -3330,7 +3871,30 @@ def apply_adult_intimacy_action(
     now: str | datetime | None = None,
     subject_view: bool = False,
 ) -> dict[str, Any]:
-    """Validate and apply an adult intimacy closed-loop action with atomic 0600 persistence."""
+    """Validate and apply one action under one exclusive single-writer lock.
+
+    The whole cycle — read state, monotonic clock guard, idempotency replay,
+    permission/consent checks, mutation, co-presence sync and the atomic 0600
+    persist — runs inside ``state_tx_guard.state_file_lock`` so a stop / consent
+    revocation can never be overwritten by a stale concurrent update, and two
+    writers never interleave on the same state file.
+    """
+    if not isinstance(payload, Mapping):
+        raise AdultIntimacyValidationError("PAYLOAD_NOT_OBJECT")
+    with _tx.state_file_lock(adult_intimacy_state_path(root)):
+        return _apply_adult_intimacy_action_locked(
+            root, payload, now=now, subject_view=subject_view
+        )
+
+
+def _apply_adult_intimacy_action_locked(
+    root: Path | str,
+    payload: Mapping[str, Any],
+    *,
+    now: str | datetime | None = None,
+    subject_view: bool = False,
+) -> dict[str, Any]:
+    """Inner write body; callers must already hold ``state_file_lock``."""
     if not isinstance(payload, Mapping):
         raise AdultIntimacyValidationError("PAYLOAD_NOT_OBJECT")
 
@@ -3396,6 +3960,8 @@ def apply_adult_intimacy_action(
             receipt.setdefault("revision", cur_rec["revision"])
         state["revision"] = int(state.get("revision") or 0) + 1
         state["updated_at"] = now_iso
+        # Round Q1: 幂等缓存按提交序有界淘汰，被淘汰的回执进入 committed_op_ring。
+        _stamp_and_trim_idempotency_cache(state)
         persisted = _atomic_write_json(adult_intimacy_state_path(root), state)
         return _project_adult_intimacy(
             persisted,
@@ -3419,13 +3985,16 @@ def apply_adult_intimacy_action(
         fp = _canonical_fingerprint(payload, exclude_keys=frozenset({"monotonic_ms"}))
         cache = state["permits"].setdefault("idempotency_cache", {})
         cached = cache.get(idem_key)
+        if cached is None:
+            # 已滑出活动缓存但仍在有界淘汰环里的回执：安全重放原结果，绝不二次副作用。
+            cached = _lookup_committed_op_ring(state, idem_key)
         state["permits"].setdefault("command_ledger", []).append({
             "key": idem_key,
             "action": action,
             "at": now_iso,
         })
         if cached is not None:
-            if cached["fingerprint"] != fp:
+            if cached.get("fingerprint") != fp:
                 state["memory"].setdefault("admin_log", []).append({
                     "op": "IDEMPOTENCY_CONFLICT",
                     "action": action,
@@ -3446,6 +4015,9 @@ def apply_adult_intimacy_action(
                 action_receipt=replay_receipt,
                 validation_result=replay_val,
             )
+        if _op_key_expired_from_ring(state, idem_key):
+            # 回执连同淘汰环一起滑出窗口：拒绝重复生效，明确要求先同步当前状态。
+            raise AdultIntimacyConflictError("RETRY_WINDOW_EXPIRED")
         return idem_key, fp, None
 
     def _require_lexicon_loaded_for_intimate() -> None:
@@ -4604,7 +5176,7 @@ def apply_adult_intimacy_action(
         if emo_unavail:
             raise AdultIntimacyConflictError("SUBJECT_EMOTIONALLY_UNAVAILABLE")
 
-        body_proj = _derive_body_and_desire(state, now_dt)
+        body_proj = _derive_body_and_desire(state, now_dt, live_overlay=_read_live_body_and_affect_zero_write(root, now_dt))
         if body_proj["user_impairment_declared"] or body_proj["alcohol_impairment_level"] in ("INTOXICATED", "INCAPACITATED"):
             raise AdultIntimacyConflictError("INCAPACITY")
         if not body_proj["available_for_intimacy"]:
@@ -4825,7 +5397,7 @@ def apply_adult_intimacy_action(
             if gate_proj.get("verdict") == "UNKNOWN" and lexicon_info.get("status") != "LOADED":
                 raise AdultIntimacyConflictError("LEXICON_MISSING")
             raise AdultIntimacyPermissionError("ADULT_GATE_CLOSED")
-        body_proj = _derive_body_and_desire(state, now_dt)
+        body_proj = _derive_body_and_desire(state, now_dt, live_overlay=_read_live_body_and_affect_zero_write(root, now_dt))
         if body_proj["user_impairment_declared"] or body_proj["alcohol_impairment_level"] in ("INTOXICATED", "INCAPACITATED"):
             raise AdultIntimacyConflictError("INCAPACITY")
         if not body_proj["available_for_intimacy"]:
@@ -4878,10 +5450,34 @@ def apply_adult_intimacy_action(
         rec["last_activity_at"] = now_iso
         rec["last_activity_mono_ms"] = mono_ms
         # 36B §5.4 入场第一件事（36A §11.1）：把"被接管的当前活动"存为断点字段。
-        # 本引擎读不到 Life 活动清单，activity_ref=None/saved=False 是诚实记录
-        # （"未保存"），绝不虚构引用；恢复执行不在本批。
-        rec["checkpoint"] = {"activity_ref": None, "saved_at": now_iso, "saved": False,
-                             "resumable": False}
+        # 调用方显式带来非空 ``checkpoint_activity_ref`` / ``activity_ref`` 时如实保存；
+        # 否则零写只读探测 ``canonical_life_state.json`` 的活跃前台活动；仍无活跃活动时
+        # ``activity_ref=None/saved=False`` 是诚实记录（"未保存"），绝不虚构引用。
+        raw_checkpoint_ref = payload.get("checkpoint_activity_ref")
+        if not (isinstance(raw_checkpoint_ref, str) and raw_checkpoint_ref.strip()):
+            raw_checkpoint_ref = payload.get("activity_ref")
+        saved_activity_ref = (
+            raw_checkpoint_ref.strip()[:200]
+            if isinstance(raw_checkpoint_ref, str) and raw_checkpoint_ref.strip()
+            else None
+        )
+        auto_captured = False
+        auto_activity_title: Optional[str] = None
+        if saved_activity_ref is None:
+            saved_activity_ref, auto_activity_title = _read_active_foreground_activity_zero_write(root)
+            if saved_activity_ref is not None:
+                auto_captured = True
+        checkpoint_doc: dict[str, Any] = {
+            "activity_ref": saved_activity_ref,
+            "saved_at": now_iso,
+            "saved": saved_activity_ref is not None,
+            "resumable": False,
+        }
+        if auto_captured:
+            checkpoint_doc["capture_source"] = "canonical_life_state_auto"
+            if auto_activity_title:
+                checkpoint_doc["activity_title"] = auto_activity_title
+        rec["checkpoint"] = checkpoint_doc
         # 36B §5.4：declared_seconds 上限 86400 的过夜重决定窗口从这里起算。
         rec["active_since"] = now_iso
         rec["updated_at"] = now_iso
@@ -4907,7 +5503,15 @@ def apply_adult_intimacy_action(
         _op_req = _require_local_id(_op_raw, reason_code="OPERATION_KEY_INVALID")
         op_key = f"advance_beat:{_op_req}"
         fp = _canonical_fingerprint(payload)
-        cached = state["permits"]["idempotency_cache"].get(op_key) or state["permits"]["idempotency_cache"].get(_op_req)
+        _idem_cache = state["permits"]["idempotency_cache"]
+        cached = _idem_cache.get(op_key) or _idem_cache.get(_op_req)
+        if cached is None:
+            # 已滑出活动缓存但仍在淘汰环内的逐拍回执同样安全重放。
+            cached = _lookup_committed_op_ring(state, op_key) or _lookup_committed_op_ring(state, _op_req)
+        if cached is None and (
+            _op_key_expired_from_ring(state, op_key) or _op_key_expired_from_ring(state, _op_req)
+        ):
+            raise AdultIntimacyConflictError("RETRY_WINDOW_EXPIRED")
         has_exec_or_facts = (
             "execution_id" in payload
             or "proposed_facts" in payload
@@ -5029,7 +5633,7 @@ def apply_adult_intimacy_action(
             _commit({"action": action, "aborted": "ADULT_GATE_CLOSED"})
             raise AdultIntimacyPermissionError("ADULT_GATE_CLOSED")
 
-        body_proj = _derive_body_and_desire(state, now_dt)
+        body_proj = _derive_body_and_desire(state, now_dt, live_overlay=_read_live_body_and_affect_zero_write(root, now_dt))
         space_proj = _derive_private_space(state)
         if (
             body_proj["user_impairment_declared"]
@@ -5609,7 +6213,7 @@ def apply_adult_intimacy_action(
         gate_proj = _evaluate_adult_gate(state, char_ctx, lexicon_info=lexicon_info)
         if not gate_proj["gate_open"]:
             raise AdultIntimacyPermissionError("ADULT_GATE_CLOSED")
-        body_proj = _derive_body_and_desire(state, now_dt)
+        body_proj = _derive_body_and_desire(state, now_dt, live_overlay=_read_live_body_and_affect_zero_write(root, now_dt))
         if body_proj["user_impairment_declared"] or body_proj["alcohol_impairment_level"] in ("INTOXICATED", "INCAPACITATED"):
             raise AdultIntimacyConflictError("INCAPACITY")
         if not body_proj["available_for_intimacy"]:
@@ -5666,7 +6270,7 @@ def apply_adult_intimacy_action(
                 _category_base(c) != "AFFECTION" for c in pending["add_categories"]
             ):
                 _require_lexicon_loaded_for_intimate()
-            body_proj_w = _derive_body_and_desire(state, now_dt)
+            body_proj_w = _derive_body_and_desire(state, now_dt, live_overlay=_read_live_body_and_affect_zero_write(root, now_dt))
             if body_proj_w["user_impairment_declared"] or body_proj_w["alcohol_impairment_level"] in ("INTOXICATED", "INCAPACITATED"):
                 raise AdultIntimacyConflictError("INCAPACITY")
             if not body_proj_w["available_for_intimacy"]:
@@ -5787,7 +6391,7 @@ def apply_adult_intimacy_action(
         gate_proj = _evaluate_adult_gate(state, char_ctx, lexicon_info=lexicon_info)
         if not gate_proj["gate_open"]:
             raise AdultIntimacyPermissionError("ADULT_GATE_CLOSED")
-        body_proj = _derive_body_and_desire(state, now_dt)
+        body_proj = _derive_body_and_desire(state, now_dt, live_overlay=_read_live_body_and_affect_zero_write(root, now_dt))
         if body_proj["user_impairment_declared"] or body_proj["alcohol_impairment_level"] in ("INTOXICATED", "INCAPACITATED"):
             raise AdultIntimacyConflictError("INCAPACITY")
         if not body_proj["available_for_intimacy"]:
@@ -6234,7 +6838,7 @@ def apply_adult_intimacy_action(
             raise AdultIntimacyValidationError("SLEEP_STEP_INVALID")
 
         gate_proj = _evaluate_adult_gate(state, char_ctx)
-        body_proj = _derive_body_and_desire(state, now_dt)
+        body_proj = _derive_body_and_desire(state, now_dt, live_overlay=_read_live_body_and_affect_zero_write(root, now_dt))
         space_proj = _derive_private_space(state)
 
         ineligible = _solo_ineligible_reason(
@@ -7061,7 +7665,167 @@ def apply_adult_intimacy_action(
             "pending_memory_outbox_count": len(still_mem_outbox),
         })
 
+    # ------------------------------------------------------------------
+    # Action 31: save_activity_checkpoint（36A §11.1 / 36B-4 §9）
+    # ------------------------------------------------------------------
+    if action == "save_activity_checkpoint":
+        idem_k, idem_fp, replay_out = _check_idempotency_or_execution_key(
+            mismatch_code="EXECUTION_ID_REUSED"
+        )
+        if replay_out is not None:
+            return replay_out
+        pid_raw = payload.get("permit_id") or state["permits"].get("active_permit_id")
+        pid = _require_local_id(pid_raw, reason_code="PERMIT_ID_INVALID")
+        rec = state["permits"]["records"].get(pid)
+        if not isinstance(rec, dict):
+            raise AdultIntimacyNotFoundError(f"PERMIT_NOT_FOUND:{pid}")
+        if "expected_revision" in payload:
+            exp_rev = payload["expected_revision"]
+            if (
+                isinstance(exp_rev, bool)
+                or not isinstance(exp_rev, int)
+                or exp_rev != int(rec.get("permit_revision") or 1)
+            ):
+                raise AdultIntimacyConflictError("REVISION_CONFLICT")
+        if str(rec.get("state") or "") not in OPEN_PERMIT_STATES:
+            raise AdultIntimacyConflictError("PERMIT_NOT_OPEN")
+        raw_ref = payload.get("checkpoint_activity_ref")
+        if not (isinstance(raw_ref, str) and raw_ref.strip()):
+            raw_ref = payload.get("activity_ref")
+        if not (isinstance(raw_ref, str) and raw_ref.strip()):
+            raise AdultIntimacyValidationError("ACTIVITY_REF_REQUIRED")
+        activity_ref = raw_ref.strip()[:200]
+
+        checkpoint = dict(rec.get("checkpoint") or {})
+        checkpoint.update({
+            "activity_ref": activity_ref,
+            "saved_at": now_iso,
+            "saved": True,
+            "resumable": False,
+        })
+        if isinstance(payload.get("step_summary"), str) and payload["step_summary"].strip():
+            checkpoint["step_summary"] = payload["step_summary"].strip()[:240]
+        if isinstance(payload.get("activity_title"), str) and payload["activity_title"].strip():
+            checkpoint["activity_title"] = payload["activity_title"].strip()[:120]
+        rec["checkpoint"] = checkpoint
+        rec["updated_at"] = now_iso
+        # 36B-4 §9：已绑定共在会话时把断点同步过去（fail-open、幂等；水位线未动时是
+        # 只读 no-op，绝不重复打扰 owner，也绝不阻断场景）。
+        _sync_intimacy_co_presence(state, rec, now_iso, root)
+
+        receipt = {
+            "action": action,
+            "permit_id": pid,
+            "state": rec.get("state"),
+            "activity_ref": activity_ref,
+            "saved": True,
+            "resumable": False,
+        }
+        if idem_k and idem_fp:
+            state["permits"]["idempotency_cache"][idem_k] = {
+                "fingerprint": idem_fp,
+                "receipt": receipt,
+            }
+        return _commit(receipt)
+
     raise AdultIntimacyValidationError(f"ACTION_INVALID:{action}")
+
+
+def consume_resumable_checkpoint(
+    root: Path | str,
+    *,
+    permit_id: str,
+    now: str | datetime | None = None,
+    decision_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """36A §11.1：消费一个可恢复的入场断点（幂等、无副作用重放）。
+
+    ``permit`` 记录上 ``checkpoint`` 带 ``resumable=True`` 与非空 ``activity_ref`` 且未被
+    消费时，把它标记为已恢复（``resumable=False`` / ``consumed=True`` / ``resumed_at``），
+    原子写盘后返回恢复事实。已被同一或不同 ``decision_id`` 消费、或本来就没有可恢复
+    断点时，幂等返回 ``already_consumed=True``，绝不抛错。
+
+    本函数只记录"断点被恢复消费"这一事实；恢复场景本身的执行不在这一步。
+    """
+    state_path = adult_intimacy_state_path(root)
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {
+            "ok": False,
+            "already_consumed": False,
+            "reason_code": "ADULT_INTIMACY_STATE_UNREADABLE",
+            "permit_id": permit_id,
+            "llm_calls": 0,
+        }
+    if not isinstance(raw, Mapping):
+        return {
+            "ok": False,
+            "already_consumed": False,
+            "reason_code": "ADULT_INTIMACY_STATE_UNREADABLE",
+            "permit_id": permit_id,
+            "llm_calls": 0,
+        }
+    state = dict(raw)
+    permits = state.get("permits") if isinstance(state.get("permits"), Mapping) else {}
+    records = permits.get("records") if isinstance(permits.get("records"), Mapping) else {}
+    rec = records.get(str(permit_id)) if isinstance(records, Mapping) else None
+    if not isinstance(rec, dict):
+        return {
+            "ok": False,
+            "already_consumed": False,
+            "reason_code": f"PERMIT_NOT_FOUND:{permit_id}",
+            "permit_id": permit_id,
+            "llm_calls": 0,
+        }
+
+    now_iso = _to_iso(_parse_now(now))
+    checkpoint = dict(rec.get("checkpoint") or {})
+    activity_ref = checkpoint.get("activity_ref")
+    resumable = checkpoint.get("resumable") is True
+    already_consumed = bool(checkpoint.get("consumed")) or not resumable
+    if already_consumed or not (isinstance(activity_ref, str) and activity_ref.strip()):
+        return {
+            "ok": True,
+            "already_consumed": True,
+            "permit_id": str(permit_id),
+            "activity_ref": activity_ref if isinstance(activity_ref, str) else None,
+            "resumed_at": checkpoint.get("resumed_at"),
+            "decision_id": decision_id,
+            "llm_calls": 0,
+        }
+
+    checkpoint["resumable"] = False
+    checkpoint["consumed"] = True
+    checkpoint["resumed_at"] = now_iso
+    checkpoint["resumed_by_decision_id"] = str(decision_id) if decision_id else None
+    rec["checkpoint"] = checkpoint
+    rec["updated_at"] = now_iso
+    state["revision"] = int(state.get("revision") or 0) + 1
+    state["updated_at"] = now_iso
+    _atomic_write_json(state_path, state)
+
+    # 共在记录同步：如存在对应会话，只做只读报告（幂等、绝不抛错、不重开场景）。
+    co_presence: dict[str, Any] = {"state": "NONE"}
+    try:
+        owner = _import_life_co_presence()
+        if owner is not None:
+            co_presence = owner.read_private_intimate_session(
+                _resolve_co_presence_root(Path(root))
+            )
+    except Exception as exc:  # fail-open：共在故障不阻断断点消费
+        co_presence = {"state": "ERROR", "error_type": type(exc).__name__}
+
+    return {
+        "ok": True,
+        "already_consumed": False,
+        "permit_id": str(permit_id),
+        "activity_ref": activity_ref.strip(),
+        "resumed_at": now_iso,
+        "decision_id": decision_id,
+        "co_presence": co_presence,
+        "llm_calls": 0,
+    }
 
 
 __all__ = [
@@ -7083,6 +7847,7 @@ __all__ = [
     "AdultIntimacyValidationError",
     "adult_intimacy_state_path",
     "apply_adult_intimacy_action",
+    "consume_resumable_checkpoint",
     "find_matching_solo_slot",
     "read_adult_intimacy",
     "solo_window_probability",

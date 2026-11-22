@@ -53,6 +53,7 @@ GATEWAY_READ_COMMANDS = (
     "get_snapshot",
     "get_observation",
     "get_body_signals",
+    "get_body_health",
     "get_available_actions",
     "get_action_result",
     "get_status",
@@ -753,22 +754,7 @@ class GatewaySurface:
         if not self.include_test_objects:
             hands = {slot: (None if is_test_object(held) else held)
                      for slot, held in hands.items()}
-        # A readable label instead of a 70-char instance id: the chat model
-        # should see "basic_bed", not `item-8ad09561...`.  The join is with the
-        # property economy in this same home, so it is bounded and local.
-        labels: dict[str, str] = {}
-        try:
-            economy = json.loads(
-                (service.config.world_home / "state" / "world_property_economy.json")
-                .read_text(encoding="utf-8")
-            )
-            for item in economy.get("items") or []:
-                if isinstance(item, dict) and item.get("item_instance_id"):
-                    labels[item["item_instance_id"]] = str(
-                        item.get("catalog_item_id") or "item"
-                    )
-        except Exception:
-            labels = {}
+        labels = self._labels()
 
         visible: list[dict[str, Any]] = []
         for object_id in self._visible_object_ids():
@@ -876,7 +862,168 @@ class GatewaySurface:
         needs = summary.get("needs")
         if isinstance(needs, Mapping):
             payload["needs"] = dict(needs)
+        # v0.8: health status and its capacity state travel with the same read
+        # the decision adapter already consumes, so illness narrows capacity
+        # through the real path instead of only being visible on its own verb.
+        try:
+            projection = self._health_projection()
+            health_reason = None
+        except Exception:  # health must never take down the body read
+            projection = None
+            health_reason = "HEALTH_PROJECTION_UNAVAILABLE"
+        if projection is not None:
+            snapshot, envelope = projection
+            payload["health"] = {
+                "status": snapshot.status.value,
+                "capacity_state": envelope.capacity_state,
+                # how many candidates this body can still weigh this round
+                "candidate_cap": envelope.candidate_cap,
+                "max_plan_steps": envelope.max_plan_steps,
+                "creative_block": envelope.creative_block,
+                "reason_code": snapshot.source_reason,
+                # v0.8: the owner's own identity/version/instant for this answer.
+                # A runtime with no burden signal still has this health fact; the
+                # capacity view binds to these fields instead of dropping the
+                # envelope merely because the signal list is empty.
+                "body_id": snapshot.body_id,
+                "body_version": state.get("version"),
+                "observed_at": (
+                    snapshot.observed_at.isoformat()
+                    if hasattr(snapshot.observed_at, "isoformat")
+                    else str(snapshot.observed_at)
+                ),
+            }
+        else:
+            # A health read that failed is a named unknown, not a missing key:
+            # downstream must not read "absent" as "healthy" or "unlimited".
+            payload["health"] = {
+                "status": "UNATTESTED",
+                "capacity_state": "UNKNOWN",
+                "candidate_cap": None,
+                "max_plan_steps": None,
+                "creative_block": None,
+                "reason_code": health_reason,
+            }
         return payload
+
+    def _health_projection(self):
+        """The one join both health surfaces use.  Returns None without a body."""
+
+        service = self.service
+        state = service.body_state
+        if not state:
+            return None
+        import body_health_projection as bhp
+
+        moment = service._moment()
+        record_fn = getattr(service, "health_record", None)
+        if callable(record_fn):
+            record = record_fn()
+        else:
+            record = getattr(service, "health_state", None) or bhp.initial_record(
+                body_id=str(state.get("body_id") or "chiyo_body"),
+                subject_id="self",
+                home_ref="",
+                at=moment,
+            )
+        return bhp.project(record, state, at=moment)
+
+    def get_body_health(self) -> dict[str, Any]:
+        """S02 health status and the capability envelope (read-only, v0.8).
+
+        The status comes from the real body runtime through
+        ``body_health_projection``; the capability envelope is what S04 may
+        still attempt.  Nothing here writes, mints an episode or moves time.
+        """
+
+        service = self.service
+        state = service.body_state
+        moment = service._moment()
+        if not state:
+            return {
+                "kind": KIND_GATEWAY_API,
+                "schema_version": SCHEMA_GATEWAY_API,
+                "available": False,
+                "health": {"status": "UNATTESTED", "attested": False, "episode": None},
+                "capacity": {
+                    "state": "UNKNOWN",
+                    "capacity_index": 0.0,
+                    "candidate_cap": 0,
+                    "max_plan_steps": 0,
+                    "creative_block": True,
+                    "action_verify_required": True,
+                },
+                "read_only": True,
+                "writes_performed": 0,
+            }
+
+        import body_signal as bsi
+
+        try:
+            projection = self._health_projection()
+            health_reason = None
+        except Exception:  # a failed health read is a named gap, not a crash
+            projection = None
+            health_reason = "HEALTH_PROJECTION_UNAVAILABLE"
+        if projection is None:  # the body disappeared between the two reads
+            return {
+                "kind": KIND_GATEWAY_API,
+                "schema_version": SCHEMA_GATEWAY_API,
+                "available": False,
+                "health": {
+                    "status": "UNATTESTED", "attested": False, "episode": None,
+                    "reason_code": health_reason,
+                },
+                "capacity": {"state": "UNKNOWN"},
+                "read_only": True,
+                "writes_performed": 0,
+            }
+        snapshot, envelope = projection
+        episode = snapshot.episode
+        severity_band = None
+        if episode is not None:
+            severity_band = (
+                bsi.BAND_MILD
+                if episode.severity < 0.34
+                else bsi.BAND_NOTICEABLE
+                if episode.severity < 0.67
+                else bsi.BAND_STRONG
+            )
+        return {
+            "kind": KIND_GATEWAY_API,
+            "schema_version": SCHEMA_GATEWAY_API,
+            "available": True,
+            "health": {
+                "status": snapshot.status.value,
+                "attested": snapshot.attested,
+                "since": snapshot.health_since.isoformat(),
+                "reason_code": snapshot.source_reason,
+                "episode": None
+                if episode is None
+                else {
+                    "open": episode.open,
+                    "origin": episode.origin,
+                    "severity_band": severity_band,
+                    "left_acute_at": episode.left_acute_at.isoformat()
+                    if episode.left_acute_at
+                    else None,
+                },
+            },
+            "capacity": {
+                "state": envelope.capacity_state,
+                "capacity_index": envelope.capacity_index,
+                "candidate_cap": envelope.candidate_cap,
+                "max_plan_steps": envelope.max_plan_steps,
+                "concurrent_activity_cap": envelope.concurrent_activity_cap,
+                "creative_block": envelope.creative_block,
+                "action_verify_required": envelope.action_verify_required,
+                "action_reliability_ceiling": envelope.action_reliability_ceiling,
+                "latency_floor_ms": envelope.latency_floor_ms,
+            },
+            "read_only": True,
+            "writes_performed": 0,
+        }
+
     def get_environment(self) -> dict[str, Any]:
         """The derived room environment of the current place/area (read-only).
 
@@ -951,10 +1098,13 @@ class GatewaySurface:
                 .read_text(encoding="utf-8")
             )
             for item in economy.get("items") or []:
-                if isinstance(item, dict) and item.get("item_instance_id"):
-                    labels[item["item_instance_id"]] = str(
-                        item.get("catalog_item_id") or "item"
-                    )
+                if not isinstance(item, dict) or not item.get("item_instance_id"):
+                    continue
+                meta = item.get("item_meta")
+                meta_name = str(meta.get("name") or "").strip() if isinstance(meta, Mapping) else ""
+                labels[item["item_instance_id"]] = (
+                    meta_name or str(item.get("catalog_item_id") or "item")
+                )
         except Exception:
             labels = {}
         return labels
@@ -1634,6 +1784,7 @@ class GatewaySurface:
                 "get_snapshot": self.get_snapshot,
                 "get_observation": self.get_observation,
                 "get_body_signals": self.get_body_signals,
+                "get_body_health": self.get_body_health,
                 "get_available_actions": self.get_available_actions,
                 "get_action_result": lambda: self.get_action_result(
                     (argument or {}).get("execution_id") if isinstance(argument, Mapping) else argument

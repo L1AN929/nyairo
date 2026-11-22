@@ -30,10 +30,12 @@ from __future__ import annotations
 
 import copy
 import random
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
 from . import schema
+from .generator import infer_affordance_traits, infer_matter_profile
 
 #: 世界包地点 kind → 建筑类型（ outdoors 返回 None：无室内）。
 BUILDING_BY_KIND = {
@@ -193,6 +195,7 @@ class _Plan:
         stack_on: Optional[tuple[int, int]] = None,
         area: Optional[str] = None,
         object_prefix: str = "obj",
+        matter_profile: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """登记一件家具；占格检查（叠放组合除外）；归属导航区域。"""
         if area is not None and area not in self._area_ids:
@@ -233,6 +236,7 @@ class _Plan:
             "_cell": stack_on if stack_on is not None else cell,
             "_area": area,
             "_object_prefix": object_prefix,
+            "_matter_profile": dict(matter_profile) if matter_profile else None,
         }
         self.furniture.append(item)
         self._occupied.add(cell)
@@ -338,6 +342,222 @@ def _build_home(plan: _Plan, design: Optional[dict[str, Any]]) -> None:
     plan.furniture_at(kind="dispenser", cell=(14, 13), label="饮水机", rotation=270, area="kitchen", object_prefix="dispenser")
     if rng.random() < 0.4:
         plan.furniture_at(kind="plant", cell=(18, 12), label="香草盆栽", rotation=0, area="kitchen", object_prefix="plant")
+
+
+_PROCEDURAL_HOME_FLOOR_STYLES: dict[str, tuple[str, str]] = {
+    "living": ("#e9e2d3", "planks"),
+    "veranda": ("#e2ebd9", "planks"),
+    "kitchenette": ("#dbe5e2", "tiles"),
+    "study_nook": ("#e6e1d6", "planks"),
+}
+
+_NINE_KEY_SPECIMEN_PROFILE: dict[str, Any] = {
+    "ambient_zone": "room",
+    "water_source": False,
+    "capacity_slots": 2,
+    "item_kind": "paper",
+    "paper_like": True,
+    "shelf_life_hours": 720,
+    "portions": 4,
+    "material_units": 6,
+    "assembly_role": "insert_part",
+}
+
+
+def _populate_extra_home_zone(
+    plan: _Plan,
+    area_id: str,
+    cells: tuple[tuple[int, int], tuple[int, int], tuple[int, int]],
+) -> None:
+    """在多分区住宅的单个附加生活区内摆放契合其用途的代表家具。"""
+    c0, c1, c2 = cells
+    if area_id == "veranda":
+        plan.furniture_at(
+            kind="chair", cell=c0, label="缘侧藤椅", rotation=180,
+            note="面向院外风光的矮背藤椅。", area=area_id, object_prefix="chair",
+        )
+        plan.furniture_at(
+            kind="table", cell=c1, label="晒台茶几", rotation=0,
+            note="放茶杯与风铃小物的木茶几。", area=area_id, object_prefix="table",
+        )
+        plan.furniture_at(
+            kind="cup", cell=c1, stack_on=c1, label="粗陶茶杯",
+            note="搁在晒台茶几上的粗陶杯。", area=area_id, object_prefix="cup",
+        )
+        plan.furniture_at(
+            kind="plant", cell=c2, label="缘侧迷迭香盆栽", rotation=0,
+            note="耐风耐晒的香草陶盆。", area=area_id, object_prefix="plant",
+        )
+    elif area_id == "study_nook":
+        plan.furniture_at(
+            kind="cabinet", cell=c0, label="分格资料书架", rotation=0,
+            note="收纳地方志与剪报夹的木架。", area=area_id, object_prefix="shelf",
+        )
+        plan.furniture_at(
+            kind="table", cell=c1, label="阅览木桌", rotation=0,
+            note="适合安静抄写与做手工的木桌。", area=area_id, object_prefix="table",
+        )
+        plan.furniture_at(
+            kind="book", cell=c1, stack_on=c1, label="一叠风景明信片",
+            note="可按张拆用的厚卡纸明信片。", area=area_id, object_prefix="cards",
+        )
+        plan.furniture_at(
+            kind="lamp", cell=c2, label="阅读立灯", rotation=0,
+            note="灯头可调角度的阅读灯。", area=area_id, object_prefix="lamp",
+        )
+    elif area_id == "kitchenette":
+        plan.furniture_at(
+            kind="cabinet", cell=c0, label="料理储物柜", rotation=0,
+            note="收纳碗盘与茶叶罐的矮柜。", area=area_id, object_prefix="cabinet",
+        )
+        plan.furniture_at(
+            kind="table", cell=c1, label="备餐料理台", rotation=0,
+            note="干净整洁的木面备餐台。", area=area_id, object_prefix="table",
+        )
+        plan.furniture_at(
+            kind="cup", cell=c1, stack_on=c1, label="手冲滤杯壶",
+            note="放在备餐台上的陶瓷杯壶。", area=area_id, object_prefix="cup",
+        )
+        plan.furniture_at(
+            kind="plant", cell=c2, label="窗台薄荷盆栽", rotation=0,
+            note="随手可摘叶泡水的薄荷盆栽。", area=area_id, object_prefix="plant",
+        )
+    else:  # living 及其他起居扩展区
+        plan.furniture_at(
+            kind="lamp", cell=c0, label="暖光落地灯", rotation=0,
+            note="起居室角落的布罩落地灯。", area=area_id, object_prefix="lamp",
+        )
+        plan.furniture_at(
+            kind="table", cell=c1, label="起居矮桌", rotation=0,
+            note="铺着棉麻桌旗的实木矮桌。", area=area_id, object_prefix="table",
+        )
+        plan.furniture_at(
+            kind="book", cell=c1, stack_on=c1, label="随手记事本",
+            note="摊在起居矮桌上的日常记事本。", area=area_id, object_prefix="notes",
+        )
+        plan.furniture_at(
+            kind="chair", cell=c2, label="木扶手靠椅", rotation=180,
+            note="坐感舒适的木扶手单椅。", area=area_id, object_prefix="chair",
+        )
+
+
+def _build_procedural_home(
+    plan: _Plan,
+    rooms: Sequence[Mapping[str, Any]],
+    design: Optional[dict[str, Any]],
+) -> None:
+    """按 ``topology.json`` 中 ``home.rooms`` 声明的多分区结构生成住宅几何与家具。"""
+    del design
+    rng = plan.rng
+    bedroom_meta = next(
+        (r for r in rooms if r.get("room_id") == "bedroom"),
+        {"room_id": "bedroom", "name": "自己的房间"},
+    )
+    extras = [r for r in rooms if r.get("room_id") and r.get("room_id") != "bedroom"][:2]
+    if not extras:
+        _build_home(plan, None)
+        return
+
+    partition_y = rng.choice((45, 50))
+    horiz_wall = plan.wall(0, partition_y, 100, partition_y)
+    plan.door(horiz_wall, rng.choice((35, 40)))
+    if rng.random() < 0.7:
+        plan.window(horiz_wall, 70, 15)
+    plan.floor(0, 0, 100, partition_y, "#f0e3d3", "planks")
+
+    first = extras[0]
+    first_id = str(first["room_id"])
+    first_name = str(first.get("name") or first_id)
+    first_color, first_tex = _PROCEDURAL_HOME_FLOOR_STYLES.get(first_id, ("#e9e2d3", "planks"))
+
+    if len(extras) == 1:
+        plan.floor(0, partition_y, 100, 100 - partition_y, first_color, first_tex)
+        plan.space["entry"] = {"x": 9, "y": 17}
+        plan.keep_clear({(8, 17), (9, 17), (10, 17), (9, 16)})
+        plan.area(first_id, first_name, first_id)
+        plan.area("bedroom", str(bedroom_meta.get("name") or "自己的房间"), "bedroom")
+        plan.connect(first_id, "bedroom")
+        plan.set_entrance(first_id)
+        _populate_extra_home_zone(plan, first_id, ((2, 12), (5, 13), (2, 16)))
+        utility_area = first_id
+        fridge_cell, kettle_cell, sink_cell = (17, 16), (14, 16), (17, 12)
+    else:
+        second = extras[1]
+        second_id = str(second["room_id"])
+        second_name = str(second.get("name") or second_id)
+        second_color, second_tex = _PROCEDURAL_HOME_FLOOR_STYLES.get(second_id, ("#dbe5e2", "tiles"))
+        split_x = 60
+        vert_wall = plan.wall(split_x, partition_y, split_x, 100)
+        plan.door(vert_wall, 20)
+        plan.floor(0, partition_y, split_x, 100 - partition_y, first_color, first_tex)
+        plan.floor(split_x, partition_y, 100 - split_x, 100 - partition_y, second_color, second_tex)
+        plan.space["entry"] = {"x": 6, "y": 17}
+        plan.keep_clear({(5, 17), (6, 17), (7, 17), (6, 16)})
+        plan.area(first_id, first_name, first_id)
+        plan.area("bedroom", str(bedroom_meta.get("name") or "自己的房间"), "bedroom")
+        plan.area(second_id, second_name, second_id)
+        plan.connect(first_id, "bedroom")
+        plan.connect(first_id, second_id)
+        plan.set_entrance(first_id)
+        _populate_extra_home_zone(plan, first_id, ((2, 12), (5, 13), (8, 13)))
+        # 右下区：放置生活设备三件套 + 第二分区代表摆件
+        accent_kind, accent_label, accent_note, accent_prefix = {
+            "veranda": ("plant", "缘侧迷迭香盆栽", "养在木栏边的迷迭香陶盆。", "plant"),
+            "study_nook": ("cabinet", "分格资料书架", "收纳地方志与卡片的书架。", "shelf"),
+            "living": ("chair", "木扶手靠椅", "朝向采光面的单人木椅。", "chair"),
+            "kitchenette": ("cabinet", "料理储物柜", "收纳餐具与茶叶罐的厨柜。", "cabinet"),
+        }.get(second_id, ("plant", "室内绿植", "角落里的耐阴绿植。", "plant"))
+        plan.furniture_at(
+            kind=accent_kind, cell=(14, 12), label=accent_label, rotation=0,
+            note=accent_note, area=second_id, object_prefix=accent_prefix,
+        )
+        utility_area = second_id
+        fridge_cell, kettle_cell, sink_cell = (17, 16), (14, 16), (17, 12)
+
+    # 卧室核心配置：床 + 书桌 + 叠放九键标本册 + 带木栓私密抽屉柜 + 立式木书架 + 床头台灯
+    bed_x = rng.choice((3, 4))
+    desk_cell = (rng.choice((8, 9)), 3)
+    plan.furniture_at(
+        kind="bed", cell=(bed_x, 3), label="木架单人床", rotation=0,
+        note="临窗铺着棉麻床单的单人床。", area="bedroom", object_prefix="bed",
+    )
+    plan.furniture_at(
+        kind="table", cell=desk_cell, label="靠窗书桌", rotation=0,
+        note="桌面宽敞的实木书桌。", area="bedroom", object_prefix="desk",
+    )
+    plan.furniture_at(
+        kind="book", cell=desk_cell, stack_on=desk_cell, label="押花香草标本册",
+        note="内含干花压片与可嵌入书架展示框的棉纸卡页。",
+        area="bedroom", object_prefix="specimen",
+        matter_profile=_NINE_KEY_SPECIMEN_PROFILE,
+    )
+    plan.furniture_at(
+        kind="cabinet", cell=(12, 3), label="带木栓私密抽屉柜", rotation=0,
+        note="书桌旁带木栓的私密抽屉柜，妥善收存私人信件与旧物。",
+        area="bedroom", object_prefix="drawer",
+    )
+    plan.furniture_at(
+        kind="cabinet", cell=(16, 3), label="立式木书架", rotation=90,
+        note="靠墙摆放的多层实木书架。", area="bedroom", object_prefix="shelf",
+    )
+    plan.furniture_at(
+        kind="lamp", cell=(2, 6), label="暖光台灯", rotation=0,
+        note="柔和护眼的黄铜台灯。", area="bedroom", object_prefix="lamp",
+    )
+
+    # 生活设备三件套（保证冷藏 / 加热 / 水源三种物质档在室内生成后齐全）
+    plan.furniture_at(
+        kind="cabinet", cell=fridge_cell, label="双门小冰箱", rotation=270,
+        note="安静运转的双门冷藏小冰箱。", area=utility_area, object_prefix="fridge",
+    )
+    plan.furniture_at(
+        kind="dispenser", cell=kettle_cell, label="温控煮水壶", rotation=0,
+        note="随时可以烧水泡茶的温控电煮水壶。", area=utility_area, object_prefix="kettle",
+    )
+    plan.furniture_at(
+        kind="dispenser", cell=sink_cell, label="陶瓷洗手池", rotation=270,
+        note="带净水龙头的陶瓷洗手池。", area=utility_area, object_prefix="sink",
+    )
 
 
 def _build_bookstore(plan: _Plan, design: Optional[dict[str, Any]]) -> None:
@@ -636,6 +856,7 @@ def generate_interior(
     location_id: str = "",
     location_name: str = "",
     design: Optional[dict[str, Any]] = None,
+    rooms: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> dict[str, Any]:
     """为一栋建筑生成室内场景与家具。
 
@@ -657,7 +878,15 @@ def generate_interior(
         )
     rng = random.Random(f"nyairo-interior|v0.3|{building}|{seed}|{location_id}")
     plan = _Plan(rng, building)
-    _BUILDERS[building](plan, design)
+    has_multi_home_rooms = (
+        building == "home"
+        and rooms is not None
+        and any(r.get("room_id") and r.get("room_id") != "bedroom" for r in rooms)
+    )
+    if has_multi_home_rooms and rooms is not None:
+        _build_procedural_home(plan, rooms, design)
+    else:
+        _BUILDERS[building](plan, design)
     design_applied: list[str] = []
     if design:
         design_applied = _apply_design(plan, design)
@@ -698,6 +927,8 @@ def generate_interior(
             "zone": item["_area"] or plan.entrance_area,
             "prefix": item["_object_prefix"],
         }
+        if item.get("_matter_profile") is not None:
+            entry["matter_profile"] = dict(item["_matter_profile"])
         furniture.append(entry)
         furniture_map.setdefault(entry["zone"], []).append(f"{entry['prefix']}{index:02d}")
     navigation = plan.navigation()
@@ -838,11 +1069,12 @@ def apply_interiors_to_package(
         "assets": copy.deepcopy(old_scene.get("assets", {})),
         "navigation": copy.deepcopy(old_scene.get("navigation", {})),
     }
-    # 待重新生成的地点：先移除其现有家具（objects + placements）。
+    # 待重新生成的地点：先移除其现有家具（objects + placements）；显式可售商品（sale_spec）保留。
+    target_locs = {loc for loc, _, _ in targets}
     removed_by_location: dict[str, list[str]] = {}
     kept_objects = []
     for obj in docs["objects.json"]["objects"]:
-        if obj["location_id"] in {loc for loc, _, _ in targets}:
+        if obj["location_id"] in target_locs and "sale_spec" not in obj:
             removed_by_location.setdefault(obj["location_id"], []).append(obj["object_id"])
             new_scene["placements"].pop(obj["object_id"], None)
         else:
@@ -878,6 +1110,7 @@ def apply_interiors_to_package(
             seed=seed,
             location_id=location_id,
             design=design,
+            rooms=location.get("rooms") if building == "home" else None,
         )
         # 家具 → objects.json + placements；导航归属 → scene.navigation。
         navigation = result["navigation"]
@@ -886,6 +1119,17 @@ def apply_interiors_to_package(
         }
         for index, item in enumerate(result["furniture"], start=1):
             object_id = _furniture_object_id(location_id, item["prefix"], index)
+            raw_matter = (
+                dict(item["matter_profile"])
+                if item.get("matter_profile") is not None
+                else infer_matter_profile(
+                    item["kind"],
+                    name=item["label"],
+                    portable=bool(item["portable"]),
+                    capacity=int(item.get("capacity", 0) or 0),
+                    note=item["note"],
+                )
+            )
             kept_objects.append(
                 {
                     "object_id": object_id,
@@ -893,6 +1137,16 @@ def apply_interiors_to_package(
                     "kind": item["kind"],
                     "location_id": location_id,
                     "note": item["note"],
+                    "affordance_traits": infer_affordance_traits(
+                        item["kind"],
+                        name=item["label"],
+                        portable=bool(item["portable"]),
+                        note=item["note"],
+                    ),
+                    "matter_profile": schema.normalize_matter_profile(
+                        raw_matter,
+                        f"objects.objects[{len(kept_objects)}].matter_profile",
+                    ),
                 }
             )
             new_scene["placements"][object_id] = {

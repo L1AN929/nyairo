@@ -38,6 +38,7 @@ Core invariants:
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -57,6 +58,31 @@ for _entry in (str(_LIFE_SCRIPTS), str(_COMPONENTS_ROOT)):
 
 import everyday_desire_lifecycle as desire_lc  # noqa: E402
 import life_dwell  # noqa: E402
+
+try:  # same-directory import when loaded flat (components/life/scripts on sys.path)
+    import v02_representation_lease_forget as _rlf  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - package-style import
+    try:
+        from . import v02_representation_lease_forget as _rlf  # type: ignore[no-redef]
+    except ImportError:
+        _rlf = None  # type: ignore[assignment]
+
+try:  # same-directory import when loaded flat (components/life/scripts on sys.path)
+    from state_tx_guard import (  # type: ignore[import-not-found]
+        payload_fingerprint,
+        reconcile_evicted_or_active_op,
+        stamp_receipt,
+        state_file_lock,
+        trim_receipts_by_op_seq,
+    )
+except ImportError:  # pragma: no cover - package-style import
+    from .state_tx_guard import (  # type: ignore[no-redef]
+        payload_fingerprint,
+        reconcile_evicted_or_active_op,
+        stamp_receipt,
+        state_file_lock,
+        trim_receipts_by_op_seq,
+    )
 
 V03_CLOCK_VIEW_SCHEMA = "phone.v03.clock.v1"
 V03_CLOCK_STATE_SCHEMA = "life.v03.clock_evaporation.v1"
@@ -79,8 +105,25 @@ MAX_SLOW_VARS = 64
 MAX_UNKNOWN_ACTIONS = 64
 MAX_GAP_RECEIPTS = 32
 MAX_OP_LEDGER = 128
+MAX_COMMITTED_OP_RING = 4096
 MAX_TEXT_LEN = 280
 MAX_ID_LEN = 128
+
+#: Ch.43 §五/§六: a long offline gap is settled in bounded chronological slices.
+#: Segments never exceed this count; when more event boundaries occur, the first
+#: ``MAX_CATCHUP_BOUNDARY_SLICES - 1`` cuts are processed in order and the rest of
+#: the interval is coalesced into the final slice (``batch_coalesced == True``).
+MAX_CATCHUP_BOUNDARY_SLICES = 24
+#: Caller-supplied piecewise regime-change boundaries (``advance_projection``).
+BOUNDARY_EVENT_ALLOWED_FIELDS = frozenset({
+    "at_iso",
+    "kind",
+    "weather",
+    "airflow",
+    "window_state",
+    "note_cn",
+})
+MAX_BOUNDARY_SETTLEMENT_LOG = 64
 
 # ---------------------------------------------------------------------------
 # v3.0 Ch.02 Slow-Variable Incubation Kernel (Variable Ledger / Causal Edge
@@ -248,6 +291,7 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "advance_projection": frozenset({
         "action",
         "sync_v02",
+        "boundary_events",
         "expected_revision",
         "operation_key",
     }),
@@ -774,6 +818,9 @@ def default_v03_clock_state() -> dict[str, Any]:
             "album_count": 0,
         },
         "op_ledger": {},
+        "next_op_seq": 0,
+        "committed_op_ring": [],
+        "evicted_up_to_revision": 0,
     }
 
 
@@ -873,11 +920,34 @@ def _validate_clock_state(raw: Any) -> dict[str, Any]:
 
     ledger = raw.get("op_ledger")
     if isinstance(ledger, Mapping):
-        base["op_ledger"] = {
+        # Trim strictly by submission order (``op_seq``), never by the
+        # alphabetical key order that ``sort_keys=True`` produces on disk.
+        rows = {
             str(k): dict(v)
-            for k, v in list(ledger.items())[-MAX_OP_LEDGER:]
+            for k, v in ledger.items()
             if isinstance(v, Mapping)
         }
+        if len(rows) > MAX_OP_LEDGER:
+            def _op_row_order(item: tuple[str, dict[str, Any]]) -> tuple[int, str, str]:
+                row = item[1]
+                seq_raw = row.get("op_seq")
+                seq = int(seq_raw) if isinstance(seq_raw, int) and not isinstance(seq_raw, bool) else 0
+                return (seq, str(row.get("committed_at") or row.get("at") or ""), item[0])
+
+            rows = dict(sorted(rows.items(), key=_op_row_order)[-MAX_OP_LEDGER:])
+        base["op_ledger"] = rows
+
+    next_seq_raw = raw.get("next_op_seq")
+    if isinstance(next_seq_raw, int) and not isinstance(next_seq_raw, bool) and next_seq_raw >= 0:
+        base["next_op_seq"] = int(next_seq_raw)
+    evicted_rev_raw = raw.get("evicted_up_to_revision")
+    if isinstance(evicted_rev_raw, int) and not isinstance(evicted_rev_raw, bool) and evicted_rev_raw >= 0:
+        base["evicted_up_to_revision"] = int(evicted_rev_raw)
+    ring_raw = raw.get("committed_op_ring")
+    if isinstance(ring_raw, list):
+        base["committed_op_ring"] = [
+            dict(x) for x in ring_raw[-MAX_COMMITTED_OP_RING:] if isinstance(x, Mapping)
+        ]
     return base
 
 
@@ -968,13 +1038,19 @@ def _project_outerwear_entry(
     elapsed = max(0, int((now_dt - started_dt).total_seconds()))
     remaining = max(0, OUTERWEAR_DRYING_SECONDS - elapsed)
     is_dry = elapsed >= OUTERWEAR_DRYING_SECONDS
+    if is_dry:
+        projected_dryness = "dry"
+    elif initial_state == "wet" and elapsed < (OUTERWEAR_DRYING_SECONDS / 2.0):
+        projected_dryness = "wet"
+    else:
+        projected_dryness = "damp"
     return {
         "var_id": var_id,
         "label": label,
         "started_at": started_at,
         "elapsed_seconds": elapsed,
         "remaining_seconds": remaining,
-        "projected_dryness": "dry" if is_dry else "damp",
+        "projected_dryness": projected_dryness,
         "settled_dry": is_dry,
         "dried_at": (started_dt + timedelta(seconds=OUTERWEAR_DRYING_SECONDS)).isoformat(
             timespec="seconds"
@@ -1144,13 +1220,14 @@ def _collect_slow_variable_projections(
             gid = str(garment.get("garment_id") or "outerwear")
             glabel = str(garment.get("label") or gid)
             drying = garment.get("drying")
-            if garment.get("dryness") == "damp" and isinstance(drying, Mapping) and drying.get("started_at"):
+            garment_dryness = garment.get("dryness")
+            if garment_dryness in ("damp", "wet") and isinstance(drying, Mapping) and drying.get("started_at"):
                 outerwear_list.append(
                     _project_outerwear_entry(
                         var_id=gid,
                         label=glabel,
                         started_at=str(drying["started_at"]),
-                        initial_state="damp",
+                        initial_state=str(garment_dryness),
                         now_dt=now_dt,
                         source="somatic_comfort",
                     )
@@ -1275,7 +1352,7 @@ def _settle_sibling_slow_variables_on_advance(day_root: Path, now_dt: datetime, 
     }
     root = Path(day_root)
 
-    # 1. Settle somatic_comfort hanging damp outerwear that completed >= 6h drying
+    # 1. Settle somatic_comfort hanging damp/wet outerwear that completed >= 6h drying
     somatic_path = root / "phone" / "somatic_comfort.json"
     if somatic_path.exists() and not somatic_path.is_symlink():
         try:
@@ -1287,7 +1364,7 @@ def _settle_sibling_slow_variables_on_advance(day_root: Path, now_dt: datetime, 
                 drying = garment.get("drying")
                 if (
                     garment.get("state") == "hang"
-                    and garment.get("dryness") == "damp"
+                    and garment.get("dryness") in ("damp", "wet")
                     and isinstance(drying, Mapping)
                     and drying.get("started_at")
                 ):
@@ -2403,6 +2480,320 @@ def sync_v02_slices_from_committed_world(
 # ---------------------------------------------------------------------------
 
 
+#: Non-private micro-zone ambient fields the clock view may surface.  An
+#: explicit allowlist keeps subject-only breakpoints and doorstep cues out of
+#: the partner/default projection even if the ecology snapshot grows.
+_V03_MICROZONE_AMBIENT_KEYS: tuple[str, ...] = (
+    "weather",
+    "airflow",
+    "season",
+    "is_night",
+    "window_state",
+    "lamp_on",
+    "lamp_angle",
+    "active_spot_id",
+    "active_conditions",
+    "light_quality",
+    "draft_state",
+    "shelter_exposure",
+    "drying_rate_multiplier",
+    "cooling_rate_multiplier",
+    "aroma_cue_cn",
+    "salient_reasons",
+    "is_quiet_background",
+    "spots",
+)
+
+
+# ---------------------------------------------------------------------------
+# Ch.43 §五–§六: piecewise event-boundary settlement & offline recovery report
+# ---------------------------------------------------------------------------
+
+
+def _validate_boundary_events(value: Any) -> list[dict[str, Any]]:
+    """Strictly validate caller-supplied regime-change boundaries.
+
+    Each item is a closed mapping ``{at_iso, kind?, weather?, airflow?,
+    window_state?, note_cn?}``; ``at_iso`` must parse as a timezone-aware
+    timestamp.  Returns cleaned rows (``_at_dt`` is internal-only).
+    """
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise V03ClockValidationError("BOUNDARY_EVENTS_INVALID")
+    cleaned: list[dict[str, Any]] = []
+    for index, raw in enumerate(value):
+        if not isinstance(raw, Mapping):
+            raise V03ClockValidationError("BOUNDARY_EVENTS_INVALID")
+        unknown = sorted(set(raw.keys()) - BOUNDARY_EVENT_ALLOWED_FIELDS)
+        if unknown or "at_iso" not in raw:
+            raise V03ClockValidationError("BOUNDARY_EVENTS_INVALID")
+        at_dt = _parse_iso(raw.get("at_iso"), reason_code="BOUNDARY_EVENT_TIMESTAMP_INVALID")
+        item: dict[str, Any] = {
+            "at_iso": at_dt.isoformat(timespec="seconds"),
+            "_at_dt": at_dt,
+            "_order": index,
+        }
+        for field in ("kind", "weather", "airflow", "window_state", "note_cn"):
+            if field in raw and raw[field] is not None:
+                item[field] = _clean_text(
+                    raw[field], min_len=1, max_len=MAX_TEXT_LEN,
+                    reason_code="BOUNDARY_EVENTS_INVALID",
+                )
+        cleaned.append(item)
+    return cleaned
+
+
+def _settle_world_clock_slow_variables(
+    world_clock: dict[str, Any], at_dt: datetime
+) -> tuple[int, int]:
+    """Settle the three legacy physical micro slow variables as of ``at_dt``.
+
+    Returns ``(settled_count, faded_missing_notes)``; identical math to the
+    pre-piecewise single-pass settlement, evaluated once per segment.
+    """
+    settled_count = 0
+    faded_missing = 0
+    remaining: list[dict[str, Any]] = []
+    for sv in world_clock.get("slow_variables") or []:
+        kind = str(sv.get("var_kind") or "")
+        try:
+            s_dt = _parse_iso(str(sv["started_at"]))
+        except (KeyError, V03ClockError):
+            remaining.append(sv)
+            continue
+        age = max(0, int((at_dt - s_dt).total_seconds()))
+        if kind == "damp_outerwear":
+            if sv.get("current_state") != "dry" and age >= OUTERWEAR_DRYING_SECONDS:
+                sv["current_state"] = "dry"
+                sv["settled_at"] = (
+                    s_dt + timedelta(seconds=OUTERWEAR_DRYING_SECONDS)
+                ).isoformat(timespec="seconds")
+                settled_count += 1
+            remaining.append(sv)
+        elif kind == "desk_drink":
+            new_temp = (
+                "warm"
+                if age < DRINK_TEPID_SECONDS
+                else ("tepid" if age < DRINK_COOLING_SECONDS else "room_temp")
+            )
+            if sv.get("current_state") != new_temp:
+                sv["current_state"] = new_temp
+                if new_temp == "room_temp":
+                    settled_count += 1
+            remaining.append(sv)
+        elif kind == "missing_note":
+            if age >= MISSING_NOTE_FADE_SECONDS:
+                faded_missing += 1
+                settled_count += 1
+                # Naturally faded: drops cleanly with zero absence debt
+                continue
+            remaining.append(sv)
+        else:
+            remaining.append(sv)
+    world_clock["slow_variables"] = remaining
+    return settled_count, faded_missing
+
+
+def _collect_internal_settlement_boundaries(
+    state: Mapping[str, Any], *, prev_dt: datetime, target_dt: datetime
+) -> list[dict[str, Any]]:
+    """Internal scheduled expiries strictly inside ``(prev_dt, target_dt]``.
+
+    Covers evaporable TTL deadlines plus the declared physical slow-variable
+    milestones (outerwear drying completion, drink cooling, note fade).  Pure
+    read: nothing on disk is touched.
+    """
+    events: list[dict[str, Any]] = []
+
+    def _inside(dt: datetime) -> bool:
+        return prev_dt < dt <= target_dt
+
+    for item in state.get("evaporable_pool") or []:
+        if not isinstance(item, Mapping):
+            continue
+        exp_raw = item.get("expires_at")
+        if not isinstance(exp_raw, str) or not exp_raw.strip():
+            continue
+        try:
+            exp_dt = _parse_iso(exp_raw)
+        except V03ClockError:
+            continue
+        if _inside(exp_dt):
+            events.append({
+                "at_dt": exp_dt,
+                "kind": "evaporable_expired",
+                "priority": 0,
+                "ref": str(item.get("thought_id") or ""),
+            })
+
+    world_clock = state.get("world_clock") or {}
+    for sv in world_clock.get("slow_variables") or []:
+        if not isinstance(sv, Mapping):
+            continue
+        kind = str(sv.get("var_kind") or "")
+        started_raw = sv.get("started_at")
+        if not isinstance(started_raw, str) or not started_raw.strip():
+            continue
+        try:
+            started_dt = _parse_iso(started_raw)
+        except V03ClockError:
+            continue
+        current_state = str(sv.get("current_state") or sv.get("initial_state") or "")
+        marks: list[tuple[str, datetime]] = []
+        if kind == "damp_outerwear" and current_state != "dry":
+            marks.append(("outerwear_dried", started_dt + timedelta(seconds=OUTERWEAR_DRYING_SECONDS)))
+        elif kind == "desk_drink":
+            marks.append(("drink_tepid", started_dt + timedelta(seconds=DRINK_TEPID_SECONDS)))
+            marks.append(("drink_cooled", started_dt + timedelta(seconds=DRINK_COOLING_SECONDS)))
+        elif kind == "missing_note":
+            marks.append(("missing_note_faded", started_dt + timedelta(seconds=MISSING_NOTE_FADE_SECONDS)))
+        for label, at_dt in marks:
+            if _inside(at_dt):
+                events.append({
+                    "at_dt": at_dt,
+                    "kind": label,
+                    "priority": 0,
+                    "ref": str(sv.get("var_id") or ""),
+                })
+    return events
+
+
+def _plan_piecewise_segments(
+    *,
+    prev_dt: datetime,
+    target_dt: datetime,
+    internal_events: list[dict[str, Any]],
+    external_events: list[dict[str, Any]],
+) -> tuple[list[tuple[datetime, datetime]], bool, list[datetime]]:
+    """Split ``(prev_dt, target_dt]`` into bounded chronological segments.
+
+    Returns ``(segments, batch_coalesced, applied_cut_points)``.  More than
+    ``MAX_CATCHUP_BOUNDARY_SLICES - 1`` distinct cuts are truncated in
+    chronological order and the remaining interval is coalesced into the final
+    slice (Ch.43 §五: "长时间补算设批次上限").
+    """
+    cut_points = sorted(
+        {ev["at_dt"] for ev in internal_events}
+        | {ev["_at_dt"] for ev in external_events}
+    )
+    batch_coalesced = False
+    if len(cut_points) > MAX_CATCHUP_BOUNDARY_SLICES - 1:
+        cut_points = cut_points[: MAX_CATCHUP_BOUNDARY_SLICES - 1]
+        batch_coalesced = True
+
+    segments: list[tuple[datetime, datetime]] = []
+    start = prev_dt
+    for end in cut_points:
+        if end > start:
+            segments.append((start, end))
+            start = end
+    # Always settle up to the target, even for a zero-length interval so queued
+    # threshold contracts still get their dispatch pass.
+    if target_dt > start:
+        segments.append((start, target_dt))
+    elif not segments:
+        segments.append((start, target_dt))
+    return segments, batch_coalesced, cut_points
+
+
+def _build_piecewise_settlement_log(
+    internal_events: list[dict[str, Any]],
+    external_events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Chronological settlement log; due expiries at ``t_k`` come before the
+    regime change at the same ``t_k`` (Ch.43 §五 stable ordering)."""
+    ordered: list[tuple[datetime, int, int, dict[str, Any]]] = []
+    for index, ev in enumerate(internal_events):
+        row = {"at": ev["at_dt"].isoformat(timespec="seconds"), "kind": ev["kind"]}
+        if ev.get("ref"):
+            row["ref"] = ev["ref"]
+        ordered.append((ev["at_dt"], 0, index, row))
+    for index, ev in enumerate(external_events):
+        row = {"at": ev["_at_dt"].isoformat(timespec="seconds"), "kind": "regime_change"}
+        detail = {
+            key: ev[key]
+            for key in ("kind", "weather", "airflow", "window_state", "note_cn")
+            if key in ev
+        }
+        if detail:
+            row["detail"] = detail
+        ordered.append((ev["_at_dt"], 1, index, row))
+    ordered.sort(key=lambda entry: (entry[0], entry[1], entry[2]))
+    return [entry[3] for entry in ordered[-MAX_BOUNDARY_SETTLEMENT_LOG:]]
+
+
+def _build_offline_recovery_report(
+    *,
+    piecewise_segments_count: int,
+    boundary_cuts_applied: int,
+    batch_coalesced: bool,
+) -> dict[str, Any]:
+    """Ch.43 §六 structured recovery report (no raw internal codes in prose)."""
+    if batch_coalesced:
+        summary = "这段离线时间较长，环境与物品变化已按时间顺序分批追赶结算，未替角色补写任何未执行的活动。"
+    elif piecewise_segments_count > 1:
+        summary = "这段离线时间已按时间顺序分段结算环境与物品变化，未替角色补写任何未执行的活动。"
+    else:
+        summary = "这段离线时间已结算环境与物品变化，未替角色补写任何未执行的活动。"
+    return {
+        "environmental_processes_settled": True,
+        "piecewise_segments_count": int(piecewise_segments_count),
+        "boundary_cuts_applied": int(boundary_cuts_applied),
+        "batch_coalesced": bool(batch_coalesced),
+        "character_activities_paused_at_breakpoint": True,
+        "fabricated_offline_actions": 0,
+        "recovery_summary_cn": summary,
+    }
+
+
+def _project_offline_recovery_report(
+    world_clock: Mapping[str, Any], gap_seconds: int
+) -> dict[str, Any]:
+    """Zero-write report for the read projection: last settled receipt, or a
+    conservative snapshot-derived default when no advance has happened yet."""
+    for row in reversed(list(world_clock.get("gap_receipts") or [])):
+        if isinstance(row, Mapping) and isinstance(row.get("offline_recovery_report"), Mapping):
+            return dict(row["offline_recovery_report"])
+    return _build_offline_recovery_report(
+        piecewise_segments_count=1 if gap_seconds > 0 else 0,
+        boundary_cuts_applied=0,
+        batch_coalesced=False,
+    )
+
+
+def _read_microzone_ambient_zero_write(
+    day_root: Path, now_iso: str
+) -> Optional[dict[str, Any]]:
+    """Read-only micro-zone ambient snapshot for clock/world alignment.
+
+    Mirrors the same weather/window/airflow surface that objective matter
+    physics settles against, so a client reading the clock can see *why* tea
+    cooled fast, a note smudged or a cloth stayed damp across an offline gap.
+    Purely observational: an absent ecology engine, a missing state file or a
+    broken read degrades to ``None`` and never creates or mutates anything.
+    """
+
+    try:
+        from components.world.scripts import v08_microzone_ecology as _microzone
+    except ImportError:  # pragma: no cover - flat components import path
+        try:
+            from world.scripts import v08_microzone_ecology as _microzone  # type: ignore[no-redef]
+        except ImportError:
+            return None
+    try:
+        snapshot = _microzone.resolve_local_conditions_zero_write(day_root, now_iso=now_iso)
+    except Exception:  # noqa: BLE001 - a broken ecology never blocks a clock read
+        return None
+    if not isinstance(snapshot, Mapping):
+        return None
+    ambient: dict[str, Any] = {}
+    for key in _V03_MICROZONE_AMBIENT_KEYS:
+        if key in snapshot:
+            ambient[key] = copy.deepcopy(snapshot[key])
+    return ambient or None
+
+
 def project_v03_clock_data(
     day_root: Path | str,
     state: Mapping[str, Any],
@@ -2421,6 +2812,8 @@ def project_v03_clock_data(
     else:
         gap_seconds = 0
 
+    offline_recovery_report = _project_offline_recovery_report(wc, gap_seconds)
+
     ambient = _derive_ambient_soundscape(now_dt, wc.get("ambient_date"))
     slow_vars, unknown_actions, slow_private = _collect_slow_variable_projections(
         Path(day_root),
@@ -2429,6 +2822,7 @@ def project_v03_clock_data(
         has_subject_capability=has_subject_capability,
     )
     slow_ledger_view = _project_slow_ledger_view(state, now_dt=now_dt)
+    microzone_ambient = _read_microzone_ambient_zero_write(Path(day_root), clean_now)
 
     # Filter active evaporable items on pure read (expired items vanish without tombstones)
     active_evaporable: list[dict[str, Any]] = []
@@ -2479,11 +2873,53 @@ def project_v03_clock_data(
     dwell_proj = life_dwell.project_life_dwell(
         day_root, now_iso=clean_now, subject_view=has_subject_capability
     )
+    forget_barrier: Optional[Mapping[str, Any]] = None
+    if _rlf is not None:
+        forget_barrier = _rlf.load_unified_forget_barrier_readonly(Path(day_root))
     desire_proj = desire_lc.project_everyday_desires(
         day_root,
         now_iso=clean_now,
         channel_visibility="subject_private" if has_subject_capability else "public_or_shared",
+        forget_barrier=forget_barrier,
     )
+    if _rlf is not None and isinstance(forget_barrier, Mapping):
+        if forget_barrier.get("fail_closed"):
+            active_evaporable = []
+            if isinstance(desire_proj, dict):
+                for _dk in (
+                    "turn_only_concerns",
+                    "retained_concerns",
+                    "auto_subsided_concerns",
+                    "active_desires",
+                ):
+                    if isinstance(desire_proj.get(_dk), list):
+                        desire_proj[_dk] = []
+                if "last_arbitration" in desire_proj:
+                    desire_proj["last_arbitration"] = None
+        else:
+            if forget_barrier.get("barrier_active"):
+                active_evaporable = _rlf.filter_collection_by_barrier(
+                    active_evaporable, forget_barrier
+                )
+            if isinstance(desire_proj, dict):
+                for _dk in (
+                    "turn_only_concerns",
+                    "retained_concerns",
+                    "auto_subsided_concerns",
+                    "active_desires",
+                ):
+                    if isinstance(desire_proj.get(_dk), list):
+                        desire_proj[_dk] = _rlf.filter_collection_by_barrier(
+                            desire_proj[_dk], forget_barrier
+                        )
+                if forget_barrier.get("barrier_active") and isinstance(
+                    desire_proj.get("last_arbitration"), Mapping
+                ):
+                    desire_proj["last_arbitration"] = _rlf.filter_document_by_barrier(
+                        desire_proj["last_arbitration"],
+                        forget_barrier,
+                        nullable_entity_keys=("chosen_primary",),
+                    )
 
     return {
         "schema": V03_CLOCK_VIEW_SCHEMA,
@@ -2513,6 +2949,7 @@ def project_v03_clock_data(
                 "ambient_date": ambient["local_date"],
                 "ambient_date_switched": ambient["date_switched"],
                 "ambient_soundscape": ambient,
+                "microzone_ambient": microzone_ambient,
                 "gap_receipts": list(wc.get("gap_receipts") or []),
                 "llm_calls": 0,
             },
@@ -2528,6 +2965,7 @@ def project_v03_clock_data(
         },
         "slow_variables": slow_vars,
         "slow_ledger": slow_ledger_view,
+        "offline_recovery_report": offline_recovery_report,
         "iron_laws": {
             "unknown_actions_never_guessed_by_clock": True,
             "cognitive_backfill_forbidden": True,
@@ -2602,14 +3040,14 @@ def read_v03_clock_view(
         return _envelope_err(exc)
 
 
-def mutate_v03_clock_view(
+def _mutate_v03_clock_view_unlocked(
     day_root: Path | str,
     payload: Mapping[str, Any],
     *,
     actor_side: str,
     now_iso: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """POST mutation entrypoint for ``/api/phone/v03/clock`` (zero LLM calls)."""
+    """RMW body; the public entrypoint holds the unified state-file lock."""
     try:
         if not isinstance(payload, Mapping):
             raise V03ClockValidationError("PAYLOAD_NOT_OBJECT")
@@ -2646,14 +3084,24 @@ def mutate_v03_clock_view(
 
         op_key = payload.get("operation_key")
         clean_op_key: Optional[str] = None
+        intent_hash: Optional[str] = None
+        payload_hash: Optional[str] = None
         if op_key is not None:
             clean_op_key = _clean_id(op_key, reason_code="OPERATION_KEY_INVALID")
-            intent_hash = hashlib.sha256(
-                json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()[:24]
+            canonical_payload = json.dumps(
+                dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            intent_hash = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()[:24]
+            payload_hash = payload_fingerprint(dict(payload))
             existing_op = state["op_ledger"].get(clean_op_key)
             if isinstance(existing_op, Mapping):
-                if existing_op.get("intent_hash") != intent_hash:
+                # Legacy receipts carry ``intent_hash``; guard-era receipts also
+                # carry ``payload_hash``.  Either mismatch is a real conflict.
+                legacy_intent = existing_op.get("intent_hash")
+                stored_hash = existing_op.get("payload_hash")
+                if legacy_intent != intent_hash or (
+                    stored_hash is not None and str(stored_hash) != payload_hash
+                ):
                     raise V03ClockConflictError("OPERATION_KEY_REUSED_WITH_DIFFERENT_INTENT")
                 data = project_v03_clock_data(
                     root, state, has_subject_capability=has_subject_cap, now_iso=clean_now
@@ -2662,11 +3110,36 @@ def mutate_v03_clock_view(
                 return _envelope_ok(data, already_applied=True)
 
         exp_rev = payload.get("expected_revision")
-        if exp_rev is not None:
-            if isinstance(exp_rev, bool) or not isinstance(exp_rev, int) or exp_rev < 0:
-                raise V03ClockValidationError("EXPECTED_REVISION_INVALID")
-            if int(exp_rev) != int(state["revision"]):
-                raise V03ClockConflictError("REVISION_CONFLICT")
+        if exp_rev is not None and (
+            isinstance(exp_rev, bool) or not isinstance(exp_rev, int) or exp_rev < 0
+        ):
+            raise V03ClockValidationError("EXPECTED_REVISION_INVALID")
+        exp_rev_int = int(exp_rev) if exp_rev is not None else None
+
+        # Evicted but still within the retry window -> idempotent replay; older
+        # than the retained window -> explicit 409 (never treated as brand new).
+        if clean_op_key is not None and not isinstance(state["op_ledger"].get(clean_op_key), Mapping):
+            outcome, detail = reconcile_evicted_or_active_op(
+                root,
+                state,
+                clean_op_key,
+                dict_key="op_ledger",
+                expected_revision=exp_rev_int,
+                payload_hash=payload_hash,
+            )
+            if outcome == "conflict":
+                raise V03ClockConflictError("OP_KEY_CONFLICT")
+            if outcome == "expired":
+                raise V03ClockConflictError("RETRY_WINDOW_EXPIRED")
+            if outcome in ("hit_full", "hit_evicted"):
+                data = project_v03_clock_data(
+                    root, state, has_subject_capability=has_subject_cap, now_iso=clean_now
+                )
+                data["action_receipt"] = dict(detail or {})
+                return _envelope_ok(data, already_applied=True)
+
+        if exp_rev_int is not None and exp_rev_int != int(state["revision"]):
+            raise V03ClockConflictError("REVISION_CONFLICT")
 
         wc = state["world_clock"]
         cc = state["cognitive_clock"]
@@ -2674,6 +3147,7 @@ def mutate_v03_clock_view(
 
         if action == "advance_projection":
             sync_v02 = True if "sync_v02" not in payload else _strict_bool(payload["sync_v02"])
+            caller_boundaries = _validate_boundary_events(payload.get("boundary_events"))
             prev_at = wc.get("last_committed_at")
             if isinstance(prev_at, str) and prev_at.strip():
                 prev_dt = _parse_iso(prev_at)
@@ -2681,55 +3155,66 @@ def mutate_v03_clock_view(
                     raise V03ClockConflictError("WORLD_CLOCK_MONOTONIC_VIOLATION")
                 elapsed = int((now_dt - prev_dt).total_seconds())
             else:
+                prev_dt = now_dt
                 elapsed = 0
 
-            # 1. Silent TTL evaporation: zero tombstones, zero deleted_ids list, zero reflection queue
-            before_evap = len(state["evaporable_pool"])
-            surviving_evap: list[dict[str, Any]] = []
-            for item in state["evaporable_pool"]:
-                exp_dt = _parse_iso(str(item["expires_at"]))
-                if now_dt < exp_dt:
-                    surviving_evap.append(item)
-            evaporated_count = before_evap - len(surviving_evap)
-            state["evaporable_pool"] = surviving_evap
+            # Ch.43 §五: split (prev, target] at every event boundary strictly
+            # inside it — internal scheduled expiries first, caller regime changes
+            # second.  More than ``MAX_CATCHUP_BOUNDARY_SLICES - 1`` cuts are
+            # truncated chronologically and the tail is coalesced into the final
+            # slice (``batch_coalesced == True``).
+            internal_events = _collect_internal_settlement_boundaries(
+                state, prev_dt=prev_dt, target_dt=now_dt
+            )
+            external_events = [
+                ev for ev in caller_boundaries if prev_dt < ev["_at_dt"] <= now_dt
+            ]
+            segments, batch_coalesced, applied_cut_points = _plan_piecewise_segments(
+                prev_dt=prev_dt,
+                target_dt=now_dt,
+                internal_events=internal_events,
+                external_events=external_events,
+            )
+            piecewise_settlement_log = _build_piecewise_settlement_log(
+                internal_events, external_events
+            )
 
-            # 2. Settle internal slow variables deterministically
+            # 1+2+3.5: settle each slice chronologically — silent TTL evaporation
+            # (zero tombstones), the three legacy physical slow variables, and the
+            # Ch.02 slow-variable incubation kernel.  At an identical timestamp,
+            # due expiries settle BEFORE that timestamp's external regime change.
+            evaporated_count = 0
             settled_count = 0
-            remaining_slow_vars: list[dict[str, Any]] = []
             faded_missing_internal = 0
-            for sv in wc["slow_variables"]:
-                kind = str(sv.get("var_kind") or "")
-                s_dt = _parse_iso(str(sv["started_at"]))
-                age = max(0, int((now_dt - s_dt).total_seconds()))
-                if kind == "damp_outerwear":
-                    if sv.get("current_state") != "dry" and age >= OUTERWEAR_DRYING_SECONDS:
-                        sv["current_state"] = "dry"
-                        sv["settled_at"] = (s_dt + timedelta(seconds=OUTERWEAR_DRYING_SECONDS)).isoformat(
-                            timespec="seconds"
-                        )
-                        settled_count += 1
-                    remaining_slow_vars.append(sv)
-                elif kind == "desk_drink":
-                    new_temp = (
-                        "warm"
-                        if age < DRINK_TEPID_SECONDS
-                        else ("tepid" if age < DRINK_COOLING_SECONDS else "room_temp")
-                    )
-                    if sv.get("current_state") != new_temp:
-                        sv["current_state"] = new_temp
-                        if new_temp == "room_temp":
-                            settled_count += 1
-                    remaining_slow_vars.append(sv)
-                elif kind == "missing_note":
-                    if age >= MISSING_NOTE_FADE_SECONDS:
-                        faded_missing_internal += 1
-                        settled_count += 1
-                        # Naturally faded: drops cleanly with zero absence debt
+            slow_ledger_counters: dict[str, int] = {}
+            for _seg_start, seg_end in segments:
+                surviving_evap: list[dict[str, Any]] = []
+                for item in state["evaporable_pool"]:
+                    try:
+                        exp_dt = _parse_iso(str(item["expires_at"]))
+                    except V03ClockError:
+                        surviving_evap.append(item)
                         continue
-                    remaining_slow_vars.append(sv)
-                else:
-                    remaining_slow_vars.append(sv)
-            wc["slow_variables"] = remaining_slow_vars
+                    if exp_dt <= seg_end:
+                        evaporated_count += 1
+                    else:
+                        surviving_evap.append(item)
+                state["evaporable_pool"] = surviving_evap
+
+                seg_settled, seg_faded = _settle_world_clock_slow_variables(wc, seg_end)
+                settled_count += seg_settled
+                faded_missing_internal += seg_faded
+
+                seg_counters = _settle_slow_ledger(
+                    root,
+                    state,
+                    now_dt=seg_end,
+                    now_iso=seg_end.isoformat(timespec="seconds"),
+                )
+                for counter_key, counter_value in seg_counters.items():
+                    slow_ledger_counters[counter_key] = (
+                        slow_ledger_counters.get(counter_key, 0) + int(counter_value or 0)
+                    )
 
             # 3. Settle sibling slices (somatic outerwear >=6h, emotional missing notes >=72h)
             sibling_settled = _settle_sibling_slow_variables_on_advance(root, now_dt, clean_now)
@@ -2737,10 +3222,6 @@ def mutate_v03_clock_view(
                 sibling_settled["somatic_outerwear_dried"]
                 + sibling_settled["emotional_missing_faded"]
             )
-
-            # 3.5 v3.0 Ch.02 slow-variable incubation kernel: drift -> ripe -> enqueue ->
-            #     dispatch under cooldown/entropy/calm guards -> one-time v04 physical write
-            slow_ledger_counters = _settle_slow_ledger(root, state, now_dt=now_dt, now_iso=clean_now)
 
             # 4. Iron Law 1: Discrete UNKNOWN actions stay strictly UNKNOWN (never guessed)
             for unk in wc["pending_unknown_actions"]:
@@ -2780,6 +3261,65 @@ def mutate_v03_clock_view(
                 except life_dwell.LifeDwellError as exc:
                     _raise_from_subengine_error(exc)
 
+            # 3.7 v0.8: natural fade of timed living traces.  A missing state file is a
+            #     zero-cost skip (never created here); the write, when needed, stays
+            #     inside this same advance transaction.
+            evaporated_living_traces = 0
+            try:
+                from components.world.scripts import v08_open_affordance as _v08_open
+            except ImportError:  # pragma: no cover - flat components import path
+                try:
+                    from world.scripts import v08_open_affordance as _v08_open  # type: ignore[no-redef]
+                except ImportError:
+                    _v08_open = None  # type: ignore[assignment]
+            if _v08_open is not None:
+                try:
+                    evaporated_living_traces = int(
+                        _v08_open.evaporate_expired_living_traces(root, clean_now) or 0
+                    )
+                except Exception:  # noqa: BLE001 - a broken trace file never blocks the clock
+                    evaporated_living_traces = 0
+
+            # 3.7b v0.8: advance universal matter physics (thermal / moisture /
+            #      freshness / rain splash).  A missing state file is 100% zero-write
+            #      and yields an empty receipt block; any failure stays inside the
+            #      receipt and never blocks the clock.
+            matter_physics_settled: dict[str, int] = {}
+            try:
+                from components.world.scripts import v08_universal_matter as _v08_matter
+            except ImportError:  # pragma: no cover - flat components import path
+                try:
+                    from world.scripts import v08_universal_matter as _v08_matter  # type: ignore[no-redef]
+                except ImportError:
+                    _v08_matter = None  # type: ignore[assignment]
+            if _v08_matter is not None:
+                try:
+                    # Probe the state path first: settle is a no-op on an absent
+                    # file, and never materialise a matter space just by ticking
+                    # the clock.  Only real settlements reach the receipt.
+                    state_probe = getattr(_v08_matter, "state_path", None)
+                    has_matter_space = bool(
+                        callable(state_probe) and state_probe(root).is_file()
+                    )
+                    if has_matter_space:
+                        raw_settled = _v08_matter.settle_matter_physics(root, clean_now) or {}
+                        if isinstance(raw_settled, Mapping):
+                            # Preserve every objective settlement counter as an
+                            # integer, including weather-driven keys such as
+                            # ``rain_dampened``; ignore non-counter junk.
+                            for settled_key, settled_value in raw_settled.items():
+                                if isinstance(settled_value, int) and not isinstance(
+                                    settled_value, bool
+                                ):
+                                    matter_physics_settled[str(settled_key)] = int(settled_value)
+                except Exception:  # noqa: BLE001 - a broken matter file never blocks the clock
+                    matter_physics_settled = {}
+
+            offline_recovery_report = _build_offline_recovery_report(
+                piecewise_segments_count=len(segments),
+                boundary_cuts_applied=len(applied_cut_points),
+                batch_coalesced=batch_coalesced,
+            )
             gap_receipt = {
                 "kind": life_dwell.HOST_GAP_KIND if host_gap_rec is not None else "SHORT_ADVANCE",
                 "host_gap_recorded": host_gap_rec is not None,
@@ -2791,7 +3331,14 @@ def mutate_v03_clock_view(
                 "evaporated_count": evaporated_count,
                 "faded_missing_notes": faded_missing_internal + sibling_settled["emotional_missing_faded"],
                 "slow_ledger": dict(slow_ledger_counters),
+                "evaporated_living_traces": evaporated_living_traces,
+                "matter_physics_settled": matter_physics_settled,
                 "ambient_date_switched": date_switched,
+                "piecewise_segments_count": len(segments),
+                "boundary_cuts_applied": len(applied_cut_points),
+                "batch_coalesced": bool(batch_coalesced),
+                "piecewise_settlement_log": piecewise_settlement_log,
+                "offline_recovery_report": offline_recovery_report,
                 "unknown_actions_guessed": 0,
                 "cognitive_backfill_count": 0,
                 "llm_calls": 0,
@@ -3425,17 +3972,25 @@ def mutate_v03_clock_view(
         state["revision"] = int(state["revision"]) + 1
         state["updated_at"] = clean_now
         if clean_op_key is not None:
-            intent_hash = hashlib.sha256(
-                json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()[:24]
-            state["op_ledger"][clean_op_key] = {
+            # Keep the legacy keys (``intent_hash`` / ``receipt`` / ``at``) next to
+            # the guard's submission-order fields so old readers and old rows keep
+            # working.  Eviction is strictly by ``op_seq`` (never key order), and
+            # evicted rows flow into the bounded ring for idempotent replay.
+            legacy_row = {
                 "intent_hash": intent_hash,
                 "receipt": dict(receipt),
                 "at": clean_now,
             }
-            if len(state["op_ledger"]) > MAX_OP_LEDGER:
-                oldest = list(state["op_ledger"].keys())[0]
-                state["op_ledger"].pop(oldest, None)
+            stamp_receipt(
+                state,
+                clean_op_key,
+                legacy_row,
+                revision=int(state["revision"]),
+                dict_key="op_ledger",
+                payload_hash=payload_hash or "",
+                committed_at=clean_now,
+            )
+            trim_receipts_by_op_seq(state, dict_key="op_ledger", max_keep=MAX_OP_LEDGER)
 
         saved = write_v03_clock_state(root, state)
         data = project_v03_clock_data(
@@ -3445,6 +4000,56 @@ def mutate_v03_clock_view(
         return _envelope_ok(data)
     except V03ClockError as exc:
         return _envelope_err(exc)
+
+
+def _prevalidate_clock_request(payload: Any, actor_side: str) -> None:
+    """Pure payload checks, run before taking the write lock so rejected requests
+    never create the ``.lock`` file or the ``phone/`` directory."""
+    if not isinstance(payload, Mapping):
+        raise V03ClockValidationError("PAYLOAD_NOT_OBJECT")
+    clean_actor = str(actor_side or "").strip().lower()
+    if clean_actor not in ACTOR_SIDES:
+        raise V03ClockPermissionError("ACTOR_SIDE_INVALID")
+    forbidden_global = sorted(set(payload.keys()) & GLOBAL_FORBIDDEN_FIELDS)
+    if forbidden_global:
+        raise V03ClockConflictError(f"FORBIDDEN_FIELD:{forbidden_global[0]}")
+    action = _clean_text(payload.get("action"), min_len=1, max_len=64, reason_code="ACTION_REQUIRED")
+    allowed_fields = ACTION_ALLOWED_FIELDS.get(action)
+    if allowed_fields is None:
+        raise V03ClockValidationError(f"ACTION_INVALID:{action}")
+    if action == "record_evaporable":
+        forbidden_evap_keys = sorted(set(payload.keys()) & FORBIDDEN_EVAPORABLE_PAYLOAD_KEYS)
+        if forbidden_evap_keys:
+            raise V03ClockConflictError("EVAPORABLE_FORBIDDEN_FOR_ACCOUNTABLE_STATE")
+    extra_fields = sorted(set(payload.keys()) - allowed_fields)
+    if extra_fields:
+        raise V03ClockValidationError(f"UNKNOWN_FIELD:{','.join(extra_fields)}")
+    if action in SUBJECT_ONLY_ACTIONS and clean_actor != "subject":
+        raise V03ClockPermissionError("SUBJECT_CAPABILITY_REQUIRED")
+
+
+def mutate_v03_clock_view(
+    day_root: Path | str,
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str,
+    now_iso: str | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """POST mutation entrypoint for ``/api/phone/v03/clock`` (zero LLM calls).
+
+    Every accepted transaction runs read-check-mutate-save under the unified
+    ``state_file_lock``; rejected payloads are filtered before the lock so they
+    stay zero-write.  ``read_v03_clock_view`` never takes this lock.
+    """
+    try:
+        _prevalidate_clock_request(payload, actor_side)
+    except V03ClockError as exc:
+        return _envelope_err(exc)
+    root = Path(day_root)
+    with state_file_lock(v03_clock_state_path(root)):
+        return _mutate_v03_clock_view_unlocked(
+            root, payload, actor_side=actor_side, now_iso=now_iso
+        )
 
 
 def apply_v03_clock_action(
@@ -3461,9 +4066,35 @@ def apply_v03_clock_action(
     return body
 
 
+def advance_v05_fabric_ripple_hook(
+    *,
+    fabric: Any = None,
+    minutes: int = 15,
+    day_root: Optional[Path | str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """0.5 统一空间树与钟面/微气候纯本地涟漪推进钩子（零模型调用）。"""
+    from components.world.scripts import v05_unified_world_fabric as fabric_mod
+
+    if fabric is not None:
+        return fabric.advance_ripple(minutes)
+    if day_root is not None:
+        snap = fabric_mod.project_unified_world_fabric_zero_write(day_root, now_iso=now_iso)
+        return {
+            "sunbeam_zone": snap.get("sunbeam_zone"),
+            "nightlight_auto_on": bool(snap.get("nightlight_auto_on")),
+            "window_state": snap.get("window_state"),
+            "weather": snap.get("weather"),
+            "changed_objects": [],
+            "llm_calls": 0,
+        }
+    return {"sunbeam_zone": None, "nightlight_auto_on": False, "changed_objects": [], "llm_calls": 0}
+
+
 __all__ = [
     "ACCOUNTABILITY_TIERS",
     "ACTION_ALLOWED_FIELDS",
+    "advance_v05_fabric_ripple_hook",
     "CALM_PERIOD_DAYS",
     "CAUSAL_EDGE_GRADES",
     "COOLDOWN_FAMILIES",
@@ -3473,6 +4104,7 @@ __all__ = [
     "FORBIDDEN_EVAPORABLE_DOMAINS",
     "MANIFESTATION_STATUSES",
     "MAX_ACTIVE_ECO_VARIABLES",
+    "MAX_CATCHUP_BOUNDARY_SLICES",
     "MEANINGLESS_IDLE_KINDS",
     "MISSING_NOTE_FADE_SECONDS",
     "OUTERWEAR_DRYING_SECONDS",

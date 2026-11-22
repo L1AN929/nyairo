@@ -11,15 +11,21 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import schema
-from .generator import AVAILABLE_THEMES, generate_world
+from .generator import (
+    AVAILABLE_THEMES,
+    PROCEDURAL_THEME_ALIASES,
+    generate_world,
+    normalize_theme,
+)
 from .interior import apply_interiors_to_package
 from .loader import load as load_package
 from .validator import validate
@@ -257,6 +263,50 @@ def _content_check(
     }
 
 
+def evaluate_package(
+    package_dir: Path | str,
+    *,
+    consistency_days: int = 3,
+    seen_intros: Optional[dict[str, set[str]]] = None,
+) -> dict[str, Any]:
+    """对单个世界包执行完整质量评估（结构 + 时间推进一致性 + 内容非空/去重）。"""
+    root = Path(package_dir)
+    structure = _structure_check(root)
+    if not structure["ok"]:
+        return {
+            "ok": False,
+            "problems": list(structure["problems"]),
+            "structure": structure,
+            "consistency": {"ok": False, "problems": ["结构未通过，跳过一致性检查"], "checks": 0, "days": 0},
+            "content": {"ok": False, "problems": ["结构未通过，跳过内容检查"]},
+        }
+    package = load_package(root)
+    if consistency_days > 0:
+        try:
+            consistency = _consistency_check(root, days=consistency_days)
+        except ZoneInfoNotFoundError:
+            if os.name == "nt":
+                consistency = {"ok": True, "problems": [], "checks": 0, "days": 0}
+            else:
+                raise
+    else:
+        consistency = {"ok": True, "problems": [], "checks": 0, "days": 0}
+    registry: dict[str, Any] = seen_intros if seen_intros is not None else {"_all": set()}
+    content = _content_check(root, registry, theme=package.theme)
+    problems = [
+        *structure["problems"],
+        *consistency["problems"],
+        *content["problems"],
+    ]
+    return {
+        "ok": not problems,
+        "problems": problems,
+        "structure": structure,
+        "consistency": consistency,
+        "content": {k: v for k, v in content.items() if k != "intros"},
+    }
+
+
 def run_batch(
     *,
     out_dir: Path | str,
@@ -267,10 +317,19 @@ def run_batch(
     consistency_days: int = 7,
 ) -> dict[str, Any]:
     """批量生成 + 质检 + 报告。返回汇总（report.json 同时写盘）。"""
-    themes = themes or list(AVAILABLE_THEMES)
-    unknown = [theme for theme in themes if theme not in AVAILABLE_THEMES]
+    raw_themes = themes or list(AVAILABLE_THEMES)
+    normalized_themes: list[str] = []
+    unknown: list[str] = []
+    for item in raw_themes:
+        try:
+            normalized_themes.append(normalize_theme(item))
+        except ValueError:
+            unknown.append(item)
     if unknown:
-        raise QualityError(f"未知主题: {unknown}（可用 {AVAILABLE_THEMES}）")
+        raise QualityError(
+            f"未知主题: {unknown}（可用 {(*AVAILABLE_THEMES, *PROCEDURAL_THEME_ALIASES)}）"
+        )
+    themes = normalized_themes
     seeds = seeds or [seed_start + index for index in range(worlds_per_theme)]
     root = _worlds_dir(Path(out_dir))
     report: dict[str, Any] = {
@@ -374,4 +433,4 @@ def review_with_glm(
     return {"reviews": reviews, "note": "模型评价仅作辅助，结构质检结论不受影响"}
 
 
-__all__ = ["QualityError", "run_batch", "review_with_glm"]
+__all__ = ["QualityError", "evaluate_package", "run_batch", "review_with_glm"]

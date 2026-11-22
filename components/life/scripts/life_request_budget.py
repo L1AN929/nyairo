@@ -52,6 +52,7 @@ active day's token count.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import uuid
@@ -93,6 +94,173 @@ DEFAULT_DAILY_TOKEN_BUDGET = 50_000
 #: 24 次全按保守常数计（48_000）仍低于日 token 预算，调用上限先绑定。
 DEFAULT_CONSERVATIVE_TOKEN_RESERVATION = 2000
 
+#: 07 章 §四 SlotQuota / DailyEnvelope：时段槽位与日分类包络（v0.8 Wave 7 最小实装）。
+#: 仅在调用方显式 ``enforce_slot_envelope=True`` 时生效，默认调用路径与此前逐字节一致。
+SLOT_DAYTIME_ACTIVE = "DAYTIME_ACTIVE"
+SLOT_EVENING_WIND_DOWN = "EVENING_WIND_DOWN"
+SLOT_NIGHT_REST = "NIGHT_REST"
+SLOT_QUOTAS: dict[str, int] = {
+    SLOT_DAYTIME_ACTIVE: 2,
+    SLOT_EVENING_WIND_DOWN: 1,
+    SLOT_NIGHT_REST: 0,
+}
+CATEGORY_INITIATION = "INITIATION"
+CATEGORY_CONTINUATION = "CONTINUATION"
+CATEGORY_REFLECTION = "REFLECTION"
+DAILY_ENVELOPE_CAPS: dict[str, Any] = {
+    "daily_hard_cap": 8,
+    "per_category_cap": {
+        CATEGORY_INITIATION: 3,
+        CATEGORY_CONTINUATION: 5,
+        CATEGORY_REFLECTION: 2,
+    },
+}
+REASON_SLOT_QUOTA_EXCEEDED = "REQUEST_BUDGET_SLOT_QUOTA_EXCEEDED"
+REASON_DAILY_ENVELOPE_EXCEEDED = "REQUEST_BUDGET_DAILY_ENVELOPE_EXCEEDED"
+REASON_UNKNOWN_SLOT_OR_CATEGORY = "REQUEST_BUDGET_UNKNOWN_SLOT_OR_CATEGORY"
+MAX_SLOT_ENVELOPE_OPS = 64
+
+#: 07 章 §四 四时段配额与结转（v0.8 补全）。与上方的三槽 ``SLOT_QUOTAS`` 并存：
+#: 三槽是既有默认路径（仅在 ``enforce_slot_envelope=True`` 时生效），四时段只在调用方
+#: 显式 ``slot_mode="v03_four_slot"`` 时启用，默认调用与旧账本形状逐字节不变。
+#: 业务时区内按 ``morning 06-12 / afternoon 12-18 / evening 18-22 / night 22-06`` 划段；
+#: 同一业务日内前一已过时段的未用完配额按 ``V03_SLOT_CARRY_RATIO`` 折半滚入下一时段，
+#: 但单日四个时段的总支出绝不超过日硬顶 24 次 / 50000 tokens；跨午夜进入新业务日时
+#: 早段无可继承的已过时段，结转自然归零（不攒跨天债）。
+V03_FOUR_SLOT_QUOTAS: dict[str, dict[str, int]] = {
+    "morning": {"calls": 6, "tokens": 12500},
+    "afternoon": {"calls": 7, "tokens": 14000},
+    "evening": {"calls": 7, "tokens": 14000},
+    "night": {"calls": 4, "tokens": 9500},
+}
+V03_FOUR_SLOT_ORDER: tuple[str, ...] = ("morning", "afternoon", "evening", "night")
+V03_SLOT_CARRY_RATIO: float = 0.5
+V03_FOUR_SLOT_DAILY_CALL_CAP = sum(row["calls"] for row in V03_FOUR_SLOT_QUOTAS.values())
+V03_FOUR_SLOT_DAILY_TOKEN_CAP = sum(row["tokens"] for row in V03_FOUR_SLOT_QUOTAS.values())
+V03_SLOT_MODE = "v03_four_slot"
+REASON_V03_SLOT_QUOTA_EXCEEDED = "REQUEST_BUDGET_V03_SLOT_QUOTA_EXCEEDED"
+REASON_V03_DAILY_CAP_EXCEEDED = "REQUEST_BUDGET_V03_DAILY_CAP_EXCEEDED"
+REASON_UNKNOWN_V03_SLOT = "REQUEST_BUDGET_UNKNOWN_V03_SLOT"
+
+
+def v03_slot_for_hour(hour: int) -> str:
+    """Map a local business-time hour to its four-slot name (22-06 is ``night``)."""
+
+    h = int(hour) % 24
+    if 6 <= h < 12:
+        return "morning"
+    if 12 <= h < 18:
+        return "afternoon"
+    if 18 <= h < 22:
+        return "evening"
+    return "night"
+
+
+def _v03_elapsed_slots_for_hour(hour: int) -> tuple[str, ...]:
+    """The slots whose window has already closed within the current business day.
+
+    ``00:00-06:00`` is the *night of a new business day*: no earlier slot of that day has
+    elapsed yet, so nothing carries in -- this is exactly the "cross-midnight zero carry"
+    rule, expressed as data rather than a special case in the caller.
+    """
+
+    h = int(hour) % 24
+    if 6 <= h < 12:
+        return ()
+    if 12 <= h < 18:
+        return ("morning",)
+    if 18 <= h < 22:
+        return ("morning", "afternoon")
+    if 22 <= h < 24:
+        return ("morning", "afternoon", "evening")
+    return ()
+
+
+def _v03_used_calls_tokens(row: Any) -> tuple[int, int]:
+    if not isinstance(row, Mapping):
+        return 0, 0
+    raw_calls = row.get("calls")
+    raw_tokens = row.get("tokens")
+    calls = max(0, int(raw_calls)) if isinstance(raw_calls, int) and not isinstance(raw_calls, bool) else 0
+    tokens = max(0, int(raw_tokens)) if isinstance(raw_tokens, int) and not isinstance(raw_tokens, bool) else 0
+    return calls, tokens
+
+
+def v03_four_slot_effective(
+    day_bucket: Any,
+    hour: int,
+    *,
+    daily_call_cap: int = V03_FOUR_SLOT_DAILY_CALL_CAP,
+    daily_token_cap: int = V03_FOUR_SLOT_DAILY_TOKEN_CAP,
+) -> dict[str, Any]:
+    """Pure, read-only effective-quota projection for one business day.
+
+    Each slot's effective quota is its base plus half of the *immediately preceding* slot's
+    unused effective quota, but only when that preceding slot has actually elapsed inside
+    this business day.  The per-day totals are the raw usage sum across all four slots and
+    are capped at the daily hard envelope (24 calls / 50000 tokens).
+    """
+
+    raw_slots = (
+        day_bucket.get("slots")
+        if isinstance(day_bucket, Mapping) and isinstance(day_bucket.get("slots"), Mapping)
+        else {}
+    )
+    elapsed = set(_v03_elapsed_slots_for_hour(hour))
+    slots_out: dict[str, Any] = {}
+    prev_eff_calls: Optional[int] = None
+    prev_used_calls = 0
+    prev_eff_tokens: Optional[int] = None
+    prev_used_tokens = 0
+    prev_elapsed = False
+    for slot in V03_FOUR_SLOT_ORDER:
+        base = V03_FOUR_SLOT_QUOTAS[slot]
+        carry_calls = 0
+        carry_tokens = 0
+        if prev_eff_calls is not None and prev_elapsed:
+            carry_calls = int(math.floor(
+                max(0, prev_eff_calls - prev_used_calls) * V03_SLOT_CARRY_RATIO))
+            carry_tokens = int(math.floor(
+                max(0, prev_eff_tokens - prev_used_tokens) * V03_SLOT_CARRY_RATIO))
+        eff_calls = int(base["calls"]) + carry_calls
+        eff_tokens = int(base["tokens"]) + carry_tokens
+        used_calls, used_tokens = _v03_used_calls_tokens(raw_slots.get(slot))
+        slots_out[slot] = {
+            "calls": {
+                "base": int(base["calls"]),
+                "carry": carry_calls,
+                "effective": eff_calls,
+                "used": used_calls,
+                "remaining": max(0, eff_calls - used_calls),
+            },
+            "tokens": {
+                "base": int(base["tokens"]),
+                "carry": carry_tokens,
+                "effective": eff_tokens,
+                "used": used_tokens,
+                "remaining": max(0, eff_tokens - used_tokens),
+            },
+        }
+        prev_eff_calls, prev_used_calls = eff_calls, used_calls
+        prev_eff_tokens, prev_used_tokens = eff_tokens, used_tokens
+        prev_elapsed = slot in elapsed
+
+    total_calls = sum(row["calls"]["used"] for row in slots_out.values())
+    total_tokens = sum(row["tokens"]["used"] for row in slots_out.values())
+    return {
+        "slots": slots_out,
+        "slot_order": list(V03_FOUR_SLOT_ORDER),
+        "current_slot": v03_slot_for_hour(hour),
+        "local_hour": int(hour) % 24,
+        "total_calls_used": total_calls,
+        "total_tokens_used": total_tokens,
+        "daily_call_cap": int(daily_call_cap),
+        "daily_token_cap": int(daily_token_cap),
+        "daily_calls_remaining": max(0, int(daily_call_cap) - total_calls),
+        "daily_tokens_remaining": max(0, int(daily_token_cap) - total_tokens),
+        "carry_ratio": V03_SLOT_CARRY_RATIO,
+    }
+
 #: How many finished run windows and days are retained in the ledger.
 MAX_WINDOWS = 32
 MAX_DAYS = 64
@@ -101,7 +269,7 @@ MAX_TOKENS = 256
 
 _KEYS = frozenset({
     "schema_version", "kind", "active_day", "days", "windows", "run_id",
-    "tokens", "opened_at", "updated_at", "day_tokens",
+    "tokens", "opened_at", "updated_at", "day_tokens", "slot_envelope_days",
 })
 
 
@@ -493,6 +661,11 @@ class LifeRequestBudget:
             raise RequestBudgetError(REASON_STATE_CORRUPT, "active_day is not a string")
         if "day_tokens" in data and not isinstance(data.get("day_tokens"), dict):
             raise RequestBudgetError(REASON_STATE_CORRUPT, "day_tokens is not an object")
+        # 可选字段：旧账本没有它是完全合法的；只有存在但类型错误才判损坏。
+        if "slot_envelope_days" in data and not isinstance(data.get("slot_envelope_days"), dict):
+            raise RequestBudgetError(REASON_STATE_CORRUPT, "slot_envelope_days is not an object")
+        if "v03_four_slot_days" in data and not isinstance(data.get("v03_four_slot_days"), dict):
+            raise RequestBudgetError(REASON_STATE_CORRUPT, "v03_four_slot_days is not an object")
         return data
 
     def _save_locked(self, data: dict[str, Any]) -> None:
@@ -511,6 +684,18 @@ class LifeRequestBudget:
             data["windows"] = {key: windows[key] for key in ordered[-MAX_WINDOWS:]}
         tokens = list(data.get("tokens") or [])[-MAX_TOKENS:]
         data["tokens"] = tokens
+        slot_days = data.get("slot_envelope_days")
+        if isinstance(slot_days, dict) and len(slot_days) > MAX_DAYS:
+            keep_slot_days = sorted(slot_days)[-MAX_DAYS:]
+            data["slot_envelope_days"] = {
+                key: slot_days[key] for key in keep_slot_days
+            }
+        four_days = data.get("v03_four_slot_days")
+        if isinstance(four_days, dict) and len(four_days) > MAX_DAYS:
+            keep_four_days = sorted(four_days)[-MAX_DAYS:]
+            data["v03_four_slot_days"] = {
+                key: four_days[key] for key in keep_four_days
+            }
         data["updated_at"] = _iso()
         try:
             _write_atomically(self.path, data)
@@ -526,8 +711,7 @@ class LifeRequestBudget:
         """Read-only view.  Never raises for a corrupt ledger: it reports ``corrupt``."""
 
         try:
-            with _exclusive(self.state_root):
-                data = self._load_locked()
+            data = self._load_locked()
         except RequestBudgetError as exc:
             day = self._resolve_day(now)
             return {"state": STATE_CORRUPT, "reason_code": exc.reason_code,
@@ -610,18 +794,29 @@ class LifeRequestBudget:
 
     # -- the reservation -----------------------------------------------------
 
-    def check(self, *, now: Optional[datetime] = None) -> dict[str, Any]:
+    def check(
+        self,
+        *,
+        est_tokens: int = 0,
+        now: Optional[datetime] = None,
+    ) -> dict[str, Any]:
         """Is one more request allowed right now?  Read-only, and fail closed."""
 
+        if isinstance(est_tokens, bool) or not isinstance(est_tokens, int) or est_tokens < 0:
+            raise ValueError("est_tokens must be a non-negative int, got %r" % (est_tokens,))
         try:
-            with _exclusive(self.state_root):
-                data = self._load_locked()
+            data = self._load_locked()
         except RequestBudgetError as exc:
             return {"allowed": False, "reason_code": exc.reason_code, "detail": exc.detail}
-        return self._verdict(data, moment=now)
+        return self._verdict(data, moment=now, est_tokens=int(est_tokens))
 
-    def _verdict(self, data: Mapping[str, Any], *,
-                 moment: Optional[datetime] = None) -> dict[str, Any]:
+    def _verdict(
+        self,
+        data: Mapping[str, Any],
+        *,
+        moment: Optional[datetime] = None,
+        est_tokens: int = 0,
+    ) -> dict[str, Any]:
         day = self._active_day(data, moment=moment)
         day_used = int((data.get("days") or {}).get(day) or 0)
         window_used = self._window_calls(data, self.run_id)
@@ -640,16 +835,176 @@ class LifeRequestBudget:
             return dict(base, allowed=False, reason_code=REASON_RUN_WINDOW_LIMIT,
                         detail="run window %s spent %s of %s"
                                % (self.run_id, window_used, self.run_window_max))
-        if self.daily_token_budget is not None and day_tokens_used >= self.daily_token_budget:
-            return dict(base, allowed=False, reason_code=REASON_DAILY_TOKEN_BUDGET,
-                        detail="business day %s (%s) reserved %s of %s est tokens"
-                               % (day, self.business_tz_label, day_tokens_used,
-                                  self.daily_token_budget))
+        if self.daily_token_budget is not None:
+            if day_tokens_used >= self.daily_token_budget:
+                return dict(
+                    base,
+                    allowed=False,
+                    reason_code=REASON_DAILY_TOKEN_BUDGET,
+                    detail="business day %s (%s) reserved %s of %s est tokens"
+                    % (day, self.business_tz_label, day_tokens_used, self.daily_token_budget),
+                )
+            if int(est_tokens) > 0 and (day_tokens_used + int(est_tokens)) > self.daily_token_budget:
+                return dict(
+                    base,
+                    allowed=False,
+                    reason_code=REASON_DAILY_TOKEN_BUDGET,
+                    detail="business day %s (%s) reserved %s+%s of %s est tokens"
+                    % (
+                        day,
+                        self.business_tz_label,
+                        day_tokens_used,
+                        int(est_tokens),
+                        self.daily_token_budget,
+                    ),
+                )
         return dict(base, allowed=True, reason_code="")
+
+    def _local_hour(self, moment: Optional[datetime] = None) -> int:
+        """The hour of ``moment`` in this budget's business timezone."""
+
+        if moment is None:
+            moment = datetime.now(timezone.utc)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=self.business_tz)
+        return int(moment.astimezone(self.business_tz).hour)
+
+    def _four_slot_bucket(self, data: Mapping[str, Any], day: str) -> Optional[dict[str, Any]]:
+        days = data.get("v03_four_slot_days")
+        bucket = days.get(day) if isinstance(days, Mapping) else None
+        return bucket if isinstance(bucket, dict) else None
+
+    def _four_slot_verdict(
+        self,
+        day_bucket: Any,
+        *,
+        slot: str,
+        hour: int,
+        est_tokens: int,
+        day: str,
+    ) -> dict[str, Any]:
+        projection = v03_four_slot_effective(day_bucket, hour)
+        slots = projection["slots"]
+        row = slots[slot]
+        base = {
+            "business_day": day,
+            "business_tz": self.business_tz_label,
+            "slot_name": slot,
+            "local_hour": hour,
+            "slot_calls": dict(row["calls"]),
+            "slot_tokens": dict(row["tokens"]),
+            "total_calls_used": projection["total_calls_used"],
+            "total_tokens_used": projection["total_tokens_used"],
+            "daily_call_cap": projection["daily_call_cap"],
+            "daily_token_cap": projection["daily_token_cap"],
+        }
+        calls = row["calls"]
+        tokens = row["tokens"]
+        if calls["used"] >= calls["effective"]:
+            return dict(base, allowed=False, reason_code=REASON_V03_SLOT_QUOTA_EXCEEDED,
+                        detail="slot %s on %s (%s) spent %s of %s calls"
+                               % (slot, day, self.business_tz_label,
+                                  calls["used"], calls["effective"]))
+        if int(tokens["used"]) + int(est_tokens) > int(tokens["effective"]):
+            return dict(base, allowed=False, reason_code=REASON_V03_SLOT_QUOTA_EXCEEDED,
+                        detail="slot %s on %s (%s) reserved %s+%s of %s est tokens"
+                               % (slot, day, self.business_tz_label,
+                                  tokens["used"], est_tokens, tokens["effective"]))
+        if int(projection["total_calls_used"]) >= int(projection["daily_call_cap"]):
+            return dict(base, allowed=False, reason_code=REASON_V03_DAILY_CAP_EXCEEDED,
+                        detail="business day %s (%s) spent %s of %s daily calls"
+                               % (day, self.business_tz_label,
+                                  projection["total_calls_used"], projection["daily_call_cap"]))
+        if int(projection["total_tokens_used"]) + int(est_tokens) \
+                > int(projection["daily_token_cap"]):
+            return dict(base, allowed=False, reason_code=REASON_V03_DAILY_CAP_EXCEEDED,
+                        detail="business day %s (%s) reserved %s+%s of %s est tokens"
+                               % (day, self.business_tz_label,
+                                  projection["total_tokens_used"], est_tokens,
+                                  projection["daily_token_cap"]))
+        return dict(base, allowed=True, reason_code="")
+
+    def check_v03_four_slot(
+        self,
+        *,
+        slot_name: Optional[str] = None,
+        est_tokens: int = 0,
+        now: Optional[datetime] = None,
+        now_iso: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Read-only four-slot verdict (fail closed); the default call path never uses it."""
+
+        moment = self._coerce_moment(now, now_iso)
+        hour = self._local_hour(moment)
+        slot = str(slot_name).strip() if slot_name else v03_slot_for_hour(hour)
+        if slot not in V03_FOUR_SLOT_QUOTAS:
+            return {"allowed": False, "reason_code": REASON_UNKNOWN_V03_SLOT,
+                    "detail": "unknown v03 slot %r" % (slot,), "slot_name": slot}
+        try:
+            data = self._load_locked()
+        except RequestBudgetError as exc:
+            return {"allowed": False, "reason_code": exc.reason_code,
+                    "detail": exc.detail, "slot_name": slot}
+        day = self._active_day(data, moment=moment)
+        return self._four_slot_verdict(
+            self._four_slot_bucket(data, day),
+            slot=slot,
+            hour=hour,
+            est_tokens=int(est_tokens or 0),
+            day=day,
+        )
+
+    def four_slot_snapshot(
+        self,
+        *,
+        now: Optional[datetime] = None,
+        now_iso: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Read-only snapshot of one business day's four-slot usage (never raises)."""
+
+        moment = self._coerce_moment(now, now_iso)
+        hour = self._local_hour(moment)
+        try:
+            data = self._load_locked()
+        except RequestBudgetError as exc:
+            day = self._resolve_day(moment)
+            projection = v03_four_slot_effective(None, hour)
+            return dict(projection, state=STATE_CORRUPT, reason_code=exc.reason_code,
+                        detail=exc.detail, business_day=day,
+                        business_tz=self.business_tz_label)
+        day = self._active_day(data, moment=moment)
+        bucket = self._four_slot_bucket(data, day)
+        projection = v03_four_slot_effective(bucket, hour)
+        return dict(
+            projection,
+            state=STATE_OK if bucket else STATE_ABSENT,
+            business_day=day,
+            business_tz=self.business_tz_label,
+            slot_quotas={k: dict(v) for k, v in V03_FOUR_SLOT_QUOTAS.items()},
+        )
+
+    @staticmethod
+    def _coerce_moment(now: Optional[datetime],
+                       now_iso: Optional[str]) -> Optional[datetime]:
+        if now is not None:
+            return now
+        if isinstance(now_iso, datetime):
+            return now_iso
+        if isinstance(now_iso, str) and now_iso.strip():
+            text = now_iso.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                return datetime.fromisoformat(text)
+            except ValueError:
+                return None
+        return None
 
     def reserve(self, kind: str = REQUEST_KIND_DECISION, *,
                 est_tokens: Optional[int] = None,
-                now: Optional[datetime] = None) -> dict[str, Any]:
+                now: Optional[datetime] = None,
+                slot_mode: Optional[str] = None,
+                slot_name: Optional[str] = None) -> dict[str, Any]:
         """Persist one attempt's reservation **before** the caller sends anything.
 
         ``est_tokens`` is the reservation's estimated token cost -- the wake ticket's own
@@ -658,23 +1013,47 @@ class LifeRequestBudget:
         non-negative int (booleans refused).  Raises :class:`RequestBudgetError` when any
         ceiling is reached or the ledger is corrupt.  There is no path that gives a
         reservation back -- the estimate keeps its reservation like the call does.
+
+        ``slot_mode="v03_four_slot"`` is the opt-in 07 章 §四 four-slot + carry ceiling.  It
+        adds its own per-slot and per-day caps on top of the historical ceilings and writes
+        only the optional ``v03_four_slot_days`` sub-key; every other call path (including
+        the three-slot ``SLOT_QUOTAS``) is byte-for-byte unchanged.
         """
 
         if kind not in REQUEST_KINDS:
             raise ValueError("unknown request kind %r" % (kind,))
+        if slot_mode not in (None, V03_SLOT_MODE):
+            raise ValueError("unknown slot_mode %r" % (slot_mode,))
         if est_tokens is None:
             est = DEFAULT_CONSERVATIVE_TOKEN_RESERVATION
         else:
             if isinstance(est_tokens, bool) or not isinstance(est_tokens, int) or est_tokens < 0:
                 raise ValueError("est_tokens must be a non-negative int, got %r" % (est_tokens,))
             est = int(est_tokens)
+        four_mode = slot_mode == V03_SLOT_MODE
         with self._thread_lock, _exclusive(self.state_root):
             self.check_failstop()
             data = self._load_locked()
-            verdict = self._verdict(data, moment=now)
+            verdict = self._verdict(data, moment=now, est_tokens=est)
             if not verdict["allowed"]:
                 raise RequestBudgetError(verdict["reason_code"], verdict["detail"])
             day = self._active_day(data, moment=now)
+            four_slot = None
+            if four_mode:
+                hour = self._local_hour(now)
+                four_slot = str(slot_name).strip() if slot_name else v03_slot_for_hour(hour)
+                if four_slot not in V03_FOUR_SLOT_QUOTAS:
+                    raise RequestBudgetError(
+                        REASON_UNKNOWN_V03_SLOT, "unknown v03 slot %r" % (four_slot,))
+                gate = self._four_slot_verdict(
+                    self._four_slot_bucket(data, day),
+                    slot=four_slot,
+                    hour=hour,
+                    est_tokens=est,
+                    day=day,
+                )
+                if not gate["allowed"]:
+                    raise RequestBudgetError(gate["reason_code"], gate["detail"])
             days = dict(data.get("days") or {})
             days[day] = int(days.get(day) or 0) + 1
             day_tokens = dict(data.get("day_tokens") or {})
@@ -685,6 +1064,26 @@ class LifeRequestBudget:
                                                            "closed_at": None})
                 window["calls"] = int(window.get("calls") or 0) + 1
                 windows[self.run_id] = window
+            if four_mode:
+                four_days = data.get("v03_four_slot_days")
+                if not isinstance(four_days, dict):
+                    four_days = {}
+                    data["v03_four_slot_days"] = four_days
+                bucket = four_days.get(day)
+                if not isinstance(bucket, dict):
+                    bucket = {"slots": {}, "total_calls": 0, "total_tokens": 0, "ops": {}}
+                    four_days[day] = bucket
+                for key in ("slots", "ops"):
+                    if not isinstance(bucket.get(key), dict):
+                        bucket[key] = {}
+                slot_row = bucket["slots"].get(four_slot)
+                if not isinstance(slot_row, dict):
+                    slot_row = {"calls": 0, "tokens": 0}
+                slot_row["calls"] = int(slot_row.get("calls") or 0) + 1
+                slot_row["tokens"] = int(slot_row.get("tokens") or 0) + est
+                bucket["slots"][four_slot] = slot_row
+                bucket["total_calls"] = int(bucket.get("total_calls") or 0) + 1
+                bucket["total_tokens"] = int(bucket.get("total_tokens") or 0) + est
             token = {"token": "lreq:%s" % uuid.uuid4().hex[:16], "kind": kind,
                      "utc_day": day, "business_day": day,
                      "business_tz": self.business_tz_label,
@@ -699,11 +1098,308 @@ class LifeRequestBudget:
             if not data.get("opened_at"):
                 data["opened_at"] = _iso(now)
             self._save_locked(data)
-            return {"reservation": token, "utc_day": day,
-                    "business_day": day, "business_tz": self.business_tz_label,
-                    "utc_day_calls": days[day],
-                    "utc_day_tokens": day_tokens[day],
-                    "run_window_calls": self._window_calls(data, self.run_id)}
+            result = {"reservation": token, "utc_day": day,
+                      "business_day": day, "business_tz": self.business_tz_label,
+                      "utc_day_calls": days[day],
+                      "utc_day_tokens": day_tokens[day],
+                      "run_window_calls": self._window_calls(data, self.run_id)}
+            if four_mode:
+                projection = v03_four_slot_effective(
+                    self._four_slot_bucket(data, day), self._local_hour(now))
+                result["slot_mode"] = V03_SLOT_MODE
+                result["slot_name"] = four_slot
+                result["v03_four_slot"] = projection
+            return result
+
+
+    # -- 07 章 §四 slot quota & daily envelope --------------------------------
+
+    @staticmethod
+    def _empty_slot_bucket() -> dict[str, Any]:
+        return {"slots": {}, "categories": {}, "total": 0, "ops": {}}
+
+    @staticmethod
+    def _read_slot_usage(data: Mapping[str, Any], day: str) -> dict[str, Any]:
+        days = data.get("slot_envelope_days")
+        bucket = days.get(day) if isinstance(days, Mapping) else None
+        if not isinstance(bucket, Mapping):
+            return {"slots": {}, "categories": {}, "total": 0, "ops": {}}
+        slots = bucket.get("slots") if isinstance(bucket.get("slots"), Mapping) else {}
+        categories = bucket.get("categories") if isinstance(bucket.get("categories"), Mapping) else {}
+        ops = bucket.get("ops") if isinstance(bucket.get("ops"), Mapping) else {}
+
+        def _safe_count(raw: Any) -> int:
+            if isinstance(raw, bool):
+                return 0
+            try:
+                return max(0, int(raw))
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "slots": {str(k): _safe_count(v) for k, v in slots.items()},
+            "categories": {str(k): _safe_count(v) for k, v in categories.items()},
+            "total": _safe_count(bucket.get("total")),
+            "ops": dict(ops),
+        }
+
+    @staticmethod
+    def _slot_verdict(
+        slot_kind: str,
+        category: str,
+        day: str,
+        usage: Mapping[str, Any],
+        *,
+        business_tz_label: str,
+    ) -> dict[str, Any]:
+        slot_quota = int(SLOT_QUOTAS[slot_kind])
+        category_cap = int(DAILY_ENVELOPE_CAPS["per_category_cap"][category])
+        daily_hard_cap = int(DAILY_ENVELOPE_CAPS["daily_hard_cap"])
+        slot_used = int((usage.get("slots") or {}).get(slot_kind) or 0)
+        category_used = int((usage.get("categories") or {}).get(category) or 0)
+        day_total = int(usage.get("total") or 0)
+        base = {
+            "utc_day": day,
+            "business_day": day,
+            "business_tz": business_tz_label,
+            "slot_kind": slot_kind,
+            "slot_used": slot_used,
+            "slot_quota": slot_quota,
+            "slot_remaining": max(0, slot_quota - slot_used),
+            "category": category,
+            "category_used": category_used,
+            "category_cap": category_cap,
+            "category_remaining": max(0, category_cap - category_used),
+            "day_total": day_total,
+            "daily_hard_cap": daily_hard_cap,
+            "daily_remaining": max(0, daily_hard_cap - day_total),
+        }
+        if slot_used >= slot_quota:
+            return dict(
+                base,
+                allowed=False,
+                reason_code=REASON_SLOT_QUOTA_EXCEEDED,
+                detail="slot %s on %s (%s) spent %s of %s"
+                       % (slot_kind, day, business_tz_label, slot_used, slot_quota),
+            )
+        if category_used >= category_cap:
+            return dict(
+                base,
+                allowed=False,
+                reason_code=REASON_DAILY_ENVELOPE_EXCEEDED,
+                detail="category %s on %s (%s) spent %s of %s"
+                       % (category, day, business_tz_label, category_used, category_cap),
+            )
+        if day_total >= daily_hard_cap:
+            return dict(
+                base,
+                allowed=False,
+                reason_code=REASON_DAILY_ENVELOPE_EXCEEDED,
+                detail="business day %s (%s) spent %s of %s daily envelope"
+                       % (day, business_tz_label, day_total, daily_hard_cap),
+            )
+        return dict(base, allowed=True, reason_code="", detail="")
+
+    def check_slot_and_daily_envelope(
+        self,
+        *,
+        slot_kind: str,
+        category: str,
+        now_dt: Optional[datetime] = None,
+    ) -> dict[str, Any]:
+        """Read-only joint SlotQuota + DailyEnvelope check (fail closed)."""
+
+        slot = str(slot_kind or "").strip()
+        cat = str(category or "").strip()
+        if slot not in SLOT_QUOTAS or cat not in DAILY_ENVELOPE_CAPS["per_category_cap"]:
+            return {
+                "allowed": False,
+                "reason_code": REASON_UNKNOWN_SLOT_OR_CATEGORY,
+                "detail": "unknown slot_kind=%r or category=%r" % (slot, cat),
+                "slot_kind": slot,
+                "category": cat,
+            }
+        try:
+            data = self._load_locked()
+        except RequestBudgetError as exc:
+            return {
+                "allowed": False,
+                "reason_code": exc.reason_code,
+                "detail": exc.detail,
+                "slot_kind": slot,
+                "category": cat,
+            }
+        day = self._active_day(data, moment=now_dt)
+        usage = self._read_slot_usage(data, day)
+        return self._slot_verdict(
+            slot, cat, day, usage, business_tz_label=self.business_tz_label
+        )
+
+    def record_slot_and_daily_consumption(
+        self,
+        *,
+        slot_kind: str,
+        category: str,
+        now_dt: Optional[datetime] = None,
+        operation_key: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Persist one envelope consumption after both caps admit it (never refunds)."""
+
+        slot = str(slot_kind or "").strip()
+        cat = str(category or "").strip()
+        if slot not in SLOT_QUOTAS or cat not in DAILY_ENVELOPE_CAPS["per_category_cap"]:
+            raise RequestBudgetError(
+                REASON_UNKNOWN_SLOT_OR_CATEGORY,
+                "unknown slot_kind=%r or category=%r" % (slot, cat),
+            )
+        op_key = str(operation_key).strip() if operation_key else None
+        with self._thread_lock, _exclusive(self.state_root):
+            self.check_failstop()
+            data = self._load_locked()
+            day = self._active_day(data, moment=now_dt)
+            days = data.get("slot_envelope_days")
+            if not isinstance(days, dict):
+                days = {}
+                data["slot_envelope_days"] = days
+            bucket = days.get(day)
+            if not isinstance(bucket, dict):
+                bucket = {"slots": {}, "categories": {}, "total": 0, "ops": {}}
+                days[day] = bucket
+            for key in ("slots", "categories", "ops"):
+                if not isinstance(bucket.get(key), dict):
+                    bucket[key] = {}
+
+            usage = self._read_slot_usage(data, day)
+            if op_key and op_key in usage["ops"]:
+                cached = dict(usage["ops"][op_key])
+                cached["already_applied"] = True
+                return cached
+
+            verdict = self._slot_verdict(
+                slot, cat, day, usage, business_tz_label=self.business_tz_label
+            )
+            if not verdict["allowed"]:
+                raise RequestBudgetError(verdict["reason_code"], verdict["detail"])
+
+            bucket["slots"][slot] = int(verdict["slot_used"]) + 1
+            bucket["categories"][cat] = int(verdict["category_used"]) + 1
+            bucket["total"] = int(verdict["day_total"]) + 1
+            result = dict(verdict)
+            result["slot_used"] = bucket["slots"][slot]
+            result["slot_remaining"] = max(0, verdict["slot_quota"] - bucket["slots"][slot])
+            result["category_used"] = bucket["categories"][cat]
+            result["category_remaining"] = max(
+                0, verdict["category_cap"] - bucket["categories"][cat]
+            )
+            result["day_total"] = bucket["total"]
+            result["daily_remaining"] = max(
+                0, verdict["daily_hard_cap"] - bucket["total"]
+            )
+            result["already_applied"] = False
+            result["operation_key"] = op_key
+
+            if op_key:
+                ops = bucket["ops"]
+                ops[op_key] = dict(result)
+                if len(ops) > MAX_SLOT_ENVELOPE_OPS:
+                    for stale in list(ops.keys())[: len(ops) - MAX_SLOT_ENVELOPE_OPS]:
+                        ops.pop(stale, None)
+
+            data["active_day"] = day
+            self._save_locked(data)
+            return result
+
+    def slot_and_daily_snapshot(
+        self,
+        *,
+        now_dt: Optional[datetime] = None,
+    ) -> dict[str, Any]:
+        """Read-only snapshot of today's slot/category usage (never raises on corruption)."""
+
+        try:
+            data = self._load_locked()
+        except RequestBudgetError as exc:
+            day = self._resolve_day(now_dt)
+            return {
+                "state": STATE_CORRUPT,
+                "reason_code": exc.reason_code,
+                "detail": exc.detail,
+                "business_day": day,
+                "business_tz": self.business_tz_label,
+                "slots": {},
+                "categories": {},
+                "day_total": 0,
+                "daily_hard_cap": int(DAILY_ENVELOPE_CAPS["daily_hard_cap"]),
+                "slot_quotas": dict(SLOT_QUOTAS),
+                "per_category_cap": dict(DAILY_ENVELOPE_CAPS["per_category_cap"]),
+            }
+        day = self._active_day(data, moment=now_dt)
+        usage = self._read_slot_usage(data, day)
+        days = data.get("slot_envelope_days")
+        present = isinstance(days, Mapping) and isinstance(days.get(day), Mapping)
+        slots = {
+            kind: {
+                "used": int(usage["slots"].get(kind) or 0),
+                "quota": int(quota),
+                "remaining": max(0, int(quota) - int(usage["slots"].get(kind) or 0)),
+            }
+            for kind, quota in SLOT_QUOTAS.items()
+        }
+        categories = {
+            name: {
+                "used": int(usage["categories"].get(name) or 0),
+                "cap": int(cap),
+                "remaining": max(0, int(cap) - int(usage["categories"].get(name) or 0)),
+            }
+            for name, cap in DAILY_ENVELOPE_CAPS["per_category_cap"].items()
+        }
+        return {
+            "state": STATE_OK if present else STATE_ABSENT,
+            "business_day": day,
+            "business_tz": self.business_tz_label,
+            "slots": slots,
+            "categories": categories,
+            "day_total": int(usage["total"]),
+            "daily_hard_cap": int(DAILY_ENVELOPE_CAPS["daily_hard_cap"]),
+            "daily_remaining": max(
+                0, int(DAILY_ENVELOPE_CAPS["daily_hard_cap"]) - int(usage["total"])
+            ),
+            "slot_quotas": dict(SLOT_QUOTAS),
+            "per_category_cap": dict(DAILY_ENVELOPE_CAPS["per_category_cap"]),
+        }
+
+    def can_spend(
+        self,
+        *,
+        now: Optional[datetime] = None,
+        slot_kind: Optional[str] = None,
+        category: Optional[str] = None,
+        enforce_slot_envelope: bool = False,
+    ) -> dict[str, Any]:
+        """The existing ``check`` verdict, optionally joined with SlotQuota + DailyEnvelope.
+
+        Without ``enforce_slot_envelope=True`` this is exactly ``check(now=now)`` -- the
+        historical call path is byte-for-byte unchanged.
+        """
+
+        verdict = self.check(now=now)
+        if not enforce_slot_envelope:
+            return verdict
+        if not verdict.get("allowed"):
+            return verdict
+        gate = self.check_slot_and_daily_envelope(
+            slot_kind=str(slot_kind or ""),
+            category=str(category or ""),
+            now_dt=now,
+        )
+        merged = dict(verdict)
+        merged["slot_envelope_checked"] = True
+        merged["slot_and_daily"] = gate
+        if not gate.get("allowed"):
+            merged["allowed"] = False
+            merged["reason_code"] = gate.get("reason_code", REASON_UNKNOWN_SLOT_OR_CATEGORY)
+            merged["detail"] = gate.get("detail", "")
+        return merged
 
 
 # ---------------------------------------------------------------------------------
@@ -867,7 +1563,11 @@ __all__ = [
     "BUDGET_FILENAME",
     "BudgetedCognitionAdapter",
     "BudgetedModelClient",
+    "CATEGORY_CONTINUATION",
+    "CATEGORY_INITIATION",
+    "CATEGORY_REFLECTION",
     "CONTENT_WRITER_STAGES",
+    "DAILY_ENVELOPE_CAPS",
     "DEFAULT_CONSERVATIVE_TOKEN_RESERVATION",
     "DEFAULT_DAILY_TOKEN_BUDGET",
     "FAILURE_DIAGNOSTIC_KEYS",
@@ -875,10 +1575,14 @@ __all__ = [
     "KIND",
     "LOCK_FILENAME",
     "LifeRequestBudget",
+    "MAX_SLOT_ENVELOPE_OPS",
+    "REASON_DAILY_ENVELOPE_EXCEEDED",
     "REASON_DAILY_TOKEN_BUDGET",
     "REASON_RUN_WINDOW_LIMIT",
     "REASON_RUN_WINDOW_NOT_AUTHORIZED",
+    "REASON_SLOT_QUOTA_EXCEEDED",
     "REASON_STATE_CORRUPT",
+    "REASON_UNKNOWN_SLOT_OR_CATEGORY",
     "REASON_UNREADABLE",
     "REASON_UTC_DAY_LIMIT",
     "REQUEST_KIND_CONTENT",
@@ -887,12 +1591,27 @@ __all__ = [
     "REQUEST_KINDS",
     "RequestBudgetError",
     "SCHEMA_VERSION",
+    "SLOT_DAYTIME_ACTIVE",
+    "SLOT_EVENING_WIND_DOWN",
+    "SLOT_NIGHT_REST",
+    "SLOT_QUOTAS",
     "STATE_ABSENT",
     "STATE_CORRUPT",
     "STATE_OK",
+    "V03_FOUR_SLOT_DAILY_CALL_CAP",
+    "V03_FOUR_SLOT_DAILY_TOKEN_CAP",
+    "V03_FOUR_SLOT_ORDER",
+    "V03_FOUR_SLOT_QUOTAS",
+    "V03_SLOT_CARRY_RATIO",
+    "V03_SLOT_MODE",
+    "REASON_UNKNOWN_V03_SLOT",
+    "REASON_V03_DAILY_CAP_EXCEEDED",
+    "REASON_V03_SLOT_QUOTA_EXCEEDED",
     "attach_safe_failure_metadata",
     "budget_path",
     "lock_path",
     "safe_failure_diagnostics",
     "safe_failure_metadata",
+    "v03_four_slot_effective",
+    "v03_slot_for_hour",
 ]

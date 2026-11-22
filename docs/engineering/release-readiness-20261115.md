@@ -105,3 +105,9 @@
   - 合计 400 例全绿。
 - **双侧同步**：本单四个改动文件（MANIFEST.json、scripts/release.json、本文件、登记文件）＋7 个预存漂移 website 文件（6 个内容更新 + 1 个 WSL 缺失新增 `website/assets/screenshots/desktop-editor.webp`）全部 md5 双侧一致；全树逐文件 md5 终检见收尾报告。
 - **tar 快照**：`/root/nyairo-v051-code-backup-20261115.tar.gz` 已按 §七配方打制（1212 同配方；结构实核与 1212 同族：vendor/__pycache__/.memsearch/dist/data/worker-runs 等排除，含本单全部产物）。
+
+## 十一、三轮修复与全量复扫收官（2026-11-15）
+
+- **三轮修复**（commit `4526e47`，6 文件，+52/-6）：全量 321 模块扫描（发布树 `4227639`）发现 6 失败，三根因——①身体档两种"没读"拼法轮番漂移处境指纹（BODY_NOT_READ / BODY_SITUATION_NOT_READ），"同一处境只考虑一次"的有界沉默失效；②停点"最新"按 set_at 排序在冻结/混合时钟下失真，且 plan_page_read 的 head_number 参数实际无人传（版本戳恒 1）；③test_world_runner / test_world_move_pause_race 兄弟导入缺 tests 目录 bootstrap。修复：body_parts 无真实 owner 事实统一收敛 BODY_NOT_READ；位置行盖 written_in_revision（文档自身单调版本号）、元数据投影白名单放行、_bookmark 与 read_reading_situation 改版本号优先排序；两测试文件补 tests 目录 sys.path。
+- **全量复扫**：对最终提交树 `git archive` 干净拉取，并行（10 路）扫 tests/ 全部 321 个测试模块 + worldgen discover：**322/322 全部 PASS，0 失败 0 超时**（最慢三件：test_one_day_life_w05r 449s、test_life_v1_integration 406s、test_v07_daily_life 161s）。
+- **清单第五遍**：修复匹配清单（commit `7214bab`，tree_sha256 `498696e6…`，staging verify `valid=true`）；本节收录后按治理再重算一遍，终值以 `MANIFEST.json` 文件本身为准。

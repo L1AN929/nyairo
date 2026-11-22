@@ -20,13 +20,13 @@ from . import GENERATOR_VERSION, __doc__
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
-    from .generator import generate_world, load_theme
+    from .generator import generate_world, normalize_theme
     from .providers import glm
     from . import schema
 
-    load_theme(args.theme)  # 校验主题名
+    resolved_theme = normalize_theme(args.theme)
 
-    docs = generate_world(seed=args.seed, theme=args.theme, timezone_name=args.timezone)
+    docs = generate_world(seed=args.seed, theme=resolved_theme, timezone_name=args.timezone)
     content_doc = docs["content.json"]
 
     if args.llm:
@@ -272,7 +272,20 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     gen = sub.add_parser("generate", help="从种子生成一个世界包")
     gen.add_argument("--seed", type=int, required=True, help="随机种子（0..2^31-1）")
-    gen.add_argument("--theme", required=True, choices=("coastal_town", "residential_town", "mountain_town", "rural_farming"))
+    gen.add_argument(
+        "--theme",
+        default="procedural",
+        choices=(
+            "procedural",
+            "freeform",
+            "auto",
+            "coastal_town",
+            "residential_town",
+            "mountain_town",
+            "rural_farming",
+        ),
+        help="世界主题（默认 procedural 零预设自由生成）",
+    )
     gen.add_argument("--timezone", default="Asia/Tokyo", help="IANA 时区（默认 Asia/Tokyo）")
     gen.add_argument("--out", required=True, help="输出目录")
     gen.add_argument("--llm", action="store_true", help="调用 GLM 生成文本内容（需 WORLDGEN_LLM_API_KEY）")

@@ -34,7 +34,7 @@
       "description": "If you already use Claude Code, Codex, or another AI coding tool with terminal access, copy this standard prompt to have it inspect your environment first...",
       "url": "https://nyairo.com/en/docs/agent-install/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -483,12 +483,12 @@
 
 <h2 id="agent-section-1">Prompt to Copy to Your AI Assistant</h2>
 <p>Click "Copy" in the top-right corner of the code block and paste it verbatim to your AI assistant:</p>
-<div class="code-block"><div class="code-header"><span>text</span><button class="copy-btn" type="button">Copy</button></div><pre><code>Please help me install nyairo (v0.7.0) on this machine. Follow the specification at https://nyairo.com/AGENT_INSTALL.zh-CN.md strictly, explain what you are doing in English at each step, do not skip any checks, and never pretend a step succeeded:
+<div class="code-block"><div class="code-header"><span>text</span><button class="copy-btn" type="button">Copy</button></div><pre><code>Please help me install nyairo (v0.8.0) on this machine. Follow the specification at https://nyairo.com/AGENT_INSTALL.zh-CN.md strictly, explain what you are doing in English at each step, do not skip any checks, and never pretend a step succeeded:
 
 1. [Read-Only Check — Do Not Install Yet] Inspect the OS environment (requires Linux or WSL 2), free disk space (≥ 3 GB recommended), and connectivity to github.com and astral.sh; check whether the current HOME already has ~/.nyairo, ~/.local/share/nyairo, or ~/.chiyo-v1, and whether any m0_writer_worker or gateway processes are currently running. If an existing instance is found, you must stop immediately, report it, and recommend using a separate Linux user or separate HOME—never overwrite existing data and never kill processes belonging to an existing instance.
-2. [Ask for Confirmation] List the directories you plan to create (~/.local/share/nyairo/releases/v0.7.0, ~/.nyairo, ~/.local/bin/nyairo). Any action requiring sudo or creating a new system user must wait for my explicit approval.
-3. [Verified Installation] Download nyairo-v0.7.0.zip and its matching .sha256 file from https://github.com/L1AN929/nyairo/releases/download/v0.7.0/ and verify with sha256sum -c before extracting, then run bash scripts/bootstrap.sh from the extracted bundle (add --no-setup --no-launch in non-interactive terminals).
-4. [On-Machine Verification] Confirm ~/.local/state/nyairo/install.json reports version v0.7.0, run scripts/verify_manifest.py using the bundled Python to confirm "valid": true, run ~/.local/bin/nyairo -z "install self-check" once, and verify no stray processes remain for the new instance. Until I configure my own keys, honestly mark the model and external channels as "Not yet verified".
+2. [Ask for Confirmation] List the directories you plan to create (~/.local/share/nyairo/releases/v0.8.0, ~/.nyairo, ~/.local/bin/nyairo). Any action requiring sudo or creating a new system user must wait for my explicit approval.
+3. [Verified Installation] Download nyairo-v0.8.0.zip and its matching .sha256 file from https://github.com/L1AN929/nyairo/releases/download/v0.8.0/ and verify with sha256sum -c before extracting, then run bash scripts/bootstrap.sh from the extracted bundle (add --no-setup --no-launch in non-interactive terminals).
+4. [On-Machine Verification] Confirm ~/.local/state/nyairo/install.json reports version v0.8.0, run scripts/verify_manifest.py using the bundled Python to confirm "valid": true, run ~/.local/bin/nyairo -z "install self-check" once, and verify no stray processes remain for the new instance. Until I configure my own keys, honestly mark the model and external channels as "Not yet verified".
 5. [Handoff Summary] In clear, concise English, tell me how to start (nyairo), configure a model (nyairo setup model), connect WeChat/Telegram, update, and back up. Never ask me to send API Keys or passwords in chat at any point.</code></pre></div>
 
 <h2 id="agent-section-2">Why These Four Guardrails Exist</h2>
@@ -502,7 +502,7 @@
 <h2 id="agent-section-3">What to Verify Yourself Afterward</h2>
 <p>After the AI reports "Installation complete", take a quick look at these three items to be sure nothing was glossed over:</p>
 <ol>
-<li><code>version</code> in <code>cat ~/.local/state/nyairo/install.json</code> is indeed <code>v0.7.0</code> (note: running <code>nyairo --version</code> directly prints the underlying host Hermes version; check <code>install.json</code> for nyairo's own version);</li>
+<li><code>version</code> in <code>cat ~/.local/state/nyairo/install.json</code> is indeed <code>v0.8.0</code> (note: running <code>nyairo --version</code> directly prints the underlying host Hermes version; check <code>install.json</code> for nyairo's own version);</li>
 <li><code>SOUL.md</code>, <code>config.yaml</code>, and <code>chiyo/config.json</code> have been created under <code>~/.nyairo</code>;</li>
 <li>Run <code>nyairo setup model</code> to enter your own API Key, then run <code>nyairo</code> and send a greeting—once you get a normal reply back, you are all set.</li>
 </ol>

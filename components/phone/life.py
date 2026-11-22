@@ -709,7 +709,10 @@ def _readonly_sqlite(path: Path | str):
     import sqlite3
 
     resolved = Path(str(path)).resolve()
-    query = "?mode=ro" if Path(f"{resolved}-wal").exists() else "?mode=ro&immutable=1"
+    shm_exists = Path(f"{resolved}-shm").exists()
+    wal_path = Path(f"{resolved}-wal")
+    has_wal = wal_path.exists() and wal_path.stat().st_size > 0
+    query = "?mode=ro" if (shm_exists or has_wal) else "?mode=ro&immutable=1"
     return sqlite3.connect(resolved.as_uri() + query, uri=True, timeout=2)
 
 

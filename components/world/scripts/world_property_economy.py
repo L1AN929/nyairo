@@ -284,11 +284,54 @@ _CATALOG_DECLARATIONS: dict[str, dict[str, Any]] = {
 }
 
 
-def catalog_declaration(catalog_item_id: Any) -> dict[str, Any]:
+def _open_storefront():
+    import sys
+
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import world_open_storefront as open_storefront
+
+    return open_storefront
+
+
+def _dynamic_catalog():
+    import sys
+
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import world_content_catalog as content_catalog
+
+    return content_catalog
+
+
+def catalog_declaration(
+    catalog_item_id: Any,
+    *,
+    hermes_home: Optional[Path | str] = None,
+) -> dict[str, Any]:
     """The room-living declaration of one catalog item (``{}`` when none)."""
 
     entry = _CATALOG_DECLARATIONS.get(str(catalog_item_id))
-    return dict(entry) if entry else {}
+    if entry:
+        return dict(entry)
+    parsed = _open_storefront().parse_shop_item_id(catalog_item_id)
+    if parsed is not None:
+        if hermes_home is not None:
+            try:
+                dyn = _dynamic_catalog().read_dynamic_catalog_zero_write(
+                    hermes_home, include_out_of_stock=True
+                )
+                found = (dyn.get("items_by_id") or {}).get(str(catalog_item_id))
+                if isinstance(found, Mapping) and isinstance(found.get("declaration"), Mapping):
+                    decl = dict(found["declaration"])
+                    decl["surfaces"] = tuple(decl.get("surfaces") or ())
+                    return decl
+            except Exception:
+                pass
+        return _open_storefront().declaration_for_category(parsed[1])
+    return {}
 
 
 def object_capability(catalog_item_id: Any) -> dict[str, Any]:
@@ -299,10 +342,13 @@ def object_capability(catalog_item_id: Any) -> dict[str, Any]:
     """
 
     entry = _CATALOG_BY_ID.get(str(catalog_item_id))
-    if not isinstance(entry, Mapping):
-        return {}
-    capability = entry.get("capability")
-    return dict(capability) if isinstance(capability, Mapping) else {}
+    if isinstance(entry, Mapping):
+        capability = entry.get("capability")
+        return dict(capability) if isinstance(capability, Mapping) else {}
+    parsed = _open_storefront().parse_shop_item_id(catalog_item_id)
+    if parsed is not None:
+        return _open_storefront().capability_for_category(parsed[1])
+    return {}
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -375,7 +421,11 @@ _ITEM_KEYS = frozenset(
         "currency",
         "current_location",
         "disposition",
+        "item_meta",
     }
+)
+_DELIVERY_PLACE_AREA_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 )
 _DELIVERY_KEYS = frozenset(
     {
@@ -901,9 +951,18 @@ def _validate_transaction(value: Any) -> dict[str, Any]:
         catalog_item_id = _id(
             value.get("catalog_item_id"), "transaction.catalog_item_id"
         )
-        if catalog_item_id not in _CATALOG_BY_ID:
+        is_dynamic = (
+            catalog_item_id not in _CATALOG_BY_ID
+            and _open_storefront().parse_shop_item_id(catalog_item_id) is not None
+        )
+        if catalog_item_id not in _CATALOG_BY_ID and not is_dynamic:
             raise PropertyEconomyError("transaction.catalog_item_id is unknown")
-        if value.get("delivery_location") != HOME_ITEM_LOCATION:
+        delivery_loc = value.get("delivery_location")
+        if delivery_loc != HOME_ITEM_LOCATION and not (
+            is_dynamic
+            and isinstance(delivery_loc, str)
+            and bool(_DELIVERY_PLACE_AREA_RE.fullmatch(delivery_loc))
+        ):
             raise PropertyEconomyError("transaction.delivery_location is invalid")
         return {
             "transaction_id": transaction_id,
@@ -916,7 +975,7 @@ def _validate_transaction(value: Any) -> dict[str, Any]:
             "purchase_intent_id": _id(
                 value.get("purchase_intent_id"), "transaction.purchase_intent_id"
             ),
-            "delivery_location": HOME_ITEM_LOCATION,
+            "delivery_location": delivery_loc,
             "provenance": _validate_provenance(
                 value.get("provenance"), "transaction.provenance"
             ),
@@ -996,7 +1055,11 @@ def _validate_item(value: Any) -> dict[str, Any]:
         raise PropertyEconomyError("item must be an object")
     _assert_exact_keys(value, _ITEM_KEYS, "item")
     catalog_item_id = _id(value.get("catalog_item_id"), "item.catalog_item_id")
-    if catalog_item_id not in _CATALOG_BY_ID:
+    is_dynamic = (
+        catalog_item_id not in _CATALOG_BY_ID
+        and _open_storefront().parse_shop_item_id(catalog_item_id) is not None
+    )
+    if catalog_item_id not in _CATALOG_BY_ID and not is_dynamic:
         raise PropertyEconomyError("item.catalog_item_id is unknown")
     if value.get("owner") != OWNER:
         raise PropertyEconomyError("item.owner is invalid")
@@ -1004,15 +1067,25 @@ def _validate_item(value: Any) -> dict[str, Any]:
         raise PropertyEconomyError("item.acquisition_kind is invalid")
     if value.get("currency") != CURRENCY:
         raise PropertyEconomyError("item.currency is invalid")
-    if value.get("current_location") not in {
-        HOME_ITEM_LOCATION,
-        DELIVERY_PENDING_LOCATION,
-    }:
+    loc = value.get("current_location")
+    if loc not in {HOME_ITEM_LOCATION, DELIVERY_PENDING_LOCATION} and not (
+        is_dynamic
+        and isinstance(loc, str)
+        and bool(_DELIVERY_PLACE_AREA_RE.fullmatch(loc))
+    ):
         raise PropertyEconomyError("item.current_location is invalid")
     disposition = value.get("disposition")
     if disposition not in VALID_DISPOSITIONS:
         raise PropertyEconomyError("item.disposition is invalid")
-    return {
+    cleaned_meta: Optional[dict[str, Any]] = None
+    if "item_meta" in value and value["item_meta"] is not None:
+        if not is_dynamic:
+            raise PropertyEconomyError("item.item_meta is invalid for static catalog item")
+        ok, parsed_meta = _open_storefront().validate_item_meta(value["item_meta"])
+        if not ok:
+            raise PropertyEconomyError("item.item_meta is invalid")
+        cleaned_meta = parsed_meta
+    normalized = {
         "item_instance_id": _id(value.get("item_instance_id"), "item.item_instance_id"),
         "catalog_item_id": catalog_item_id,
         "owner": OWNER,
@@ -1025,9 +1098,12 @@ def _validate_item(value: Any) -> dict[str, Any]:
             value.get("acquisition_price"), "item.acquisition_price"
         ),
         "currency": CURRENCY,
-        "current_location": value["current_location"],
+        "current_location": loc,
         "disposition": disposition,
     }
+    if cleaned_meta is not None:
+        normalized["item_meta"] = cleaned_meta
+    return normalized
 
 
 def _validate_delivery(value: Any) -> dict[str, Any]:
@@ -1703,7 +1779,33 @@ def owned_counts_by_catalog_item(state: Mapping[str, Any]) -> dict[str, int]:
     return counts
 
 
-def _transaction_projection(transaction: Mapping[str, Any]) -> dict[str, Any]:
+def _item_names_by_transaction(state: Mapping[str, Any]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for item in state.get("items") or ():
+        if not isinstance(item, Mapping):
+            continue
+        meta = item.get("item_meta")
+        meta_name = (
+            str(meta.get("name") or "").strip()
+            if isinstance(meta, Mapping)
+            else ""
+        )
+        if not meta_name:
+            continue
+        prov = item.get("acquisition_provenance")
+        tx_id = (
+            str(prov.get("transaction_id") or "").strip()
+            if isinstance(prov, Mapping)
+            else ""
+        )
+        if tx_id:
+            names[tx_id] = meta_name
+    return names
+
+
+def _transaction_projection(
+    transaction: Mapping[str, Any], *, item_name: Optional[str] = None
+) -> dict[str, Any]:
     result = {
         "transaction_id": transaction["transaction_id"],
         "transaction_kind": transaction["transaction_kind"],
@@ -1716,6 +1818,8 @@ def _transaction_projection(transaction: Mapping[str, Any]) -> dict[str, Any]:
         result["catalog_item_id"] = transaction["catalog_item_id"]
         result["delivery_location"] = transaction["delivery_location"]
         result["purchase_intent_id"] = transaction["purchase_intent_id"]
+        if item_name:
+            result["item_name"] = item_name
     elif transaction["transaction_kind"] == OWNER_FUNDING_TRANSACTION_KIND:
         result["request_id"] = transaction["provenance"]["request_id"]
         result["owner_decision_id"] = transaction["provenance"]["owner_decision_id"]
@@ -1731,7 +1835,7 @@ def _transaction_projection(transaction: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _item_projection(item: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    projected: dict[str, Any] = {
         "item_instance_id": item["item_instance_id"],
         "catalog_item_id": item["catalog_item_id"],
         "owner": item["owner"],
@@ -1743,6 +1847,12 @@ def _item_projection(item: Mapping[str, Any]) -> dict[str, Any]:
         "current_location": item["current_location"],
         "disposition": item["disposition"],
     }
+    meta = item.get("item_meta")
+    if isinstance(meta, Mapping):
+        projected["item_meta"] = dict(meta)
+        if meta.get("name"):
+            projected["name"] = meta["name"]
+    return projected
 
 
 def _delivery_projection(delivery: Mapping[str, Any]) -> dict[str, Any]:
@@ -2014,6 +2124,7 @@ def wallet_projection(
                     pass
     current_bal = _balance(state)
     core_bal = world_core_balance(state)
+    tx_item_names = _item_names_by_transaction(state)
     result = {
         "kind": WALLET_KIND,
         "status": "available",
@@ -2030,7 +2141,9 @@ def wallet_projection(
         "current_balance_jpy": current_bal,
         "world_core_balance_jpy": core_bal,
         "recent_transactions": [
-            _transaction_projection(item)
+            _transaction_projection(
+                item, item_name=tx_item_names.get(item["transaction_id"])
+            )
             for item in list(reversed(state["transactions"]))[:MAX_RECENT_TRANSACTIONS]
         ],
     }
@@ -2105,6 +2218,230 @@ def _current_world_location(
     return place
 
 
+def _location_availability_safe(
+    target_place: str,
+    *,
+    sources: Optional[Mapping[str, Any]],
+    env: Mapping[str, str],
+    now: Any = None,
+) -> dict[str, Any]:
+    """Query ``world_daily_rhythm`` with fallback to editor-only room hours."""
+
+    import sys
+
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import world_daily_rhythm
+
+    rhythm_env = dict(env)
+    if (
+        sources is not None
+        and sources.get("has_rules")
+        and sources.get("package_dir")
+        and not str(rhythm_env.get("CHIYO_WORLD_PACKAGE") or "").strip()
+    ):
+        rhythm_env["CHIYO_WORLD_PACKAGE"] = str(sources["package_dir"])
+    try:
+        return world_daily_rhythm.location_availability(
+            target_place,
+            now,
+            timezone_name=WORLD_TIMEZONE,
+            environment=rhythm_env,
+        )
+    except world_daily_rhythm.DailyRhythmError:
+        if sources is not None:
+            found, hours = _open_storefront().room_hours_for(
+                target_place, sources=sources
+            )
+            if found:
+                if hours is None or hours[0] is None or hours[1] is None:
+                    return {
+                        "location_id": target_place,
+                        "status": "OPEN",
+                        "reason_code": "ALWAYS_AVAILABLE",
+                    }
+                zone = _bdk.resolve_zone(WORLD_TIMEZONE)
+                instant = datetime.now(timezone.utc) if now is None else now
+                if isinstance(instant, str):
+                    instant = datetime.fromisoformat(instant.replace("Z", "+00:00"))
+                if instant.tzinfo is None:
+                    instant = instant.replace(tzinfo=timezone.utc)
+                local = instant.astimezone(zone) if zone is not None else instant
+                is_open = int(hours[0]) <= local.hour < int(hours[1])
+                return {
+                    "location_id": target_place,
+                    "status": "OPEN" if is_open else "CLOSED",
+                    "reason_code": "WITHIN_OPEN_HOURS" if is_open else "OUTSIDE_OPEN_HOURS",
+                }
+        raise
+
+
+def _resolve_world_store_context(
+    *,
+    hermes_home: Optional[Path | str],
+    environment: Optional[Mapping[str, str]],
+) -> tuple[Optional[dict[str, Any]], tuple[str, ...]]:
+    osf = _open_storefront()
+    sources = osf.resolve_world_sources(hermes_home, environment)
+    if sources is None:
+        return None, (STORE_LOCATION_ID,)
+    ids = osf.open_store_ids(sources)
+    if not ids:
+        return sources, (STORE_LOCATION_ID,)
+    return sources, ids
+
+
+def _open_store_ids_now(
+    store_ids: Sequence[str],
+    *,
+    sources: Optional[Mapping[str, Any]],
+    env: Mapping[str, str],
+    now: Any = None,
+) -> list[str]:
+    if sources is None:
+        return []
+    opened: list[str] = []
+    for sid in store_ids:
+        try:
+            avail = _location_availability_safe(
+                sid, sources=sources, env=env, now=now
+            )
+        except Exception:
+            continue
+        if avail.get("status") == "OPEN":
+            opened.append(sid)
+    return opened
+
+
+def _resolve_store_catalog_entries(
+    store_id: str,
+    *,
+    sources: Optional[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    if sources is None:
+        return store_catalog_entries()
+    dynamic = _open_storefront().store_shelf_for_location(store_id, sources=sources)
+    if store_id != STORE_LOCATION_ID:
+        return dynamic
+    base = store_catalog_entries()
+    seen_names = {str(entry.get("name") or "") for entry in base}
+    prioritized = (
+        [item for item in dynamic if item.get("is_dynamic_catalog_item")]
+        + [item for item in dynamic if item.get("open_order")]
+        + [
+            item
+            for item in dynamic
+            if not item.get("is_dynamic_catalog_item") and not item.get("open_order")
+        ]
+    )
+    extras: list[dict[str, Any]] = []
+    for item in prioritized:
+        name = str(item.get("name") or "")
+        if name and name not in seen_names:
+            seen_names.add(name)
+            extras.append(item)
+            if len(extras) >= 6:
+                break
+    return base + extras
+
+
+def _resolve_store_item_for_purchase(
+    item_id: str,
+    *,
+    store_id: Optional[str],
+    hermes_home: Optional[Path | str],
+    environment: Optional[Mapping[str, str]],
+    sources: Optional[Mapping[str, Any]] = None,
+    custom_item_name: Any = None,
+    estimated_price: Any = None,
+    allow_out_of_stock: bool = False,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    has_custom_name = custom_item_name is not None and (
+        not isinstance(custom_item_name, str) or bool(custom_item_name.strip())
+    )
+    catalog_item = _CATALOG_BY_ID.get(item_id)
+    if catalog_item is not None:
+        if CHANNEL_HOME_GOODS_STORE not in catalog_item.get(
+            "channels", (CHANNEL_HOME_GOODS_STORE,)
+        ):
+            return None, "ITEM_NOT_SOLD_AT_STORE"
+        if store_id is not None and store_id != STORE_LOCATION_ID:
+            return None, "ITEM_NOT_SOLD_AT_STORE"
+        if has_custom_name:
+            return None, "CUSTOM_NAME_NOT_SUPPORTED"
+        return catalog_item, None
+
+    osf = _open_storefront()
+    if osf.parse_shop_item_id(item_id) is None:
+        return None, "UNKNOWN_CATALOG_ITEM"
+    resolved_sources = (
+        sources
+        if sources is not None
+        else osf.resolve_world_sources(hermes_home, environment)
+    )
+    if resolved_sources is None:
+        return None, "UNKNOWN_CATALOG_ITEM"
+    if store_id is not None:
+        matched = osf.find_open_catalog_item(
+            item_id,
+            location_id=store_id,
+            hermes_home=hermes_home,
+            environment=environment,
+            sources=resolved_sources,
+        )
+        if matched is not None:
+            return osf.customize_open_catalog_entry(
+                matched,
+                custom_item_name=custom_item_name,
+                estimated_price=estimated_price,
+                allow_out_of_stock=allow_out_of_stock,
+            )
+        anywhere = osf.find_open_catalog_item(
+            item_id,
+            hermes_home=hermes_home,
+            environment=environment,
+            sources=resolved_sources,
+        )
+        return None, (
+            "ITEM_NOT_SOLD_AT_STORE" if anywhere is not None else "UNKNOWN_CATALOG_ITEM"
+        )
+    anywhere = osf.find_open_catalog_item(
+        item_id,
+        hermes_home=hermes_home,
+        environment=environment,
+        sources=resolved_sources,
+    )
+    if anywhere is None:
+        return None, "UNKNOWN_CATALOG_ITEM"
+    return osf.customize_open_catalog_entry(
+        anywhere,
+        custom_item_name=custom_item_name,
+        estimated_price=estimated_price,
+        allow_out_of_stock=allow_out_of_stock,
+    )
+
+
+def _purchase_delivery_target(
+    catalog_item: Mapping[str, Any],
+    *,
+    hermes_home: Optional[Path | str],
+    environment: Optional[Mapping[str, str]],
+) -> tuple[str, bool]:
+    is_fixed = bool((catalog_item.get("capability") or {}).get("fixed") is True)
+    is_dynamic_carry = bool(catalog_item.get("is_open_store_item")) and not is_fixed
+    if not is_dynamic_carry:
+        return HOME_ITEM_LOCATION, delivery_time_enabled(environment)
+    place_now, area_now = _read_world_location(hermes_home=hermes_home)
+    candidate = f"{place_now}/{area_now}" if place_now and area_now else ""
+    target = (
+        candidate
+        if candidate and _DELIVERY_PLACE_AREA_RE.fullmatch(candidate)
+        else HOME_ITEM_LOCATION
+    )
+    return target, False
+
+
 def _store_check(
     *,
     hermes_home: Optional[Path | str],
@@ -2123,26 +2460,18 @@ def _store_check(
     )
     if location is None:
         return {"status": "unavailable", "reason_code": "WORLD_LOCATION_UNAVAILABLE"}
-    if location != STORE_LOCATION_ID:
+    sources, valid_store_ids = _resolve_world_store_context(
+        hermes_home=hermes_home, environment=env
+    )
+    if location not in valid_store_ids:
         return {
             "status": "rejected",
             "reason_code": "STORE_LOCATION_REQUIRED",
             "current_location_id": location,
         }
     try:
-        import sys
-
-        scripts_dir = str(_home(hermes_home) / "scripts")
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        import world_daily_rhythm
-
-        # 19 章 §一.4：不再写死 Asia/Tokyo，用本模块共享的同一业务时区。
-        availability = world_daily_rhythm.location_availability(
-            STORE_LOCATION_ID,
-            now,
-            timezone_name=WORLD_TIMEZONE,
-            environment=env,
+        availability = _location_availability_safe(
+            location, sources=sources, env=env, now=now
         )
     except Exception:
         return {"status": "unavailable", "reason_code": "DAILY_RHYTHM_UNAVAILABLE"}
@@ -2150,9 +2479,10 @@ def _store_check(
         return {
             "status": "rejected",
             "reason_code": "STORE_CLOSED",
+            "store_id": location,
             "availability": availability,
         }
-    return {"status": "available", "availability": availability}
+    return {"status": "available", "store_id": location, "availability": availability}
 
 
 def shop_projection(
@@ -2166,10 +2496,15 @@ def shop_projection(
     checked = _store_check(hermes_home=hermes_home, environment=environment, now=now)
     if checked["status"] != "available":
         return {"kind": SHOP_KIND, **checked}
+    store_id = str(checked.get("store_id") or STORE_LOCATION_ID)
+    sources, _ = _resolve_world_store_context(
+        hermes_home=hermes_home, environment=environment
+    )
+    entries = _resolve_store_catalog_entries(store_id, sources=sources)
     return {
         "kind": SHOP_KIND,
         "status": "available",
-        "location_id": STORE_LOCATION_ID,
+        "location_id": store_id,
         "availability": checked["availability"],
         "currency": CURRENCY,
         "catalog": [
@@ -2180,8 +2515,7 @@ def shop_projection(
                 "price": item["price"],
                 "currency": CURRENCY,
             }
-            for item in CATALOG
-            if CHANNEL_HOME_GOODS_STORE in item.get("channels", (CHANNEL_HOME_GOODS_STORE,))
+            for item in entries
         ],
     }
 
@@ -2220,6 +2554,7 @@ def _purchase_result(
     reason_code: Optional[str] = None,
     delivery: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
+    delivery_loc = str(transaction.get("delivery_location") or HOME_ITEM_LOCATION)
     result: dict[str, Any] = {
         "kind": PURCHASE_KIND,
         "status": status,
@@ -2230,10 +2565,16 @@ def _purchase_result(
         "price": transaction["amount"],
         "currency": CURRENCY,
         "occurred_at": transaction["occurred_at"],
-        "delivery_location": HOME_ITEM_LOCATION,
+        "delivery_location": delivery_loc,
         "delivery_provenance": "included_home_delivery",
         "current_balance": balance,
     }
+    meta = item.get("item_meta")
+    if isinstance(meta, Mapping):
+        if meta.get("name"):
+            result["item_name"] = meta["name"]
+        if meta.get("store_id"):
+            result["store_id"] = meta["store_id"]
     if reason_code is not None:
         result["reason_code"] = reason_code
     if isinstance(delivery, Mapping):
@@ -2241,6 +2582,9 @@ def _purchase_result(
         result["expected_delivery_at"] = delivery["expected_delivery_at"]
         result["delivered_at"] = delivery["delivered_at"]
         result["delivery_provenance"] = delivery["delivery_provenance"]
+    elif _open_storefront().parse_shop_item_id(transaction.get("catalog_item_id")) is not None:
+        result["location"] = item.get("current_location")
+        result["delivery_status"] = DELIVERY_STATUS_DELIVERED
     return result
 
 
@@ -2254,6 +2598,8 @@ def purchase_item(
     source_turn_id: Any = None,
     source_message_id: Any = None,
     now: Any = None,
+    custom_item_name: Any = None,
+    estimated_price: Any = None,
 ) -> dict[str, Any]:
     if not feature_enabled(environment):
         return {"kind": PURCHASE_KIND, "status": "disabled", "reason_code": "FEATURE_DISABLED"}
@@ -2268,18 +2614,20 @@ def purchase_item(
         intent_id = _id(purchase_intent_id, "purchase_intent_id")
     except PropertyEconomyError:
         return {"kind": PURCHASE_KIND, "status": "rejected", "reason_code": "INVALID_PURCHASE_INPUT"}
-    catalog_item = _CATALOG_BY_ID.get(item_id)
+    catalog_item, err_code = _resolve_store_item_for_purchase(
+        item_id,
+        store_id=None,
+        hermes_home=hermes_home,
+        environment=environment,
+        custom_item_name=custom_item_name,
+        estimated_price=estimated_price,
+        allow_out_of_stock=True,
+    )
     if catalog_item is None:
-        return {"kind": PURCHASE_KIND, "status": "rejected", "reason_code": "UNKNOWN_CATALOG_ITEM"}
-    if CHANNEL_HOME_GOODS_STORE not in catalog_item.get(
-        "channels", (CHANNEL_HOME_GOODS_STORE,)
-    ):
-        # v0.4: the physical store sells its own channel only.  The phone's
-        # virtual store is a *separate* declared channel, never a bypass.
         return {
             "kind": PURCHASE_KIND,
             "status": "rejected",
-            "reason_code": "ITEM_NOT_SOLD_AT_STORE",
+            "reason_code": err_code or "UNKNOWN_CATALOG_ITEM",
         }
 
     path = state_path(hermes_home)
@@ -2314,6 +2662,15 @@ def purchase_item(
                         "reason_code": "PURCHASE_INTENT_CONFLICT",
                         "purchase_intent_id": intent_id,
                     }
+                if isinstance(custom_item_name, str) and custom_item_name.strip():
+                    recorded_name = str(((existing_item.get("item_meta") or {}).get("name")) or "").strip()
+                    if recorded_name and " ".join(custom_item_name.split()) != recorded_name:
+                        return {
+                            "kind": PURCHASE_KIND,
+                            "status": "rejected",
+                            "reason_code": "PURCHASE_INTENT_CONFLICT",
+                            "purchase_intent_id": intent_id,
+                        }
                 existing_delivery = next(
                     (
                         delivery
@@ -2338,6 +2695,21 @@ def purchase_item(
             )
             if checked["status"] != "available":
                 return {"kind": PURCHASE_KIND, **checked}
+            active_store_id = str(checked.get("store_id") or STORE_LOCATION_ID)
+            catalog_item, err_code = _resolve_store_item_for_purchase(
+                item_id,
+                store_id=active_store_id,
+                hermes_home=hermes_home,
+                environment=environment,
+                custom_item_name=custom_item_name,
+                estimated_price=estimated_price,
+            )
+            if catalog_item is None:
+                return {
+                    "kind": PURCHASE_KIND,
+                    "status": "rejected",
+                    "reason_code": err_code or "ITEM_NOT_SOLD_AT_STORE",
+                }
             amount = int(catalog_item["price"])
             balance = _balance(state)
             if balance < amount:
@@ -2358,6 +2730,9 @@ def purchase_item(
                 source_message_id=source_message_id,
             )
             occurred_at = _timestamp(now, "occurred_at")
+            delivery_dest, temporal_delivery = _purchase_delivery_target(
+                catalog_item, hermes_home=hermes_home, environment=environment
+            )
             transaction = {
                 "transaction_id": transaction_id,
                 "transaction_kind": "PURCHASE",
@@ -2367,10 +2742,9 @@ def purchase_item(
                 "occurred_at": occurred_at,
                 "catalog_item_id": item_id,
                 "purchase_intent_id": intent_id,
-                "delivery_location": HOME_ITEM_LOCATION,
+                "delivery_location": delivery_dest,
                 "provenance": provenance,
             }
-            temporal_delivery = delivery_time_enabled(environment)
             delivery: Optional[dict[str, Any]] = None
             if temporal_delivery:
                 purchased_instant = datetime.fromisoformat(
@@ -2392,7 +2766,7 @@ def purchase_item(
                     "status": DELIVERY_STATUS_PENDING,
                     "delivery_provenance": DELIVERY_PROVENANCE,
                 }
-            item = {
+            item: dict[str, Any] = {
                 "item_instance_id": item_instance_id,
                 "catalog_item_id": item_id,
                 "owner": OWNER,
@@ -2404,10 +2778,12 @@ def purchase_item(
                 "current_location": (
                     DELIVERY_PENDING_LOCATION
                     if temporal_delivery
-                    else HOME_ITEM_LOCATION
+                    else delivery_dest
                 ),
                 "disposition": DISPOSITION_OWNED,
             }
+            if catalog_item.get("is_open_store_item"):
+                item["item_meta"] = _open_storefront().build_item_meta(catalog_item)
             updated = dict(state)
             updated["revision"] = state["revision"] + 1
             updated["updated_at"] = occurred_at
@@ -2422,6 +2798,17 @@ def purchase_item(
             verified = _load(path)
             if verified != saved:
                 raise PropertyEconomyError("purchase postcondition failed")
+            stock_remaining: Optional[int] = None
+            if catalog_item.get("is_dynamic_catalog_item"):
+                stock_res = _dynamic_catalog().decrement_dynamic_item_stock(
+                    _home(hermes_home),
+                    catalog_item_id=item_id,
+                    purchase_intent_id=intent_id,
+                    quantity=1,
+                    now_iso=occurred_at,
+                )
+                if stock_res.get("ok") and isinstance(stock_res.get("stock_remaining"), int):
+                    stock_remaining = int(stock_res["stock_remaining"])
             verified_transaction = verified["transactions"][-1]
             verified_item = verified["items"][-1]
             verified_delivery = (
@@ -2457,6 +2844,8 @@ def purchase_item(
                 balance=_balance(verified),
                 delivery=verified_delivery,
             )
+            if stock_remaining is not None:
+                result["stock_remaining"] = stock_remaining
             if delivery_timeline_status is not None:
                 result["delivery_timeline_status"] = delivery_timeline_status
             return result
@@ -2631,6 +3020,7 @@ def _phone_purchase_result(
     balance: int,
     reason_code: Optional[str] = None,
 ) -> dict[str, Any]:
+    delivery_loc = str(transaction.get("delivery_location") or HOME_ITEM_LOCATION)
     result: dict[str, Any] = {
         "kind": PHONE_PURCHASE_KIND,
         "status": status,
@@ -2643,11 +3033,15 @@ def _phone_purchase_result(
         "currency": CURRENCY,
         "occurred_at": transaction["occurred_at"],
         "ownership": item["disposition"],
-        "delivery_location": HOME_ITEM_LOCATION,
+        "location": item.get("current_location"),
+        "delivery_location": delivery_loc,
         "delivery_provenance": PHONE_DELIVERY_PROVENANCE,
         "materialization": "pending",
         "current_balance": balance,
     }
+    meta = item.get("item_meta")
+    if isinstance(meta, Mapping) and meta.get("name"):
+        result["item_name"] = meta["name"]
     if reason_code is not None:
         result["reason_code"] = reason_code
     return result
@@ -3297,7 +3691,15 @@ def build_purchase_source_event(
     intent_id = _id(purchase_result.get("purchase_intent_id"), "purchase_intent_id")
     item_instance_id = _id(purchase_result.get("item_instance_id"), "item_instance_id")
     catalog_item = _CATALOG_BY_ID.get(item_id)
-    if catalog_item is None:
+    if catalog_item is not None:
+        item_name = str(catalog_item["name"])
+        item_price = int(catalog_item["price"])
+        store_loc = STORE_LOCATION_ID
+    elif _open_storefront().parse_shop_item_id(item_id) is not None:
+        item_name = str(purchase_result.get("item_name") or item_id)
+        item_price = int(purchase_result.get("price") or 0)
+        store_loc = str(purchase_result.get("store_id") or STORE_LOCATION_ID)
+    else:
         raise PropertyEconomyError("purchase result item is unknown")
     import sys
 
@@ -3310,21 +3712,22 @@ def build_purchase_source_event(
         occurred_at if occurred_at is not None else purchase_result.get("occurred_at"),
         "purchase.occurred_at",
     )
+    delivery_loc = str(purchase_result.get("delivery_location") or HOME_ITEM_LOCATION)
     return ec.SourceEvent.create(
         source="shiomi_world_property_economy",
         source_event_id=f"purchase-event-{transaction_id}",
         occurred_at=event_time,
         event_type="world_item_purchase",
-        summary=f"在 {STORE_LOCATION_ID} 购买 {catalog_item['name']}，支付 {catalog_item['price']} JPY",
+        summary=f"在 {store_loc} 购买 {item_name}，支付 {item_price} JPY",
         facts={
-            "location_id": STORE_LOCATION_ID,
+            "location_id": store_loc,
             "catalog_item_id": item_id,
             "item_instance_id": item_instance_id,
             "purchase_intent_id": intent_id,
             "transaction_id": transaction_id,
-            "price": catalog_item["price"],
+            "price": item_price,
             "currency": CURRENCY,
-            "delivery_location": HOME_ITEM_LOCATION,
+            "delivery_location": delivery_loc,
         },
         provenance={
             "created_by": "shiomi_world_property_economy",
@@ -3514,20 +3917,18 @@ def store_availability(
     place, area = _read_world_location(hermes_home=hermes_home)
     if place is None:
         return {"status": "unavailable", "reason_code": "WORLD_LOCATION_UNAVAILABLE"}
-    at_store = place == STORE_LOCATION_ID
+    sources, valid_store_ids = _resolve_world_store_context(
+        hermes_home=hermes_home, environment=env
+    )
+    at_store = place in valid_store_ids
+    active_store_id = (
+        place
+        if at_store
+        else (STORE_LOCATION_ID if STORE_LOCATION_ID in valid_store_ids else valid_store_ids[0])
+    )
     try:
-        import sys
-
-        scripts_dir = str(_home(hermes_home) / "scripts")
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        import world_daily_rhythm
-
-        availability = world_daily_rhythm.location_availability(
-            STORE_LOCATION_ID,
-            now,
-            timezone_name=WORLD_TIMEZONE,
-            environment=env,
+        availability = _location_availability_safe(
+            active_store_id, sources=sources, env=env, now=now
         )
     except Exception:
         return {
@@ -3540,12 +3941,17 @@ def store_availability(
         "status": "available"
         if (at_store and availability.get("status") == "OPEN")
         else "rejected",
+        "store_id": active_store_id,
         "availability": availability,
         "current_location_id": place,
         "area_id": area,
         "at_store": at_store,
         "reason_code": None,
     }
+    if sources is not None:
+        block["open_store_ids"] = _open_store_ids_now(
+            valid_store_ids, sources=sources, env=env, now=now
+        )
     if not at_store:
         block["reason_code"] = "STORE_LOCATION_REQUIRED"
     elif availability.get("status") != "OPEN":
@@ -3598,19 +4004,30 @@ def store_shop_projection(
     checked = store_availability(
         hermes_home=hermes_home, environment=environment, now=now
     )
+    active_store_id = str(checked.get("store_id") or STORE_LOCATION_ID)
+    at_store = bool(checked.get("at_store"))
+    if at_store:
+        sources, _ = _resolve_world_store_context(
+            hermes_home=hermes_home, environment=environment
+        )
+        shelf_catalog = _resolve_store_catalog_entries(
+            active_store_id, sources=sources
+        )
+    else:
+        shelf_catalog = store_catalog_entries()
     block: dict[str, Any] = {
         "kind": SHOP_KIND,
         "schema_version": SCHEMA_VERSION,
-        "store_id": STORE_LOCATION_ID,
+        "store_id": active_store_id,
         "channel": CHANNEL_HOME_GOODS_STORE,
         "store_kind": "physical_counter",
         "currency": CURRENCY,
-        "catalog": store_catalog_entries(),
+        "catalog": shelf_catalog,
         "location": {
             "location_id": checked.get("current_location_id"),
             "area_id": checked.get("area_id"),
         },
-        "at_store": bool(checked.get("at_store")),
+        "at_store": at_store,
         "availability": checked.get("availability"),
         "status": checked["status"],
         "purchase_available": False,
@@ -3637,6 +4054,8 @@ def store_shop_projection(
         "read_is_pure": True,
         "paid_real_money": False,
     }
+    if isinstance(checked.get("open_store_ids"), list):
+        block["open_store_ids"] = list(checked["open_store_ids"])
     if checked.get("reason_code"):
         block["reason_code"] = checked["reason_code"]
     try:
@@ -3703,6 +4122,8 @@ def _store_purchase_result(
     reason_code: Optional[str] = None,
     delivery: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
+    delivery_loc = str(transaction.get("delivery_location") or HOME_ITEM_LOCATION)
+    usable_kind = catalog_declaration(transaction["catalog_item_id"]).get("usable_kind")
     result: dict[str, Any] = {
         "kind": STORE_PURCHASE_KIND,
         "status": status,
@@ -3716,7 +4137,7 @@ def _store_purchase_result(
         "occurred_at": transaction["occurred_at"],
         "ownership": item["disposition"],
         "location": item["current_location"],
-        "delivery_location": HOME_ITEM_LOCATION,
+        "delivery_location": delivery_loc,
         "delivery_provenance": STORE_DELIVERY_PROVENANCE,
         "delivery_status": (
             delivery["status"]
@@ -3729,9 +4150,17 @@ def _store_purchase_result(
         "delivered_at": (
             delivery["delivered_at"] if isinstance(delivery, Mapping) else None
         ),
-        "materialization": "pending_arrange",
+        "materialization": (
+            "pending_arrange" if usable_kind != "CARRY" else "instant_ready"
+        ),
         "current_balance": balance,
     }
+    meta = item.get("item_meta")
+    if isinstance(meta, Mapping):
+        if meta.get("name"):
+            result["item_name"] = meta["name"]
+        if meta.get("store_id"):
+            result["store_id"] = meta["store_id"]
     if reason_code is not None:
         result["reason_code"] = reason_code
     return result
@@ -3745,6 +4174,7 @@ def store_purchase_item(
     hermes_home: Optional[Path | str] = None,
     environment: Optional[Mapping[str, str]] = None,
     now: Any = None,
+    custom_item_name: Any = None,
 ) -> dict[str, Any]:
     """Buy one item at the physical counter (explicit local owner).
 
@@ -3752,8 +4182,8 @@ def store_purchase_item(
     debit **and** the OWNED instance, the operation key is the economy's own
     purchase intent id, and a replay cannot charge twice -- plus the two facts
     this channel is about: she must really be at the counter and it must really
-    be open.  The purchase never places the furniture: ownership arriving is not
-    a placement, and ``ARRANGE`` is the only thing that arranges a room.
+    be open.  Fixed furniture is not placed until ``ARRANGE``; handheld counter
+    goods are handed over at the shop right away.
     """
 
     if not feature_enabled(environment):
@@ -3778,22 +4208,24 @@ def store_purchase_item(
             "status": "rejected",
             "reason_code": "INVALID_STORE_PURCHASE_INPUT",
         }
-    catalog_item = _CATALOG_BY_ID.get(item_id)
+    catalog_item, err_code = _resolve_store_item_for_purchase(
+        item_id,
+        store_id=None,
+        hermes_home=hermes_home,
+        environment=environment,
+        custom_item_name=custom_item_name,
+        allow_out_of_stock=True,
+    )
     if catalog_item is None:
         return {
             "kind": STORE_PURCHASE_KIND,
             "status": "rejected",
-            "reason_code": "UNKNOWN_CATALOG_ITEM",
+            "reason_code": err_code or "UNKNOWN_CATALOG_ITEM",
         }
-    if CHANNEL_HOME_GOODS_STORE not in catalog_item.get("channels", ()):
-        return {
-            "kind": STORE_PURCHASE_KIND,
-            "status": "rejected",
-            "reason_code": "ITEM_NOT_SOLD_AT_STORE",
-        }
-    if not catalog_declaration(item_id).get("relocatable"):
-        # A counter item with no legal next step (nothing could arrange it)
-        # would be sold into a dead end; refuse instead of selling it.
+    decl = dict(catalog_item.get("declaration") or catalog_declaration(item_id))
+    if not decl.get("relocatable") and decl.get("usable_kind") != "CARRY":
+        # A counter item with no legal next step would be sold into a dead end;
+        # refuse instead of selling it.
         return {
             "kind": STORE_PURCHASE_KIND,
             "status": "rejected",
@@ -3853,6 +4285,15 @@ def store_purchase_item(
                         "purchase_intent_id": intent_id,
                         "transaction_id": existing["transaction_id"],
                     }
+                if isinstance(custom_item_name, str) and custom_item_name.strip():
+                    recorded_name = str(((existing_item.get("item_meta") or {}).get("name")) or "").strip()
+                    if recorded_name and " ".join(custom_item_name.split()) != recorded_name:
+                        return {
+                            "kind": STORE_PURCHASE_KIND,
+                            "status": "rejected",
+                            "reason_code": "OPERATION_TARGET_CONFLICT",
+                            "purchase_intent_id": intent_id,
+                        }
                 existing_delivery = next(
                     (
                         delivery
@@ -3875,6 +4316,20 @@ def store_purchase_item(
             )
             if checked["status"] != "available":
                 return {"kind": STORE_PURCHASE_KIND, **checked}
+            active_store_id = str(checked.get("store_id") or STORE_LOCATION_ID)
+            catalog_item, err_code = _resolve_store_item_for_purchase(
+                item_id,
+                store_id=active_store_id,
+                hermes_home=hermes_home,
+                environment=environment,
+                custom_item_name=custom_item_name,
+            )
+            if catalog_item is None:
+                return {
+                    "kind": STORE_PURCHASE_KIND,
+                    "status": "rejected",
+                    "reason_code": err_code or "ITEM_NOT_SOLD_AT_STORE",
+                }
             if (
                 len(state["transactions"]) >= MAX_TRANSACTIONS
                 or len(state["items"]) >= MAX_ITEMS
@@ -3907,7 +4362,9 @@ def store_purchase_item(
                 "source_turn_id": "local-owner-uid-%04d" % owner["context"]["uid"],
             }
             occurred_at = _timestamp(now, "occurred_at")
-            temporal = delivery_time_enabled(environment)
+            delivery_dest, temporal = _purchase_delivery_target(
+                catalog_item, hermes_home=hermes_home, environment=environment
+            )
             transaction = {
                 "transaction_id": transaction_id,
                 "transaction_kind": "PURCHASE",
@@ -3917,7 +4374,7 @@ def store_purchase_item(
                 "occurred_at": occurred_at,
                 "catalog_item_id": item_id,
                 "purchase_intent_id": intent_id,
-                "delivery_location": HOME_ITEM_LOCATION,
+                "delivery_location": delivery_dest,
                 "provenance": provenance,
             }
             delivery: Optional[dict[str, Any]] = None
@@ -3944,7 +4401,7 @@ def store_purchase_item(
                     # registered in ``VALID_PURCHASE_PROVENANCES``.
                     "delivery_provenance": DELIVERY_PROVENANCE,
                 }
-            item = {
+            item: dict[str, Any] = {
                 "item_instance_id": item_instance_id,
                 "catalog_item_id": item_id,
                 "owner": OWNER,
@@ -3954,10 +4411,12 @@ def store_purchase_item(
                 "acquisition_price": amount,
                 "currency": CURRENCY,
                 "current_location": (
-                    DELIVERY_PENDING_LOCATION if temporal else HOME_ITEM_LOCATION
+                    DELIVERY_PENDING_LOCATION if temporal else delivery_dest
                 ),
                 "disposition": DISPOSITION_OWNED,
             }
+            if catalog_item.get("is_open_store_item"):
+                item["item_meta"] = _open_storefront().build_item_meta(catalog_item)
             updated = dict(state)
             updated["revision"] = state["revision"] + 1
             updated["updated_at"] = occurred_at
@@ -3969,6 +4428,17 @@ def store_purchase_item(
             verified = _load(path)
             if verified != saved:
                 raise PropertyEconomyError("store purchase postcondition failed")
+            stock_remaining: Optional[int] = None
+            if catalog_item.get("is_dynamic_catalog_item"):
+                stock_res = _dynamic_catalog().decrement_dynamic_item_stock(
+                    _home(hermes_home),
+                    catalog_item_id=item_id,
+                    purchase_intent_id=intent_id,
+                    quantity=1,
+                    now_iso=occurred_at,
+                )
+                if stock_res.get("ok") and isinstance(stock_res.get("stock_remaining"), int):
+                    stock_remaining = int(stock_res["stock_remaining"])
             verified_delivery = (
                 next(
                     entry
@@ -3985,6 +4455,8 @@ def store_purchase_item(
                 balance=_balance(verified),
                 delivery=verified_delivery,
             )
+            if stock_remaining is not None:
+                result["stock_remaining"] = stock_remaining
             if verified_delivery is not None:
                 try:
                     import sys
@@ -4051,7 +4523,7 @@ def arrange_verdict(
         return {"allowed": False, "reason_code": "NOT_AN_ECONOMY_INSTANCE"}
     if item["disposition"] != DISPOSITION_OWNED:
         return {"allowed": False, "reason_code": "NOT_OWNED"}
-    declaration = catalog_declaration(item["catalog_item_id"])
+    declaration = catalog_declaration(item["catalog_item_id"], hermes_home=hermes_home)
     if not declaration.get("relocatable"):
         return {
             "allowed": False,
@@ -4314,7 +4786,10 @@ def read_v03_bridge_sync_snapshot(
         ),
         "v03_ecology_sync": _copy_json(sync_block) if isinstance(sync_block, Mapping) else None,
         "recent_world_transactions": [
-            _transaction_projection(item)
+            _transaction_projection(
+                item,
+                item_name=_item_names_by_transaction(state).get(item["transaction_id"]),
+            )
             for item in list(reversed(state["transactions"]))[:MAX_RECENT_TRANSACTIONS]
         ],
     }

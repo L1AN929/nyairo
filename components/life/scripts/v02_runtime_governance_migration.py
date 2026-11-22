@@ -32,18 +32,53 @@ import json
 import math
 import os
 import re
+import sqlite3
+import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+try:
+    from components.life.scripts import state_tx_guard as _tx
+except ImportError:
+    _LIFE_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+    if _LIFE_SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, _LIFE_SCRIPTS_DIR)
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
+try:
+    from components.life.scripts import v02_recall_projection as _recall_proj
+except ImportError:
+    _LIFE_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+    if _LIFE_SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, _LIFE_SCRIPTS_DIR)
+    import v02_recall_projection as _recall_proj  # type: ignore[no-redef]
+
+VC_AUTHORITY_SCHEMA = _recall_proj.VC_AUTHORITY_SCHEMA
+VC_AUTHORITY_WATERMARK_REL_PATH = _recall_proj.VC_AUTHORITY_WATERMARK_REL_PATH
+compute_vc_item_digest = _recall_proj.compute_vc_item_digest
+read_vc_authority_watermark_readonly = _recall_proj.read_vc_authority_watermark_readonly
+record_vc_revocation_seal = _recall_proj.record_vc_revocation_seal
+
 VIEW_SCHEMA = "nyairo.v02.runtime_migration.v1"
 ENDPOINT_PATH = "/api/phone/v02/runtime-migration"
 
 STATE_DIRNAME = "phone"
 STATE_FILENAME = "v02_runtime_migration.json"
+RUNTIME_GOVERNANCE_FILENAME = "v02_runtime_governance.json"
+RUNTIME_GOVERNANCE_SCHEMA = "nyairo.v02.runtime_governance.v1"
 STATE_SCHEMA_VERSION = 1
+
+DEVICE_PRESENCE_SCHEMA = "nyairo.v02.device_presence.v1"
+DEFAULT_DEVICE_LEASE_SECONDS = 900
+MAX_DEVICE_LEASE_SECONDS = 86400
+MAX_DEVICE_HANDOFF_HISTORY = 16
+
+CHATLESS_LIFE_REVIEW_SCHEMA = "nyairo.v02.chatless_life_review.v1"
+_VC_DIGEST_HEX_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_VC_SAFE_SCOPE_RE = re.compile(r"[^A-Za-z0-9_.:-]")
 
 DEFAULT_TZ = timezone(timedelta(hours=8))
 
@@ -55,6 +90,174 @@ MAX_WAKE_ATTRIBUTIONS = 32
 MAX_WORKSPACE_AUDITS = 24
 MAX_WAKE_TIMESTAMPS = 256
 MAX_OPERATION_LEDGER = 128
+
+# ---------------------------------------------------------------------------------
+# Ch.16 §7 一年衰败与维护：22 类监测矩阵（v2.0 一年期漂移监测，不用生命总分）。
+# 只读统计既有实证文件的存在性/新鲜度，零写盘、零大模型；22 类严格分属四大域。
+# ---------------------------------------------------------------------------------
+DECAY_MONITOR_SCHEMA = "nyairo.v02.annual_decay_matrix.v1"
+DECAY_MONITOR_GROUP_MEMORY = "memory_recall"
+DECAY_MONITOR_GROUP_RELATIONSHIP = "relationship_common_ground"
+DECAY_MONITOR_GROUP_AGENCY = "agency_habits_projects"
+DECAY_MONITOR_GROUP_WORLD = "world_rhythm_somatic"
+DECAY_MONITOR_GROUPS: tuple[str, ...] = (
+    DECAY_MONITOR_GROUP_MEMORY,
+    DECAY_MONITOR_GROUP_RELATIONSHIP,
+    DECAY_MONITOR_GROUP_AGENCY,
+    DECAY_MONITOR_GROUP_WORLD,
+)
+
+DECAY_STATUS_ACTIVE = "ACTIVE"
+DECAY_STATUS_DORMANT = "DORMANT"
+DECAY_STATUS_NEEDS_REANCHOR = "NEEDS_REANCHOR"
+DECAY_STATUS_ABSENT_BASELINE = "ABSENT_BASELINE"
+DECAY_MONITOR_STATUSES: tuple[str, ...] = (
+    DECAY_STATUS_ACTIVE,
+    DECAY_STATUS_DORMANT,
+    DECAY_STATUS_NEEDS_REANCHOR,
+    DECAY_STATUS_ABSENT_BASELINE,
+)
+
+#: 每个域一项一行的监测登记：来源文件、计数键、半衰期、底线权重、漂移区间与重锚定策略。
+#: 22 项总数固定（6 + 5 + 6 + 5），缺少或重复都会在投影的 total/group_counts 里显形。
+DECAY_MONITOR_CATEGORIES_22: tuple[dict[str, Any], ...] = (
+    # 1) memory_recall (6)
+    {
+        "category": "episodic_traces", "group": DECAY_MONITOR_GROUP_MEMORY,
+        "label_cn": "情景记忆痕迹", "sources": ("memory/v02_recall_projection_state.json",),
+        "count_key": "memories", "half_life_days": 180, "floor_weight": 0.15,
+        "drift_band": (0.0, 0.40), "re_anchor_policy": "REHEARSE_OR_ARCHIVE_CONFIRM",
+    },
+    {
+        "category": "autobiographical_anchors", "group": DECAY_MONITOR_GROUP_MEMORY,
+        "label_cn": "自传体锚点", "sources": ("memory/v02_recall_projection_state.json",),
+        "count_key": "memories", "half_life_days": 365, "floor_weight": 0.20,
+        "drift_band": (0.0, 0.25), "re_anchor_policy": "RE_ANCHOR_FROM_MILESTONES",
+    },
+    {
+        "category": "sensory_impressions", "group": DECAY_MONITOR_GROUP_MEMORY,
+        "label_cn": "感官印象", "sources": ("phone/v02_crossmodal.json",),
+        "count_key": None, "half_life_days": 210, "floor_weight": 0.10,
+        "drift_band": (0.0, 0.50), "re_anchor_policy": "OBSERVE_ANEW",
+    },
+    {
+        "category": "promise_commitments", "group": DECAY_MONITOR_GROUP_MEMORY,
+        "label_cn": "承诺与约定", "sources": ("phone/reunion_anchor.json", "phone/home_recipes.json"),
+        "count_key": None, "half_life_days": 120, "floor_weight": 0.30,
+        "drift_band": (0.0, 0.30), "re_anchor_policy": "RECONFIRM_WITH_PARTNER",
+    },
+    {
+        "category": "seasonal_milestones", "group": DECAY_MONITOR_GROUP_MEMORY,
+        "label_cn": "季节里程碑", "sources": ("memory/v02_common_ground_state.json",),
+        "count_key": "items", "half_life_days": 365, "floor_weight": 0.25,
+        "drift_band": (0.0, 0.20), "re_anchor_policy": "MARK_NEXT_SEASON",
+    },
+    {
+        "category": "active_faded_items", "group": DECAY_MONITOR_GROUP_MEMORY,
+        "label_cn": "主动淡忘项", "sources": ("memory/v02_recall_projection_state.json",),
+        "count_key": "memories", "half_life_days": 90, "floor_weight": 0.00,
+        "drift_band": (0.0, 0.60), "re_anchor_policy": "ALLOW_TO_FADE",
+    },
+    # 2) relationship_common_ground (5)
+    {
+        "category": "shared_vocabulary", "group": DECAY_MONITOR_GROUP_RELATIONSHIP,
+        "label_cn": "共同语汇", "sources": ("memory/v02_common_ground_state.json",),
+        "count_key": "items", "half_life_days": 300, "floor_weight": 0.20,
+        "drift_band": (0.0, 0.25), "re_anchor_policy": "REUSE_IN_DIALOGUE",
+    },
+    {
+        "category": "agreed_boundaries", "group": DECAY_MONITOR_GROUP_RELATIONSHIP,
+        "label_cn": "已达成边界", "sources": ("phone/reunion_anchor.json", "phone/tentative_plans.json"),
+        "count_key": None, "half_life_days": 365, "floor_weight": 0.35,
+        "drift_band": (0.0, 0.15), "re_anchor_policy": "RESTATE_AGREEMENT",
+    },
+    {
+        "category": "pending_clarifications", "group": DECAY_MONITOR_GROUP_RELATIONSHIP,
+        "label_cn": "待澄清事项", "sources": ("memory/v02_common_ground_state.json",),
+        "count_key": "items", "half_life_days": 21, "floor_weight": 0.05,
+        "drift_band": (0.0, 0.70), "re_anchor_policy": "RAISE_NATURAL_QUESTION",
+    },
+    {
+        "category": "gift_lantern_entries", "group": DECAY_MONITOR_GROUP_RELATIONSHIP,
+        "label_cn": "信物灯盏条目", "sources": ("phone/longterm_gifts_lantern.json",),
+        "count_key": None, "half_life_days": 400, "floor_weight": 0.25,
+        "drift_band": (0.0, 0.20), "re_anchor_policy": "REVISIT_LANTERN",
+    },
+    {
+        "category": "co_presence_habits", "group": DECAY_MONITOR_GROUP_RELATIONSHIP,
+        "label_cn": "共在习惯", "sources": ("phone/autonomy_rhythm.json",),
+        "count_key": None, "half_life_days": 180, "floor_weight": 0.20,
+        "drift_band": (0.0, 0.30), "re_anchor_policy": "RENEGOTIATE_RHYTHM",
+    },
+    # 3) agency_habits_projects (6)
+    {
+        "category": "preference_satiation", "group": DECAY_MONITOR_GROUP_AGENCY,
+        "label_cn": "偏好饱和", "sources": ("state/v02_agency_depth_state.json",),
+        "count_key": "preferences", "half_life_days": 30, "floor_weight": 0.05,
+        "drift_band": (0.0, 0.50), "re_anchor_policy": "ROTATE_NOVELTY",
+    },
+    {
+        "category": "open_inquiries", "group": DECAY_MONITOR_GROUP_AGENCY,
+        "label_cn": "有界探究", "sources": ("state/v02_agency_depth_state.json",),
+        "count_key": "inquiries", "half_life_days": 60, "floor_weight": 0.10,
+        "drift_band": (0.0, 0.40), "re_anchor_policy": "ADD_EVIDENCE_OR_STOP",
+    },
+    {
+        "category": "tentative_plans", "group": DECAY_MONITOR_GROUP_AGENCY,
+        "label_cn": "待定小约定", "sources": ("phone/tentative_plans.json",),
+        "count_key": "plans", "half_life_days": 30, "floor_weight": 0.05,
+        "drift_band": (0.0, 0.50), "re_anchor_policy": "CONFIRM_OR_RELEASE",
+    },
+    {
+        "category": "tomorrow_notes", "group": DECAY_MONITOR_GROUP_AGENCY,
+        "label_cn": "明日便签", "sources": ("phone/desk_tomorrow_note.json",),
+        "count_key": None, "half_life_days": 7, "floor_weight": 0.00,
+        "drift_band": (0.0, 0.80), "re_anchor_policy": "FOLLOW_OR_DROP",
+    },
+    {
+        "category": "workbench_drafts", "group": DECAY_MONITOR_GROUP_AGENCY,
+        "label_cn": "工作台草稿", "sources": ("phone/workbench_tray.json", "phone/workbench_curio.json"),
+        "count_key": None, "half_life_days": 90, "floor_weight": 0.20,
+        "drift_band": (0.0, 0.35), "re_anchor_policy": "SAVE_CHECKPOINT",
+    },
+    {
+        "category": "second_order_rules", "group": DECAY_MONITOR_GROUP_AGENCY,
+        "label_cn": "二阶小规矩", "sources": ("state/v02_agency_depth_state.json",),
+        "count_key": "second_order_rules", "half_life_days": 240, "floor_weight": 0.20,
+        "drift_band": (0.0, 0.30), "re_anchor_policy": "REVIEW_AND_REVISE",
+    },
+    # 4) world_rhythm_somatic (5)
+    {
+        "category": "courtyard_plant_care", "group": DECAY_MONITOR_GROUP_WORLD,
+        "label_cn": "院子盆栽照料", "sources": ("world/v04_neighborhood_state.json",),
+        "count_key": None, "half_life_days": 14, "floor_weight": 0.10,
+        "drift_band": (0.0, 0.50), "re_anchor_policy": "WATER_OR_MOVE",
+    },
+    {
+        "category": "neighborhood_familiarity", "group": DECAY_MONITOR_GROUP_WORLD,
+        "label_cn": "街区熟悉度", "sources": ("world/v04_neighborhood_state.json",),
+        "count_key": None, "half_life_days": 180, "floor_weight": 0.15,
+        "drift_band": (0.0, 0.35), "re_anchor_policy": "WALK_ROUTE_REVISIT",
+    },
+    {
+        "category": "illness_recovery_memory", "group": DECAY_MONITOR_GROUP_WORLD,
+        "label_cn": "病后恢复记忆", "sources": ("phone/v03_ecology.json", "phone/v03_ecology_state.json"),
+        "count_key": None, "half_life_days": 60, "floor_weight": 0.10,
+        "drift_band": (0.0, 0.40), "re_anchor_policy": "REST_AND_RECORD",
+    },
+    {
+        "category": "somatic_comfort_baseline", "group": DECAY_MONITOR_GROUP_WORLD,
+        "label_cn": "身体舒适基线", "sources": ("phone/somatic_comfort.json",),
+        "count_key": None, "half_life_days": 120, "floor_weight": 0.20,
+        "drift_band": (0.0, 0.30), "re_anchor_policy": "RECHECK_WARMTH",
+    },
+    {
+        "category": "economic_spending_rhythm", "group": DECAY_MONITOR_GROUP_WORLD,
+        "label_cn": "收支节奏", "sources": ("phone/v03_ecology.json", "phone/v03_ecology_state.json"),
+        "count_key": None, "half_life_days": 90, "floor_weight": 0.15,
+        "drift_band": (0.0, 0.35), "re_anchor_policy": "REVIEW_LEDGER",
+    },
+)
 
 # ---------------------------------------------------------------------------------
 # 07 章 §二 WakeTicket：持久唤醒票（07-宏观驱动引擎与事件循环 §二）。
@@ -109,6 +312,28 @@ MODE_NORMAL = "NORMAL"
 MODE_LOW_BUDGET = "LOW_BUDGET"
 MODE_DORMANT = "DORMANT"
 
+RETIREMENT_STATUS_ACTIVE = "ACTIVE"
+RETIREMENT_STATUS_PENDING = "PENDING_CONFIRMATION"
+RETIREMENT_STATUS_SEALED = "RETIRED_ARCHIVE_SEALED"
+RETIREMENT_STATUSES: tuple[str, ...] = (
+    RETIREMENT_STATUS_ACTIVE,
+    RETIREMENT_STATUS_PENDING,
+    RETIREMENT_STATUS_SEALED,
+)
+RETIREMENT_CONFIRMATION_PHRASE_CN = "确认温和封存归档"
+
+PROACTIVE_DEFAULT_QUIET_START_HM = "22:30"
+PROACTIVE_DEFAULT_QUIET_END_HM = "07:30"
+PROACTIVE_DEFAULT_DAILY_CAP = 2
+PROACTIVE_MIN_DAILY_CAP = 1
+PROACTIVE_MAX_DAILY_CAP = 6
+PROACTIVE_DEFAULT_COOLDOWN_MINUTES = 180
+PROACTIVE_MIN_COOLDOWN_MINUTES = 30
+PROACTIVE_MAX_COOLDOWN_MINUTES = 1440
+PROACTIVE_MAX_PENDING_QUEUE = 12
+PROACTIVE_MAX_RECENT_LOG = 24
+_HM_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
 BUDGET_MODE_ALIASES: dict[str, str] = {
     "NORMAL": MODE_NORMAL,
     "LOW_BUDGET": MODE_LOW_BUDGET,
@@ -130,13 +355,16 @@ SUITCASE_PROFILE_MODES = (
 )
 
 SUITCASE_BUNDLE_SCHEMA = "nyairo.suitcase.bundle.v1"
-SUITCASE_BUNDLE_VERSION = "0.7.0"
+SUITCASE_BUNDLE_VERSION = "0.8.0"
+MIGRATION_LOSS_MANIFEST_SCHEMA = "nyairo.suitcase.loss_manifest.g4.v1"
 
 SUITCASE_RECORDS_ONLY_SLICES: tuple[str, ...] = (
     "desk_tomorrow_note.json",
     "home_hearth.json",
     "v02_common_ground.json",
     "v02_recall_projection.json",
+    "window_keepsakes.json",
+    "longterm_gifts_lantern.json",
 )
 SUITCASE_RECORDS_AND_OBJECTS_EXTRA_SLICES: tuple[str, ...] = (
     "workbench_curio.json",
@@ -144,6 +372,8 @@ SUITCASE_RECORDS_AND_OBJECTS_EXTRA_SLICES: tuple[str, ...] = (
     "v02_crossmodal.json",
     "wardrobe_pocket.json",
     "v04_neighborhood.json",
+    "v04_elastic_play.json",
+    "v03_epistemic_encounters.json",
 )
 SUITCASE_PRACTICE_EXTRA_SLICES: tuple[str, ...] = (
     "longterm_room_habits.json",
@@ -154,6 +384,8 @@ SUITCASE_PRACTICE_EXTRA_SLICES: tuple[str, ...] = (
     "emotional_tension.json",
     "v03_ecology.json",
     "everyday_desires.json",
+    "v08_emergent_echoes.json",
+    "v08_composable_body.json",
 )
 SUITCASE_ALLOWED_SLICE_FILES: tuple[str, ...] = (
     SUITCASE_RECORDS_ONLY_SLICES
@@ -162,16 +394,49 @@ SUITCASE_ALLOWED_SLICE_FILES: tuple[str, ...] = (
 )
 SUITCASE_ALLOWED_SLICE_SET: frozenset[str] = frozenset(SUITCASE_ALLOWED_SLICE_FILES)
 
+SUITCASE_ALLOWED_WORLD_FILES: tuple[str, ...] = (
+    "v08_matter_space.json",
+    "v08_open_affordance.json",
+    "v08_microzone_ecology.json",
+    "v04_neighborhood_state.json",
+)
+SUITCASE_ALLOWED_WORLD_FILE_SET: frozenset[str] = frozenset(SUITCASE_ALLOWED_WORLD_FILES)
+
+SUITCASE_WORLD_SLICE_META: dict[str, str] = {
+    "v08_matter_space.json": "通用物质空间、嵌套容器包与私密抽屉物理态",
+    "v08_open_affordance.json": "通用物件交互痕迹与自建顺手小流程",
+    "v08_microzone_ecology.json": "室内外微气候落座点、窗扇灯角与气味条件",
+    "v04_neighborhood_state.json": "三环街区院落、盆栽耐受与手作借还状态",
+}
+
+SUITCASE_ALLOWED_WORLD_PACKAGE_FILES: tuple[str, ...] = (
+    "manifest.json",
+    "locations.json",
+    "routes.json",
+    "rules.json",
+    "objects.json",
+    "scene.json",
+    "content.json",
+)
+SUITCASE_ALLOWED_WORLD_PACKAGE_FILE_SET: frozenset[str] = frozenset(
+    SUITCASE_ALLOWED_WORLD_PACKAGE_FILES
+)
+SUITCASE_WORLD_PACKAGE_MAX_TOTAL_BYTES = 2 * 1024 * 1024
+
 SUITCASE_SLICE_META: dict[str, tuple[str, str]] = {
     "desk_tomorrow_note.json": ("书桌明日便签与留存短笺", "records_only"),
     "home_hearth.json": ("居家炉火、重逢锚点与小约定", "records_only"),
     "v02_common_ground.json": ("双方共同认知与待澄清账本", "records_only"),
     "v02_recall_projection.json": ("四层回忆清晰度与遗忘墓碑水位", "records_only"),
+    "window_keepsakes.json": ("窗边景致、自选锁屏与冰箱贴留念", "records_only"),
+    "longterm_gifts_lantern.json": ("共同礼物轨迹与回忆双层灯盏", "records_only"),
     "workbench_curio.json": ("工作台创作托盘与小物履历", "records_and_objects"),
     "outing_bench_bookstore.json": ("外出长椅足迹与书店橱窗书签", "records_and_objects"),
     "v02_crossmodal.json": ("跨模态配色小样、试色板与读书标记", "records_and_objects"),
     "wardrobe_pocket.json": ("衣柜穿搭与口袋心愿小清单", "records_and_objects"),
     "v04_neighborhood.json": ("街区小院、手作与周边风物", "records_and_objects"),
+    "v04_elastic_play.json": ("弹性玩耍探索与造物手艺谱系", "records_and_objects"),
+    "v03_epistemic_encounters.json": ("有限视野三次遇见、递交材料与听说边界", "records_and_objects"),
     "longterm_room_habits.json": ("房间日常起居小习惯", "practice"),
     "v02_open_self_rules.json": ("自主生活小原则与自我约定", "practice"),
     "autonomy_rhythm.json": ("独处与相伴节奏偏好", "practice"),
@@ -180,6 +445,8 @@ SUITCASE_SLICE_META: dict[str, tuple[str, str]] = {
     "emotional_tension.json": ("日常情绪张力与缓和节奏", "practice"),
     "v03_ecology.json": ("独立收支账本与生病调养习惯", "practice"),
     "everyday_desires.json": ("日常小心愿自然消长状态", "practice"),
+    "v08_emergent_echoes.json": ("涌现回响、共同暗语与零债日常习惯", "practice"),
+    "v08_composable_body.json": ("可组合身体节律包与日常照拂提示", "practice"),
 }
 
 FORBIDDEN_SUITCASE_SECRET_KEYS: frozenset[str] = frozenset({
@@ -463,6 +730,37 @@ def _default_skills_catalog() -> dict[str, dict[str, Any]]:
     }
 
 
+def _default_retirement_state() -> dict[str, Any]:
+    return {
+        "status": RETIREMENT_STATUS_ACTIVE,
+        "prepared_at": None,
+        "sealed_at": None,
+        "reason_cn": "",
+        "farewell_note_cn": "",
+        "confirmation_phrase": None,
+        "archive_manifest": None,
+        "prepared_by": None,
+        "sealed_by": None,
+        "destructive_wipe_performed": False,
+    }
+
+
+def _default_proactive_outbound_state() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "quiet_start_hm": PROACTIVE_DEFAULT_QUIET_START_HM,
+        "quiet_end_hm": PROACTIVE_DEFAULT_QUIET_END_HM,
+        "daily_cap": PROACTIVE_DEFAULT_DAILY_CAP,
+        "min_cooldown_minutes": PROACTIVE_DEFAULT_COOLDOWN_MINUTES,
+        "sent_today_count": 0,
+        "sent_today_date": None,
+        "last_sent_at": None,
+        "next_msg_seq": 1,
+        "pending_queue": [],
+        "recent_log": [],
+    }
+
+
 def build_default_state() -> dict[str, Any]:
     return {
         "schema": VIEW_SCHEMA,
@@ -508,7 +806,20 @@ def build_default_state() -> dict[str, Any]:
             "keep_skill_ids": None,
             "leave_behind_note": "",
             "packed_at": None,
+            "migrated_delivery_records": [],
         },
+        "device_presence": {
+            "active_device_id": None,
+            "lease_epoch": 0,
+            "leased_at": None,
+            "lease_expires_at": None,
+            "lease_seconds": DEFAULT_DEVICE_LEASE_SECONDS,
+            "continuation_ref": None,
+            "last_handoff": None,
+            "handoff_history": [],
+        },
+        "retirement": _default_retirement_state(),
+        "proactive_outbound": _default_proactive_outbound_state(),
         "workspace_audits": [],
         "operation_ledger": {},
     }
@@ -527,7 +838,15 @@ def _load_state_readonly(day_root: Path) -> tuple[bool, dict[str, Any]]:
 
     base["revision"] = int(raw.get("revision") or 0)
     base["updated_at"] = raw.get("updated_at")
-    for section in ("mode_config", "wake_router", "carrier_migration", "suitcase_state"):
+    for section in (
+        "mode_config",
+        "wake_router",
+        "carrier_migration",
+        "suitcase_state",
+        "device_presence",
+        "retirement",
+        "proactive_outbound",
+    ):
         src_sec = raw.get(section)
         if isinstance(src_sec, Mapping):
             if section == "carrier_migration":
@@ -554,6 +873,26 @@ def _load_state_readonly(day_root: Path) -> tuple[bool, dict[str, Any]]:
                         ]
                     else:
                         merged["wake_tickets"] = []
+                elif section == "device_presence":
+                    raw_hist = merged.get("handoff_history")
+                    if isinstance(raw_hist, list):
+                        merged["handoff_history"] = [
+                            dict(h) for h in raw_hist[-MAX_DEVICE_HANDOFF_HISTORY:]
+                            if isinstance(h, Mapping)
+                        ]
+                    else:
+                        merged["handoff_history"] = []
+                elif section == "proactive_outbound":
+                    raw_pq = merged.get("pending_queue")
+                    merged["pending_queue"] = [
+                        dict(item) for item in (raw_pq[-PROACTIVE_MAX_PENDING_QUEUE:] if isinstance(raw_pq, list) else [])
+                        if isinstance(item, Mapping)
+                    ]
+                    raw_rl = merged.get("recent_log")
+                    merged["recent_log"] = [
+                        dict(item) for item in (raw_rl[-PROACTIVE_MAX_RECENT_LOG:] if isinstance(raw_rl, list) else [])
+                        if isinstance(item, Mapping)
+                    ]
                 base[section] = merged
 
     if isinstance(raw.get("workspace_audits"), list):
@@ -1605,6 +1944,10 @@ def _project_runtime_mode(
     router = state["wake_router"]
     mode = str(mode_cfg.get("mode") or MODE_NORMAL)
     budget_pct = int(mode_cfg.get("budget_scale_pct") or 100)
+    ret_sec = state.get("retirement") if isinstance(state.get("retirement"), Mapping) else {}
+    if str(ret_sec.get("status") or "") == RETIREMENT_STATUS_SEALED:
+        mode = MODE_DORMANT
+        budget_pct = 0
     reason_cn = str(mode_cfg.get("reason_cn") or "")
     dormant_since = mode_cfg.get("dormant_since")
     last_gap_sec = int(mode_cfg.get("last_dormant_gap_seconds") or 0)
@@ -1630,6 +1973,26 @@ def _project_runtime_mode(
         current_dormant_gap = last_gap_sec
 
     is_low_budget = mode == MODE_LOW_BUDGET or (mode == MODE_NORMAL and budget_pct <= 25)
+    configured_pct = budget_pct
+    if mode != MODE_DORMANT:
+        try:
+            from components.life.scripts import v02_autobiography_skill_provenance as _asp
+
+            asp_budget = _asp.project_budget_survival(day_root, now_iso=now_iso)
+            asp_pct_raw = asp_budget.get("budget_scale_pct") if isinstance(asp_budget, Mapping) else None
+            if (
+                isinstance(asp_pct_raw, int)
+                and not isinstance(asp_pct_raw, bool)
+                and asp_pct_raw < budget_pct
+            ):
+                budget_pct = max(0, asp_pct_raw)
+                if mode == MODE_NORMAL and (
+                    budget_pct <= 25
+                    or str(asp_budget.get("mode") or "").upper() != _asp.BUDGET_MODE_NORMAL
+                ):
+                    is_low_budget = True
+        except Exception:
+            pass
 
     if fault_reasons:
         health_state = HEALTH_STALLED_OR_DEGRADED
@@ -1681,10 +2044,15 @@ def _project_runtime_mode(
         ]
         allowed_work_scope = "control_and_reconciliation_only"
 
+    effective_mode = (
+        MODE_LOW_BUDGET
+        if (mode == MODE_NORMAL and is_low_budget)
+        else mode
+    )
     return {
-        "mode": mode,
+        "mode": effective_mode,
         "budget_scale_pct": 0 if mode == MODE_DORMANT else budget_pct,
-        "configured_budget_scale_pct": budget_pct,
+        "configured_budget_scale_pct": 0 if mode == MODE_DORMANT and configured_pct == 100 else configured_pct,
         "health_state": health_state,
         "summary_cn": summary_cn,
         "reason_cn": reason_cn,
@@ -1843,9 +2211,22 @@ def _project_today_capability_card(
     }
 
 
-def _summarize_phone_slice_doc(slice_file: str, doc: Mapping[str, Any]) -> dict[str, Any]:
-    """Build a compact read-only summary for one present ``phone/<slice>.json`` file."""
+def _summarize_phone_slice_doc(
+    slice_file: str,
+    doc: Mapping[str, Any],
+    *,
+    source_rel: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build a compact read-only summary for one present portable phone slice file."""
     label_cn, tier = SUITCASE_SLICE_META.get(slice_file, (slice_file, "records_and_objects"))
+    if slice_file == "v08_composable_body.json":
+        return {
+            "slice_file": slice_file,
+            "tier": tier,
+            "entry_count": 0,
+            "title_cn": f"{label_cn}（按需受控便携切片）",
+            "source": source_rel or f"{STATE_DIRNAME}/{slice_file}",
+        }
     entry_count = 0
     for key in (
         "items",
@@ -1863,6 +2244,21 @@ def _summarize_phone_slice_doc(slice_file: str, doc: Mapping[str, Any]) -> dict[
         "desires",
         "recipes",
         "plans",
+        "pins",
+        "shared_gifts",
+        "later_reflections",
+        "encounters",
+        "shared_materials",
+        "npc_errands_and_hearsay",
+        "play_sessions",
+        "craft_genealogy",
+        "future_self_questions",
+        "shared_idioms",
+        "memory_reinterpretations",
+        "style_and_interest_sparks",
+        "divergent_notices",
+        "day_directions",
+        "personal_rituals",
     ):
         val = doc.get(key)
         if isinstance(val, (list, Mapping)):
@@ -1880,7 +2276,7 @@ def _summarize_phone_slice_doc(slice_file: str, doc: Mapping[str, Any]) -> dict[
         "tier": tier,
         "entry_count": entry_count,
         "title_cn": f"{label_cn}{detail_suffix}",
-        "source": f"{STATE_DIRNAME}/{slice_file}",
+        "source": source_rel or f"{STATE_DIRNAME}/{slice_file}",
     }
 
 
@@ -1890,7 +2286,7 @@ def _discover_real_suitcase_assets_readonly(
     practice_service: Any = None,
     project_service: Any = None,
 ) -> dict[str, Any]:
-    """Read real PersonalPracticeService methods, PrivateProjectService works, character_pack.json, keepsakes & phone/*.json slices (zero writes)."""
+    """Read real PersonalPracticeService methods, PrivateProjectService works, character_pack.json, keepsakes, phone slices & world assets (zero writes)."""
     result: dict[str, Any] = {
         "has_real_sources": False,
         "character_pack": None,
@@ -1898,6 +2294,10 @@ def _discover_real_suitcase_assets_readonly(
         "private_works": [],
         "shared_keepsakes": [],
         "phone_slices": [],
+        "world_slices": [],
+        "world_package_files": [],
+        "world_package_oversized": False,
+        "tombstone_count": 0,
     }
     if day_root is None and practice_service is None and project_service is None:
         return result
@@ -2206,23 +2606,33 @@ def _discover_real_suitcase_assets_readonly(
                 "source": "memory/v02_common_ground_state.json",
             })
 
-    # 5. Read-only scan of real <day_root>/phone/*.json portable suitcase slices
-    phone_dir = day_root / STATE_DIRNAME
-    try:
-        phone_dir_valid = phone_dir.is_dir() and not phone_dir.is_symlink()
-    except OSError:
-        phone_dir_valid = False
-    if phone_dir_valid:
-        for slice_file in SUITCASE_ALLOWED_SLICE_FILES:
-            sp = phone_dir / slice_file
-            try:
-                if sp.is_symlink():
-                    continue
-            except OSError:
-                continue
-            ex_sl, ok_sl, sl_doc = _read_json_safe(sp)
-            if ex_sl and ok_sl and isinstance(sl_doc, Mapping):
-                result["phone_slices"].append(_summarize_phone_slice_doc(slice_file, sl_doc))
+    # 5. Read-only scan of real portable phone slices (including canonical companion paths)
+    for slice_file in SUITCASE_ALLOWED_SLICE_FILES:
+        sl_doc, sl_src = _read_slice_or_companion_readonly_with_source(day_root, slice_file)
+        if sl_doc is not None:
+            result["phone_slices"].append(
+                _summarize_phone_slice_doc(slice_file, sl_doc, source_rel=sl_src)
+            )
+
+    # 6. Read-only scan of real <day_root>/world/ (or world-home/world/) v0.8/v0.4 world slices
+    for w_file in SUITCASE_ALLOWED_WORLD_FILES:
+        w_doc, w_src = _read_world_slice_readonly_with_source(day_root, w_file)
+        if w_doc is not None:
+            w_label = SUITCASE_WORLD_SLICE_META.get(w_file, w_file)
+            result["world_slices"].append({
+                "world_file": w_file,
+                "title_cn": f"{w_label}（已初始化）",
+                "source": w_src or f"world/{w_file}",
+            })
+
+    # 7. Read-only scan of custom <day_root>/world-package/ (<= 2 MB, non-symlink)
+    wp_files_meta, wp_oversized = _inspect_world_package_readonly(day_root)
+    result["world_package_files"] = wp_files_meta
+    result["world_package_oversized"] = wp_oversized
+
+    # 8. Read-only tombstone watermark count
+    ts_map = _extract_tombstone_ledger_readonly(day_root, now_iso="1970-01-01T00:00:00+00:00")
+    result["tombstone_count"] = len(ts_map)
 
     result["has_real_sources"] = bool(
         result["character_pack"]
@@ -2230,6 +2640,8 @@ def _discover_real_suitcase_assets_readonly(
         or result["private_works"]
         or result["shared_keepsakes"]
         or result["phone_slices"]
+        or result["world_slices"]
+        or result["world_package_files"]
     )
     return result
 
@@ -2408,6 +2820,36 @@ def _build_suitcase_for_route(
             })
             default_real_keep_ids.add(sl_item_id)
 
+    for w_summary in assets.get("world_slices") or ():
+        if not isinstance(w_summary, Mapping):
+            continue
+        w_file = str(w_summary.get("world_file") or "").strip()
+        if not w_file:
+            continue
+        core_objects_and_commitments.append({
+            "item_id": f"world_slice:{w_file}",
+            "kind": "world_slice_object",
+            "world_file": w_file,
+            "title_cn": str(w_summary.get("title_cn") or w_file),
+            "reason_cn": "来自本地真实空间物质、生活痕迹与微气候切片，迁入新环境后延续房间器物现场",
+            "source": str(w_summary.get("source") or f"world/{w_file}"),
+        })
+
+    wp_files_list = [
+        str(x.get("package_file") or "").strip()
+        for x in (assets.get("world_package_files") or ())
+        if isinstance(x, Mapping) and str(x.get("package_file") or "").strip()
+    ]
+    if wp_files_list:
+        core_objects_and_commitments.append({
+            "item_id": "custom_world_package:world-package",
+            "kind": "custom_world_package",
+            "package_files": wp_files_list,
+            "title_cn": f"自建世界包目录（共 {len(wp_files_list)} 份声明文件）",
+            "reason_cn": "来自本地 world-package 自定义街区、店铺售卖规格与物件物质档声明，整体无损迁走",
+            "source": "world-package",
+        })
+
     non_portable_external_leases = [
         {
             "item_id": "old_community_exclusive_doorplate",
@@ -2524,6 +2966,49 @@ def _project_migration_suitcase(
         real_assets=real_assets,
     )
 
+    selected_for_active = set(
+        _slices_for_effective_mode(
+            active_mode,
+            requested_mode=active_mode,
+            keep_skill_ids=keep_ids if isinstance(keep_ids, list) else None,
+        )
+    )
+    present_phone_slice_files = [
+        str(s.get("slice_file"))
+        for s in (real_assets.get("phone_slices") or ())
+        if isinstance(s, Mapping) and str(s.get("slice_file") or "") in selected_for_active
+    ]
+    present_world_slice_files = (
+        [
+            str(w.get("world_file"))
+            for w in (real_assets.get("world_slices") or ())
+            if isinstance(w, Mapping) and str(w.get("world_file") or "")
+        ]
+        if active_mode != SUITCASE_RECORDS_ONLY
+        else []
+    )
+    present_wp_files = (
+        [
+            str(p.get("package_file"))
+            for p in (real_assets.get("world_package_files") or ())
+            if isinstance(p, Mapping) and str(p.get("package_file") or "")
+        ]
+        if active_mode != SUITCASE_RECORDS_ONLY
+        else []
+    )
+    preview_loss_manifest = _build_migration_loss_manifest(
+        profile_mode=active_mode,
+        effective_mode=active_mode,
+        has_phone_slices=bool(present_phone_slice_files),
+        phone_slice_count=len(present_phone_slice_files),
+        has_character_pack=bool(real_assets.get("character_pack")),
+        world_slice_names=present_world_slice_files,
+        world_package_files=present_wp_files,
+        tombstone_count=int(real_assets.get("tombstone_count") or 0),
+        carrier_sec=state.get("carrier_migration") or {},
+        world_package_oversized=bool(real_assets.get("world_package_oversized", False)),
+    )
+
     return {
         "profile_mode": active_mode,
         "recommended_mode": SUITCASE_SELECTIVE_PRACTICE,
@@ -2531,12 +3016,14 @@ def _project_migration_suitcase(
         "keep_skill_ids": list(keep_ids) if isinstance(keep_ids, list) else None,
         "leave_behind_note": leave_note,
         "packed_at": suit_cfg.get("packed_at"),
+        "migrated_delivery_records": copy.deepcopy(suit_cfg.get("migrated_delivery_records") or []),
         "compatibility_debt_level": active_pack["compatibility_debt_level"],
         "summary_cn": active_pack["summary_cn"],
         "carried_items": active_pack["carried_items"],
         "left_behind_items": active_pack["left_behind_items"],
         "route_comparison": route_comparison,
         "real_sources": real_assets,
+        "migration_loss_manifest": preview_loss_manifest,
     }
 
 
@@ -2652,6 +3139,137 @@ def collect_source_freshness(
     return out
 
 
+def _decay_count_entries(doc: Any, count_key: Optional[str]) -> int:
+    if not count_key or not isinstance(doc, Mapping):
+        return 0
+    val = doc.get(count_key)
+    if isinstance(val, (list, Mapping)):
+        return len(val)
+    return 0
+
+
+def _decay_snapshot(
+    root: Path,
+    sources: Sequence[str],
+) -> tuple[bool, Optional[datetime], Optional[str], dict[str, dict[str, Any]]]:
+    """Read presence/freshness/counts from real files with zero writes."""
+    present = False
+    latest_dt: Optional[datetime] = None
+    latest_iso: Optional[str] = None
+    docs: dict[str, dict[str, Any]] = {}
+    for rel in sources:
+        path = root / rel
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+        except OSError:
+            continue
+        present = True
+        _exists, ok, doc = _read_json_safe(path)
+        m_iso = _mtime_iso(path)
+        m_dt = _parse_iso(m_iso)
+        if m_dt is not None and (latest_dt is None or m_dt > latest_dt):
+            latest_dt = m_dt
+            latest_iso = m_iso
+        if ok:
+            docs[rel] = doc
+    return present, latest_dt, latest_iso, docs
+
+
+def project_annual_decay_matrix_22(
+    day_root: Path | str,
+    *,
+    horizon_days: int = 365,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Ch.16 §7：22 类一年期衰败监测矩阵的只读投影（零写盘、零大模型）。
+
+    仅统计既有实证文件的存在性、最近修改时间与条目数，据此为每一类计算半衰期、
+    底线权重、漂移区间、重锚定策略与当前观测状态（``ACTIVE`` / ``DORMANT`` /
+    ``NEEDS_REANCHOR`` / ``ABSENT_BASELINE``）。没有任何基线文件的类别诚实记为
+    ``ABSENT_BASELINE``，绝不虚构观测。
+    """
+    root = Path(day_root)
+    now_dt, resolved_iso = _resolve_now(now_iso)
+    horizon = max(1, int(horizon_days))
+    categories: list[dict[str, Any]] = []
+    group_counts = {group: 0 for group in DECAY_MONITOR_GROUPS}
+    status_counts = {status: 0 for status in DECAY_MONITOR_STATUSES}
+
+    for spec in DECAY_MONITOR_CATEGORIES_22:
+        group = str(spec["group"])
+        present, latest_dt, latest_iso, docs = _decay_snapshot(root, spec["sources"])
+        entry_count = 0
+        count_key = spec.get("count_key")
+        if count_key:
+            for doc in docs.values():
+                entry_count += _decay_count_entries(doc, count_key)
+
+        half_life = max(1, int(spec["half_life_days"]))
+        age_days: Optional[float] = None
+        if present and latest_dt is not None:
+            age_days = round(max(0.0, (now_dt - latest_dt).total_seconds() / 86400.0), 3)
+
+        if not present:
+            status = DECAY_STATUS_ABSENT_BASELINE
+            retained_weight = 0.0
+        else:
+            if age_days is None:
+                status = DECAY_STATUS_ACTIVE
+                retained_weight = 1.0
+            else:
+                if age_days > horizon:
+                    status = DECAY_STATUS_NEEDS_REANCHOR
+                elif age_days > horizon * 0.5:
+                    status = DECAY_STATUS_DORMANT
+                else:
+                    status = DECAY_STATUS_ACTIVE
+                retained_weight = round(0.5 ** (age_days / half_life), 4)
+
+        group_counts[group] = group_counts.get(group, 0) + 1
+        status_counts[status] = status_counts.get(status, 0) + 1
+        drift_lo, drift_hi = spec["drift_band"]
+        categories.append({
+            "category": str(spec["category"]),
+            "group": group,
+            "label_cn": str(spec["label_cn"]),
+            "status": status,
+            "present": bool(present),
+            "entry_count": int(entry_count),
+            "last_observed_at": latest_iso,
+            "age_days": age_days,
+            "half_life_days": half_life,
+            "floor_weight": float(spec["floor_weight"]),
+            "drift_band": [float(drift_lo), float(drift_hi)],
+            "retained_weight": retained_weight,
+            "re_anchor_policy": str(spec["re_anchor_policy"]),
+            "sources": list(spec["sources"]),
+        })
+
+    groups = [
+        {
+            "group": group,
+            "count": group_counts.get(group, 0),
+            "categories": [
+                row["category"] for row in categories if row["group"] == group
+            ],
+        }
+        for group in DECAY_MONITOR_GROUPS
+    ]
+    return {
+        "schema": DECAY_MONITOR_SCHEMA,
+        "observed_at": resolved_iso,
+        "horizon_days": horizon,
+        "total_categories": len(categories),
+        "group_counts": group_counts,
+        "groups": groups,
+        "status_counts": status_counts,
+        "categories": categories,
+        "zero_write": True,
+        "llm_calls": 0,
+    }
+
+
 def project_v02_runtime_migration(
     day_root: Path | str,
     *,
@@ -2758,6 +3376,15 @@ def _build_projected_payload(
         state.get("workspace_audits") or [],
         has_subject_capability=has_subject_capability,
     )
+    vc_status_proj = _project_vc_authority_status(day_root)
+    device_presence_proj = _project_device_presence(state, now_dt=now_dt)
+    retirement_status_proj = _project_retirement_status(state)
+    proactive_outbound_proj = _project_proactive_outbound(state, now_dt=now_dt)
+    chatless_review_proj = project_chatless_life_review(
+        day_root,
+        has_subject_capability=has_subject_capability,
+        now_iso=now_iso,
+    )
 
     return {
         "schema": VIEW_SCHEMA,
@@ -2772,8 +3399,17 @@ def _build_projected_payload(
         "today_capability_card": cap_card_proj,
         "last_migration_verdict": cap_card_proj["last_migration_verdict"],
         "migration_suitcase": suitcase_proj,
+        "migration_loss_manifest": copy.deepcopy(suitcase_proj["migration_loss_manifest"]),
         "source_freshness": freshness_proj,
         "workspace_audits": audits_proj,
+        "annual_decay_matrix_22": project_annual_decay_matrix_22(
+            day_root, now_iso=now_iso
+        ),
+        "vc_authority_status": vc_status_proj,
+        "device_presence": device_presence_proj,
+        "retirement_status": retirement_status_proj,
+        "proactive_outbound": proactive_outbound_proj,
+        "chatless_life_review": chatless_review_proj,
         "llm_calls": 0,
     }
 
@@ -2788,6 +3424,170 @@ def _canonical_payload_fingerprint(payload: Mapping[str, Any], *, actor_side: st
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def _build_duplicate_projection(
+    root: Path,
+    *,
+    state: Mapping[str, Any],
+    state_exists: bool,
+    action: str,
+    actor_side: str,
+    payload: Mapping[str, Any],
+    ledger_entry: Mapping[str, Any],
+    now_dt: datetime,
+    now_iso: str,
+) -> dict[str, Any]:
+    projected = _build_projected_payload(
+        root,
+        state=state,
+        state_exists=state_exists,
+        has_subject_capability=(actor_side == "subject"),
+        now_dt=now_dt,
+        now_iso=now_iso,
+    )
+    cached_extra = ledger_entry.get("response_extra")
+    if isinstance(cached_extra, Mapping):
+        for ek, ev in cached_extra.items():
+            projected[ek] = copy.deepcopy(ev)
+    elif action == "export_suitcase":
+        exp_bundle, exp_summary = _build_export_suitcase_bundle(
+            root, state=state, payload=payload, now_iso=now_iso
+        )
+        projected["suitcase_bundle"] = exp_bundle
+        projected["summary"] = exp_summary
+        projected["migration_loss_manifest"] = copy.deepcopy(exp_summary["migration_loss_manifest"])
+    return projected
+
+
+def _run_state_only_action(
+    root: Path,
+    *,
+    state: dict[str, Any],
+    action: str,
+    payload: Mapping[str, Any],
+    now_dt: datetime,
+    now_iso: str,
+    actor_side: str = "partner",
+) -> Optional[dict[str, Any]]:
+    if action == "set_budget_mode":
+        _apply_set_budget_mode(state, payload, now_dt=now_dt, now_iso=now_iso)
+    elif action == "record_carrier_check":
+        _apply_record_carrier_check(state, payload, now_iso=now_iso)
+    elif action == "pack_selective_suitcase":
+        _apply_pack_selective_suitcase(state, payload, now_iso=now_iso, day_root=root)
+    elif action == "coalesce_probe":
+        _route_wake_event_into_state(
+            state,
+            family=str(payload["family"]),
+            summary_cn=str(payload["summary_cn"]),
+            is_control=bool(payload.get("is_control", False)),
+            lane="control" if bool(payload.get("is_control", False)) else "background",
+            now_dt=now_dt,
+            now_iso=now_iso,
+            day_root=root,
+        )
+    elif action == "reverify_migrated_skill":
+        _apply_reverify_migrated_skill(state, payload, now_iso=now_iso)
+    elif action == "record_workspace_audit":
+        _apply_record_workspace_audit(state, payload, now_iso=now_iso)
+    elif action == "claim_device_presence_lease":
+        _apply_claim_device_presence_lease(state, payload, now_dt=now_dt, now_iso=now_iso)
+    elif action == "handoff_device_presence_lease":
+        _apply_handoff_device_presence_lease(state, payload, now_dt=now_dt, now_iso=now_iso)
+    elif action == "prepare_dignified_retirement":
+        return _apply_prepare_dignified_retirement(
+            root, state, payload, actor_side=actor_side, now_iso=now_iso
+        )
+    elif action == "cancel_dignified_retirement":
+        return _apply_cancel_dignified_retirement(state)
+    elif action == "confirm_dignified_retirement":
+        return _apply_confirm_dignified_retirement(
+            root, state, payload, actor_side=actor_side, now_dt=now_dt, now_iso=now_iso
+        )
+    elif action == "configure_proactive_outbound":
+        return _apply_configure_proactive_outbound(
+            state, payload, actor_side=actor_side, now_dt=now_dt, day_root=root, now_iso=now_iso
+        )
+    elif action == "enqueue_proactive_message":
+        return _apply_enqueue_proactive_message(
+            state, payload, actor_side=actor_side, now_dt=now_dt, now_iso=now_iso, day_root=root
+        )
+    elif action == "acknowledge_or_cancel_proactive_message":
+        return _apply_acknowledge_or_cancel_proactive_message(
+            state, payload, actor_side=actor_side, now_iso=now_iso, day_root=root
+        )
+    else:
+        raise V02ValidationError("INVALID_FIELDS", f"Unsupported action: {action!r}")
+    return None
+
+
+def _on_carrier_model_switched(
+    root: Path,
+    *,
+    from_model_id: str,
+    to_model_id: str,
+    actor_side: str,
+    now_iso: str,
+) -> None:
+    """Post-commit hook on real model switch: bump existing skill provenance & open preference recheck pack."""
+    if not from_model_id or not to_model_id or from_model_id == to_model_id:
+        return
+
+    # 1. Only bump skill provenance if state/v02_autobiography_skill_provenance.json already exists
+    #    and has active releases registered under from_model_id.
+    prov_path = root / "state" / "v02_autobiography_skill_provenance.json"
+    if prov_path.is_file() and not prov_path.is_symlink():
+        try:
+            try:
+                from components.life.scripts import v02_autobiography_skill_provenance as _asp
+            except ImportError:
+                import v02_autobiography_skill_provenance as _asp  # type: ignore[no-redef]
+
+            _p_exists, p_state = _asp._load_state_readonly(root)
+            if _p_exists:
+                releases = (p_state.get("skills") or {}).get("releases") or {}
+                tool_versions = sorted({
+                    str(rec.get("tool_version") or "")
+                    for rec in releases.values()
+                    if isinstance(rec, Mapping)
+                    and rec.get("model_id") == from_model_id
+                    and rec.get("status") != _asp.SKILL_STATUS_RETIRED
+                    and str(rec.get("tool_version") or "").strip()
+                })
+                for tv in tool_versions:
+                    _asp.bump_carrier_or_tool_version(
+                        root,
+                        {
+                            "from_model_id": from_model_id,
+                            "to_model_id": to_model_id,
+                            "from_tool_version": tv,
+                            "to_tool_version": tv,
+                        },
+                        now_iso=now_iso,
+                    )
+        except Exception:
+            pass
+
+    # 2. Auto-create a Cross-Model Preference Recheck Pack in v02_personality_drift_recheck.json.
+    try:
+        try:
+            from components.life.scripts import v02_personality_drift_and_model_recheck as _drift
+        except ImportError:
+            import v02_personality_drift_and_model_recheck as _drift  # type: ignore[no-redef]
+
+        _drift.create_model_preference_recheck_pack(
+            root,
+            {
+                "from_model_id": from_model_id,
+                "to_model_id": to_model_id,
+                "note_cn": f"模型从 {from_model_id} 切换为 {to_model_id} 后自动生成偏好复核包",
+            },
+            actor_side=actor_side,
+            now_iso=now_iso,
+        )
+    except Exception:
+        pass
+
+
 def apply_runtime_migration_mutation(
     day_root: Path | str,
     payload: Mapping[str, Any],
@@ -2798,103 +3598,198 @@ def apply_runtime_migration_mutation(
     """Apply validated command, persist atomically, and return ``(projected, command_status)``."""
     root = Path(day_root)
     now_dt, resolved_iso = _resolve_now(now_iso)
-    state_exists, state = _load_state_readonly(root)
-
     action = str(payload["action"]).strip()
+    if action == "reconcile_backup_restore" and actor_side != "subject":
+        raise V02PermissionError(
+            "FORBIDDEN_ACTOR_SIDE",
+            f"Action {action!r} is forbidden for actor_side={actor_side!r}",
+        )
+
     op_key_raw = payload.get("operation_key")
     op_key = op_key_raw.strip() if isinstance(op_key_raw, str) and op_key_raw.strip() else None
-
-    ledger: dict[str, dict[str, Any]] = state.setdefault("operation_ledger", {})
     payload_fp = _canonical_payload_fingerprint(payload, actor_side=actor_side)
 
-    if op_key is not None and op_key in ledger:
-        prev = ledger[op_key]
-        if prev.get("payload_sha256") != payload_fp:
+    # Read-only pre-flight before touching filesystem/lockfile so rejected 400/403/409 remain zero-write
+    pre_exists, pre_state = _load_state_readonly(root)
+    pre_ledger: Mapping[str, Any] = pre_state.get("operation_ledger") or {}
+    if op_key is not None and op_key in pre_ledger:
+        prev_pre = pre_ledger[op_key]
+        if prev_pre.get("payload_sha256") != payload_fp:
             raise V02ConflictError(
                 "OPERATION_KEY_CONFLICT",
                 f"operation_key {op_key!r} already committed with different payload",
             )
-        projected = _build_projected_payload(
+        return (
+            _build_duplicate_projection(
+                root,
+                state=pre_state,
+                state_exists=pre_exists,
+                action=action,
+                actor_side=actor_side,
+                payload=payload,
+                ledger_entry=prev_pre,
+                now_dt=now_dt,
+                now_iso=resolved_iso,
+            ),
+            "DUPLICATE",
+        )
+
+    if action == "export_suitcase":
+        _build_export_suitcase_bundle(root, state=copy.deepcopy(pre_state), payload=payload, now_iso=resolved_iso)
+    elif action == "import_suitcase":
+        _apply_import_suitcase(
+            root, state=copy.deepcopy(pre_state), payload=payload, now_iso=resolved_iso, dry_run=True
+        )
+    elif action == "reconcile_backup_restore":
+        if root.is_symlink():
+            raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "day_root cannot be a symlink")
+        _normalize_external_watermark_seal(
+            payload.get("external_watermark_seal"), default_now_iso=resolved_iso
+        )
+        _assert_not_symlink_chain(
+            root, tuple(VC_AUTHORITY_WATERMARK_REL_PATH), label="/".join(VC_AUTHORITY_WATERMARK_REL_PATH)
+        )
+        _assert_not_symlink_chain(
+            root, (STATE_DIRNAME, RUNTIME_GOVERNANCE_FILENAME), label=f"{STATE_DIRNAME}/{RUNTIME_GOVERNANCE_FILENAME}"
+        )
+    else:
+        _run_state_only_action(
             root,
-            state=state,
-            state_exists=state_exists,
-            has_subject_capability=(actor_side == "subject"),
+            state=copy.deepcopy(pre_state),
+            action=action,
+            payload=payload,
             now_dt=now_dt,
             now_iso=resolved_iso,
+            actor_side=actor_side,
         )
-        cached_extra = prev.get("response_extra")
-        if isinstance(cached_extra, Mapping):
-            for ek, ev in cached_extra.items():
-                projected[ek] = copy.deepcopy(ev)
-        elif action == "export_suitcase":
-            exp_bundle, exp_summary = _build_export_suitcase_bundle(
+
+    with _tx.state_file_lock(_state_file_path(root)):
+        state_exists, state = _load_state_readonly(root)
+        ledger: dict[str, dict[str, Any]] = state.setdefault("operation_ledger", {})
+
+        if op_key is not None and op_key in ledger:
+            prev = ledger[op_key]
+            if prev.get("payload_sha256") != payload_fp:
+                raise V02ConflictError(
+                    "OPERATION_KEY_CONFLICT",
+                    f"operation_key {op_key!r} already committed with different payload",
+                )
+            return (
+                _build_duplicate_projection(
+                    root,
+                    state=state,
+                    state_exists=state_exists,
+                    action=action,
+                    actor_side=actor_side,
+                    payload=payload,
+                    ledger_entry=prev,
+                    now_dt=now_dt,
+                    now_iso=resolved_iso,
+                ),
+                "DUPLICATE",
+            )
+
+        extra_projection_fields: dict[str, Any] = {}
+        carrier_prev_model_id: Optional[str] = None
+        carrier_new_model_id: Optional[str] = None
+
+        if action == "export_suitcase":
+            exp_bundle, exp_summary = _apply_export_suitcase(
                 root, state=state, payload=payload, now_iso=resolved_iso
             )
-            projected["suitcase_bundle"] = exp_bundle
-            projected["summary"] = exp_summary
-        return projected, "DUPLICATE"
+            extra_projection_fields["suitcase_bundle"] = exp_bundle
+            extra_projection_fields["summary"] = exp_summary
+            extra_projection_fields["migration_loss_manifest"] = copy.deepcopy(
+                exp_summary["migration_loss_manifest"]
+            )
+        elif action == "import_suitcase":
+            imp_receipt = _apply_import_suitcase(
+                root, state=state, payload=payload, now_iso=resolved_iso
+            )
+            extra_projection_fields["import_receipt"] = imp_receipt
+            extra_projection_fields["migration_loss_manifest"] = copy.deepcopy(
+                imp_receipt["migration_loss_manifest"]
+            )
+        elif action == "reconcile_backup_restore":
+            rec_receipt = _apply_reconcile_backup_restore_vc_barrier(
+                root,
+                external_watermark_seal=payload.get("external_watermark_seal"),
+                now_iso=resolved_iso,
+            )
+            extra_projection_fields["vc_reconcile_receipt"] = rec_receipt
+        else:
+            if action == "record_carrier_check":
+                prev_fp_before = (
+                    (state.get("carrier_migration") or {}).get("carrier_fingerprint")
+                    or DEFAULT_CARRIER_FINGERPRINT
+                )
+                carrier_prev_model_id = str(prev_fp_before.get("model_id") or "")
+            state_receipt = _run_state_only_action(
+                root,
+                state=state,
+                action=action,
+                payload=payload,
+                now_dt=now_dt,
+                now_iso=resolved_iso,
+                actor_side=actor_side,
+            )
+            if isinstance(state_receipt, Mapping):
+                extra_projection_fields["action_receipt"] = copy.deepcopy(dict(state_receipt))
+            if action == "record_carrier_check":
+                new_fp_after = (state.get("carrier_migration") or {}).get("carrier_fingerprint") or {}
+                carrier_new_model_id = str(new_fp_after.get("model_id") or "")
 
-    extra_projection_fields: dict[str, Any] = {}
+        state["revision"] = int(state.get("revision") or 0) + 1
+        state["updated_at"] = resolved_iso
 
-    if action == "set_budget_mode":
-        _apply_set_budget_mode(state, payload, now_dt=now_dt, now_iso=resolved_iso)
-    elif action == "record_carrier_check":
-        _apply_record_carrier_check(state, payload, now_iso=resolved_iso)
-    elif action == "pack_selective_suitcase":
-        _apply_pack_selective_suitcase(state, payload, now_iso=resolved_iso, day_root=root)
-    elif action == "export_suitcase":
-        exp_bundle, exp_summary = _apply_export_suitcase(
-            root, state=state, payload=payload, now_iso=resolved_iso
-        )
-        extra_projection_fields["suitcase_bundle"] = exp_bundle
-        extra_projection_fields["summary"] = exp_summary
-    elif action == "import_suitcase":
-        imp_receipt = _apply_import_suitcase(
-            root, state=state, payload=payload, now_iso=resolved_iso
-        )
-        extra_projection_fields["import_receipt"] = imp_receipt
-    elif action == "coalesce_probe":
-        _route_wake_event_into_state(
-            state,
-            family=str(payload["family"]),
-            summary_cn=str(payload["summary_cn"]),
-            is_control=bool(payload.get("is_control", False)),
-            lane="control" if bool(payload.get("is_control", False)) else "background",
-            now_dt=now_dt,
-            now_iso=resolved_iso,
-            day_root=root,
-        )
-    elif action == "reverify_migrated_skill":
-        _apply_reverify_migrated_skill(state, payload, now_iso=resolved_iso)
-    elif action == "record_workspace_audit":
-        _apply_record_workspace_audit(state, payload, now_iso=resolved_iso)
-    else:
-        raise V02ValidationError("INVALID_FIELDS", f"Unsupported action: {action!r}")
-
-    state["revision"] = int(state.get("revision") or 0) + 1
-    state["updated_at"] = resolved_iso
-
-    if op_key is not None:
-        ledger_entry: dict[str, Any] = {
-            "action": action,
-            "actor_side": actor_side,
-            "payload_sha256": payload_fp,
-            "recorded_at": resolved_iso,
-            "revision": state["revision"],
-        }
-        if "import_receipt" in extra_projection_fields:
-            ledger_entry["response_extra"] = {
-                "import_receipt": copy.deepcopy(extra_projection_fields["import_receipt"])
+        if op_key is not None:
+            ledger_entry: dict[str, Any] = {
+                "action": action,
+                "actor_side": actor_side,
+                "payload_sha256": payload_fp,
+                "recorded_at": resolved_iso,
+                "revision": state["revision"],
             }
-        ledger[op_key] = ledger_entry
-        if len(ledger) > MAX_OPERATION_LEDGER:
-            oldest_keys = list(ledger.keys())[: len(ledger) - MAX_OPERATION_LEDGER]
-            for ok_del in oldest_keys:
-                ledger.pop(ok_del, None)
+            if "import_receipt" in extra_projection_fields:
+                ledger_entry["response_extra"] = {
+                    "import_receipt": copy.deepcopy(extra_projection_fields["import_receipt"]),
+                    "migration_loss_manifest": copy.deepcopy(
+                        extra_projection_fields["migration_loss_manifest"]
+                    ),
+                }
+            elif "vc_reconcile_receipt" in extra_projection_fields:
+                ledger_entry["response_extra"] = {
+                    "vc_reconcile_receipt": copy.deepcopy(
+                        extra_projection_fields["vc_reconcile_receipt"]
+                    ),
+                }
+            elif "action_receipt" in extra_projection_fields:
+                ledger_entry["response_extra"] = {
+                    "action_receipt": copy.deepcopy(extra_projection_fields["action_receipt"]),
+                }
+            ledger[op_key] = ledger_entry
+            if len(ledger) > MAX_OPERATION_LEDGER:
+                oldest_keys = list(ledger.keys())[: len(ledger) - MAX_OPERATION_LEDGER]
+                for ok_del in oldest_keys:
+                    ledger.pop(ok_del, None)
 
-    _save_state_atomic(root, state)
+        _save_state_atomic(root, state)
 
-    if action == "set_budget_mode":
+    if (
+        action == "record_carrier_check"
+        and carrier_prev_model_id
+        and carrier_new_model_id
+        and carrier_prev_model_id != carrier_new_model_id
+    ):
+        _on_carrier_model_switched(
+            root,
+            from_model_id=carrier_prev_model_id,
+            to_model_id=carrier_new_model_id,
+            actor_side=actor_side,
+            now_iso=resolved_iso,
+        )
+
+    if action in ("set_budget_mode", "confirm_dignified_retirement"):
         try:
             from components.phone import living as phone_living
 
@@ -2921,13 +3816,1500 @@ def apply_runtime_migration_mutation(
     return projected, "APPLIED"
 
 
-def _apply_set_budget_mode(
+def _strict_non_bool_int(raw: Any, *, field_name: str, minimum: int = 0, maximum: Optional[int] = None) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise V02ValidationError("INVALID_FIELDS", f"{field_name} must be an integer")
+    if raw < minimum:
+        raise V02ValidationError("INVALID_FIELDS", f"{field_name} must be >= {minimum}")
+    if maximum is not None and raw > maximum:
+        raise V02ValidationError("INVALID_FIELDS", f"{field_name} must be <= {maximum}")
+    return raw
+
+
+def _default_device_presence_state() -> dict[str, Any]:
+    return {
+        "schema": DEVICE_PRESENCE_SCHEMA,
+        "lease_epoch": 0,
+        "active_device_id": None,
+        "continuation_ref": None,
+        "lease_seconds": DEFAULT_DEVICE_LEASE_SECONDS,
+        "leased_at": None,
+        "expires_at": None,
+        "last_handoff_at": None,
+        "last_handoff_from": None,
+        "last_handoff_to": None,
+        "handoff_history": [],
+    }
+
+
+def _project_device_presence(state: Mapping[str, Any], *, now_dt: datetime) -> dict[str, Any]:
+    raw_dp = state.get("device_presence")
+    dp = dict(raw_dp) if isinstance(raw_dp, Mapping) else _default_device_presence_state()
+    epoch = max(0, int(dp.get("lease_epoch") or 0))
+    active_dev_raw = dp.get("active_device_id")
+    active_dev = active_dev_raw.strip() if isinstance(active_dev_raw, str) and active_dev_raw.strip() else None
+    cont_raw = dp.get("continuation_ref")
+    cont_ref = cont_raw.strip() if isinstance(cont_raw, str) and cont_raw.strip() else None
+    lease_seconds = max(1, int(dp.get("lease_seconds") or DEFAULT_DEVICE_LEASE_SECONDS))
+    leased_at_raw = dp.get("leased_at")
+    leased_at = leased_at_raw.strip() if isinstance(leased_at_raw, str) and leased_at_raw.strip() else None
+    expires_at_raw = dp.get("expires_at")
+    expires_at = expires_at_raw.strip() if isinstance(expires_at_raw, str) and expires_at_raw.strip() else None
+
+    expires_dt = _parse_iso(expires_at)
+    remaining_seconds = 0
+    lease_active = False
+    if active_dev is not None:
+        if expires_dt is None:
+            lease_active = True
+        else:
+            delta_s = int((expires_dt - now_dt).total_seconds())
+            if delta_s > 0:
+                lease_active = True
+                remaining_seconds = delta_s
+
+    history_raw = dp.get("handoff_history")
+    history = [
+        dict(entry)
+        for entry in (history_raw if isinstance(history_raw, list) else [])[-MAX_DEVICE_HANDOFF_HISTORY:]
+        if isinstance(entry, Mapping)
+    ]
+
+    return {
+        "schema": DEVICE_PRESENCE_SCHEMA,
+        "lease_epoch": epoch,
+        "active_device_id": active_dev,
+        "continuation_ref": cont_ref,
+        "lease_seconds": lease_seconds,
+        "leased_at": leased_at,
+        "expires_at": expires_at,
+        "lease_active": lease_active,
+        "lease_expired": bool(active_dev is not None and not lease_active),
+        "remaining_seconds": remaining_seconds,
+        "last_handoff_at": dp.get("last_handoff_at"),
+        "last_handoff_from": dp.get("last_handoff_from"),
+        "last_handoff_to": dp.get("last_handoff_to"),
+        "handoff_history": history,
+        "epoch_guard_enforced": True,
+        "llm_calls": 0,
+    }
+
+
+def _apply_claim_device_presence_lease(
     state: dict[str, Any],
     payload: Mapping[str, Any],
     *,
     now_dt: datetime,
     now_iso: str,
 ) -> None:
+    raw_dev = payload.get("device_id")
+    if not isinstance(raw_dev, str) or not raw_dev.strip() or len(raw_dev.strip()) > 128:
+        raise V02ValidationError("INVALID_FIELDS", "device_id must be a non-empty string (<=128 chars)")
+    device_id = raw_dev.strip()
+
+    raw_ls = payload.get("lease_seconds")
+    if raw_ls is None:
+        lease_seconds = DEFAULT_DEVICE_LEASE_SECONDS
+    else:
+        lease_seconds = _strict_non_bool_int(
+            raw_ls, field_name="lease_seconds", minimum=1, maximum=MAX_DEVICE_LEASE_SECONDS
+        )
+
+    dp = state.get("device_presence")
+    if not isinstance(dp, dict):
+        dp = _default_device_presence_state()
+        state["device_presence"] = dp
+
+    active_epoch = max(0, int(dp.get("lease_epoch") or 0))
+    if "expected_epoch" in payload and payload.get("expected_epoch") is not None:
+        expected_epoch = _strict_non_bool_int(payload.get("expected_epoch"), field_name="expected_epoch", minimum=0)
+        if expected_epoch < active_epoch:
+            raise V02ConflictError(
+                "STALE_DEVICE_EPOCH",
+                f"expected_epoch={expected_epoch} is older than active lease_epoch={active_epoch}",
+                details={"expected_epoch": expected_epoch, "active_lease_epoch": active_epoch},
+            )
+        if expected_epoch > active_epoch:
+            raise V02ConflictError(
+                "DEVICE_EPOCH_MISMATCH",
+                f"expected_epoch={expected_epoch} does not match active lease_epoch={active_epoch}",
+                details={"expected_epoch": expected_epoch, "active_lease_epoch": active_epoch},
+            )
+
+    prev_device = dp.get("active_device_id")
+    if "continuation_ref" in payload:
+        raw_cont = payload.get("continuation_ref")
+        if raw_cont is None:
+            continuation_ref = None
+        elif isinstance(raw_cont, str):
+            continuation_ref = raw_cont.strip()[:240] or None
+        else:
+            raise V02ValidationError("INVALID_FIELDS", "continuation_ref must be a string or null")
+    else:
+        prev_cont = dp.get("continuation_ref")
+        continuation_ref = prev_cont.strip()[:240] if isinstance(prev_cont, str) and prev_cont.strip() else None
+
+    new_epoch = active_epoch + 1
+    expires_iso = (now_dt + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
+    dp["schema"] = DEVICE_PRESENCE_SCHEMA
+    dp["lease_epoch"] = new_epoch
+    dp["active_device_id"] = device_id
+    dp["continuation_ref"] = continuation_ref
+    dp["lease_seconds"] = lease_seconds
+    dp["leased_at"] = now_iso
+    dp["expires_at"] = expires_iso
+
+    history = list(dp.get("handoff_history") or [])
+    history.append(
+        {
+            "event": "claim",
+            "from_device_id": prev_device,
+            "to_device_id": device_id,
+            "lease_epoch": new_epoch,
+            "continuation_ref": continuation_ref,
+            "at": now_iso,
+        }
+    )
+    dp["handoff_history"] = history[-MAX_DEVICE_HANDOFF_HISTORY:]
+
+
+def _apply_handoff_device_presence_lease(
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    now_dt: datetime,
+    now_iso: str,
+) -> None:
+    raw_from = payload.get("from_device_id")
+    raw_to = payload.get("to_device_id")
+    if not isinstance(raw_from, str) or not raw_from.strip() or len(raw_from.strip()) > 128:
+        raise V02ValidationError("INVALID_FIELDS", "from_device_id must be a non-empty string")
+    if not isinstance(raw_to, str) or not raw_to.strip() or len(raw_to.strip()) > 128:
+        raise V02ValidationError("INVALID_FIELDS", "to_device_id must be a non-empty string")
+    from_device_id = raw_from.strip()
+    to_device_id = raw_to.strip()
+
+    if "lease_epoch" not in payload or payload.get("lease_epoch") is None:
+        raise V02ValidationError("INVALID_FIELDS", "lease_epoch is required for handoff_device_presence_lease")
+    req_epoch = _strict_non_bool_int(payload.get("lease_epoch"), field_name="lease_epoch", minimum=0)
+
+    dp = state.get("device_presence")
+    if not isinstance(dp, dict):
+        dp = _default_device_presence_state()
+        state["device_presence"] = dp
+
+    active_epoch = max(0, int(dp.get("lease_epoch") or 0))
+    if req_epoch < active_epoch:
+        raise V02ConflictError(
+            "STALE_DEVICE_EPOCH",
+            f"lease_epoch={req_epoch} is older than active lease_epoch={active_epoch}",
+            details={"lease_epoch": req_epoch, "active_lease_epoch": active_epoch},
+        )
+    if req_epoch > active_epoch:
+        raise V02ConflictError(
+            "DEVICE_EPOCH_MISMATCH",
+            f"lease_epoch={req_epoch} does not match active lease_epoch={active_epoch}",
+            details={"lease_epoch": req_epoch, "active_lease_epoch": active_epoch},
+        )
+
+    active_device_raw = dp.get("active_device_id")
+    active_device = active_device_raw.strip() if isinstance(active_device_raw, str) and active_device_raw.strip() else None
+    if active_device is None:
+        raise V02ConflictError(
+            "NO_ACTIVE_DEVICE_LEASE",
+            "Cannot handoff device presence before an active lease is claimed",
+        )
+    if active_device != from_device_id:
+        raise V02ConflictError(
+            "DEVICE_LEASE_OWNER_MISMATCH",
+            f"Active lease belongs to {active_device!r}, not {from_device_id!r}",
+            details={"active_device_id": active_device, "from_device_id": from_device_id},
+        )
+
+    raw_ls = payload.get("lease_seconds")
+    if raw_ls is None:
+        lease_seconds = max(1, int(dp.get("lease_seconds") or DEFAULT_DEVICE_LEASE_SECONDS))
+    else:
+        lease_seconds = _strict_non_bool_int(
+            raw_ls, field_name="lease_seconds", minimum=1, maximum=MAX_DEVICE_LEASE_SECONDS
+        )
+
+    if "continuation_ref" in payload:
+        raw_cont = payload.get("continuation_ref")
+        if raw_cont is None:
+            continuation_ref = None
+        elif isinstance(raw_cont, str):
+            continuation_ref = raw_cont.strip()[:240] or None
+        else:
+            raise V02ValidationError("INVALID_FIELDS", "continuation_ref must be a string or null")
+    else:
+        prev_cont = dp.get("continuation_ref")
+        continuation_ref = prev_cont.strip()[:240] if isinstance(prev_cont, str) and prev_cont.strip() else None
+
+    new_epoch = active_epoch + 1
+    expires_iso = (now_dt + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
+    dp["schema"] = DEVICE_PRESENCE_SCHEMA
+    dp["lease_epoch"] = new_epoch
+    dp["active_device_id"] = to_device_id
+    dp["continuation_ref"] = continuation_ref
+    dp["lease_seconds"] = lease_seconds
+    dp["leased_at"] = now_iso
+    dp["expires_at"] = expires_iso
+    dp["last_handoff_at"] = now_iso
+    dp["last_handoff_from"] = from_device_id
+    dp["last_handoff_to"] = to_device_id
+
+    history = list(dp.get("handoff_history") or [])
+    history.append(
+        {
+            "event": "handoff",
+            "from_device_id": from_device_id,
+            "to_device_id": to_device_id,
+            "lease_epoch": new_epoch,
+            "continuation_ref": continuation_ref,
+            "at": now_iso,
+        }
+    )
+    dp["handoff_history"] = history[-MAX_DEVICE_HANDOFF_HISTORY:]
+
+
+def _project_vc_authority_status(day_root: Path) -> dict[str, Any]:
+    """Read-only summary of G0 V-C anti-resurrection watermark (zero writes, zero plaintext)."""
+    wm_rel_parts = tuple(VC_AUTHORITY_WATERMARK_REL_PATH)
+    wm = read_vc_authority_watermark_readonly(day_root)
+    ext_root_raw = str(os.environ.get("NYAIRO_V02_CONTROL_ROOT") or "").strip()
+    candidate_roots = [Path(ext_root_raw), day_root] if ext_root_raw else [day_root]
+    wm_exists = any(
+        _is_safe_nonsymlink_rel(cand_root, wm_rel_parts)
+        and cand_root.joinpath(*wm_rel_parts).is_file()
+        for cand_root in candidate_roots
+    )
+    sealed = wm.get("sealed_digests")
+    sealed_count = len(sealed) if isinstance(sealed, Mapping) else 0
+    return {
+        "schema": VC_AUTHORITY_SCHEMA,
+        "watermark_rel_path": "/".join(wm_rel_parts),
+        "watermark_exists": wm_exists,
+        "authority_generation": int(wm.get("authority_generation") or 0),
+        "restore_epoch": int(wm.get("restore_epoch") or 0),
+        "sealed_digest_count": sealed_count,
+        "enforced": True,
+        "plaintext_stored": False,
+        "llm_calls": 0,
+    }
+
+
+def _runtime_governance_candidate_paths(day_root: Path) -> tuple[Path, ...]:
+    return (
+        day_root / STATE_DIRNAME / RUNTIME_GOVERNANCE_FILENAME,
+        day_root / "governance" / RUNTIME_GOVERNANCE_FILENAME,
+        day_root / RUNTIME_GOVERNANCE_FILENAME,
+    )
+
+
+def _read_governance_tombstones_readonly(day_root: Path, *, now_iso: str) -> dict[str, dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for cand in _runtime_governance_candidate_paths(day_root):
+        try:
+            if cand.is_symlink():
+                continue
+        except OSError:
+            continue
+        ex, ok, doc = _read_json_safe(cand)
+        if not ex or not ok or not isinstance(doc, Mapping):
+            continue
+        for k in ("tombstones", "tombstone_ledger", "revocations"):
+            if k in doc:
+                merged.update(_normalize_tombstone_entries_from_any(doc.get(k), default_now_iso=now_iso))
+    return merged
+
+
+def _read_controls_db_revoked_ids_readonly(day_root: Path) -> dict[str, str]:
+    """Read revoked/deleted target event IDs from SQLite controls.db in strict read-only URI mode."""
+    revoked: dict[str, str] = {}
+    for rel in (("memory", "controls.db"), ("controls.db",)):
+        if not _is_safe_nonsymlink_rel(day_root, rel):
+            continue
+        db_path = day_root.joinpath(*rel)
+        if not db_path.is_file():
+            continue
+        conn: Optional[sqlite3.Connection] = None
+        try:
+            conn = sqlite3.connect(f"file:{db_path.resolve()}?mode=ro", uri=True)
+            cur = conn.cursor()
+            tables = {
+                str(r[0])
+                for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                if r and r[0]
+            }
+            if "memory_controls" in tables:
+                cols = {
+                    str(r[1])
+                    for r in cur.execute("PRAGMA table_info(memory_controls)").fetchall()
+                    if len(r) > 1
+                }
+                if {"kind", "target_event"}.issubset(cols):
+                    sel = "SELECT target_event, created_at FROM memory_controls WHERE UPPER(COALESCE(kind,''))='DELETE'" if "created_at" in cols else "SELECT target_event, '' FROM memory_controls WHERE UPPER(COALESCE(kind,''))='DELETE'"
+                    for tgt, ts in cur.execute(sel).fetchall():
+                        clean = str(tgt or "").strip()
+                        if clean:
+                            revoked.setdefault(clean, str(ts or "").strip())
+            if "memory_erasures" in tables:
+                cols = {
+                    str(r[1])
+                    for r in cur.execute("PRAGMA table_info(memory_erasures)").fetchall()
+                    if len(r) > 1
+                }
+                if "event_ids_json" in cols:
+                    sel = "SELECT event_ids_json, created_at FROM memory_erasures" if "created_at" in cols else "SELECT event_ids_json, '' FROM memory_erasures"
+                    for raw_json, ts in cur.execute(sel).fetchall():
+                        try:
+                            parsed = json.loads(str(raw_json or "[]"))
+                        except ValueError:
+                            continue
+                        if isinstance(parsed, list):
+                            for eid in parsed:
+                                clean = str(eid or "").strip()
+                                if clean:
+                                    revoked.setdefault(clean, str(ts or "").strip())
+        except sqlite3.Error:
+            pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+    return revoked
+
+
+def _sync_runtime_governance_files(
+    day_root: Path,
+    *,
+    tombstones_map: Mapping[str, Mapping[str, Any]],
+    authority_generation: int,
+    restore_epoch: int,
+    now_iso: str,
+) -> list[str]:
+    """Atomically sync tombstones and V-C epoch metadata into v02_runtime_governance.json files."""
+    primary_rel = (STATE_DIRNAME, RUNTIME_GOVERNANCE_FILENAME)
+    _assert_not_symlink_chain(day_root, primary_rel, label="/".join(primary_rel))
+    primary_path = day_root.joinpath(*primary_rel)
+    candidates: list[tuple[tuple[str, ...], Path]] = [(primary_rel, primary_path)]
+    for extra_rel in (("governance", RUNTIME_GOVERNANCE_FILENAME), (RUNTIME_GOVERNANCE_FILENAME,)):
+        p = day_root.joinpath(*extra_rel)
+        if _is_safe_nonsymlink_rel(day_root, extra_rel) and p.is_file():
+            candidates.append((extra_rel, p))
+
+    synced: list[str] = []
+    with _tx.state_file_lock(primary_path):
+        for rel_parts, target_path in candidates:
+            _assert_not_symlink_chain(day_root, rel_parts, label="/".join(rel_parts))
+            ex, ok, existing = _read_json_safe(target_path)
+            doc = copy.deepcopy(existing) if (ex and ok and isinstance(existing, Mapping)) else {
+                "schema": RUNTIME_GOVERNANCE_SCHEMA,
+                "tombstones": {},
+            }
+            if not doc.get("schema"):
+                doc["schema"] = RUNTIME_GOVERNANCE_SCHEMA
+            existing_ts = _normalize_tombstone_entries_from_any(
+                doc.get("tombstones"), default_now_iso=now_iso
+            )
+            for mid, entry in tombstones_map.items():
+                if not isinstance(mid, str) or not mid.strip():
+                    continue
+                norm_mid = mid.strip()
+                existing_ts[norm_mid] = {
+                    "memory_id": norm_mid,
+                    "vc_digest": str(entry.get("vc_digest") or compute_vc_item_digest(norm_mid)),
+                    "reason": str(entry.get("reason") or "user_revoked").strip()[:120],
+                    "tombstoned_at": str(entry.get("tombstoned_at") or now_iso).strip()[:40],
+                    "tombstoned": True,
+                }
+            doc["tombstones"] = existing_ts
+            doc["vc_authority_generation"] = int(authority_generation)
+            doc["vc_restore_epoch"] = int(restore_epoch)
+            doc["updated_at"] = now_iso
+            _tx.atomic_write_json(target_path, doc)
+            synced.append("/".join(rel_parts))
+    return synced
+
+
+def record_revocation_tombstone(
+    day_root: Path | str,
+    item_id: str,
+    *,
+    reason: str = "user_revoked",
+    scope: str = "governance",
+    now_iso: Optional[str] = None,
+    now: Optional[str] = None,
+) -> dict[str, Any]:
+    """Record a governance revocation tombstone and persist its irreversible V-C watermark seal."""
+    root = Path(day_root)
+    if root.is_symlink():
+        raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "day_root cannot be a symlink")
+    if not isinstance(item_id, str) or not item_id.strip():
+        raise V02ValidationError("INVALID_FIELDS", "item_id must be a non-empty string")
+    clean_id = item_id.strip()
+    clean_reason = str(reason or "user_revoked").strip()[:120] or "user_revoked"
+    eff_now = now_iso if now_iso is not None else now
+    _, resolved_iso = _resolve_now(eff_now)
+
+    seal_receipt = record_vc_revocation_seal(
+        root,
+        clean_id,
+        revoked_at=resolved_iso,
+        scope=scope,
+    )
+
+    gov_entry = {
+        clean_id: {
+            "memory_id": clean_id,
+            "vc_digest": seal_receipt["digest"],
+            "reason": clean_reason,
+            "tombstoned_at": resolved_iso,
+            "tombstoned": True,
+        }
+    }
+    synced_paths = _sync_runtime_governance_files(
+        root,
+        tombstones_map=gov_entry,
+        authority_generation=int(seal_receipt["authority_generation"]),
+        restore_epoch=int(seal_receipt["restore_epoch"]),
+        now_iso=resolved_iso,
+    )
+    return {
+        "schema": RUNTIME_GOVERNANCE_SCHEMA,
+        "status": "TOMBSTONED",
+        "item_id": clean_id,
+        "vc_digest": seal_receipt["digest"],
+        "authority_generation": int(seal_receipt["authority_generation"]),
+        "restore_epoch": int(seal_receipt["restore_epoch"]),
+        "tombstoned_at": resolved_iso,
+        "reason": clean_reason,
+        "scope": seal_receipt["scope"],
+        "watermark_rel_path": "/".join(VC_AUTHORITY_WATERMARK_REL_PATH),
+        "synced_governance_paths": synced_paths,
+        "llm_calls": 0,
+    }
+
+
+def _normalize_external_watermark_seal(
+    raw_seal: Any,
+    *,
+    default_now_iso: str,
+) -> tuple[dict[str, dict[str, Any]], int, int]:
+    if raw_seal is None:
+        return {}, 0, 0
+    if not isinstance(raw_seal, Mapping):
+        raise V02ValidationError("INVALID_FIELDS", "external_watermark_seal must be an object")
+
+    ext_gen = _strict_non_bool_int(
+        raw_seal.get("authority_generation", 0), field_name="authority_generation", minimum=0
+    )
+    ext_restore_epoch = _strict_non_bool_int(
+        raw_seal.get("restore_epoch", 0), field_name="restore_epoch", minimum=0
+    )
+
+    raw_digests = raw_seal.get("sealed_digests")
+    if raw_digests is None and "revoked_digests" in raw_seal:
+        raw_digests = raw_seal.get("revoked_digests")
+
+    out_digests: dict[str, dict[str, Any]] = {}
+    if raw_digests is None:
+        return out_digests, ext_gen, ext_restore_epoch
+
+    if isinstance(raw_digests, Mapping):
+        for raw_hex, meta in raw_digests.items():
+            hex_str = str(raw_hex or "").strip().lower()
+            if not _VC_DIGEST_HEX_RE.match(hex_str):
+                raise V02ValidationError(
+                    "INVALID_FIELDS", "external_watermark_seal sealed_digests keys must be 64-hex SHA-256 digests"
+                )
+            rev_at = default_now_iso
+            sc = "memory"
+            if isinstance(meta, Mapping):
+                if isinstance(meta.get("revoked_at"), str) and meta["revoked_at"].strip():
+                    rev_at = meta["revoked_at"].strip()[:40]
+                if isinstance(meta.get("scope"), str) and meta["scope"].strip():
+                    sc = _VC_SAFE_SCOPE_RE.sub("_", meta["scope"].strip())[:32] or "memory"
+            out_digests[hex_str] = {"revoked_at": rev_at, "scope": sc}
+    elif isinstance(raw_digests, list):
+        for elem in raw_digests:
+            if isinstance(elem, str):
+                hex_str = elem.strip().lower()
+                rev_at = default_now_iso
+                sc = "memory"
+            elif isinstance(elem, Mapping):
+                hex_str = str(elem.get("digest") or elem.get("sha256") or "").strip().lower()
+                rev_at = str(elem.get("revoked_at") or default_now_iso).strip()[:40]
+                sc = _VC_SAFE_SCOPE_RE.sub("_", str(elem.get("scope") or "memory").strip())[:32] or "memory"
+            else:
+                raise V02ValidationError("INVALID_FIELDS", "Invalid external_watermark_seal digest entry")
+            if not _VC_DIGEST_HEX_RE.match(hex_str):
+                raise V02ValidationError(
+                    "INVALID_FIELDS", "external_watermark_seal digests must be valid 64-hex SHA-256 strings"
+                )
+            out_digests[hex_str] = {"revoked_at": rev_at, "scope": sc}
+    else:
+        raise V02ValidationError("INVALID_FIELDS", "external_watermark_seal sealed_digests must be an object or list")
+
+    return out_digests, ext_gen, ext_restore_epoch
+
+
+def _collect_vc_scrub_targets(day_root: Path) -> list[tuple[tuple[str, ...], bool]]:
+    """Ordered list of ``(rel_parts, allow_list_root)`` files subject to V-C anti-resurrection scrubbing."""
+    seen: set[tuple[str, ...]] = set()
+    targets: list[tuple[tuple[str, ...], bool]] = []
+
+    def _add(rel_parts: tuple[str, ...], allow_list: bool = False) -> None:
+        if rel_parts not in seen:
+            seen.add(rel_parts)
+            targets.append((rel_parts, allow_list))
+
+    _add((STATE_DIRNAME, "v02_recall_projection.json"))
+    _add(("memory", "v02_recall_projection_state.json"))
+    _add(("memory", "v02_common_ground_state.json"))
+    _add(("state", "v02_agency_depth_state.json"))
+    _add((STATE_DIRNAME, "v02_agency_depth_state.json"))
+    _add((STATE_DIRNAME, "v02_agency_depth.json"))
+    _add((STATE_DIRNAME, "workbench_curio.json"))
+    _add((STATE_DIRNAME, "workbench_tray.json"))
+    _add((STATE_DIRNAME, "desk_tomorrow_note.json"))
+    _add((STATE_DIRNAME, "longterm_gifts_lantern.json"))
+    _add((STATE_DIRNAME, "outing_bench_bookstore.json"))
+    _add((STATE_DIRNAME, "v02_crossmodal.json"))
+    _add((STATE_DIRNAME, "character_pack_state.json"))
+
+    for sname in SUITCASE_ALLOWED_SLICE_FILES:
+        _add((STATE_DIRNAME, sname))
+        for comp_rel in _SUITCASE_COMPANION_FALLBACKS.get(sname, ()):
+            _add(tuple(comp_rel))
+        for mirror_rel in _SUITCASE_CANONICAL_RESTORE_MIRRORS.get(sname, ()):
+            _add(tuple(mirror_rel))
+
+    for wname in SUITCASE_ALLOWED_WORLD_FILES:
+        _add(("world", wname))
+        for w_rel in _WORLD_SLICE_READ_CANDIDATES.get(wname, ()):
+            _add(tuple(w_rel))
+    world_dir = day_root / "world"
+    if _is_safe_nonsymlink_rel(day_root, ("world",)) and world_dir.is_dir():
+        try:
+            for child in sorted(world_dir.iterdir(), key=lambda p: p.name):
+                if child.suffix.lower() == ".json" and not child.is_symlink() and child.is_file():
+                    _add(("world", child.name))
+        except OSError:
+            pass
+
+    for pname in SUITCASE_ALLOWED_WORLD_PACKAGE_FILES:
+        _add(("world-package", pname), allow_list=True)
+    wp_dir = day_root / "world-package"
+    if _is_safe_nonsymlink_rel(day_root, ("world-package",)) and wp_dir.is_dir():
+        try:
+            for child in sorted(wp_dir.iterdir(), key=lambda p: p.name):
+                if child.suffix.lower() == ".json" and not child.is_symlink() and child.is_file():
+                    _add(("world-package", child.name), allow_list=True)
+        except OSError:
+            pass
+
+    return targets
+
+
+def _recompute_recall_projection_doc_after_scrub(
+    doc: dict[str, Any],
+    *,
+    merged_tombstones: Mapping[str, Mapping[str, Any]],
+    now_iso: str,
+) -> dict[str, Any]:
+    existing_ts = _normalize_tombstone_entries_from_any(doc.get("tombstones"), default_now_iso=now_iso)
+    for mid, entry in merged_tombstones.items():
+        if isinstance(mid, str) and mid.strip():
+            norm_mid = mid.strip()
+            existing_ts[norm_mid] = {
+                "memory_id": norm_mid,
+                "reason": str(entry.get("reason") or "vc_barrier_reconciled").strip()[:120],
+                "tombstoned_at": str(entry.get("tombstoned_at") or now_iso).strip()[:40],
+                "tombstoned": True,
+            }
+    if existing_ts:
+        doc["tombstones"] = existing_ts
+    mems = doc.get("memories")
+    if isinstance(mems, Mapping) and isinstance(doc.get("clarity_counts"), dict):
+        counts = {"CRYSTAL": 0, "WARM": 0, "FADING": 0, "ARCHIVED": 0, "TOMBSTONED": len(existing_ts)}
+        for m in mems.values():
+            if isinstance(m, Mapping):
+                tier = str(m.get("clarity_tier") or "WARM").upper()
+                if tier in counts:
+                    counts[tier] += 1
+        doc["clarity_counts"] = counts
+    doc["updated_at"] = now_iso
+    return doc
+
+
+def _apply_reconcile_backup_restore_vc_barrier(
+    day_root: Path,
+    *,
+    external_watermark_seal: Any = None,
+    now_iso: str,
+) -> dict[str, Any]:
+    if day_root.is_symlink():
+        raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "day_root cannot be a symlink")
+
+    ext_digests, ext_gen, ext_restore_epoch = _normalize_external_watermark_seal(
+        external_watermark_seal, default_now_iso=now_iso
+    )
+
+    wm_rel_parts = tuple(VC_AUTHORITY_WATERMARK_REL_PATH)
+    _assert_not_symlink_chain(day_root, wm_rel_parts, label="/".join(wm_rel_parts))
+    wm_path = day_root.joinpath(*wm_rel_parts)
+
+    # Read-only gather of tombstones from local recall projection, local governance, and controls.db
+    local_rp_ts = _extract_tombstone_ledger_readonly(day_root, now_iso=now_iso)
+    local_gov_ts = _read_governance_tombstones_readonly(day_root, now_iso=now_iso)
+    controls_db_revoked = _read_controls_db_revoked_ids_readonly(day_root)
+
+    with _tx.state_file_lock(wm_path):
+        local_wm = read_vc_authority_watermark_readonly(day_root)
+        local_digests: dict[str, dict[str, Any]] = {}
+        raw_local_sd = local_wm.get("sealed_digests")
+        if isinstance(raw_local_sd, Mapping):
+            for hx, meta in raw_local_sd.items():
+                if _VC_DIGEST_HEX_RE.match(str(hx)):
+                    m_map = meta if isinstance(meta, Mapping) else {}
+                    hx_low = str(hx).lower()
+                    local_digests[hx_low] = {
+                        "digest": hx_low,
+                        "revoked_at": str(m_map.get("revoked_at") or now_iso)[:40],
+                        "scope": str(m_map.get("scope") or "memory")[:32],
+                    }
+
+        merged_digests: dict[str, dict[str, Any]] = dict(local_digests)
+        for hx, meta in ext_digests.items():
+            if hx not in merged_digests:
+                merged_digests[hx] = {
+                    "digest": hx,
+                    "revoked_at": str(meta.get("revoked_at") or now_iso)[:40],
+                    "scope": str(meta.get("scope") or "memory")[:32],
+                }
+
+        for tid, ts_entry in list(local_rp_ts.items()) + list(local_gov_ts.items()):
+            hx = compute_vc_item_digest(tid)
+            if hx not in merged_digests:
+                merged_digests[hx] = {
+                    "digest": hx,
+                    "revoked_at": str(ts_entry.get("tombstoned_at") or now_iso)[:40],
+                    "scope": "memory",
+                }
+        controls_db_digests = 0
+        for cid, c_ts in controls_db_revoked.items():
+            hx = compute_vc_item_digest(cid)
+            if hx not in merged_digests:
+                merged_digests[hx] = {
+                    "digest": hx,
+                    "revoked_at": str(c_ts or now_iso)[:40],
+                    "scope": "controls_db",
+                }
+                controls_db_digests += 1
+
+        local_gen = max(0, int(local_wm.get("authority_generation") or 0))
+        local_restore_epoch = max(0, int(local_wm.get("restore_epoch") or 0))
+        added_beyond_local = len(merged_digests) > len(local_digests)
+        added_beyond_ext = ext_gen > 0 and len(merged_digests) > len(ext_digests)
+        new_gen = max(local_gen, ext_gen)
+        if (added_beyond_local and new_gen <= local_gen) or (added_beyond_ext and new_gen <= ext_gen):
+            new_gen += 1
+        new_restore_epoch = max(local_restore_epoch, ext_restore_epoch) + 1
+        for entry_meta in merged_digests.values():
+            entry_meta.setdefault("authority_generation", int(new_gen))
+
+        wm_doc = {
+            "schema": VC_AUTHORITY_SCHEMA,
+            "authority_generation": int(new_gen),
+            "restore_epoch": int(new_restore_epoch),
+            "sealed_digests": merged_digests,
+            "plaintext_stored": False,
+            "updated_at": now_iso,
+        }
+        _tx.atomic_write_json(wm_path, wm_doc, sort_keys=True)
+
+    sealed_digest_set = frozenset(merged_digests.keys())
+    known_dead_ids: set[str] = (
+        set(local_rp_ts.keys())
+        | set(local_gov_ts.keys())
+        | set(controls_db_revoked.keys())
+    )
+    discovered_dead_ids: set[str] = set()
+    scrubbed_files: list[str] = []
+
+    for rel_parts, allow_list in _collect_vc_scrub_targets(day_root):
+        if not _is_safe_nonsymlink_rel(day_root, rel_parts):
+            continue
+        target_path = day_root.joinpath(*rel_parts)
+        if not target_path.is_file():
+            continue
+        with _tx.state_file_lock(target_path):
+            if allow_list:
+                ex, ok, doc = _read_json_doc_or_list_safe(target_path)
+                if not ex or not ok or not isinstance(doc, (Mapping, list)):
+                    continue
+                scrubbed = _scrub_tombstoned_ids_from_tree(
+                    doc,
+                    known_dead_ids,
+                    vc_sealed_digests=sealed_digest_set,
+                    matched_ids_out=discovered_dead_ids,
+                )
+                if scrubbed != doc and isinstance(scrubbed, (Mapping, list)):
+                    _atomic_write_json_any(target_path, scrubbed)
+                    scrubbed_files.append("/".join(rel_parts))
+            else:
+                ex, ok, doc = _read_json_safe(target_path)
+                if not ex or not ok or not isinstance(doc, Mapping):
+                    continue
+                scrubbed = _scrub_tombstoned_ids_from_tree(
+                    doc,
+                    known_dead_ids,
+                    vc_sealed_digests=sealed_digest_set,
+                    matched_ids_out=discovered_dead_ids,
+                )
+                if scrubbed != doc and isinstance(scrubbed, dict):
+                    _atomic_write_json_doc(target_path, scrubbed)
+                    scrubbed_files.append("/".join(rel_parts))
+
+    all_merged_tombstones: dict[str, dict[str, Any]] = {}
+    all_merged_tombstones.update(local_rp_ts)
+    all_merged_tombstones.update(local_gov_ts)
+    for cid, c_ts in controls_db_revoked.items():
+        all_merged_tombstones.setdefault(
+            cid,
+            {
+                "memory_id": cid,
+                "vc_digest": compute_vc_item_digest(cid),
+                "reason": "controls_db_delete_reconciled",
+                "tombstoned_at": c_ts or now_iso,
+                "tombstoned": True,
+            },
+        )
+    for did in sorted(discovered_dead_ids):
+        if did not in all_merged_tombstones:
+            hx = compute_vc_item_digest(did)
+            rev_at = merged_digests.get(hx, {}).get("revoked_at") or now_iso
+            all_merged_tombstones[did] = {
+                "memory_id": did,
+                "vc_digest": hx,
+                "reason": "vc_barrier_reconciled",
+                "tombstoned_at": rev_at,
+                "tombstoned": True,
+            }
+
+    # Sync discovered/known tombstones back into recall projection state files if they exist
+    if all_merged_tombstones:
+        for rp_rel in (
+            (STATE_DIRNAME, "v02_recall_projection.json"),
+            ("memory", "v02_recall_projection_state.json"),
+        ):
+            if not _is_safe_nonsymlink_rel(day_root, rp_rel):
+                continue
+            rp_path = day_root.joinpath(*rp_rel)
+            if not rp_path.is_file():
+                continue
+            with _tx.state_file_lock(rp_path):
+                ex_r, ok_r, doc_r = _read_json_safe(rp_path)
+                if ex_r and ok_r and isinstance(doc_r, Mapping):
+                    updated_rp = _recompute_recall_projection_doc_after_scrub(
+                        dict(doc_r),
+                        merged_tombstones=all_merged_tombstones,
+                        now_iso=now_iso,
+                    )
+                    _tx.atomic_write_json(rp_path, updated_rp)
+                    rel_str = "/".join(rp_rel)
+                    if rel_str not in scrubbed_files:
+                        scrubbed_files.append(rel_str)
+
+    synced_gov = _sync_runtime_governance_files(
+        day_root,
+        tombstones_map=all_merged_tombstones,
+        authority_generation=int(new_gen),
+        restore_epoch=int(new_restore_epoch),
+        now_iso=now_iso,
+    )
+
+    return {
+        "schema": "nyairo.v02.vc_reconcile_receipt.v1",
+        "status": "RECONCILED",
+        "authority_generation": int(new_gen),
+        "restore_epoch": int(new_restore_epoch),
+        "sealed_digest_count": len(merged_digests),
+        "merged_external_digest_count": len(ext_digests),
+        "controls_db_digests_discovered": controls_db_digests,
+        "stripped_item_count": len(discovered_dead_ids),
+        "scrubbed_files": scrubbed_files,
+        "synced_governance_paths": synced_gov,
+        "reconciled_at": now_iso,
+        "llm_calls": 0,
+    }
+
+
+def reconcile_backup_restore_vc_barrier(
+    day_root: Path | str,
+    *,
+    external_watermark_seal: Any = None,
+    operation_key: Optional[str] = None,
+    now: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Enforce G0 V-C anti-resurrection barrier across backup rollbacks (deterministic, zero LLM calls)."""
+    root = Path(day_root)
+    eff_now = now_iso if now_iso is not None else now
+    _, resolved_iso = _resolve_now(eff_now)
+
+    if operation_key is not None:
+        if not isinstance(operation_key, str) or not operation_key.strip():
+            raise V02ValidationError("INVALID_FIELDS", "operation_key must be a non-empty string when provided")
+        mut_payload: dict[str, Any] = {
+            "action": "reconcile_backup_restore",
+            "operation_key": operation_key.strip(),
+        }
+        if external_watermark_seal is not None:
+            mut_payload["external_watermark_seal"] = external_watermark_seal
+        projected, op_status = apply_runtime_migration_mutation(
+            root,
+            mut_payload,
+            actor_side="subject",
+            now_iso=resolved_iso,
+        )
+        receipt = copy.deepcopy(projected.get("vc_reconcile_receipt") or {})
+        if op_status == "REPLAYED":
+            receipt["status"] = "REPLAYED"
+        return receipt
+
+    return _apply_reconcile_backup_restore_vc_barrier(
+        root,
+        external_watermark_seal=external_watermark_seal,
+        now_iso=resolved_iso,
+    )
+
+
+def project_chatless_life_review(
+    day_root: Path | str,
+    *,
+    has_subject_capability: bool = False,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Ch.15 §10.I 'Delete Chat Window and Look' non-verbal life review (100% zero writes, zero LLM calls)."""
+    root = Path(day_root)
+    _, resolved_iso = _resolve_now(now_iso)
+
+    wm_doc = read_vc_authority_watermark_readonly(root)
+    raw_sealed = wm_doc.get("sealed_digests")
+    vc_digests = frozenset(str(k).lower() for k in raw_sealed.keys()) if isinstance(raw_sealed, Mapping) else frozenset()
+    tombstones = _extract_tombstone_ledger_readonly(root, now_iso=resolved_iso)
+    tombstones.update(_read_governance_tombstones_readonly(root, now_iso=resolved_iso))
+    dead_ids = frozenset(tombstones.keys())
+
+    def _is_dead(raw_id: Any) -> bool:
+        if not isinstance(raw_id, str):
+            return False
+        cid = raw_id.strip()
+        if not cid:
+            return False
+        if cid in dead_ids:
+            return True
+        if vc_digests and compute_vc_item_digest(cid) in vc_digests:
+            return True
+        return False
+
+    def _read_rel(rel_parts: tuple[str, ...]) -> Optional[dict[str, Any]]:
+        if not _is_safe_nonsymlink_rel(root, rel_parts):
+            return None
+        ex, ok, doc = _read_json_safe(root.joinpath(*rel_parts))
+        if ex and ok and isinstance(doc, Mapping):
+            return dict(doc)
+        return None
+
+    def _pick_first_id(entry: Mapping[str, Any], keys: tuple[str, ...], fallback: str = "") -> str:
+        for k in keys:
+            val = entry.get(k)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return fallback
+
+    def _entry_is_public(entry: Mapping[str, Any]) -> bool:
+        delivery = str(entry.get("delivery_state") or entry.get("status") or "").strip().upper()
+        stage = str(entry.get("stage") or "").strip().lower()
+        vis = str(entry.get("visibility") or "").strip().lower()
+        return bool(
+            entry.get("shared") is True
+            or entry.get("share_with_room") is True
+            or entry.get("public") is True
+            or delivery == "LOCAL_DELIVERED"
+            or stage == "gifted"
+            or vis in {"shared", "public"}
+        )
+
+    # 1. works_and_versions (workbench_curio.json / workbench_tray.json / longterm_gifts_lantern.json)
+    works_items: list[dict[str, Any]] = []
+    seen_work_keys: set[str] = set()
+    for wb_rel in ((STATE_DIRNAME, "workbench_curio.json"), (STATE_DIRNAME, "workbench_tray.json")):
+        wb_doc = _read_rel(wb_rel)
+        if not isinstance(wb_doc, Mapping):
+            continue
+        candidates: list[Mapping[str, Any]] = []
+        tray = wb_doc.get("tray")
+        if isinstance(tray, Mapping) and isinstance(tray.get("work"), Mapping):
+            w_copy = dict(tray["work"])
+            if "note" in tray and "note" not in w_copy:
+                w_copy["note"] = tray.get("note")
+            candidates.append(w_copy)
+        for list_key in ("works", "versions", "items", "curios"):
+            raw_seq = wb_doc.get(list_key)
+            if isinstance(raw_seq, list):
+                for el in raw_seq:
+                    if isinstance(el, Mapping):
+                        candidates.append(el)
+            elif isinstance(raw_seq, Mapping):
+                for dk, dv in raw_seq.items():
+                    if isinstance(dv, Mapping):
+                        merged_el = dict(dv)
+                        merged_el.setdefault("work_id", str(dk))
+                        candidates.append(merged_el)
+        if _pick_first_id(wb_doc, ("work_id", "artifact_id", "version_id", "id")):
+            candidates.append(wb_doc)
+        for item in candidates:
+            wid = _pick_first_id(item, ("work_id", "artifact_id", "version_id", "baseline_version_id", "id"))
+            if _is_dead(wid):
+                continue
+            dedup_key = f"wb:{wid}:{item.get('version_id') or item.get('baseline_version_id') or ''}"
+            if dedup_key in seen_work_keys:
+                continue
+            is_public = _entry_is_public(item)
+            if not has_subject_capability and not is_public:
+                continue
+            seen_work_keys.add(dedup_key)
+            rec: dict[str, Any] = {
+                "source": "/".join(wb_rel),
+                "work_id": wid,
+                "artifact_id": item.get("artifact_id") or wid,
+                "version_id": item.get("version_id") or item.get("baseline_version_id"),
+                "version_number": item.get("version_number") or item.get("baseline_version_number"),
+                "title": str(item.get("title") or item.get("name") or "").strip(),
+                "delivery_state": str(item.get("delivery_state") or item.get("status") or ("LOCAL_DELIVERED" if is_public else "DRAFT")).strip(),
+                "shared": is_public,
+            }
+            if has_subject_capability and isinstance(item.get("note"), str) and item["note"].strip():
+                rec["note"] = item["note"].strip()
+            works_items.append(rec)
+
+    reflection_items: list[dict[str, Any]] = []
+    gifts_doc = _read_rel((STATE_DIRNAME, "longterm_gifts_lantern.json"))
+    if isinstance(gifts_doc, Mapping):
+        for g in gifts_doc.get("shared_gifts") or []:
+            if not isinstance(g, Mapping):
+                continue
+            gid = _pick_first_id(g, ("gift_id", "artifact_id", "id"))
+            art_id = _pick_first_id(g, ("artifact_id",))
+            if _is_dead(gid) or _is_dead(art_id):
+                continue
+            is_public = _entry_is_public(g)
+            if not has_subject_capability and not is_public:
+                continue
+            rec = {
+                "source": f"{STATE_DIRNAME}/longterm_gifts_lantern.json",
+                "gift_id": gid,
+                "artifact_id": g.get("artifact_id"),
+                "version_id": g.get("version_id"),
+                "stage": str(g.get("stage") or "").strip(),
+                "title": str(g.get("title") or "").strip(),
+                "delivery_state": str(g.get("delivery_state") or ("LOCAL_DELIVERED" if is_public else "DRAFT")).strip(),
+                "gifted_at": g.get("gifted_at"),
+                "shared": is_public,
+            }
+            if has_subject_capability:
+                if isinstance(g.get("finished_note"), str) and g["finished_note"].strip():
+                    rec["finished_note"] = g["finished_note"].strip()
+                if isinstance(g.get("draft_seed_note"), str) and g["draft_seed_note"].strip():
+                    rec["draft_seed_note"] = g["draft_seed_note"].strip()
+            works_items.append(rec)
+        for rf in gifts_doc.get("later_reflections") or []:
+            if not isinstance(rf, Mapping):
+                continue
+            rf_id = _pick_first_id(rf, ("reflection_id", "source_artifact_id", "id"))
+            if _is_dead(rf_id) or _is_dead(rf.get("source_artifact_id")):
+                continue
+            is_public = _entry_is_public(rf)
+            if not has_subject_capability and not is_public:
+                continue
+            rf_rec: dict[str, Any] = {
+                "reflection_id": rf_id,
+                "source_artifact_id": rf.get("source_artifact_id"),
+                "source_version_id": rf.get("source_version_id"),
+                "shared": is_public,
+            }
+            if has_subject_capability or is_public:
+                note_txt = str(rf.get("reflection_note") or rf.get("note") or "").strip()
+                if note_txt:
+                    rf_rec["note"] = note_txt
+            reflection_items.append(rf_rec)
+
+    works_and_versions = {
+        "item_count": len(works_items),
+        "delivered_count": sum(1 for it in works_items if it.get("shared") or it.get("delivery_state") == "LOCAL_DELIVERED"),
+        "items": works_items,
+        "later_reflections": reflection_items,
+    }
+
+    # 2. room_layout_traces (world/v08_matter_space.json)
+    matter_doc, _ = _read_world_slice_readonly_with_source(root, "v08_matter_space.json")
+    zones_out: list[dict[str, Any]] = []
+    objects_out: list[dict[str, Any]] = []
+    acts_out: list[dict[str, Any]] = []
+    arrangements_out: list[dict[str, Any]] = []
+    if isinstance(matter_doc, Mapping):
+        raw_objs = matter_doc.get("matter_objects")
+        if raw_objs is None:
+            raw_objs = matter_doc.get("objects")
+        obj_list: list[Mapping[str, Any]] = []
+        if isinstance(raw_objs, Mapping):
+            for ok_id, ov in raw_objs.items():
+                if isinstance(ov, Mapping):
+                    oc = dict(ov)
+                    oc.setdefault("object_id", str(ok_id))
+                    obj_list.append(oc)
+        elif isinstance(raw_objs, list):
+            obj_list = [dict(o) for o in raw_objs if isinstance(o, Mapping)]
+
+        def _is_private_zone(zone_id: str, vis: str = "") -> bool:
+            zl = zone_id.strip().lower()
+            vl = vis.strip().lower()
+            return zl == "subject_private_drawer" or vl in {"private", "subject_only", "her_private"}
+
+        zone_counts: dict[str, int] = {}
+        for obj in obj_list:
+            oid = _pick_first_id(obj, ("object_id", "item_id", "id"))
+            if _is_dead(oid):
+                continue
+            ozone = str(obj.get("zone") or obj.get("zone_id") or obj.get("location") or "").strip()
+            ovis = str(obj.get("visibility") or "").strip()
+            if ozone:
+                zone_counts[ozone] = zone_counts.get(ozone, 0) + 1
+            if not has_subject_capability and _is_private_zone(ozone, ovis):
+                continue
+            objects_out.append(
+                {
+                    "object_id": oid,
+                    "label": str(obj.get("label") or obj.get("name") or oid).strip(),
+                    "zone": ozone,
+                    "state": str(obj.get("state") or obj.get("condition") or "").strip(),
+                }
+            )
+
+        raw_zones = matter_doc.get("zones")
+        zone_entries: list[tuple[str, Mapping[str, Any]]] = []
+        if isinstance(raw_zones, Mapping):
+            for zk, zv in raw_zones.items():
+                if isinstance(zv, Mapping):
+                    zone_entries.append((str(zk), zv))
+        elif isinstance(raw_zones, list):
+            for zv in raw_zones:
+                if isinstance(zv, Mapping):
+                    zk = _pick_first_id(zv, ("zone_id", "id", "name"))
+                    if zk:
+                        zone_entries.append((zk, zv))
+
+        seen_zones: set[str] = set()
+        for zid, zmeta in zone_entries:
+            seen_zones.add(zid)
+            zvis = str(zmeta.get("visibility") or "").strip()
+            if _is_dead(zid):
+                continue
+            if not has_subject_capability and _is_private_zone(zid, zvis):
+                zones_out.append(
+                    {
+                        "zone_id": zid,
+                        "visibility": "PRIVATE",
+                        "redacted": True,
+                        "item_count": None,
+                    }
+                )
+            else:
+                z_items = zmeta.get("items") or zmeta.get("objects")
+                z_cnt = len(z_items) if isinstance(z_items, list) else zone_counts.get(zid, 0)
+                zones_out.append(
+                    {
+                        "zone_id": zid,
+                        "label": str(zmeta.get("label") or zid).strip(),
+                        "visibility": "PRIVATE" if _is_private_zone(zid, zvis) else "PUBLIC",
+                        "item_count": int(z_cnt),
+                    }
+                )
+        for ozone, ocnt in sorted(zone_counts.items()):
+            if ozone in seen_zones or _is_dead(ozone):
+                continue
+            if not has_subject_capability and _is_private_zone(ozone):
+                zones_out.append(
+                    {
+                        "zone_id": ozone,
+                        "visibility": "PRIVATE",
+                        "redacted": True,
+                        "item_count": None,
+                    }
+                )
+            else:
+                zones_out.append(
+                    {
+                        "zone_id": ozone,
+                        "label": ozone,
+                        "visibility": "PRIVATE" if _is_private_zone(ozone) else "PUBLIC",
+                        "item_count": int(ocnt),
+                    }
+                )
+
+        for act in matter_doc.get("recent_acts") or []:
+            if not isinstance(act, Mapping):
+                continue
+            aid = _pick_first_id(act, ("act_id", "object_id", "id"))
+            if _is_dead(aid) or _is_dead(act.get("object_id")):
+                continue
+            azone = str(act.get("zone") or act.get("zone_id") or act.get("target_zone") or "").strip()
+            avis = str(act.get("visibility") or "").strip()
+            if not has_subject_capability and _is_private_zone(azone, avis):
+                continue
+            acts_out.append(
+                {
+                    "act_id": aid,
+                    "action": str(act.get("action") or act.get("act_type") or "").strip(),
+                    "zone": azone,
+                    "object_id": act.get("object_id"),
+                    "at": act.get("at") or act.get("recorded_at"),
+                }
+            )
+
+        for arr in matter_doc.get("active_arrangements") or []:
+            if not isinstance(arr, Mapping):
+                continue
+            arr_id = _pick_first_id(arr, ("arrangement_id", "id", "object_id"))
+            if _is_dead(arr_id):
+                continue
+            azone = str(arr.get("zone") or arr.get("zone_id") or "").strip()
+            avis = str(arr.get("visibility") or "").strip()
+            if not has_subject_capability and _is_private_zone(azone, avis):
+                continue
+            arrangements_out.append(
+                {
+                    "arrangement_id": arr_id,
+                    "zone": azone,
+                    "summary": str(arr.get("summary") or arr.get("label") or "").strip(),
+                }
+            )
+
+    room_layout_traces = {
+        "zones": zones_out,
+        "object_count": len(objects_out),
+        "objects": objects_out,
+        "recent_acts": acts_out,
+        "active_arrangements": arrangements_out,
+    }
+
+    # 3. reading_bookmarks (outing_bench_bookstore.json / v02_crossmodal.json)
+    bookmarks_out: list[dict[str, Any]] = []
+    crossmodal_out: list[dict[str, Any]] = []
+    bookstore_doc = _read_rel((STATE_DIRNAME, "outing_bench_bookstore.json"))
+    if isinstance(bookstore_doc, Mapping):
+        for bm in bookstore_doc.get("window_bookmarks") or bookstore_doc.get("bookmarks") or []:
+            if not isinstance(bm, Mapping):
+                continue
+            bid = _pick_first_id(bm, ("bookmark_id", "id"))
+            if _is_dead(bid):
+                continue
+            is_public = _entry_is_public(bm)
+            if not has_subject_capability and not is_public:
+                continue
+            bm_rec: dict[str, Any] = {
+                "bookmark_id": bid,
+                "slot_index": bm.get("slot_index"),
+                "book_code": bm.get("book_code"),
+                "title": str(bm.get("title") or "").strip(),
+                "shared": is_public,
+                "updated_at": bm.get("updated_at") or bm.get("saved_at"),
+            }
+            if has_subject_capability or is_public:
+                if isinstance(bm.get("note"), str) and bm["note"].strip():
+                    bm_rec["note"] = bm["note"].strip()
+            bookmarks_out.append(bm_rec)
+
+    crossmodal_doc = _read_rel((STATE_DIRNAME, "v02_crossmodal.json"))
+    if isinstance(crossmodal_doc, Mapping):
+        for seq_key in ("reading_uncertainty_marks", "collection_items", "bookmarks"):
+            seq = crossmodal_doc.get(seq_key)
+            entries: list[Mapping[str, Any]] = []
+            if isinstance(seq, list):
+                entries = [dict(x) for x in seq if isinstance(x, Mapping)]
+            elif isinstance(seq, Mapping):
+                for xk, xv in seq.items():
+                    if isinstance(xv, Mapping):
+                        xc = dict(xv)
+                        xc.setdefault("mark_id", str(xk))
+                        entries.append(xc)
+            for item in entries:
+                mid = _pick_first_id(item, ("mark_id", "bookmark_id", "item_id", "id"))
+                if _is_dead(mid):
+                    continue
+                is_public = _entry_is_public(item)
+                if not has_subject_capability and not is_public:
+                    continue
+                cm_rec: dict[str, Any] = {
+                    "mark_id": mid,
+                    "source_kind": seq_key,
+                    "title": str(item.get("title") or item.get("topic") or "").strip(),
+                    "shared": is_public,
+                }
+                if has_subject_capability or is_public:
+                    excerpt = str(item.get("note") or item.get("excerpt") or "").strip()
+                    if excerpt:
+                        cm_rec["note"] = excerpt
+                crossmodal_out.append(cm_rec)
+
+    reading_bookmarks = {
+        "bookmark_count": len(bookmarks_out),
+        "bookmarks": bookmarks_out,
+        "crossmodal_mark_count": len(crossmodal_out),
+        "crossmodal_marks": crossmodal_out,
+    }
+
+    # 4. methods_and_endings (v02_agency_depth.json / state/v02_agency_depth_state.json)
+    endings_out: list[dict[str, Any]] = []
+    methods_out: list[dict[str, Any]] = []
+    seen_endings: set[str] = set()
+    seen_methods: set[str] = set()
+    for ag_rel in (
+        (STATE_DIRNAME, "v02_agency_depth.json"),
+        (STATE_DIRNAME, "v02_agency_depth_state.json"),
+        ("state", "v02_agency_depth_state.json"),
+    ):
+        ag_doc = _read_rel(ag_rel)
+        if not isinstance(ag_doc, Mapping):
+            continue
+        for ek in ("legacy_tool_endings",):
+            raw_end = ag_doc.get(ek)
+            end_list: list[Mapping[str, Any]] = []
+            if isinstance(raw_end, list):
+                end_list = [dict(x) for x in raw_end if isinstance(x, Mapping)]
+            elif isinstance(raw_end, Mapping):
+                for xk, xv in raw_end.items():
+                    if isinstance(xv, Mapping):
+                        xc = dict(xv)
+                        xc.setdefault("ending_id", str(xk))
+                        end_list.append(xc)
+            for item in end_list:
+                eid = _pick_first_id(item, ("ending_id", "tool_id", "method_id", "id"))
+                if _is_dead(eid):
+                    continue
+                is_public = _entry_is_public(item)
+                if not has_subject_capability and not is_public:
+                    continue
+                if eid and eid in seen_endings:
+                    continue
+                if eid:
+                    seen_endings.add(eid)
+                rec = {
+                    "ending_id": eid,
+                    "title": str(item.get("title") or item.get("label") or item.get("summary") or "").strip(),
+                    "status": str(item.get("status") or "ended").strip(),
+                    "shared": is_public,
+                }
+                endings_out.append(rec)
+
+        for mk in ("validated_methods", "method_adjustments"):
+            raw_m = ag_doc.get(mk)
+            m_list: list[Mapping[str, Any]] = []
+            if isinstance(raw_m, list):
+                m_list = [dict(x) for x in raw_m if isinstance(x, Mapping)]
+            elif isinstance(raw_m, Mapping):
+                for xk, xv in raw_m.items():
+                    if isinstance(xv, Mapping):
+                        xc = dict(xv)
+                        xc.setdefault("method_id", str(xk))
+                        m_list.append(xc)
+            for item in m_list:
+                mid = _pick_first_id(item, ("method_id", "adjustment_id", "rule_id", "id"))
+                if _is_dead(mid):
+                    continue
+                is_public = _entry_is_public(item)
+                status_str = str(item.get("status") or "").strip().lower()
+                is_validated = bool(item.get("validated") is True or status_str in {"validated", "active", "verified"})
+                if mk == "method_adjustments" and not is_validated and not is_public:
+                    continue
+                if not has_subject_capability and not is_public:
+                    continue
+                if mid and mid in seen_methods:
+                    continue
+                if mid:
+                    seen_methods.add(mid)
+                methods_out.append(
+                    {
+                        "method_id": mid,
+                        "title": str(item.get("title") or item.get("label") or item.get("method") or "").strip(),
+                        "validated": is_validated or True,
+                        "shared": is_public,
+                    }
+                )
+
+    methods_and_endings = {
+        "ending_count": len(endings_out),
+        "method_count": len(methods_out),
+        "legacy_tool_endings": endings_out,
+        "validated_methods": methods_out,
+    }
+
+    # 5. closed_and_waiting_items (desk_tomorrow_note.json)
+    closed_count = 0
+    waiting_count = 0
+    private_redacted_count = 0
+    closed_items_out: list[dict[str, Any]] = []
+    waiting_items_out: list[dict[str, Any]] = []
+    desk_doc = _read_rel((STATE_DIRNAME, "desk_tomorrow_note.json"))
+    if isinstance(desk_doc, Mapping):
+        raw_notes: list[tuple[str, Mapping[str, Any]]] = []
+        for lkey, def_kind in (
+            ("closed_items", "closed"),
+            ("waiting_items", "waiting"),
+            ("tomorrow_items", "waiting"),
+            ("notes", ""),
+            ("items", ""),
+            ("shared_notes", "waiting"),
+            ("retained_notes", "waiting"),
+        ):
+            seq = desk_doc.get(lkey)
+            if isinstance(seq, list):
+                for el in seq:
+                    if isinstance(el, Mapping):
+                        raw_notes.append((def_kind, el))
+            elif isinstance(seq, Mapping):
+                for nk, nv in seq.items():
+                    if isinstance(nv, Mapping):
+                        nc = dict(nv)
+                        nc.setdefault("note_id", str(nk))
+                        raw_notes.append((def_kind, nc))
+        if _pick_first_id(desk_doc, ("note_id", "item_id", "id")) and not raw_notes:
+            raw_notes.append(("", desk_doc))
+
+        seen_note_ids: set[str] = set()
+        for def_kind, note_entry in raw_notes:
+            nid = _pick_first_id(note_entry, ("note_id", "item_id", "id"))
+            if _is_dead(nid):
+                continue
+            if nid and nid in seen_note_ids:
+                continue
+            if nid:
+                seen_note_ids.add(nid)
+            st = str(note_entry.get("status") or note_entry.get("state") or def_kind or "waiting").strip().lower()
+            is_closed = st in {"closed", "done", "completed", "resolved", "archived"}
+            if is_closed:
+                closed_count += 1
+            else:
+                waiting_count += 1
+            is_public = _entry_is_public(note_entry)
+            if not has_subject_capability and not is_public:
+                private_redacted_count += 1
+                continue
+            rec = {
+                "note_id": nid,
+                "title": str(note_entry.get("title") or note_entry.get("label") or note_entry.get("text") or "").strip(),
+                "status": "closed" if is_closed else "waiting",
+                "shared": is_public,
+            }
+            if is_closed:
+                closed_items_out.append(rec)
+            else:
+                waiting_items_out.append(rec)
+
+    closed_and_waiting_items = {
+        "closed_count": closed_count,
+        "waiting_count": waiting_count,
+        "private_redacted_count": private_redacted_count if not has_subject_capability else 0,
+        "closed_items": closed_items_out,
+        "waiting_items": waiting_items_out,
+    }
+
+    # 6. verified_deliveries (v02_common_ground.json / memory/v02_common_ground_state.json)
+    deliveries_out: list[dict[str, Any]] = []
+    seen_cg: set[str] = set()
+    shared_cg_count = 0
+    for cg_rel in ((STATE_DIRNAME, "v02_common_ground.json"), ("memory", "v02_common_ground_state.json")):
+        cg_doc = _read_rel(cg_rel)
+        if not isinstance(cg_doc, Mapping):
+            continue
+        raw_cg = cg_doc.get("items") or cg_doc.get("common_ground") or cg_doc.get("entries")
+        cg_entries: list[Mapping[str, Any]] = []
+        if isinstance(raw_cg, Mapping):
+            for gk, gv in raw_cg.items():
+                if isinstance(gv, Mapping):
+                    gc = dict(gv)
+                    gc.setdefault("ground_id", str(gk))
+                    cg_entries.append(gc)
+        elif isinstance(raw_cg, list):
+            cg_entries = [dict(g) for g in raw_cg if isinstance(g, Mapping)]
+        for g in cg_entries:
+            gid = _pick_first_id(g, ("ground_id", "item_id", "id"))
+            if _is_dead(gid) or _is_dead(g.get("source_memory_id")):
+                continue
+            if gid and gid in seen_cg:
+                continue
+            if gid:
+                seen_cg.add(gid)
+            gstatus = str(g.get("ground_status") or "").strip().upper()
+            is_shared = gstatus == "SHARED_WITH_PARTNER"
+            if is_shared:
+                shared_cg_count += 1
+            if not has_subject_capability and not is_shared:
+                continue
+            deliveries_out.append(
+                {
+                    "ground_id": gid,
+                    "ground_status": gstatus or ("SHARED_WITH_PARTNER" if is_shared else "PRIVATE_UNSHARED"),
+                    "delivery_state": str(g.get("delivery_state") or ("LOCAL_DELIVERED" if is_shared else "")).strip(),
+                    "topic": str(g.get("topic") or g.get("title") or g.get("summary") or "").strip(),
+                    "verified_at": g.get("verified_at") or g.get("shared_at") or g.get("updated_at"),
+                }
+            )
+
+    verified_deliveries = {
+        "delivery_count": len(deliveries_out),
+        "shared_count": shared_cg_count,
+        "items": deliveries_out,
+    }
+
+    return {
+        "schema": CHATLESS_LIFE_REVIEW_SCHEMA,
+        "perspective": "her_private" if has_subject_capability else "partner_default",
+        "observed_at": resolved_iso,
+        "chat_window_hidden": True,
+        "dialogue_ignored": True,
+        "nonverbal_evidence_only": True,
+        "works_and_versions": works_and_versions,
+        "room_layout_traces": room_layout_traces,
+        "reading_bookmarks": reading_bookmarks,
+        "methods_and_endings": methods_and_endings,
+        "closed_and_waiting_items": closed_and_waiting_items,
+        "verified_deliveries": verified_deliveries,
+        "llm_calls": 0,
+    }
+
+
+def _apply_set_budget_mode(
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    now_dt: datetime,
+    now_iso: str,
+    _allow_sealed_transition: bool = False,
+) -> None:
+    if not _allow_sealed_transition:
+        ret_sec = state.get("retirement") if isinstance(state.get("retirement"), Mapping) else {}
+        if str(ret_sec.get("status") or "") == RETIREMENT_STATUS_SEALED:
+            raise V02ConflictError(
+                "ALREADY_SEALED",
+                "Cannot change budget mode after dignified retirement archive is sealed",
+            )
     raw_mode = str(payload["mode"]).strip().upper()
     if raw_mode not in BUDGET_MODE_ALIASES:
         raise V02ValidationError("INVALID_MODE", f"Unsupported budget mode: {payload['mode']!r}")
@@ -2937,9 +5319,9 @@ def _apply_set_budget_mode(
     if raw_pct is not None:
         if isinstance(raw_pct, bool) or not isinstance(raw_pct, int) or not (1 <= raw_pct <= 100):
             raise V02ValidationError("INVALID_FIELDS", "budget_scale_pct must be int in 1..100")
-        pct = int(raw_pct)
+        pct = 0 if canonical_mode == MODE_DORMANT else int(raw_pct)
     else:
-        pct = 10 if canonical_mode == MODE_LOW_BUDGET else 100
+        pct = 0 if canonical_mode == MODE_DORMANT else (10 if canonical_mode == MODE_LOW_BUDGET else 100)
 
     reason_cn = str(payload.get("reason_cn") or "").strip()
     mode_cfg = state["mode_config"]
@@ -3095,11 +5477,16 @@ def _apply_pack_selective_suitcase(
         for m in (real_assets.get("practice_methods") or ())
         if isinstance(m, Mapping) and str(m.get("artifact_id") or "").strip()
     }
-    real_slice_ids = {
-        f"phone_slice:{s.get('slice_file')}"
-        for s in (real_assets.get("phone_slices") or ())
-        if isinstance(s, Mapping) and str(s.get("slice_file") or "").strip()
-    } | set(SUITCASE_ALLOWED_SLICE_SET)
+    real_slice_ids = (
+        {
+            f"phone_slice:{s.get('slice_file')}"
+            for s in (real_assets.get("phone_slices") or ())
+            if isinstance(s, Mapping) and str(s.get("slice_file") or "").strip()
+        }
+        | set(SUITCASE_ALLOWED_SLICE_SET)
+        | {f"world_slice:{w}" for w in SUITCASE_ALLOWED_WORLD_FILES}
+        | set(SUITCASE_ALLOWED_WORLD_FILE_SET)
+    )
     keep_ids_raw = payload.get("keep_skill_ids")
     keep_ids: Optional[list[str]] = None
     if keep_ids_raw is not None:
@@ -3229,15 +5616,48 @@ def _apply_record_workspace_audit(
 _SUITCASE_COMPANION_FALLBACKS: dict[str, tuple[tuple[str, ...], ...]] = {
     "v02_common_ground.json": (("memory", "v02_common_ground_state.json"),),
     "v02_recall_projection.json": (("memory", "v02_recall_projection_state.json"),),
+    "window_keepsakes.json": (("phone", "window_keepsake.json"),),
     "v04_neighborhood.json": (
         ("phone", "v04_neighborhood_state.json"),
         ("world", "v04_neighborhood_state.json"),
     ),
+    "v03_epistemic_encounters.json": (("phone", "v03_encounters.json"),),
     "v02_open_self_rules.json": (
         ("phone", "v02_agency_depth_state.json"),
         ("state", "v02_agency_depth_state.json"),
     ),
     "everyday_desires.json": (("life", "everyday_desires.json"),),
+    "v08_composable_body.json": (("body", "v08_composable_body_pack.json"),),
+}
+
+_SUITCASE_CANONICAL_RESTORE_MIRRORS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "v03_epistemic_encounters.json": (("phone", "v03_encounters.json"),),
+    "v08_composable_body.json": (("body", "v08_composable_body_pack.json"),),
+}
+
+_WORLD_SLICE_READ_CANDIDATES: dict[str, tuple[tuple[str, ...], ...]] = {
+    "v08_matter_space.json": (
+        ("world", "v08_matter_space.json"),
+        ("world-home", "world", "v08_matter_space.json"),
+    ),
+    "v08_open_affordance.json": (
+        ("world", "v08_open_affordance.json"),
+        ("world-home", "world", "v08_open_affordance.json"),
+        ("world", "v08_living_traces.json"),
+        ("world-home", "world", "v08_living_traces.json"),
+        ("phone", "v08_living_traces.json"),
+        ("world-home", "phone", "v08_living_traces.json"),
+    ),
+    "v08_microzone_ecology.json": (
+        ("world", "v08_microzone_ecology.json"),
+        ("world-home", "world", "v08_microzone_ecology.json"),
+        ("world", "v08_microzone_state.json"),
+        ("world-home", "world", "v08_microzone_state.json"),
+    ),
+    "v04_neighborhood_state.json": (
+        ("world", "v04_neighborhood_state.json"),
+        ("world-home", "world", "v04_neighborhood_state.json"),
+    ),
 }
 
 _TOMBSTONE_MATCH_ID_KEYS: tuple[str, ...] = (
@@ -3251,6 +5671,39 @@ _TOMBSTONE_MATCH_ID_KEYS: tuple[str, ...] = (
     "desire_id",
     "ground_id",
     "source_memory_id",
+    "object_id",
+    "trace_id",
+    "routine_id",
+    "act_id",
+    "inscription_id",
+    "question_id",
+    "idiom_id",
+    "reinterpretation_id",
+    "spark_id",
+    "notice_id",
+    "direction_id",
+    "ritual_id",
+    "encounter_id",
+    "material_id",
+    "errand_id",
+    "play_id",
+    "genealogy_id",
+    "artifact_id",
+    "gift_id",
+    "reflection_id",
+    "share_id",
+    "item_instance_id",
+    "bookmark_id",
+    "work_id",
+    "method_id",
+    "ending_id",
+    "adjustment_id",
+    "rule_id",
+    "preference_id",
+    "mark_id",
+    "event_id",
+    "source_artifact_id",
+    "arrangement_id",
 )
 
 
@@ -3417,23 +5870,49 @@ def _scrub_tombstoned_ids_from_tree(
     node: Any,
     tombstoned_ids: frozenset[str] | set[str],
     *,
+    vc_sealed_digests: Optional[frozenset[str] | set[str]] = None,
+    matched_ids_out: Optional[set[str]] = None,
     in_tombstone_container: bool = False,
     depth: int = 0,
 ) -> Any:
-    if not tombstoned_ids or depth > 24:
+    if (not tombstoned_ids and not vc_sealed_digests) or depth > 24:
         return node
     if in_tombstone_container:
         return copy.deepcopy(node)
+
+    def _is_dead(raw_candidate: Any) -> bool:
+        if not isinstance(raw_candidate, str):
+            return False
+        cand = raw_candidate.strip()
+        if not cand:
+            return False
+        if cand in tombstoned_ids:
+            if matched_ids_out is not None:
+                matched_ids_out.add(cand)
+            return True
+        if vc_sealed_digests and compute_vc_item_digest(cand) in vc_sealed_digests:
+            if matched_ids_out is not None:
+                matched_ids_out.add(cand)
+            return True
+        return False
+
     if isinstance(node, Mapping):
         out: dict[str, Any] = {}
         for raw_k, raw_v in node.items():
             k = str(raw_k)
-            if k in tombstoned_ids:
+            if _is_dead(k):
                 continue
+            if k in ("work", "active_work", "featured_item") and isinstance(raw_v, Mapping):
+                matched_nested = any(_is_dead(raw_v.get(id_k)) for id_k in _TOMBSTONE_MATCH_ID_KEYS)
+                if matched_nested:
+                    out[k] = None
+                    continue
             is_ts_container = k in ("tombstones", "tombstone_ledger")
             out[k] = _scrub_tombstoned_ids_from_tree(
                 raw_v,
                 tombstoned_ids,
+                vc_sealed_digests=vc_sealed_digests,
+                matched_ids_out=matched_ids_out,
                 in_tombstone_container=is_ts_container,
                 depth=depth + 1,
             )
@@ -3441,21 +5920,18 @@ def _scrub_tombstoned_ids_from_tree(
     if isinstance(node, list):
         out_list: list[Any] = []
         for elem in node:
-            if isinstance(elem, str) and elem.strip() in tombstoned_ids:
+            if _is_dead(elem):
                 continue
             if isinstance(elem, Mapping):
-                matched_dead = False
-                for id_key in _TOMBSTONE_MATCH_ID_KEYS:
-                    cand_val = elem.get(id_key)
-                    if isinstance(cand_val, str) and cand_val.strip() in tombstoned_ids:
-                        matched_dead = True
-                        break
+                matched_dead = any(_is_dead(elem.get(id_key)) for id_key in _TOMBSTONE_MATCH_ID_KEYS)
                 if matched_dead:
                     continue
             out_list.append(
                 _scrub_tombstoned_ids_from_tree(
                     elem,
                     tombstoned_ids,
+                    vc_sealed_digests=vc_sealed_digests,
+                    matched_ids_out=matched_ids_out,
                     in_tombstone_container=False,
                     depth=depth + 1,
                 )
@@ -3509,6 +5985,14 @@ def _normalize_tombstone_entries_from_any(raw_ts: Any, *, default_now_iso: str) 
     return merged
 
 
+def _read_vc_sealed_digest_set_readonly(day_root: Path) -> frozenset[str]:
+    wm = read_vc_authority_watermark_readonly(day_root)
+    raw = wm.get("sealed_digests")
+    if not isinstance(raw, Mapping):
+        return frozenset()
+    return frozenset(str(k).strip().lower() for k in raw.keys() if str(k).strip())
+
+
 def _extract_tombstone_ledger_readonly(day_root: Path, *, now_iso: str) -> dict[str, dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     candidates = (
@@ -3527,6 +6011,7 @@ def _extract_tombstone_ledger_readonly(day_root: Path, *, now_iso: str) -> dict[
         for src_key in ("tombstones", "tombstone_ledger"):
             if src_key in doc:
                 merged.update(_normalize_tombstone_entries_from_any(doc.get(src_key), default_now_iso=now_iso))
+    merged.update(_read_governance_tombstones_readonly(day_root, now_iso=now_iso))
     return merged
 
 
@@ -3560,26 +6045,379 @@ def _slices_for_effective_mode(
     return SUITCASE_ALLOWED_SLICE_FILES
 
 
-def _read_slice_or_companion_readonly(day_root: Path, slice_file: str) -> Optional[dict[str, Any]]:
-    primary = day_root / STATE_DIRNAME / slice_file
+def _is_safe_nonsymlink_rel(day_root: Path, rel_parts: Sequence[str]) -> bool:
+    cur = day_root
     try:
-        if not primary.is_symlink():
-            ex, ok, doc = _read_json_safe(primary)
-            if ex and ok and isinstance(doc, Mapping):
-                return copy.deepcopy(dict(doc))
+        if cur.exists() and cur.is_symlink():
+            return False
+        for part in rel_parts:
+            cur = cur / part
+            if cur.is_symlink():
+                return False
     except OSError:
-        pass
-    for rel_parts in _SUITCASE_COMPANION_FALLBACKS.get(slice_file, ()):
-        comp = day_root.joinpath(*rel_parts)
-        try:
-            if comp.is_symlink():
+        return False
+    return True
+
+
+def _read_json_doc_or_list_safe(path: Path) -> tuple[bool, bool, Any]:
+    """Return ``(exists, valid_json_container, payload)`` accepting dict or list (zero writes)."""
+    if not path.is_file():
+        return False, True, None
+    try:
+        raw = path.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+    except (OSError, ValueError):
+        return True, False, None
+    if isinstance(parsed, Mapping):
+        return True, True, dict(parsed)
+    if isinstance(parsed, list):
+        return True, True, list(parsed)
+    return True, False, None
+
+
+def _doc_freshness_rank(path: Path, doc: Mapping[str, Any]) -> tuple[int, int]:
+    rev_raw = doc.get("revision")
+    rev = int(rev_raw) if isinstance(rev_raw, int) and not isinstance(rev_raw, bool) else 0
+    try:
+        mtime_ns = int(path.stat().st_mtime_ns)
+    except OSError:
+        mtime_ns = 0
+    return (rev, mtime_ns)
+
+
+def _read_slice_or_companion_readonly_with_source(
+    day_root: Path, slice_file: str
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    primary_rel: tuple[str, ...] = (STATE_DIRNAME, slice_file)
+    companions = _SUITCASE_COMPANION_FALLBACKS.get(slice_file, ())
+
+    if slice_file in _SUITCASE_CANONICAL_RESTORE_MIRRORS:
+        best_doc: Optional[dict[str, Any]] = None
+        best_src: Optional[str] = None
+        best_rank: tuple[int, int] = (-1, -1)
+        for rel_parts in (primary_rel, *companions):
+            if not _is_safe_nonsymlink_rel(day_root, rel_parts):
                 continue
-        except OSError:
+            cand = day_root.joinpath(*rel_parts)
+            ex, ok, doc = _read_json_safe(cand)
+            if ex and ok and isinstance(doc, Mapping):
+                rank = _doc_freshness_rank(cand, doc)
+                if best_doc is None or rank >= best_rank:
+                    best_doc = copy.deepcopy(dict(doc))
+                    best_src = "/".join(rel_parts)
+                    best_rank = rank
+        return best_doc, best_src
+
+    if _is_safe_nonsymlink_rel(day_root, primary_rel):
+        primary = day_root.joinpath(*primary_rel)
+        ex, ok, doc = _read_json_safe(primary)
+        if ex and ok and isinstance(doc, Mapping):
+            return copy.deepcopy(dict(doc)), "/".join(primary_rel)
+    for rel_parts in companions:
+        if not _is_safe_nonsymlink_rel(day_root, rel_parts):
             continue
+        comp = day_root.joinpath(*rel_parts)
         ex_c, ok_c, doc_c = _read_json_safe(comp)
         if ex_c and ok_c and isinstance(doc_c, Mapping):
-            return copy.deepcopy(dict(doc_c))
-    return None
+            return copy.deepcopy(dict(doc_c)), "/".join(rel_parts)
+    return None, None
+
+
+def _read_slice_or_companion_readonly(day_root: Path, slice_file: str) -> Optional[dict[str, Any]]:
+    doc, _ = _read_slice_or_companion_readonly_with_source(day_root, slice_file)
+    return doc
+
+
+def _read_world_slice_readonly_with_source(
+    day_root: Path, world_file: str
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    candidates = _WORLD_SLICE_READ_CANDIDATES.get(
+        world_file,
+        (("world", world_file), ("world-home", "world", world_file)),
+    )
+    world_tier_cands = [c for c in candidates if "world" in c]
+    fallback_cands = [c for c in candidates if "world" not in c]
+
+    for group in (world_tier_cands, fallback_cands):
+        best_doc: Optional[dict[str, Any]] = None
+        best_src: Optional[str] = None
+        best_rank: tuple[int, int] = (-1, -1)
+        for rel_parts in group:
+            if not _is_safe_nonsymlink_rel(day_root, rel_parts):
+                continue
+            cand = day_root.joinpath(*rel_parts)
+            ex, ok, doc = _read_json_safe(cand)
+            if ex and ok and isinstance(doc, Mapping):
+                rank = _doc_freshness_rank(cand, doc)
+                if best_doc is None or rank >= best_rank:
+                    best_doc = copy.deepcopy(dict(doc))
+                    best_src = "/".join(rel_parts)
+                    best_rank = rank
+        if best_doc is not None:
+            return best_doc, best_src
+    return None, None
+
+
+def _read_world_package_readonly(
+    day_root: Path,
+    *,
+    stripped_bindings: Optional[list[str]] = None,
+) -> tuple[dict[str, Any], bool]:
+    wp_rel_candidates: tuple[tuple[str, ...], ...] = (
+        ("world-package",),
+        ("world-home", "world-package"),
+    )
+    chosen_dir: Optional[Path] = None
+    chosen_prefix = "world-package"
+    for rel_parts in wp_rel_candidates:
+        cur = day_root
+        has_symlink = False
+        try:
+            if cur.exists() and cur.is_symlink():
+                has_symlink = True
+            else:
+                for seg in rel_parts:
+                    cur = cur / seg
+                    if cur.is_symlink():
+                        has_symlink = True
+                        break
+        except OSError:
+            continue
+        if has_symlink:
+            if stripped_bindings is not None:
+                marker = f"{'/'.join(rel_parts)}:symlink_skipped"
+                if marker not in stripped_bindings:
+                    stripped_bindings.append(marker)
+            continue
+        try:
+            if cur.is_dir():
+                chosen_dir = cur
+                chosen_prefix = "/".join(rel_parts)
+                break
+        except OSError:
+            continue
+
+    if chosen_dir is None:
+        return {}, False
+
+    total_bytes = 0
+    raw_files: dict[str, Any] = {}
+    for fname in SUITCASE_ALLOWED_WORLD_PACKAGE_FILES:
+        fpath = chosen_dir / fname
+        try_names = (fname, "MANIFEST.json") if fname == "manifest.json" else (fname,)
+        resolved_file: Optional[Path] = None
+        for cand_name in try_names:
+            cand_p = chosen_dir / cand_name
+            try:
+                if cand_p.is_symlink():
+                    if stripped_bindings is not None:
+                        marker = f"{chosen_prefix}/{cand_name}:symlink_skipped"
+                        if marker not in stripped_bindings:
+                            stripped_bindings.append(marker)
+                    continue
+                if cand_p.is_file():
+                    resolved_file = cand_p
+                    break
+            except OSError:
+                continue
+        if resolved_file is None:
+            continue
+        try:
+            fsize = int(resolved_file.stat().st_size)
+        except OSError:
+            continue
+        total_bytes += fsize
+        if total_bytes > SUITCASE_WORLD_PACKAGE_MAX_TOTAL_BYTES:
+            if stripped_bindings is not None:
+                marker = f"{chosen_prefix}:exceeds_2mb_limit"
+                if marker not in stripped_bindings:
+                    stripped_bindings.append(marker)
+            return {}, True
+        ex_f, ok_f, parsed_f = _read_json_doc_or_list_safe(resolved_file)
+        if ex_f and ok_f and parsed_f is not None:
+            raw_files[fname] = copy.deepcopy(parsed_f)
+
+    return raw_files, False
+
+
+def _inspect_world_package_readonly(day_root: Path) -> tuple[list[dict[str, Any]], bool]:
+    docs, oversized = _read_world_package_readonly(day_root, stripped_bindings=None)
+    if oversized:
+        return [], True
+    rows = [
+        {
+            "package_file": fname,
+            "source": f"world-package/{fname}",
+        }
+        for fname in SUITCASE_ALLOWED_WORLD_PACKAGE_FILES
+        if fname in docs
+    ]
+    return rows, False
+
+
+def _build_migration_loss_manifest(
+    *,
+    profile_mode: str,
+    effective_mode: str,
+    has_phone_slices: bool,
+    phone_slice_count: int,
+    has_character_pack: bool,
+    world_slice_names: Sequence[str],
+    world_package_files: Sequence[str],
+    tombstone_count: int,
+    carrier_sec: Mapping[str, Any],
+    world_package_oversized: bool = False,
+) -> dict[str, Any]:
+    """Build deterministic G4 ``migration_loss_manifest`` (Ch.14 G4 / EP-18)."""
+    carried_domains: list[str] = []
+    carried_domains_detail: list[dict[str, Any]] = []
+
+    if has_phone_slices:
+        carried_domains.append("phone_slices")
+        carried_domains_detail.append({
+            "domain": "phone_slices",
+            "label_cn": "便携日常切片",
+            "count": int(phone_slice_count),
+            "summary_cn": f"已纳入 {int(phone_slice_count)} 份便携日常与生活记录切片",
+        })
+    if has_character_pack:
+        carried_domains.append("character_pack")
+        carried_domains_detail.append({
+            "domain": "character_pack",
+            "label_cn": "角色设定包",
+            "count": 1,
+            "summary_cn": "已纳入剥离宿主绑定后的角色基础设定包",
+        })
+    if world_slice_names:
+        carried_domains.append("world_matter_and_traces")
+        carried_domains_detail.append({
+            "domain": "world_matter_and_traces",
+            "label_cn": "空间物质状态与生活痕迹",
+            "count": len(world_slice_names),
+            "files": list(world_slice_names),
+            "summary_cn": f"已纳入 {len(world_slice_names)} 份空间器物、交互痕迹与微气候切片",
+        })
+    if world_package_files:
+        carried_domains.append("custom_world_package")
+        carried_domains_detail.append({
+            "domain": "custom_world_package",
+            "label_cn": "自定义世界包",
+            "count": len(world_package_files),
+            "files": list(world_package_files),
+            "summary_cn": f"已纳入 {len(world_package_files)} 份自定义世界包声明文件（含售卖规格与物质档）",
+        })
+    carried_domains.append("tombstone_watermarks")
+    carried_domains_detail.append({
+        "domain": "tombstone_watermarks",
+        "label_cn": "遗忘与撤回墓碑水位",
+        "count": int(tombstone_count),
+        "summary_cn": f"强制随包携带墓碑防复活水位（当前共 {int(tombstone_count)} 条墓碑记录）",
+    })
+
+    intentionally_left_behind: list[dict[str, Any]] = [
+        {
+            "domain": "host_credentials_and_api_keys",
+            "title_cn": "宿主凭据、API 密钥与访问令牌",
+            "reason_cn": "绑定原宿主运行环境的安全密钥、连接串与本机绝对路径，跨机携带会造成泄漏或失配，一律剥离。",
+        },
+        {
+            "domain": "active_36b_permits_and_solo_partition",
+            "title_cn": "36B 活跃亲密许可与独处私密分区账本",
+            "reason_cn": "严格执行 36B 隐私与同意红线：即时许可不可跨环境延续，adult_intimacy 与 solo 私密分区账本永不随包导出。",
+        },
+        {
+            "domain": "transient_sockets_and_locks",
+            "title_cn": "瞬态套接字、文件锁与运行期队列句柄",
+            "reason_cn": "仅对原机器当次进程有效的瞬态运行状态，迁入新环境后按需重建。",
+        },
+    ]
+
+    if effective_mode == SUITCASE_RECORDS_ONLY:
+        intentionally_left_behind.append({
+            "domain": "world_objects",
+            "title_cn": "空间物质器物、交互痕迹、微气候与自定义世界包",
+            "reason_cn": "当前装箱档位为仅记录模式（records_only），空间器物切片与自定义世界包按约定留在原处。",
+        })
+    if effective_mode in (SUITCASE_RECORDS_ONLY, SUITCASE_RECORDS_AND_OBJECTS):
+        intentionally_left_behind.append({
+            "domain": "practice_habits",
+            "title_cn": "个人起居习惯、涌现回响与可组合身体节律",
+            "reason_cn": (
+                "当前装箱档位为仅记录模式（records_only），个人日常习惯与身体节律切片主动留在原处，去新环境从简重起。"
+                if effective_mode == SUITCASE_RECORDS_ONLY
+                else "当前装箱档位不携带习惯层（records_and_objects 或 keep_practice=False），个人习惯与节律留在原处。"
+            ),
+        })
+    if world_package_oversized and effective_mode != SUITCASE_RECORDS_ONLY:
+        intentionally_left_behind.append({
+            "domain": "oversized_custom_world_package",
+            "title_cn": "超限自定义世界包（超过 2 MB 便携上限）",
+            "reason_cn": "自定义世界包 JSON 总体积超过 2 MB 便携上限，未内联塞入便携旅行箱。",
+        })
+
+    capability_recheck_required: list[dict[str, Any]] = []
+    seen_recheck_ids: set[str] = set()
+    skills_map = carrier_sec.get("skills") if isinstance(carrier_sec.get("skills"), Mapping) else {}
+    fp = carrier_sec.get("carrier_fingerprint") if isinstance(carrier_sec.get("carrier_fingerprint"), Mapping) else {}
+    preview_ok = bool(fp.get("preview_available", True))
+
+    for raw_sid, raw_sk in skills_map.items():
+        if not isinstance(raw_sk, Mapping):
+            continue
+        sid = str(raw_sid)
+        sk_status = str(raw_sk.get("status") or SKILL_STATUS_VALIDATED)
+        requires_prev = bool(raw_sk.get("requires_preview", False))
+        if requires_prev and not preview_ok:
+            seen_recheck_ids.add(sid)
+            capability_recheck_required.append({
+                "item_id": sid,
+                "skill_id": sid,
+                "title_cn": str(raw_sk.get("title_cn") or sid),
+                "status": "HOST_LIVE_PREVIEW_UNAVAILABLE",
+                "reason_cn": "目标宿主缺少实时预览窗能力，需改用纯文本核对或在补齐预览能力后重新核验。",
+            })
+        elif sk_status in (
+            SKILL_STATUS_UNVALIDATED,
+            SKILL_STATUS_PENDING_REVERIFY,
+            SKILL_STATUS_SUSPENDED_LOSS,
+        ):
+            seen_recheck_ids.add(sid)
+            capability_recheck_required.append({
+                "item_id": sid,
+                "skill_id": sid,
+                "title_cn": str(raw_sk.get("title_cn") or sid),
+                "status": sk_status,
+                "reason_cn": "目标模型或宿主环境变更后，需通过小样试跑重新核验该技法是否仍保持原有表现。",
+            })
+
+    for loss_item in carrier_sec.get("loss_report") or ():
+        if not isinstance(loss_item, Mapping):
+            continue
+        lcode = str(loss_item.get("loss_code") or "").strip()
+        lid = str(loss_item.get("skill_id") or lcode).strip()
+        if lid and lid not in seen_recheck_ids:
+            seen_recheck_ids.add(lid)
+            capability_recheck_required.append({
+                "item_id": lid,
+                "skill_id": lid,
+                "title_cn": str(loss_item.get("summary_cn") or lid)[:60],
+                "status": str(loss_item.get("status") or lcode or SKILL_STATUS_PENDING_REVERIFY),
+                "reason_cn": str(loss_item.get("summary_cn") or "迁入目标载体后需重新核对可用性。"),
+            })
+
+    return {
+        "schema": MIGRATION_LOSS_MANIFEST_SCHEMA,
+        "profile_mode": profile_mode,
+        "effective_profile_mode": effective_mode,
+        "carried_domains": carried_domains,
+        "carried_domains_detail": carried_domains_detail,
+        "intentionally_left_behind": intentionally_left_behind,
+        "intentionally_left_behind_domains": [
+            row["domain"] for row in intentionally_left_behind
+        ],
+        "capability_recheck_required": capability_recheck_required,
+        "tombstone_anti_resurrection_enforced": True,
+    }
 
 
 def _build_export_suitcase_bundle(
@@ -3621,8 +6459,20 @@ def _build_export_suitcase_bundle(
             stripped_host_bindings.append("phone/adult_intimacy.json:session_permits")
     except OSError:
         pass
+    for solo_rel in (
+        (STATE_DIRNAME, "solo_partition.json"),
+        (STATE_DIRNAME, "adult_solo.json"),
+        ("solo",),
+    ):
+        solo_p = day_root.joinpath(*solo_rel)
+        try:
+            if solo_p.exists() or solo_p.is_symlink():
+                stripped_host_bindings.append(f"{'/'.join(solo_rel)}:36b_solo_excluded")
+        except OSError:
+            pass
 
     tombstones_map = _extract_tombstone_ledger_readonly(day_root, now_iso=now_iso)
+    vc_digests = _read_vc_sealed_digest_set_readonly(day_root)
     tombstone_ids = frozenset(tombstones_map.keys())
     tombstone_ledger = [tombstones_map[k] for k in sorted(tombstones_map.keys())]
 
@@ -3632,12 +6482,9 @@ def _build_export_suitcase_bundle(
         ("character_pack.json",),
         (STATE_DIRNAME, "character_pack.json"),
     ):
-        pack_path = day_root.joinpath(*pack_rel)
-        try:
-            if pack_path.is_symlink():
-                continue
-        except OSError:
+        if not _is_safe_nonsymlink_rel(day_root, pack_rel):
             continue
+        pack_path = day_root.joinpath(*pack_rel)
         ex_p, ok_p, p_doc = _read_json_safe(pack_path)
         if ex_p and ok_p and isinstance(p_doc, Mapping) and p_doc:
             cleaned_pack = _sanitize_suitcase_tree(
@@ -3646,7 +6493,9 @@ def _build_export_suitcase_bundle(
                 stripped_bindings=stripped_host_bindings,
                 strip_pack_host_sections=True,
             )
-            cleaned_pack = _scrub_tombstoned_ids_from_tree(cleaned_pack, tombstone_ids)
+            cleaned_pack = _scrub_tombstoned_ids_from_tree(
+                cleaned_pack, tombstone_ids, vc_sealed_digests=vc_digests
+            )
             if isinstance(cleaned_pack, dict):
                 sanitized_character_pack = cleaned_pack
                 break
@@ -3662,7 +6511,9 @@ def _build_export_suitcase_bundle(
             stripped_bindings=stripped_host_bindings,
             strip_pack_host_sections=False,
         )
-        cleaned_doc = _scrub_tombstoned_ids_from_tree(cleaned_doc, tombstone_ids)
+        cleaned_doc = _scrub_tombstoned_ids_from_tree(
+            cleaned_doc, tombstone_ids, vc_sealed_digests=vc_digests
+        )
         if isinstance(cleaned_doc, dict):
             if slice_file == "v02_recall_projection.json" and tombstones_map:
                 existing_ts = _normalize_tombstone_entries_from_any(
@@ -3680,10 +6531,61 @@ def _build_export_suitcase_bundle(
             "updated_at": now_iso,
         }
 
+    exported_world_slices: dict[str, dict[str, Any]] = {}
+    exported_world_package: dict[str, Any] = {}
+    wp_oversized = False
+    if effective_mode != SUITCASE_RECORDS_ONLY:
+        for w_file in SUITCASE_ALLOWED_WORLD_FILES:
+            raw_w_doc, _ = _read_world_slice_readonly_with_source(day_root, w_file)
+            if raw_w_doc is None:
+                continue
+            cleaned_w_doc = _sanitize_suitcase_tree(
+                raw_w_doc,
+                source_label=f"world/{w_file}",
+                stripped_bindings=stripped_host_bindings,
+                strip_pack_host_sections=False,
+            )
+            cleaned_w_doc = _scrub_tombstoned_ids_from_tree(
+                cleaned_w_doc, tombstone_ids, vc_sealed_digests=vc_digests
+            )
+            if isinstance(cleaned_w_doc, dict):
+                exported_world_slices[w_file] = cleaned_w_doc
+
+        raw_wp_docs, wp_oversized = _read_world_package_readonly(
+            day_root, stripped_bindings=stripped_host_bindings
+        )
+        for wp_fname, raw_wp_doc in raw_wp_docs.items():
+            cleaned_wp = _sanitize_suitcase_tree(
+                raw_wp_doc,
+                source_label=f"world-package/{wp_fname}",
+                stripped_bindings=stripped_host_bindings,
+                strip_pack_host_sections=False,
+            )
+            cleaned_wp = _scrub_tombstoned_ids_from_tree(
+                cleaned_wp, tombstone_ids, vc_sealed_digests=vc_digests
+            )
+            if isinstance(cleaned_wp, (dict, list)):
+                exported_world_package[wp_fname] = cleaned_wp
+
     included_items: list[str] = []
     if sanitized_character_pack is not None:
         included_items.append("character_pack_state.json")
     included_items.extend(exported_slices.keys())
+    included_items.extend(f"world/{w}" for w in exported_world_slices.keys())
+    included_items.extend(f"world-package/{p}" for p in exported_world_package.keys())
+
+    loss_manifest = _build_migration_loss_manifest(
+        profile_mode=raw_mode,
+        effective_mode=effective_mode,
+        has_phone_slices=bool(exported_slices),
+        phone_slice_count=len(exported_slices),
+        has_character_pack=(sanitized_character_pack is not None),
+        world_slice_names=list(exported_world_slices.keys()),
+        world_package_files=list(exported_world_package.keys()),
+        tombstone_count=len(tombstone_ledger),
+        carrier_sec=state.get("carrier_migration") or {},
+        world_package_oversized=wp_oversized,
+    )
 
     bundle: dict[str, Any] = {
         "schema": SUITCASE_BUNDLE_SCHEMA,
@@ -3697,7 +6599,12 @@ def _build_export_suitcase_bundle(
         "tombstone_ledger": tombstone_ledger,
         "included_items": included_items,
         "stripped_host_bindings": stripped_host_bindings,
+        "migration_loss_manifest": loss_manifest,
     }
+    if exported_world_slices:
+        bundle["world_slices"] = exported_world_slices
+    if exported_world_package:
+        bundle["world_package"] = exported_world_package
     bundle["bundle_sha256"] = compute_suitcase_bundle_sha256(bundle)
 
     summary = {
@@ -3705,13 +6612,19 @@ def _build_export_suitcase_bundle(
         "effective_profile_mode": effective_mode,
         "keep_practice": keep_practice,
         "slice_count": len(exported_slices),
+        "world_slice_count": len(exported_world_slices),
+        "world_package_file_count": len(exported_world_package),
+        "has_world_package": bool(exported_world_package),
         "included_count": len(included_items),
         "tombstone_count": len(tombstone_ledger),
         "stripped_count": len(stripped_host_bindings),
         "has_character_pack": sanitized_character_pack is not None,
+        "migration_loss_manifest": copy.deepcopy(loss_manifest),
         "bundle_sha256": bundle["bundle_sha256"],
         "summary_cn": (
             f"已按「{effective_mode}」打包便携旅行箱：包含 {len(exported_slices)} 份生活切片"
+            f"{f'、{len(exported_world_slices)} 份空间物质切片' if exported_world_slices else ''}"
+            f"{f'、{len(exported_world_package)} 份自建世界包文件' if exported_world_package else ''}"
             f"{'与角色设定包' if sanitized_character_pack is not None else ''}，"
             f"携带 {len(tombstone_ledger)} 条遗忘墓碑水位，剥离 {len(stripped_host_bindings)} 项宿主绑定或敏感凭据。"
         ),
@@ -3758,10 +6671,15 @@ def _assert_no_secret_keys_recursive(node: Any, *, depth: int = 0) -> None:
             _assert_no_secret_keys_recursive(elem, depth=depth + 1)
 
 
-def _validate_slice_filename_allowlist(slice_name: Any) -> str:
-    if not isinstance(slice_name, str) or not slice_name.strip():
-        raise V02ValidationError("FORBIDDEN_SLICE_FILENAME", "Slice filename must be a non-empty string")
-    fname = slice_name.strip()
+def _validate_allowlisted_filename(
+    raw_name: Any,
+    *,
+    allowed_set: frozenset[str],
+    kind_label: str,
+) -> str:
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        raise V02ValidationError("FORBIDDEN_SLICE_FILENAME", f"{kind_label} filename must be a non-empty string")
+    fname = raw_name.strip()
     if (
         "/" in fname
         or "\\" in fname
@@ -3772,24 +6690,59 @@ def _validate_slice_filename_allowlist(slice_name: Any) -> str:
     ):
         raise V02ValidationError(
             "FORBIDDEN_SLICE_FILENAME",
-            f"Path traversal or separator forbidden in slice filename: {slice_name!r}",
+            f"Path traversal or separator forbidden in {kind_label} filename: {raw_name!r}",
         )
-    if fname not in SUITCASE_ALLOWED_SLICE_SET:
+    if fname not in allowed_set:
         raise V02ValidationError(
             "FORBIDDEN_SLICE_FILENAME",
-            f"Slice filename is not in portable suitcase allowlist: {fname!r}",
+            f"{kind_label} filename is not in portable suitcase allowlist: {fname!r}",
         )
     return fname
 
 
-def _atomic_write_json_doc(target_path: Path, doc: Mapping[str, Any]) -> None:
-    if target_path.exists() and target_path.is_symlink():
+def _validate_slice_filename_allowlist(slice_name: Any) -> str:
+    return _validate_allowlisted_filename(
+        slice_name,
+        allowed_set=SUITCASE_ALLOWED_SLICE_SET,
+        kind_label="Slice",
+    )
+
+
+def _validate_world_slice_filename_allowlist(world_name: Any) -> str:
+    return _validate_allowlisted_filename(
+        world_name,
+        allowed_set=SUITCASE_ALLOWED_WORLD_FILE_SET,
+        kind_label="World slice",
+    )
+
+
+def _validate_world_package_filename_allowlist(pkg_name: Any) -> str:
+    return _validate_allowlisted_filename(
+        pkg_name,
+        allowed_set=SUITCASE_ALLOWED_WORLD_PACKAGE_FILE_SET,
+        kind_label="World package",
+    )
+
+
+def _assert_not_symlink_chain(day_root: Path, rel_parts: Sequence[str], *, label: str) -> None:
+    if day_root.is_symlink():
+        raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "day_root cannot be a symlink")
+    cur = day_root
+    for seg in rel_parts:
+        cur = cur / seg
+        if cur.is_symlink():
+            raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", f"Refusing symlink target: {label}")
+
+
+def _atomic_write_json_any(target_path: Path, payload_obj: Any) -> None:
+    if target_path.is_symlink():
         raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", f"Refusing to write symlink: {target_path.name}")
     parent = target_path.parent
-    if parent.exists() and parent.is_symlink():
+    if parent.is_symlink():
         raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "Refusing to write inside symlinked directory")
     parent.mkdir(parents=True, exist_ok=True)
-    encoded = (json.dumps(dict(doc), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    serializable = dict(payload_obj) if isinstance(payload_obj, Mapping) else list(payload_obj)
+    encoded = (json.dumps(serializable, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{target_path.stem}.",
         suffix=".tmp",
@@ -3809,12 +6762,46 @@ def _atomic_write_json_doc(target_path: Path, doc: Mapping[str, Any]) -> None:
         raise
 
 
+def _atomic_write_json_doc(target_path: Path, doc: Mapping[str, Any]) -> None:
+    _atomic_write_json_any(target_path, dict(doc))
+
+
+def _scrub_existing_json_file_if_present(
+    day_root: Path,
+    rel_parts: Sequence[str],
+    tombstone_ids: frozenset[str],
+    *,
+    allow_list_root: bool = False,
+    vc_sealed_digests: Optional[frozenset[str]] = None,
+) -> None:
+    if (not tombstone_ids and not vc_sealed_digests) or not _is_safe_nonsymlink_rel(day_root, rel_parts):
+        return
+    fpath = day_root.joinpath(*rel_parts)
+    if allow_list_root:
+        ex, ok, doc = _read_json_doc_or_list_safe(fpath)
+        if ex and ok and isinstance(doc, (Mapping, list)):
+            scrubbed = _scrub_tombstoned_ids_from_tree(
+                doc, tombstone_ids, vc_sealed_digests=vc_sealed_digests
+            )
+            if scrubbed != doc and isinstance(scrubbed, (Mapping, list)):
+                _atomic_write_json_any(fpath, scrubbed)
+    else:
+        ex, ok, doc = _read_json_safe(fpath)
+        if ex and ok and isinstance(doc, Mapping):
+            scrubbed = _scrub_tombstoned_ids_from_tree(
+                doc, tombstone_ids, vc_sealed_digests=vc_sealed_digests
+            )
+            if scrubbed != doc and isinstance(scrubbed, Mapping):
+                _atomic_write_json_doc(fpath, scrubbed)
+
+
 def _apply_import_suitcase(
     day_root: Path,
     *,
     state: dict[str, Any],
     payload: Mapping[str, Any],
     now_iso: str,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     raw_bundle = payload.get("bundle")
     if not isinstance(raw_bundle, Mapping):
@@ -3840,6 +6827,42 @@ def _apply_import_suitcase(
             raise V02ValidationError("INVALID_FIELDS", f"Slice {clean_sname!r} payload must be a JSON object")
         validated_slice_names.append(clean_sname)
 
+    raw_world_slices = raw_bundle.get("world_slices")
+    if raw_world_slices is None:
+        raw_world_slices = {}
+    if not isinstance(raw_world_slices, Mapping):
+        raise V02ValidationError("INVALID_FIELDS", "bundle.world_slices must be a JSON object")
+
+    validated_world_names: list[str] = []
+    for raw_wname, raw_wdoc in raw_world_slices.items():
+        clean_wname = _validate_world_slice_filename_allowlist(raw_wname)
+        if not isinstance(raw_wdoc, Mapping):
+            raise V02ValidationError("INVALID_FIELDS", f"World slice {clean_wname!r} payload must be a JSON object")
+        validated_world_names.append(clean_wname)
+
+    raw_world_package = raw_bundle.get("world_package")
+    if raw_world_package is None:
+        raw_world_package = {}
+    if not isinstance(raw_world_package, Mapping):
+        raise V02ValidationError("INVALID_FIELDS", "bundle.world_package must be a JSON object")
+
+    validated_wp_names: list[str] = []
+    wp_encoded_bytes = 0
+    for raw_pname, raw_pdoc in raw_world_package.items():
+        clean_pname = _validate_world_package_filename_allowlist(raw_pname)
+        if not isinstance(raw_pdoc, (Mapping, list)):
+            raise V02ValidationError(
+                "INVALID_FIELDS",
+                f"World package {clean_pname!r} payload must be a JSON object or array",
+            )
+        wp_encoded_bytes += len(json.dumps(raw_pdoc, ensure_ascii=False).encode("utf-8"))
+        if wp_encoded_bytes > SUITCASE_WORLD_PACKAGE_MAX_TOTAL_BYTES:
+            raise V02ValidationError(
+                "WORLD_PACKAGE_TOO_LARGE",
+                "bundle.world_package exceeds 2 MB portable size limit",
+            )
+        validated_wp_names.append(clean_pname)
+
     raw_char_pack = raw_bundle.get("character_pack")
     if raw_char_pack is not None and not isinstance(raw_char_pack, Mapping):
         raise V02ValidationError("INVALID_FIELDS", "bundle.character_pack must be a JSON object or null")
@@ -3856,17 +6879,32 @@ def _apply_import_suitcase(
             "Suitcase bundle_sha256 does not match canonical bundle contents",
         )
 
-    if day_root.exists() and day_root.is_symlink():
+    # Pre-flight symlink verification across all target paths before mutating disk
+    if day_root.is_symlink():
         raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "day_root cannot be a symlink")
+    _assert_not_symlink_chain(day_root, (STATE_DIRNAME,), label="phone")
     phone_dir = day_root / STATE_DIRNAME
-    if phone_dir.exists() and phone_dir.is_symlink():
-        raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "phone directory cannot be a symlink")
     for sname in validated_slice_names:
-        target_p = phone_dir / sname
-        if target_p.is_symlink():
-            raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", f"Target slice {sname!r} is a symlink")
-    if (phone_dir / "character_pack_state.json").is_symlink():
-        raise V02ValidationError("SYMLINK_TARGET_FORBIDDEN", "character_pack_state.json is a symlink")
+        _assert_not_symlink_chain(day_root, (STATE_DIRNAME, sname), label=f"phone/{sname}")
+        for mirror_rel in _SUITCASE_CANONICAL_RESTORE_MIRRORS.get(sname, ()):
+            _assert_not_symlink_chain(day_root, mirror_rel, label="/".join(mirror_rel))
+    _assert_not_symlink_chain(day_root, (STATE_DIRNAME, "character_pack_state.json"), label="phone/character_pack_state.json")
+
+    world_dir = day_root / "world"
+    if validated_world_names:
+        _assert_not_symlink_chain(day_root, ("world",), label="world")
+        for wname in validated_world_names:
+            _assert_not_symlink_chain(day_root, ("world", wname), label=f"world/{wname}")
+            if wname == "v08_microzone_ecology.json":
+                _assert_not_symlink_chain(day_root, ("world", "v08_microzone_state.json"), label="world/v08_microzone_state.json")
+            elif wname == "v08_open_affordance.json":
+                _assert_not_symlink_chain(day_root, (STATE_DIRNAME, "v08_living_traces.json"), label="phone/v08_living_traces.json")
+
+    wp_dir = day_root / "world-package"
+    if validated_wp_names:
+        _assert_not_symlink_chain(day_root, ("world-package",), label="world-package")
+        for pname in validated_wp_names:
+            _assert_not_symlink_chain(day_root, ("world-package", pname), label=f"world-package/{pname}")
 
     incoming_ts = _normalize_tombstone_entries_from_any(
         raw_bundle.get("tombstone_ledger"), default_now_iso=now_iso
@@ -3879,12 +6917,20 @@ def _apply_import_suitcase(
             )
         )
     local_ts = _extract_tombstone_ledger_readonly(day_root, now_iso=now_iso)
+    vc_digests = _read_vc_sealed_digest_set_readonly(day_root)
 
     merged_tombstones: dict[str, dict[str, Any]] = {}
     merged_tombstones.update(local_ts)
     merged_tombstones.update(incoming_ts)
     all_tombstone_ids = frozenset(merged_tombstones.keys())
     replayed_tombstone_ids = sorted(incoming_ts.keys())
+    vc_matched_on_import: set[str] = set()
+
+    if merged_tombstones:
+        _assert_not_symlink_chain(day_root, (STATE_DIRNAME, "v02_recall_projection.json"), label="phone/v02_recall_projection.json")
+
+    if dry_run:
+        return {}
 
     dummy_stripped: list[str] = []
     slices_to_write: dict[str, dict[str, Any]] = {}
@@ -3895,9 +6941,58 @@ def _apply_import_suitcase(
             stripped_bindings=dummy_stripped,
             strip_pack_host_sections=False,
         )
-        scrubbed_doc = _scrub_tombstoned_ids_from_tree(sanitized_doc, all_tombstone_ids)
+        scrubbed_doc = _scrub_tombstoned_ids_from_tree(
+            sanitized_doc,
+            all_tombstone_ids,
+            vc_sealed_digests=vc_digests,
+            matched_ids_out=vc_matched_on_import,
+        )
         if isinstance(scrubbed_doc, dict):
             slices_to_write[sname] = scrubbed_doc
+
+    world_slices_to_write: dict[str, dict[str, Any]] = {}
+    for wname in validated_world_names:
+        sanitized_w = _sanitize_suitcase_tree(
+            raw_world_slices[wname],
+            source_label=f"world/{wname}",
+            stripped_bindings=dummy_stripped,
+            strip_pack_host_sections=False,
+        )
+        scrubbed_w = _scrub_tombstoned_ids_from_tree(
+            sanitized_w,
+            all_tombstone_ids,
+            vc_sealed_digests=vc_digests,
+            matched_ids_out=vc_matched_on_import,
+        )
+        if isinstance(scrubbed_w, dict):
+            world_slices_to_write[wname] = scrubbed_w
+
+    wp_files_to_write: dict[str, Any] = {}
+    for pname in validated_wp_names:
+        sanitized_p = _sanitize_suitcase_tree(
+            raw_world_package[pname],
+            source_label=f"world-package/{pname}",
+            stripped_bindings=dummy_stripped,
+            strip_pack_host_sections=False,
+        )
+        scrubbed_p = _scrub_tombstoned_ids_from_tree(
+            sanitized_p,
+            all_tombstone_ids,
+            vc_sealed_digests=vc_digests,
+            matched_ids_out=vc_matched_on_import,
+        )
+        if isinstance(scrubbed_p, (dict, list)):
+            wp_files_to_write[pname] = scrubbed_p
+
+    for did in sorted(vc_matched_on_import):
+        if did not in merged_tombstones:
+            merged_tombstones[did] = {
+                "memory_id": did,
+                "reason": "vc_barrier_reconciled",
+                "tombstoned_at": now_iso,
+                "tombstoned": True,
+            }
+    all_tombstone_ids = frozenset(merged_tombstones.keys())
 
     # Always replay merged tombstones into v02_recall_projection.json when present or non-empty
     if "v02_recall_projection.json" in slices_to_write or merged_tombstones:
@@ -3908,7 +7003,9 @@ def _apply_import_suitcase(
                 "schema": "nyairo.v02.recall_projection.v1",
                 "memories": {},
             }
-            base_rp = _scrub_tombstoned_ids_from_tree(base_rp, all_tombstone_ids)
+            base_rp = _scrub_tombstoned_ids_from_tree(
+                base_rp, all_tombstone_ids, vc_sealed_digests=vc_digests
+            )
         base_rp["tombstones"] = copy.deepcopy(merged_tombstones)
         if isinstance(base_rp.get("clarity_counts"), dict):
             base_rp["clarity_counts"]["TOMBSTONED"] = len(merged_tombstones)
@@ -3919,28 +7016,66 @@ def _apply_import_suitcase(
     for sname in SUITCASE_ALLOWED_SLICE_FILES:
         if sname in slices_to_write:
             _atomic_write_json_doc(phone_dir / sname, slices_to_write[sname])
+            for mirror_rel in _SUITCASE_CANONICAL_RESTORE_MIRRORS.get(sname, ()):
+                _atomic_write_json_doc(day_root.joinpath(*mirror_rel), slices_to_write[sname])
             restored_slices.append(sname)
-        elif all_tombstone_ids:
-            # Scrub any existing allowlisted phone slice on disk so resurrected IDs cannot linger
-            existing_path = phone_dir / sname
-            if not existing_path.is_symlink():
-                ex_e, ok_e, doc_e = _read_json_safe(existing_path)
-                if ex_e and ok_e and isinstance(doc_e, Mapping):
-                    scrubbed_e = _scrub_tombstoned_ids_from_tree(doc_e, all_tombstone_ids)
-                    if scrubbed_e != doc_e and isinstance(scrubbed_e, Mapping):
-                        _atomic_write_json_doc(existing_path, scrubbed_e)
+        elif all_tombstone_ids or vc_digests:
+            # Scrub any existing allowlisted phone slice and its canonical companion on disk
+            _scrub_existing_json_file_if_present(
+                day_root, (STATE_DIRNAME, sname), all_tombstone_ids, vc_sealed_digests=vc_digests
+            )
+            for comp_rel in _SUITCASE_COMPANION_FALLBACKS.get(sname, ()):
+                _scrub_existing_json_file_if_present(
+                    day_root, comp_rel, all_tombstone_ids, vc_sealed_digests=vc_digests
+                )
 
-    # Sync tombstones into memory/v02_recall_projection_state.json if present (or if memory dir exists)
+    restored_world_slices: list[str] = []
+    for wname in SUITCASE_ALLOWED_WORLD_FILES:
+        if wname in world_slices_to_write:
+            wdoc = world_slices_to_write[wname]
+            _atomic_write_json_doc(world_dir / wname, wdoc)
+            if wname == "v08_microzone_ecology.json":
+                _atomic_write_json_doc(world_dir / "v08_microzone_state.json", wdoc)
+            elif (
+                wname == "v08_open_affordance.json"
+                and str(wdoc.get("schema_version") or "") == "world.v08.open_affordance.v1"
+            ):
+                _atomic_write_json_doc(phone_dir / "v08_living_traces.json", wdoc)
+            restored_world_slices.append(wname)
+        elif all_tombstone_ids or vc_digests:
+            for w_rel in _WORLD_SLICE_READ_CANDIDATES.get(wname, (("world", wname),)):
+                _scrub_existing_json_file_if_present(
+                    day_root, w_rel, all_tombstone_ids, vc_sealed_digests=vc_digests
+                )
+
+    restored_world_package_files: list[str] = []
+    for pname in SUITCASE_ALLOWED_WORLD_PACKAGE_FILES:
+        if pname in wp_files_to_write:
+            _atomic_write_json_any(wp_dir / pname, wp_files_to_write[pname])
+            restored_world_package_files.append(pname)
+        elif all_tombstone_ids or vc_digests:
+            _scrub_existing_json_file_if_present(
+                day_root,
+                ("world-package", pname),
+                all_tombstone_ids,
+                allow_list_root=True,
+                vc_sealed_digests=vc_digests,
+            )
+
+    # Sync tombstones into memory/v02_recall_projection_state.json if present
     mem_rp_path = day_root / "memory" / "v02_recall_projection_state.json"
-    if merged_tombstones and not mem_rp_path.is_symlink():
+    if (merged_tombstones or vc_digests) and _is_safe_nonsymlink_rel(day_root, ("memory", "v02_recall_projection_state.json")):
         ex_m, ok_m, doc_m = _read_json_safe(mem_rp_path)
         if ex_m and ok_m and isinstance(doc_m, Mapping):
-            scrubbed_m = _scrub_tombstoned_ids_from_tree(doc_m, all_tombstone_ids)
+            scrubbed_m = _scrub_tombstoned_ids_from_tree(
+                doc_m, all_tombstone_ids, vc_sealed_digests=vc_digests
+            )
             if isinstance(scrubbed_m, dict):
                 scrubbed_m["tombstones"] = copy.deepcopy(merged_tombstones)
                 scrubbed_m["updated_at"] = now_iso
                 _atomic_write_json_doc(mem_rp_path, scrubbed_m)
 
+    restored_char_pack = False
     if isinstance(raw_char_pack, Mapping) and raw_char_pack:
         sanitized_pack = _sanitize_suitcase_tree(
             raw_char_pack,
@@ -3948,10 +7083,13 @@ def _apply_import_suitcase(
             stripped_bindings=dummy_stripped,
             strip_pack_host_sections=True,
         )
-        sanitized_pack = _scrub_tombstoned_ids_from_tree(sanitized_pack, all_tombstone_ids)
+        sanitized_pack = _scrub_tombstoned_ids_from_tree(
+            sanitized_pack, all_tombstone_ids, vc_sealed_digests=vc_digests
+        )
         if isinstance(sanitized_pack, dict):
             _atomic_write_json_doc(phone_dir / "character_pack_state.json", sanitized_pack)
             restored_slices.append("character_pack_state.json")
+            restored_char_pack = True
 
     raw_target_model = payload.get("target_model_id")
     raw_target_carrier = payload.get("target_carrier_mode")
@@ -4007,6 +7145,42 @@ def _apply_import_suitcase(
         carrier_sec["loss_report"] = loss_report
         carrier_sec["last_migration_verdict"] = _compute_migration_verdict(carrier_sec)
 
+    carrier_sec["loss_report"] = [
+        entry
+        for entry in (carrier_sec.get("loss_report") or [])
+        if isinstance(entry, Mapping) and entry.get("loss_code") != "LEGACY_DELIVERY_MEANING_DOWNGRADED"
+    ]
+    raw_legacy_delivery = raw_bundle.get("legacy_delivery_records")
+    migrated_delivery_records: list[dict[str, Any]] = []
+    if raw_legacy_delivery is not None:
+        if isinstance(raw_legacy_delivery, (str, bytes)) or not isinstance(raw_legacy_delivery, Sequence):
+            raise V02ValidationError("INVALID_FIELDS", "bundle.legacy_delivery_records must be a JSON array")
+        for rec in raw_legacy_delivery:
+            if not isinstance(rec, Mapping):
+                raise V02ValidationError("INVALID_FIELDS", "Each legacy_delivery_records item must be an object")
+            msg_id = str(rec.get("msg_id") or "").strip()
+            src_ver = str(rec.get("meaning_version") or "unknown").strip() or "unknown"
+            raw_status = str(rec.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
+            verified_read = (src_ver == "delivery.v2" and bool(rec.get("verified_read_receipt")))
+            downgraded_status = raw_status if verified_read else "UNKNOWN"
+            migrated_delivery_records.append({
+                "msg_id": msg_id,
+                "source_meaning_version": src_ver,
+                "original_status": raw_status,
+                "downgraded_status": downgraded_status,
+                "treated_as_read": bool(verified_read),
+                "meaning_downgraded": not verified_read,
+                "migrated_at": now_iso,
+            })
+        if any(item["meaning_downgraded"] for item in migrated_delivery_records):
+            carrier_sec["loss_report"].append({
+                "loss_code": "LEGACY_DELIVERY_MEANING_DOWNGRADED",
+                "count": sum(1 for item in migrated_delivery_records if item["meaning_downgraded"]),
+                "downgraded_to": "UNKNOWN",
+                "recorded_at": now_iso,
+                "summary_cn": "旧语义版本投递回执已降级为 UNKNOWN，绝不按已读处理",
+            })
+
     skills_now = carrier_sec.get("skills") or {}
     pending_reverify_count = sum(
         1
@@ -4016,16 +7190,629 @@ def _apply_import_suitcase(
     final_loss_report = copy.deepcopy(carrier_sec.get("loss_report") or [])
 
     suit = state["suitcase_state"]
-    imp_mode = str(raw_bundle.get("effective_profile_mode") or raw_bundle.get("profile_mode") or "").strip()
+    suit["migrated_delivery_records"] = copy.deepcopy(migrated_delivery_records)
+    raw_imp_profile = str(raw_bundle.get("profile_mode") or "").strip()
+    imp_mode = str(raw_bundle.get("effective_profile_mode") or raw_imp_profile or SUITCASE_SELECTIVE_PRACTICE).strip()
     if imp_mode in SUITCASE_PROFILE_MODES:
         suit["profile_mode"] = imp_mode
+    else:
+        imp_mode = str(suit.get("profile_mode") or SUITCASE_SELECTIVE_PRACTICE)
+    declared_profile = raw_imp_profile if raw_imp_profile in SUITCASE_PROFILE_MODES else imp_mode
+
+    restored_phone_slice_only = [s for s in restored_slices if s != "character_pack_state.json"]
+    import_loss_manifest = _build_migration_loss_manifest(
+        profile_mode=declared_profile,
+        effective_mode=imp_mode,
+        has_phone_slices=bool(restored_phone_slice_only),
+        phone_slice_count=len(restored_phone_slice_only),
+        has_character_pack=restored_char_pack,
+        world_slice_names=restored_world_slices,
+        world_package_files=restored_world_package_files,
+        tombstone_count=len(merged_tombstones),
+        carrier_sec=carrier_sec,
+        world_package_oversized=False,
+    )
 
     return {
         "restored_slices": restored_slices,
+        "restored_world_slices": restored_world_slices,
+        "restored_world_package_files": restored_world_package_files,
         "replayed_tombstones": replayed_tombstone_ids,
+        "migrated_delivery_records": migrated_delivery_records,
         "pending_reverify_count": int(pending_reverify_count),
         "loss_report": final_loss_report,
+        "migration_loss_manifest": import_loss_manifest,
     }
+
+
+# ---------------------------------------------------------------------------
+# F-148: Two-Step Dignified Permanent Retirement (Zero Destructive Wipe)
+# ---------------------------------------------------------------------------
+
+
+def _count_collection_entries(doc: Mapping[str, Any], keys: Sequence[str]) -> int:
+    total = 0
+    for key in keys:
+        val = doc.get(key)
+        if isinstance(val, Mapping):
+            total += len(val)
+        elif isinstance(val, list):
+            total += len(val)
+    return total
+
+
+def _build_retirement_archive_manifest_readonly(
+    day_root: Path,
+    state: Mapping[str, Any],
+    *,
+    now_iso: str,
+) -> dict[str, Any]:
+    """Compute a 100% read-only summary of memories/keepsakes/skills before sealing (zero deletes)."""
+    memories_count = 0
+    for rel in (
+        ("phone", "v02_recall_projection.json"),
+        ("memory", "v02_recall_projection_state.json"),
+    ):
+        ex, ok, doc = _read_json_safe(day_root.joinpath(*rel))
+        if ex and ok and doc:
+            memories_count = max(
+                memories_count,
+                _count_collection_entries(doc, ("memories", "items", "direct_recall_items")),
+            )
+
+    keepsakes_count = 0
+    ex_ks, ok_ks, doc_ks = _read_json_safe(day_root / "phone" / "window_keepsakes.json")
+    if ex_ks and ok_ks and doc_ks:
+        keepsakes_count += _count_collection_entries(doc_ks, ("pins", "keepsakes", "slow_letter_drafts"))
+    ex_gl, ok_gl, doc_gl = _read_json_safe(day_root / "phone" / "longterm_gifts_lantern.json")
+    if ex_gl and ok_gl and doc_gl:
+        keepsakes_count += _count_collection_entries(doc_gl, ("shared_gifts", "later_reflections"))
+
+    carrier_skills = (state.get("carrier_migration") or {}).get("skills")
+    skills_count = len(carrier_skills) if isinstance(carrier_skills, Mapping) else 0
+    ex_asp, ok_asp, doc_asp = _read_json_safe(
+        day_root / "state" / "v02_autobiography_skill_provenance.json"
+    )
+    if ex_asp and ok_asp and doc_asp:
+        sk_sec = doc_asp.get("skills")
+        if isinstance(sk_sec, Mapping) and isinstance(sk_sec.get("releases"), Mapping):
+            skills_count += len(sk_sec["releases"])
+
+    audio_notes_count = 0
+    ex_cm, ok_cm, doc_cm = _read_json_safe(day_root / "phone" / "v02_crossmodal.json")
+    if ex_cm and ok_cm and doc_cm and isinstance(doc_cm.get("audio_notes"), list):
+        audio_notes_count = len(doc_cm["audio_notes"])
+
+    phone_slice_files_count = 0
+    phone_dir = day_root / "phone"
+    if not phone_dir.is_symlink() and phone_dir.is_dir():
+        try:
+            phone_slice_files_count = sum(
+                1 for p in phone_dir.iterdir() if p.suffix == ".json" and p.is_file() and not p.is_symlink()
+            )
+        except OSError:
+            phone_slice_files_count = 0
+
+    return {
+        "memories_count": int(memories_count),
+        "keepsakes_count": int(keepsakes_count),
+        "skills_count": int(skills_count),
+        "audio_notes_count": int(audio_notes_count),
+        "phone_slice_files_count": int(phone_slice_files_count),
+        "preserved_read_only": True,
+        "destructive_wipe_performed": False,
+        "computed_at": now_iso,
+    }
+
+
+def _project_retirement_status(state: Mapping[str, Any]) -> dict[str, Any]:
+    raw_ret = state.get("retirement")
+    ret = dict(raw_ret) if isinstance(raw_ret, Mapping) else _default_retirement_state()
+    status = str(ret.get("status") or RETIREMENT_STATUS_ACTIVE)
+    if status not in RETIREMENT_STATUSES:
+        status = RETIREMENT_STATUS_ACTIVE
+    return {
+        "status": status,
+        "prepared_at": ret.get("prepared_at"),
+        "sealed_at": ret.get("sealed_at"),
+        "reason_cn": str(ret.get("reason_cn") or ""),
+        "farewell_note_cn": str(ret.get("farewell_note_cn") or ""),
+        "confirmation_phrase": ret.get("confirmation_phrase"),
+        "archive_manifest": copy.deepcopy(ret.get("archive_manifest")),
+        "destructive_wipe_performed": False,
+    }
+
+
+def _apply_prepare_dignified_retirement(
+    day_root: Path,
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str,
+    now_iso: str,
+) -> dict[str, Any]:
+    ret = state.setdefault("retirement", _default_retirement_state())
+    if str(ret.get("status") or "") == RETIREMENT_STATUS_SEALED:
+        raise V02ConflictError("ALREADY_SEALED", "Instance is already retired and archive-sealed")
+
+    raw_reason = payload.get("reason_cn")
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        raise V02ValidationError("INVALID_FIELDS", "reason_cn must be a string")
+    reason_cn = str(raw_reason or "").strip()[:200]
+
+    raw_farewell = payload.get("farewell_note_cn")
+    if raw_farewell is not None and not isinstance(raw_farewell, str):
+        raise V02ValidationError("INVALID_FIELDS", "farewell_note_cn must be a string")
+    farewell_note_cn = str(raw_farewell or "").strip()[:400]
+
+    manifest = _build_retirement_archive_manifest_readonly(day_root, state, now_iso=now_iso)
+    ret["status"] = RETIREMENT_STATUS_PENDING
+    ret["prepared_at"] = now_iso
+    ret["sealed_at"] = None
+    ret["reason_cn"] = reason_cn
+    ret["farewell_note_cn"] = farewell_note_cn
+    ret["confirmation_phrase"] = RETIREMENT_CONFIRMATION_PHRASE_CN
+    ret["archive_manifest"] = manifest
+    ret["prepared_by"] = actor_side
+    ret["destructive_wipe_performed"] = False
+    return _project_retirement_status(state)
+
+
+def _apply_cancel_dignified_retirement(state: dict[str, Any]) -> dict[str, Any]:
+    ret = state.setdefault("retirement", _default_retirement_state())
+    if str(ret.get("status") or "") == RETIREMENT_STATUS_SEALED:
+        raise V02ConflictError("ALREADY_SEALED", "Cannot cancel an already sealed retirement archive")
+    state["retirement"] = _default_retirement_state()
+    return _project_retirement_status(state)
+
+
+def _apply_confirm_dignified_retirement(
+    day_root: Path,
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str,
+    now_dt: datetime,
+    now_iso: str,
+) -> dict[str, Any]:
+    ret = state.setdefault("retirement", _default_retirement_state())
+    cur_status = str(ret.get("status") or RETIREMENT_STATUS_ACTIVE)
+    if cur_status == RETIREMENT_STATUS_SEALED:
+        raise V02ConflictError("ALREADY_SEALED", "Instance is already retired and archive-sealed")
+    if cur_status != RETIREMENT_STATUS_PENDING:
+        raise V02ConflictError(
+            "RETIREMENT_NOT_PREPARED",
+            "Must call prepare_dignified_retirement before confirming dignified retirement",
+        )
+
+    raw_phrase = payload.get("confirmation_phrase")
+    expected_phrase = str(ret.get("confirmation_phrase") or RETIREMENT_CONFIRMATION_PHRASE_CN)
+    if not isinstance(raw_phrase, str) or raw_phrase.strip() != expected_phrase:
+        raise V02ValidationError(
+            "CONFIRMATION_PHRASE_MISMATCH",
+            "Confirmation phrase does not match the prepared dignified retirement phrase",
+        )
+
+    raw_farewell = payload.get("farewell_note_cn")
+    if raw_farewell is not None:
+        if not isinstance(raw_farewell, str):
+            raise V02ValidationError("INVALID_FIELDS", "farewell_note_cn must be a string")
+        cleaned_farewell = raw_farewell.strip()[:400]
+        if cleaned_farewell:
+            ret["farewell_note_cn"] = cleaned_farewell
+
+    manifest = _build_retirement_archive_manifest_readonly(day_root, state, now_iso=now_iso)
+    ret["status"] = RETIREMENT_STATUS_SEALED
+    ret["sealed_at"] = now_iso
+    ret["sealed_by"] = actor_side
+    ret["archive_manifest"] = manifest
+    ret["destructive_wipe_performed"] = False
+
+    _apply_set_budget_mode(
+        state,
+        {
+            "mode": "DORMANT_NO_COGNITION",
+            "reason_cn": "已温和只读封存归档，暂停自主认知，全部纪念与记忆完好保留",
+        },
+        now_dt=now_dt,
+        now_iso=now_iso,
+        _allow_sealed_transition=True,
+    )
+    return _project_retirement_status(state)
+
+
+# ---------------------------------------------------------------------------
+# F-113: Opt-In Proactive Outbound Queue & Anti-Harassment Gate
+# ---------------------------------------------------------------------------
+
+
+def _parse_hm_minutes(raw: Any, field_name: str) -> tuple[str, int]:
+    if not isinstance(raw, str):
+        raise V02ValidationError("INVALID_FIELDS", f"{field_name} must be HH:MM string")
+    trimmed = raw.strip()
+    m = _HM_TIME_RE.match(trimmed)
+    if not m:
+        raise V02ValidationError("INVALID_FIELDS", f"{field_name} must be valid 24h HH:MM, got {raw!r}")
+    hours = int(m.group(1))
+    mins = int(m.group(2))
+    return f"{hours:02d}:{mins:02d}", hours * 60 + mins
+
+
+def _is_inside_quiet_hours_east8(
+    now_dt: datetime,
+    quiet_start_hm: str,
+    quiet_end_hm: str,
+) -> bool:
+    _, start_m = _parse_hm_minutes(quiet_start_hm, "quiet_start_hm")
+    _, end_m = _parse_hm_minutes(quiet_end_hm, "quiet_end_hm")
+    if start_m == end_m:
+        return False
+    local_dt = now_dt.astimezone(DEFAULT_TZ)
+    cur_m = local_dt.hour * 60 + local_dt.minute
+    if start_m < end_m:
+        return start_m <= cur_m < end_m
+    return cur_m >= start_m or cur_m < end_m
+
+
+def _project_proactive_outbound(state: Mapping[str, Any], *, now_dt: datetime) -> dict[str, Any]:
+    raw_po = state.get("proactive_outbound")
+    po = dict(raw_po) if isinstance(raw_po, Mapping) else _default_proactive_outbound_state()
+    local_today = now_dt.astimezone(DEFAULT_TZ).date().isoformat()
+    sent_today = (
+        int(po.get("sent_today_count") or 0)
+        if po.get("sent_today_date") == local_today
+        else 0
+    )
+    return {
+        "enabled": bool(po.get("enabled", False)),
+        "quiet_start_hm": str(po.get("quiet_start_hm") or PROACTIVE_DEFAULT_QUIET_START_HM),
+        "quiet_end_hm": str(po.get("quiet_end_hm") or PROACTIVE_DEFAULT_QUIET_END_HM),
+        "daily_cap": int(po.get("daily_cap") or PROACTIVE_DEFAULT_DAILY_CAP),
+        "min_cooldown_minutes": int(po.get("min_cooldown_minutes") or PROACTIVE_DEFAULT_COOLDOWN_MINUTES),
+        "sent_today_count": sent_today,
+        "last_sent_at": po.get("last_sent_at"),
+        "pending_queue": copy.deepcopy(list(po.get("pending_queue") or [])[-PROACTIVE_MAX_PENDING_QUEUE:]),
+        "recent_log": copy.deepcopy(list(po.get("recent_log") or [])[-PROACTIVE_MAX_RECENT_LOG:]),
+    }
+
+
+def _load_v03_outbound_bridge() -> Any:
+    try:
+        from components.world.scripts import v03_economy_illness_bridge as _v03_eco
+        return _v03_eco
+    except ImportError:  # pragma: no cover
+        _world_scripts = str(Path(__file__).resolve().parents[2] / "world" / "scripts")
+        if _world_scripts not in sys.path:
+            sys.path.insert(0, _world_scripts)
+        try:
+            import v03_economy_illness_bridge as _v03_eco  # type: ignore[no-redef]
+            return _v03_eco
+        except ImportError:
+            return None
+
+
+def _map_f113_channel_to_v03(channel_hint: str, v03_eco: Any) -> str:
+    clean = str(channel_hint or "").strip()
+    if clean in getattr(v03_eco, "PROACTIVE_CHANNELS", ()):
+        return clean
+    if clean.lower() in ("cross_channel", "ping", "wechat", "telegram"):
+        return "cross_channel_ping"
+    return "desktop_note"
+
+
+def _apply_configure_proactive_outbound(
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str,
+    now_dt: datetime,
+    day_root: Optional[Path] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    if actor_side != "partner":
+        raise V02PermissionError(
+            "FORBIDDEN_ACTOR_SIDE",
+            "Only partner can configure proactive outbound opt-in settings",
+        )
+    po = state.setdefault("proactive_outbound", _default_proactive_outbound_state())
+
+    if "enabled" in payload:
+        if not isinstance(payload["enabled"], bool):
+            raise V02ValidationError("INVALID_FIELDS", "enabled must be a boolean")
+        po["enabled"] = payload["enabled"]
+    if "quiet_start_hm" in payload and payload["quiet_start_hm"] is not None:
+        norm_s, _ = _parse_hm_minutes(payload["quiet_start_hm"], "quiet_start_hm")
+        po["quiet_start_hm"] = norm_s
+    if "quiet_end_hm" in payload and payload["quiet_end_hm"] is not None:
+        norm_e, _ = _parse_hm_minutes(payload["quiet_end_hm"], "quiet_end_hm")
+        po["quiet_end_hm"] = norm_e
+    if "daily_cap" in payload and payload["daily_cap"] is not None:
+        po["daily_cap"] = _strict_non_bool_int(
+            payload["daily_cap"],
+            field_name="daily_cap",
+            minimum=PROACTIVE_MIN_DAILY_CAP,
+            maximum=PROACTIVE_MAX_DAILY_CAP,
+        )
+    if "min_cooldown_minutes" in payload and payload["min_cooldown_minutes"] is not None:
+        po["min_cooldown_minutes"] = _strict_non_bool_int(
+            payload["min_cooldown_minutes"],
+            field_name="min_cooldown_minutes",
+            minimum=PROACTIVE_MIN_COOLDOWN_MINUTES,
+            maximum=PROACTIVE_MAX_COOLDOWN_MINUTES,
+        )
+
+    # When v03_ecology.json is not yet initialized and partner explicitly sets
+    # min_cooldown_minutes in F-113, initialize the unified outbound policy
+    # with partner's explicit F-113 preferences while preserving existing v03
+    # 48h policy untouched whenever v03_ecology.json already exists.
+    if (
+        day_root is not None
+        and "min_cooldown_minutes" in payload
+        and payload.get("min_cooldown_minutes") is not None
+    ):
+        v03_eco = _load_v03_outbound_bridge()
+        if v03_eco is not None:
+            eco_path = v03_eco.ecology_state_path(day_root)
+            if not eco_path.exists():
+                try:
+                    v03_eco.apply_v03_ecology_command(
+                        day_root,
+                        {
+                            "action": "configure_outbound_quota",
+                            "daily_proactive_quota": int(po["daily_cap"]),
+                            "quiet_start_hhmm": str(po["quiet_start_hm"]),
+                            "quiet_end_hhmm": str(po["quiet_end_hm"]),
+                            "min_outbound_interval_hours": int(po["min_cooldown_minutes"]) // 60,
+                        },
+                        actor_side="partner",
+                        now_iso=now_iso or now_dt.isoformat(timespec="seconds"),
+                    )
+                except Exception:
+                    pass
+
+    return _project_proactive_outbound(state, now_dt=now_dt)
+
+
+def _apply_enqueue_proactive_message(
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str,
+    now_dt: datetime,
+    now_iso: str,
+    day_root: Optional[Path] = None,
+) -> dict[str, Any]:
+    if actor_side != "subject":
+        raise V02PermissionError(
+            "FORBIDDEN_ACTOR_SIDE",
+            "Only subject can enqueue proactive outbound messages",
+        )
+
+    raw_msg = payload.get("message_cn")
+    if not isinstance(raw_msg, str) or not raw_msg.strip() or len(raw_msg.strip()) > 280:
+        raise V02ValidationError("INVALID_FIELDS", "message_cn must be a non-empty string (<=280 chars)")
+    message_cn = raw_msg.strip()
+
+    raw_reason = payload.get("reason_cn")
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        raise V02ValidationError("INVALID_FIELDS", "reason_cn must be a string")
+    reason_cn = str(raw_reason or "").strip()[:160]
+
+    raw_channel = payload.get("channel_hint")
+    if raw_channel is not None and not isinstance(raw_channel, str):
+        raise V02ValidationError("INVALID_FIELDS", "channel_hint must be a string")
+    channel_hint = str(raw_channel or "").strip()[:40] or "pocket_phone"
+
+    # Strict anti-harassment gate check order:
+    # (a) not RETIRED_ARCHIVE_SEALED (409 INSTANCE_RETIRED)
+    ret_status = str((state.get("retirement") or {}).get("status") or RETIREMENT_STATUS_ACTIVE)
+    if ret_status == RETIREMENT_STATUS_SEALED:
+        raise V02ConflictError("INSTANCE_RETIRED", "Instance is retired and archive-sealed")
+
+    po = state.setdefault("proactive_outbound", _default_proactive_outbound_state())
+
+    # (b) enabled is True (403 PROACTIVE_DISABLED)
+    if not bool(po.get("enabled", False)):
+        raise V02PermissionError("PROACTIVE_DISABLED", "Proactive outbound is disabled by partner")
+
+    # (c) runtime mode not DORMANT_NO_COGNITION (409 DORMANT_BLOCKED)
+    cur_mode = str((state.get("mode_config") or {}).get("mode") or MODE_NORMAL)
+    if cur_mode == MODE_DORMANT:
+        raise V02ConflictError("DORMANT_BLOCKED", "Runtime mode is DORMANT_NO_COGNITION")
+
+    # (d) current East-8 HH:MM not inside quiet hours (409 QUIET_HOURS_ACTIVE)
+    q_start = str(po.get("quiet_start_hm") or PROACTIVE_DEFAULT_QUIET_START_HM)
+    q_end = str(po.get("quiet_end_hm") or PROACTIVE_DEFAULT_QUIET_END_HM)
+    if _is_inside_quiet_hours_east8(now_dt, q_start, q_end):
+        raise V02ConflictError(
+            "QUIET_HOURS_ACTIVE",
+            f"Current East-8 time is inside quiet hours ({q_start}-{q_end})",
+        )
+
+    # (e) sent_today_count < daily_cap (429 DAILY_CAP_REACHED)
+    local_today = now_dt.astimezone(DEFAULT_TZ).date().isoformat()
+    sent_today = (
+        int(po.get("sent_today_count") or 0)
+        if po.get("sent_today_date") == local_today
+        else 0
+    )
+    daily_cap = int(po.get("daily_cap") or PROACTIVE_DEFAULT_DAILY_CAP)
+    if sent_today >= daily_cap:
+        raise V02RuntimeMigrationError(
+            429,
+            "DAILY_CAP_REACHED",
+            f"Daily proactive outbound cap reached ({sent_today}/{daily_cap})",
+        )
+
+    # (f) elapsed >= min_cooldown_minutes (429 COOLDOWN_ACTIVE)
+    last_sent_dt = _parse_iso(po.get("last_sent_at"))
+    min_cd = int(po.get("min_cooldown_minutes") or PROACTIVE_DEFAULT_COOLDOWN_MINUTES)
+    if last_sent_dt is not None:
+        elapsed_sec = (now_dt - last_sent_dt).total_seconds()
+        if elapsed_sec < float(min_cd * 60):
+            raise V02RuntimeMigrationError(
+                429,
+                "COOLDOWN_ACTIVE",
+                f"Proactive outbound cooldown active (min {min_cd} minutes)",
+            )
+
+    seq = int(po.get("next_msg_seq") or 1)
+    msg_id = f"pmsg_{seq:04d}"
+
+    # Stage 3 Bridge: enforce unified 7-step anti-harassment gate and enqueue
+    # into v03_economy_illness_bridge with delivery_mode="honest_outbox".
+    v03_outbound_id: Optional[str] = None
+    v03_outbox_status: Optional[str] = None
+    v03_channel: Optional[str] = None
+    if day_root is not None:
+        v03_eco = _load_v03_outbound_bridge()
+        if v03_eco is not None:
+            v03_channel = _map_f113_channel_to_v03(channel_hint, v03_eco)
+            raw_op = payload.get("operation_key")
+            if isinstance(raw_op, str) and raw_op.strip():
+                safe_op = re.sub(r"[^A-Za-z0-9._:\-]+", "_", raw_op.strip()).strip("_")
+                bridge_op_key = f"f113_{safe_op}"[:120]
+            else:
+                safe_ts = re.sub(r"[^A-Za-z0-9._:\-]+", "_", now_iso)
+                bridge_op_key = f"f113_{msg_id}_{safe_ts}"[:120]
+            try:
+                v03_res = v03_eco.attempt_proactive_outbound(
+                    day_root,
+                    text=message_cn,
+                    channel=v03_channel,
+                    reason_kind="genuine_life_share",
+                    delivery_mode="honest_outbox",
+                    operation_key=bridge_op_key,
+                    now_iso=now_iso,
+                )
+            except v03_eco.V03EcologyError as exc:
+                raise V02ConflictError(
+                    exc.reason_code,
+                    f"Blocked by unified 7-step proactive gate: {exc.reason_code}",
+                    details=exc.details,
+                ) from exc
+            rcpt = v03_res.get("receipt") if isinstance(v03_res.get("receipt"), Mapping) else {}
+            v03_outbound_id = str(rcpt.get("outbound_id") or "") or None
+            v03_outbox_status = str(rcpt.get("outbound_status") or "APPROVED_FOR_DELIVERY")
+
+    po["next_msg_seq"] = seq + 1
+    item: dict[str, Any] = {
+        "message_id": msg_id,
+        "message_cn": message_cn,
+        "reason_cn": reason_cn,
+        "channel_hint": channel_hint,
+        "status": "QUEUED",
+        "delivery_mode": "honest_outbox",
+        "created_at": now_iso,
+    }
+    if v03_outbound_id is not None:
+        item["v03_outbound_id"] = v03_outbound_id
+        item["v03_channel"] = v03_channel
+        item["outbox_status"] = v03_outbox_status or "APPROVED_FOR_DELIVERY"
+    queue = list(po.get("pending_queue") or [])
+    queue.append(item)
+    po["pending_queue"] = queue[-PROACTIVE_MAX_PENDING_QUEUE:]
+    po["sent_today_date"] = local_today
+    po["sent_today_count"] = sent_today + 1
+    po["last_sent_at"] = now_iso
+
+    rlog = list(po.get("recent_log") or [])
+    rlog.append(copy.deepcopy(item))
+    po["recent_log"] = rlog[-PROACTIVE_MAX_RECENT_LOG:]
+    return copy.deepcopy(item)
+
+
+def _apply_acknowledge_or_cancel_proactive_message(
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str,
+    now_iso: str,
+    day_root: Optional[Path] = None,
+) -> dict[str, Any]:
+    if actor_side != "partner":
+        raise V02PermissionError(
+            "FORBIDDEN_ACTOR_SIDE",
+            "Only partner can acknowledge or cancel proactive outbound messages",
+        )
+    raw_mid = payload.get("message_id")
+    if not isinstance(raw_mid, str) or not raw_mid.strip():
+        raise V02ValidationError("INVALID_FIELDS", "message_id must be a non-empty string")
+    message_id = raw_mid.strip()
+
+    raw_dec = payload.get("decision")
+    if not isinstance(raw_dec, str) or raw_dec.strip().lower() not in ("acknowledge", "cancel"):
+        raise V02ValidationError("INVALID_FIELDS", "decision must be 'acknowledge' or 'cancel'")
+    decision = raw_dec.strip().lower()
+
+    po = state.setdefault("proactive_outbound", _default_proactive_outbound_state())
+    queue = list(po.get("pending_queue") or [])
+    target: Optional[dict[str, Any]] = None
+    for entry in queue:
+        if isinstance(entry, dict) and entry.get("message_id") == message_id:
+            target = entry
+            break
+    if target is None:
+        raise V02RuntimeMigrationError(
+            404,
+            "PROACTIVE_MESSAGE_NOT_FOUND",
+            f"Proactive message not found: {message_id!r}",
+        )
+    if str(target.get("status") or "") != "QUEUED":
+        raise V02ConflictError(
+            "MESSAGE_ALREADY_DECIDED",
+            f"Proactive message {message_id!r} is already {target.get('status')!r}",
+        )
+
+    new_status = "ACKNOWLEDGED" if decision == "acknowledge" else "CANCELLED"
+    target["status"] = new_status
+    target["decided_at"] = now_iso
+    target["decided_by"] = "partner"
+    po["pending_queue"] = queue[-PROACTIVE_MAX_PENDING_QUEUE:]
+
+    if day_root is not None and target.get("v03_outbound_id"):
+        v03_eco = _load_v03_outbound_bridge()
+        if v03_eco is not None:
+            out_id = str(target["v03_outbound_id"])
+            try:
+                if decision == "acknowledge":
+                    v03_eco.ack_proactive_outbound_delivery(
+                        day_root,
+                        outbound_id=out_id,
+                        action="ack_read",
+                        operation_key=f"f113_ack_{message_id}"[:120],
+                        now_iso=now_iso,
+                    )
+                    target["outbox_status"] = "READ"
+                else:
+                    v03_eco.apply_v03_ecology_command(
+                        day_root,
+                        {
+                            "action": "withdraw_pending_outbound",
+                            "outbound_id": out_id,
+                            "operation_key": f"f113_cxl_{message_id}"[:120],
+                        },
+                        actor_side="subject",
+                        now_iso=now_iso,
+                    )
+                    target["outbox_status"] = "WITHDRAWN"
+            except Exception:
+                pass
+
+    rlog = list(po.get("recent_log") or [])
+    updated_log = False
+    for log_item in rlog:
+        if isinstance(log_item, dict) and log_item.get("message_id") == message_id:
+            log_item["status"] = new_status
+            log_item["decided_at"] = now_iso
+            log_item["decided_by"] = "partner"
+            if "outbox_status" in target:
+                log_item["outbox_status"] = target["outbox_status"]
+            updated_log = True
+    if not updated_log:
+        rlog.append(copy.deepcopy(target))
+    po["recent_log"] = rlog[-PROACTIVE_MAX_RECENT_LOG:]
+    return copy.deepcopy(target)
 
 
 def build_runtime_migration_context_summary(
@@ -4082,6 +7869,9 @@ def build_runtime_migration_context_summary(
         "last_migration_verdict": card["last_migration_verdict"],
         "unvalidated_skill_ids": unvalidated_ids,
         "paused_capability_ids": paused_ids,
+        "retirement_status": proj["retirement_status"]["status"],
+        "retired_sealed": proj["retirement_status"]["status"] == RETIREMENT_STATUS_SEALED,
+        "proactive_outbound_enabled": bool(proj["proactive_outbound"]["enabled"]),
         "headline_cn": card["headline_cn"],
         "context_hint_cn": " ".join(hints).strip(),
         "llm_calls": 0,
@@ -4090,11 +7880,22 @@ def build_runtime_migration_context_summary(
 
 __all__ = [
     "BUDGET_MODE_ALIASES",
+    "CHATLESS_LIFE_REVIEW_SCHEMA",
     "DEFAULT_CARRIER_FINGERPRINT",
     "DEFAULT_COALESCE_WINDOW_SECONDS",
     "DEFAULT_DAILY_WAKE_CAP",
+    "DEFAULT_DEVICE_LEASE_SECONDS",
     "DEFAULT_HOURLY_WAKE_CAP",
     "DEFAULT_WAKE_TICKET_EST_TOKENS",
+    "DECAY_MONITOR_CATEGORIES_22",
+    "DECAY_MONITOR_GROUPS",
+    "DECAY_MONITOR_SCHEMA",
+    "DECAY_MONITOR_STATUSES",
+    "DECAY_STATUS_ABSENT_BASELINE",
+    "DECAY_STATUS_ACTIVE",
+    "DECAY_STATUS_DORMANT",
+    "DECAY_STATUS_NEEDS_REANCHOR",
+    "DEVICE_PRESENCE_SCHEMA",
     "ENDPOINT_PATH",
     "FORBIDDEN_FOREIGN_AND_IDENTITY_KEYS",
     "FORBIDDEN_SUITCASE_SECRET_KEYS",
@@ -4104,11 +7905,32 @@ __all__ = [
     "HEALTH_QUIET_HEALTHY",
     "HEALTH_STALLED_OR_DEGRADED",
     "HEALTH_STATES",
+    "MAX_DEVICE_HANDOFF_HISTORY",
+    "MAX_DEVICE_LEASE_SECONDS",
+    "MIGRATION_LOSS_MANIFEST_SCHEMA",
     "MIGRATION_VERDICTS",
     "MODE_DORMANT",
     "MODE_LOW_BUDGET",
     "MODE_NORMAL",
+    "PROACTIVE_DEFAULT_COOLDOWN_MINUTES",
+    "PROACTIVE_DEFAULT_DAILY_CAP",
+    "PROACTIVE_DEFAULT_QUIET_END_HM",
+    "PROACTIVE_DEFAULT_QUIET_START_HM",
+    "PROACTIVE_MAX_COOLDOWN_MINUTES",
+    "PROACTIVE_MAX_DAILY_CAP",
+    "PROACTIVE_MAX_PENDING_QUEUE",
+    "PROACTIVE_MIN_COOLDOWN_MINUTES",
+    "PROACTIVE_MIN_DAILY_CAP",
     "REDACTED_PRIVATE_DRAFT_LABEL",
+    "RETIREMENT_CONFIRMATION_PHRASE_CN",
+    "RETIREMENT_STATUSES",
+    "RETIREMENT_STATUS_ACTIVE",
+    "RETIREMENT_STATUS_PENDING",
+    "RETIREMENT_STATUS_SEALED",
+    "RUNTIME_GOVERNANCE_FILENAME",
+    "RUNTIME_GOVERNANCE_SCHEMA",
+    "VC_AUTHORITY_SCHEMA",
+    "VC_AUTHORITY_WATERMARK_REL_PATH",
     "WAKE_TICKET_SCHEMA",
     "WAKE_TICKET_STATUSES",
     "WAKE_TICKET_STATUS_EXPIRED",
@@ -4122,6 +7944,8 @@ __all__ = [
     "STATE_DIRNAME",
     "STATE_FILENAME",
     "SUITCASE_ALLOWED_SLICE_FILES",
+    "SUITCASE_ALLOWED_WORLD_FILES",
+    "SUITCASE_ALLOWED_WORLD_PACKAGE_FILES",
     "SUITCASE_BUNDLE_SCHEMA",
     "SUITCASE_BUNDLE_VERSION",
     "SUITCASE_FULL_PRACTICE",
@@ -4132,6 +7956,9 @@ __all__ = [
     "SUITCASE_RECORDS_ONLY",
     "SUITCASE_RECORDS_ONLY_SLICES",
     "SUITCASE_SELECTIVE_PRACTICE",
+    "SUITCASE_SLICE_META",
+    "SUITCASE_WORLD_PACKAGE_MAX_TOTAL_BYTES",
+    "SUITCASE_WORLD_SLICE_META",
     "SemanticWakeCoalescer",
     "V02ConflictError",
     "V02PermissionError",
@@ -4146,6 +7973,13 @@ __all__ = [
     "build_runtime_migration_context_summary",
     "collect_source_freshness",
     "compute_suitcase_bundle_sha256",
+    "compute_vc_item_digest",
     "inspect_day_root_health_signals",
+    "project_annual_decay_matrix_22",
+    "project_chatless_life_review",
     "project_v02_runtime_migration",
+    "read_vc_authority_watermark_readonly",
+    "reconcile_backup_restore_vc_barrier",
+    "record_revocation_tombstone",
+    "record_vc_revocation_seal",
 ]

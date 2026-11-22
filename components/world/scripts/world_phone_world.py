@@ -396,8 +396,14 @@ class PhoneWorld:
             )
             for item in document.get("items") or []:
                 if isinstance(item, Mapping) and item.get("item_instance_id"):
-                    labels[str(item["item_instance_id"])] = str(
-                        item.get("catalog_item_id") or "item"
+                    meta = item.get("item_meta")
+                    meta_name = (
+                        str(meta.get("name") or "").strip()
+                        if isinstance(meta, Mapping)
+                        else ""
+                    )
+                    labels[str(item["item_instance_id"])] = (
+                        meta_name or str(item.get("catalog_item_id") or "item")
                     )
         except Exception:  # noqa: BLE001 - labels are cosmetic, never permission
             return {}
@@ -822,11 +828,17 @@ class PhoneWorld:
             declaration = economy.catalog_declaration(item["catalog_item_id"])
             placement = placements.get(item_id)
             delivered = item["current_location"] == economy.HOME_ITEM_LOCATION
+            meta = item.get("item_meta")
+            meta_name = (
+                str(meta.get("name") or "").strip()
+                if isinstance(meta, Mapping)
+                else ""
+            )
             entry: dict[str, Any] = {
                 "item_instance_id": item_id,
-                "label": labels.get(item_id) or item_id,
+                "label": meta_name or labels.get(item_id) or item_id,
                 "catalog_item_id": item["catalog_item_id"],
-                "name": catalog_names.get(item["catalog_item_id"], item["catalog_item_id"]),
+                "name": meta_name or catalog_names.get(item["catalog_item_id"], item["catalog_item_id"]),
                 "usable_kind": declaration.get("usable_kind"),
                 "relocatable": bool(declaration.get("relocatable")),
                 "surfaces": [

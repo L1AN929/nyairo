@@ -400,6 +400,15 @@ STAY_PHASE_ENDED_EARLY = "ENDED_EARLY"
 STAY_EXIT_ABANDON = "ABANDON"
 STAY_EXIT_PAUSE = "PAUSE"
 
+#: v0.8 Wave 3: a real v0.4 street/notice/booklet/bookstore opportunity rides the admitted
+#: PERSONAL_OPPORTUNITY source as ``fitem:v02v03-...``.  It is *not* a piece of writing, so no
+#: artifact may ever be continued or created in its place.  The Activity shape below is a
+#: bounded Life step (``INTERNAL_CHECKPOINT``), and its completion fact is the bridge's own
+#: settled v0.4 neighborhood command -- emitted only after the owner applied it.
+V02_V03_ACTIVITY_KIND = "V02_V03_DAILY_NEIGHBORHOOD_STEP"
+V02_V03_DAILY_FACT_KEY = "v02v03_daily_ref"
+V02_V03_MAPPED_PREFIX = "fitem:v02v03-"
+
 #: Outcome vocabulary.  Each one is a distinct real thing; they are never merged.
 OUTCOME_DISABLED = "DISABLED"
 OUTCOME_BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
@@ -651,6 +660,25 @@ def _world_ref_token(value: Any) -> str:
     return text[:160] or "unknown"
 
 
+def _safe_ref_token(value: Any) -> str:
+    """A short, structured-ref-safe token for a raw v0.4 clue ref."""
+    text = "".join(ch if (ch.isalnum() or ch in "_.-") else "-"
+                   for ch in str(value or "").strip()).strip("-")
+    return (text or "clue")[:96]
+
+
+def _v02_v03_operation_key(raw_ref: str, decision_id: Any = None) -> str:
+    """The bridge operation key for one settled daily step.
+
+    The decision id (when there is one) is part of the key so a replayed Decision reuses
+    exactly its own settlement, while two different Decisions that happen to name the same
+    clue are two logical actions.  Without a Decision the raw ref alone is the stable key.
+    """
+
+    seed = "%s|%s" % (str(raw_ref or ""), str(decision_id or ""))
+    return "v02v03_daily_%s" % hashlib.sha256(seed.encode("utf-8")).hexdigest()[:40]
+
+
 def journey_module() -> Any:
     """``chiyo_bundle.world_journey`` by either import spelling (W05).
 
@@ -689,6 +717,27 @@ class AutonomousLifeError(RuntimeError):
     Decision that names no observed destination.  It is never used to paper over a
     refusal that should be reported as one.
     """
+
+
+class V02V03ClueRefused(AutonomousLifeError):
+    """A committed Decision selected a ``v02v03`` bridge clue no executable event exists for.
+
+    The clue was offered in the candidate pool, so the Decision selecting it is legal; the
+    bridge simply cannot turn it into a concrete command for this instant (the descriptor is
+    unreadable, or its round event is not executable).  This is not a work candidate and it
+    must never fall through to the writing-artifact path: the round is refused as a *soft
+    landing* -- zero Activity, zero artifact, zero completion -- and the next tick is free to
+    choose something else.
+    """
+
+    reason_code = "UNMAPPED_BRIDGE_CLUE"
+    soft_landing = "defer_and_switch"
+
+    def __init__(self, selected_ref: Any = "") -> None:
+        self.selected_ref = str(selected_ref or "")
+        super().__init__(
+            "%s: the committed Decision selected %r, which the v02_v03 bridge cannot "
+            "execute this round" % (self.reason_code, self.selected_ref or "<selected>"))
 
 
 class ReadingResponseFailed(AutonomousLifeError):
@@ -990,7 +1039,9 @@ class _RoutedAdoptionSpec:
                  closeout: Optional[Callable[[Any], Mapping[str, Any]]] = None,
                  is_closeout: Optional[Callable[[Any], bool]] = None,
                  project: Optional[Callable[[Any], Mapping[str, Any]]] = None,
-                 is_project: Optional[Callable[[Any], bool]] = None) -> None:
+                 is_project: Optional[Callable[[Any], bool]] = None,
+                 v02_v03_: Optional[Callable[[Any], Mapping[str, Any]]] = None,
+                 is_v02_v03_: Optional[Callable[[Any], bool]] = None) -> None:
         self._artifact = artifact
         self._world = world
         self._is_world = is_world
@@ -1006,6 +1057,8 @@ class _RoutedAdoptionSpec:
         #: both performs the one real owner write and describes the Activity it enables.
         self._project = project
         self._is_project = is_project or (lambda _record: False)
+        self._v02_v03_ = v02_v03_
+        self._is_v02_v03_ = is_v02_v03_ or (lambda _record: False)
         self._cache: Optional[dict[str, Any]] = None
 
     def __call__(self, decision_record: Any) -> dict[str, Any]:
@@ -1016,6 +1069,10 @@ class _RoutedAdoptionSpec:
                 source = self._closeout(decision_record)
             elif self._project is not None and self._is_project(decision_record):
                 source = self._project(decision_record)
+            elif self._v02_v03_ is not None and self._is_v02_v03_(decision_record):
+                # v0.8 Wave 3: the selected real v0.4 clue has its own bounded shape and must
+                # never receive the writing/reading plan of another path.
+                source = self._v02_v03_(decision_record)
             elif self._reading is not None and self._is_reading(decision_record):
                 source = self._reading(decision_record)
             else:
@@ -1609,6 +1666,11 @@ class AutonomousLifeCycle:
         #: The correlation id of the round in flight, so a step plan can name its own intent.
         self.last_correlation_id: Optional[str] = None
         self.rounds_run = 0
+        #: Stage 1 anti-bedroom-loop state: recent settled action kinds & timeout soft landing.
+        self._recent_settled_action_kinds: list[str] = []
+        self._round_breathing_rhythm: Optional[dict[str, Any]] = None
+        self.last_breathing_rhythm: Optional[dict[str, Any]] = None
+        self.last_timeout_soft_landing: Optional[dict[str, Any]] = None
 
     # -- D (life-v1): continuity, the work binding and the capacity columns --------------
 
@@ -3916,6 +3978,15 @@ class AutonomousLifeCycle:
             return {"body_capacity_state": ag1.CAPACITY_UNKNOWN, "body_capacity_ref": None,
                     "resource_availability_state": ag1.CAPACITY_UNKNOWN,
                     "resource_budget_ref": None}
+        # v0.8: the health envelope's candidate cap rides beside the four
+        # capacity keywords; it goes to evaluate_opportunity, not to the
+        # capacity evaluator.  A view without a health opinion adds nothing.
+        limit_helper = getattr(lsv, "ag1_body_limit_kwargs", None)
+        if limit_helper is not None:
+            try:
+                kwargs.update(limit_helper(view))
+            except Exception:
+                pass
         self.last_capacity_kwargs = kwargs
         return kwargs
     # -- I-r2: the opening/opportunity facts the Decision may actually weigh ------------
@@ -4262,6 +4333,18 @@ class AutonomousLifeCycle:
                 "step_reason": (self._round_readiness.reason_code
                                 if self._round_readiness is not None else None),
             }
+        breathing = self._round_breathing_rhythm
+        if isinstance(breathing, Mapping):
+            ctx["breathing_rhythm"] = dict(breathing)
+            if (
+                breathing.get("stuffy")
+                and not breathing.get("outdoor_push_suppressed")
+                and breathing.get("desk_stuffiness_hint_cn")
+                and isinstance(ctx.get("activity"), dict)
+            ):
+                ctx["activity"]["desk_stuffiness_hint"] = str(
+                    breathing.get("desk_stuffiness_hint_cn") or ""
+                )[:120]
         basis = park or park_basis
         ctx["park"] = ({"available": True, "activity_ref": basis.get("activity_ref"),
                         "how": "choose WAIT and set later_item.park_current=true with a time"}
@@ -4795,6 +4878,28 @@ class AutonomousLifeCycle:
         explicit = getattr(self, "_v02_v03_day_root", None)
         if isinstance(explicit, Path):
             return explicit
+        try:
+            from components.world.scripts import instance_paths as _ip
+        except ImportError:
+            _ip = None
+            try:
+                import instance_paths as _ip  # type: ignore[no-redef]
+            except ImportError:
+                _ip = None
+        if _ip is not None:
+            try:
+                p_state = _ip.resolve_instance_paths(self.state_root, environment=self.env)
+                if p_state.is_managed_instance or (p_state.day_root / "phone").is_dir():
+                    return p_state.day_root
+            except Exception:
+                pass
+            if self.world_home:
+                try:
+                    p_world = _ip.resolve_instance_paths(self.world_home, environment=self.env)
+                    if p_world.is_managed_instance or (p_world.day_root / "phone").is_dir():
+                        return p_world.day_root
+                except Exception:
+                    pass
         inst_root, _ = vbridge.resolve_day_and_life_roots(self.state_root)
         if (inst_root / "phone").is_dir():
             return inst_root
@@ -4802,7 +4907,210 @@ class AutonomousLifeCycle:
             wh_parent = Path(self.world_home).parent
             if (wh_parent / "phone").is_dir():
                 return wh_parent
+            if wh_parent.name == "one-day" and (wh_parent.parent / "phone").is_dir():
+                return wh_parent.parent
         return inst_root
+
+    def _recent_note_streak(self) -> int:
+        streak = 0
+        for kind in reversed(self._recent_settled_action_kinds):
+            if str(kind) == "continue_note":
+                streak += 1
+            else:
+                break
+        return streak
+
+    def _is_final_closeout_step(self, *, closeout_available: bool = False) -> bool:
+        if closeout_available:
+            return True
+        fg = self._last_foreground_record or {}
+        if isinstance(fg, Mapping):
+            if str(fg.get("activity_kind") or "") == CLOSEOUT_ACTIVITY_KIND:
+                return True
+            if fg.get("is_final_closeout_step") is True:
+                return True
+        reading = self._reading_situation_cache
+        if isinstance(reading, Mapping):
+            mat = reading.get("material") if isinstance(reading.get("material"), Mapping) else {}
+            pos = reading.get("position") if isinstance(reading.get("position"), Mapping) else {}
+            pages = mat.get("pages")
+            next_page = pos.get("next_page")
+            if isinstance(pages, int) and pages >= 1 and isinstance(next_page, int) and next_page == pages:
+                return True
+        return False
+
+    def _current_weather_zero_write(self) -> str:
+        obs = self.last_world_observation
+        if isinstance(obs, Mapping):
+            raw_w = obs.get("weather")
+            if isinstance(raw_w, Mapping):
+                w = str(raw_w.get("condition") or raw_w.get("weather") or "").strip().lower()
+                if w:
+                    return w
+            elif isinstance(raw_w, str) and raw_w.strip():
+                return raw_w.strip().lower()
+        day_root = self._attention_day_root()
+        if isinstance(day_root, Path):
+            v04_path = day_root / "world" / "v04_neighborhood_state.json"
+            try:
+                if v04_path.is_file() and not v04_path.is_symlink():
+                    doc = json.loads(v04_path.read_text(encoding="utf-8"))
+                    if isinstance(doc, Mapping):
+                        for key in ("environment", "weather_and_ground", "weather"):
+                            blk = doc.get(key)
+                            if isinstance(blk, Mapping):
+                                w = str(blk.get("weather") or blk.get("condition") or "").strip().lower()
+                                if w:
+                                    return w
+                            elif key == "weather" and isinstance(blk, str) and blk.strip():
+                                return blk.strip().lower()
+            except (OSError, ValueError, TypeError):
+                pass
+        return "clear"
+
+    def _compute_breathing_rhythm(
+        self,
+        *,
+        closeout_available: bool = False,
+        now: Optional[str] = None,
+    ) -> dict[str, Any]:
+        streak = self._recent_note_streak()
+        final_closeout = self._is_final_closeout_step(closeout_available=closeout_available)
+        weather = self._current_weather_zero_write()
+        rain_suppressed = weather in ("rain", "storm", "heavy_rain", "thunder_blackout", "sea_gale")
+
+        stuffy_info: dict[str, Any]
+        outing_hint = ""
+        try:
+            import v02_v03_daily_loop_bridge as _vbridge
+            stuffy_info = _vbridge.compute_desk_stuffiness(
+                self._recent_settled_action_kinds,
+                is_final_closeout_step=final_closeout,
+            )
+            if stuffy_info.get("stuffy") and not rain_suppressed:
+                outing = _vbridge.build_outing_reason(stuffy=True, rain_heavy=False)
+                if isinstance(outing, Mapping) and outing.get("label_cn"):
+                    outing_hint = str(outing["label_cn"])
+        except Exception:
+            stuffy = streak >= 2 and not final_closeout
+            stuffy_info = {
+                "stuffy": stuffy,
+                "streak": streak,
+                "discount": round(min(0.55, 0.28 * (streak - 1)), 2) if stuffy else 0.0,
+                "hint_cn": "已经在书桌前连写两段，稍微有点坐闷了" if stuffy else "",
+            }
+
+        reason_hint_cn = ""
+        if not rain_suppressed and not final_closeout:
+            for row in (self.last_world_opportunity_view or ()):
+                if isinstance(row, Mapping) and str(row.get("verb") or "") == "MOVE":
+                    h = str(row.get("reason_hint_cn") or "").strip()
+                    if h:
+                        reason_hint_cn = h
+                        break
+            if not reason_hint_cn and self.last_world_opportunities:
+                try:
+                    import world_move_opportunity_source as _wmos
+                    day_root = self._attention_day_root()
+                    enriched = _wmos.enrich_move_opportunities_with_life_reasons(
+                        list(self.last_world_opportunities),
+                        day_root=day_root,
+                        observation=self.last_world_observation,
+                        now_iso=now,
+                        recent_note_streak=streak,
+                        is_final_closeout_step=final_closeout,
+                    )
+                    for row in enriched:
+                        h = str(row.get("reason_hint_cn") or "").strip()
+                        if h:
+                            reason_hint_cn = h
+                            break
+                except Exception:
+                    pass
+            if not reason_hint_cn and outing_hint:
+                reason_hint_cn = outing_hint
+
+        effective_streak = 0 if (rain_suppressed or final_closeout) else streak
+        return {
+            "recent_note_streak": streak,
+            "effective_note_streak": effective_streak,
+            "is_final_closeout_step": final_closeout,
+            "stuffy": bool(stuffy_info.get("stuffy")),
+            "discount": float(stuffy_info.get("discount") or 0.0),
+            "desk_stuffiness_hint_cn": str(stuffy_info.get("hint_cn") or ""),
+            "weather": weather,
+            "outdoor_push_suppressed": bool(rain_suppressed or final_closeout),
+            "reason_hint_cn": reason_hint_cn[:96],
+        }
+
+    @staticmethod
+    def _is_cognition_timeout(exc_or_failure: Any) -> bool:
+        if isinstance(exc_or_failure, TimeoutError):
+            return True
+        if isinstance(exc_or_failure, str):
+            upper = exc_or_failure.upper()
+            return ("TIMEOUT" in upper) or ("LATE_RESULT_DISCARDED" in upper)
+        fc = str(getattr(exc_or_failure, "failure_class", "") or "").upper()
+        if "TIMEOUT" in fc or "LATE_RESULT_DISCARDED" in fc:
+            return True
+        cls_name = type(exc_or_failure).__name__.upper()
+        if "TIMEOUT" in cls_name:
+            return True
+        msg = str(exc_or_failure).upper()
+        return any(
+            tok in msg
+            for tok in ("MODEL_TIMEOUT", "TRANSPORT_TIMEOUT", "LATE_RESULT_DISCARDED", "COGNITION_TIMEOUT")
+        )
+
+    def _apply_timeout_soft_landing(
+        self,
+        base: dict[str, Any],
+        *,
+        has_foreground: bool,
+        reason: str,
+        llm_calls: int,
+    ) -> dict[str, Any]:
+        landing = handle_round_timeout_soft_landing(foreground_locked=bool(has_foreground))
+        self.last_timeout_soft_landing = dict(landing)
+        base["timeout_soft_landing"] = dict(landing)
+        base["soft_landing"] = str(landing["status"])
+        base["llm_retries"] = int(landing["llm_retries"])
+        base["foreground_locked"] = bool(landing["foreground_locked"])
+        return self._finish(
+            base,
+            OUTCOME_DECISION_FAILED,
+            llm_calls=llm_calls,
+            detail=f"timeout_soft_landing:{landing['status']}:{reason}"[:240],
+        )
+
+    def _record_settled_action_for_rhythm(
+        self,
+        base: Mapping[str, Any],
+        outcome: str,
+    ) -> None:
+        if outcome == OUTCOME_IN_TRANSIT:
+            self._recent_settled_action_kinds.append("outing")
+        elif outcome == OUTCOME_ACTED:
+            step_path = str(base.get("step_path") or "")
+            world_ref = str(base.get("world_target_ref") or base.get("world_target") or "")
+            if step_path in ("WORLD_AR0", "STAY_CHECKPOINT", "V02V03_DAILY", "READING_AR0", "CLOSEOUT_AR0"):
+                self._recent_settled_action_kinds.append(
+                    "outing" if world_ref.startswith("place:") else "non_note_step"
+                )
+            elif base.get("reading_continued") is True or base.get("v02_v03_settled"):
+                self._recent_settled_action_kinds.append("non_note_step")
+            elif world_ref.startswith("place:") or base.get("destination_place_id"):
+                self._recent_settled_action_kinds.append("outing")
+            elif world_ref.startswith(("stay:", "object:", "buy:", "bodyact:", "dailyact:")) or base.get("world_verb"):
+                self._recent_settled_action_kinds.append("non_note_step")
+            elif (
+                base.get("owner_version_created") is True
+                or step_path in ("AR0", "PORT_DIRECT")
+                or base.get("step_work_target")
+            ):
+                self._recent_settled_action_kinds.append("continue_note")
+        if len(self._recent_settled_action_kinds) > 16:
+            self._recent_settled_action_kinds = self._recent_settled_action_kinds[-16:]
 
     def _collect_v02_v03_bridge_candidates_safe(self) -> Optional[dict[str, Any]]:
         """Pull v02_v03_daily_loop_bridge candidates via lazy import (0 circular deps, 0 writes)."""
@@ -5037,6 +5345,10 @@ class AutonomousLifeCycle:
                     "title": item.get("title"),
                     "due_at": item.get("due_at"),
                     "kind": "FUTURE_ITEM_DUE",
+                    # v0.8: a due item that names an artifact continues that work
+                    # -- exactly the high-cost path an acute body must refuse.
+                    "action_family": "follow_tomorrow_note",
+                    "creative_intensive": True,
                     "revision": int(item.get("revision") or 1),
                 })
             elif item_ref not in covered_by_project_options:
@@ -5050,6 +5362,8 @@ class AutonomousLifeCycle:
                     "due_at": item.get("due_at"),
                     "kind": "TOMORROW_NOTE_DUE",
                     "non_artifact_todo": True,
+                    "action_family": "follow_tomorrow_note",
+                    "creative_intensive": False,
                     "revision": int(item.get("revision") or 1),
                 })
 
@@ -5069,6 +5383,19 @@ class AutonomousLifeCycle:
                 "reserved": bool(option.get("reserved")),
                 "work_ref": str(option.get("work_ref") or ""),
                 "dedupe_refs": [str(ref) for ref in (option.get("dedupe_refs") or ())],
+                # v0.8: a reserved slot bound to a work continues that work; a
+                # new project option is creative.  A due note / plain
+                # self-planned todo (no work target) stays ordinary life even
+                # though it rides the same project-option seam.
+                "action_family": (
+                    "continue_bound_work" if option.get("work_ref")
+                    else "advance_project"),
+                "creative_intensive": bool(
+                    option.get("work_ref")
+                    or str(option.get("kind") or "") not in {
+                        "FUTURE_ITEM_DUE", "TOMORROW_NOTE_DUE",
+                        "TODAY_SELF_PLANNED", "TODAY_OBLIGATION",
+                    }),
                 "revision": int(option.get("revision") or 1),
             })
 
@@ -5113,6 +5440,14 @@ class AutonomousLifeCycle:
                     "due_at": desc.get("due_at"),
                     "kind": str(desc.get("cue_kind") or desc.get("action_family") or "V02_V03_LOOP_CANDIDATE"),
                     "action_family": str(desc.get("action_family") or ""),
+                    # v0.8: the bridge already computed whether this clue is a
+                    # high-cost creative intensive; carry its own answer (and the
+                    # care/idle/job kind that names rest, water, the idle window
+                    # and a manuscript fee) instead of re-deriving it later.
+                    "creative_intensive": bool(desc.get("creative_intensive")),
+                    "care_event_kind": str(desc.get("care_event_kind") or ""),
+                    "idle_kind": str(desc.get("idle_kind") or ""),
+                    "job_kind": str(desc.get("job_kind") or ""),
                     "dedupe_refs": [raw_sref],
                     "revision": int(cand.get("source_revision") or cand.get("revision") or 1),
                 })
@@ -6099,6 +6434,12 @@ class AutonomousLifeCycle:
         (``WORK_NOT_CONTINUABLE``), not a quiet retarget onto whatever else was bound.
         """
 
+        if self._decision_chose_v02_v03_daily(decision_record):
+            # v0.8 Wave 3: a real v0.4 clue is a bounded daily step, never a piece of writing.
+            return self._v02_v03_adoption_spec(decision_record)
+        # An unmapped bridge clue is *not* an unnamed work: refuse it by name instead of
+        # quietly adopting whatever artifact happened to be bound this round.
+        self._refuse_unmapped_v02_v03_clue(decision_record)
         named = self._named_work_ref(decision_record)
         if named:
             point = self.resume_point_for_artifact(named)
@@ -6114,6 +6455,13 @@ class AutonomousLifeCycle:
                                      observed_at: str) -> Mapping[str, Any]:
         """The one real step: the work the Decision named, or the project it just created."""
 
+        if self._decision_chose_v02_v03_daily(decision_record):
+            # v0.8 Wave 3: the selected real v0.4 clue gets its own bounded step; it never
+            # falls through to (or adopts) an unrelated writing artifact.
+            return self._v02_v03_step_spec(decision_record, observed_at=observed_at)
+        # Same rule for a clue whose event is not executable: a named refusal, never a
+        # fallthrough into the work/project/AR-0 step with an unrelated target.
+        self._refuse_unmapped_v02_v03_clue(decision_record)
         if self._decision_chose_project(decision_record):
             return self._project_step_spec(observed_at)
         named = self._named_work_ref(decision_record)
@@ -6310,13 +6658,25 @@ class AutonomousLifeCycle:
         # not retarget the bound work and it is not a CONTINUE permission.
         personal = (found.get("source_availability", {}) or {}).get("PERSONAL_OPPORTUNITY") or {}
         other_artifacts = int(personal.get("continuable_count") or 0)
+        # v0.8 Wave 3: a real v0.4 street/notice/booklet/bookstore clue is itself material.
+        # Without this a lived-in neighborhood with no artifact and no due note made every round
+        # NO_MATERIAL, so AG-0 never even saw the clue the resident had just collected.  The
+        # collector is the same zero-write read the source uses; an uninitialized instance
+        # answers ``None`` and adds nothing.
+        v02_v03_collected = self._collect_v02_v03_bridge_candidates_safe()
+        v02_v03_candidates = list((v02_v03_collected or {}).get("candidates") or ())
+        found["v02_v03_loop"] = {
+            "status": "WIRED" if v02_v03_collected is not None else "NOT_WIRED",
+            "candidate_count": len(v02_v03_candidates),
+        }
         found["has_material"] = bool(
             found["foreground_activity"] or found["continuable_artifact"] or observed
             or found.get("reading_material") or self._round_future_items
             or self._round_project_options or self._round_reserved_options
             or int((found.get("parked_candidates") or {}).get("count") or 0) > 0
             or found.get("blocked_activities")
-            or other_artifacts > 0)
+            or other_artifacts > 0
+            or v02_v03_candidates)
         return found
 
     # -- v0.4 day-life: read-only step readiness + the bounded reconsideration ledger -----
@@ -6745,7 +7105,13 @@ class AutonomousLifeCycle:
         if capacity not in lbc.body_capacity.VALID_CAPACITY_STATES:
             capacity = lbc.CAPACITY_UNKNOWN
         freshness = str(context.get("freshness") or "unknown")
-        return {
+        raw_needs = context.get("needs") if isinstance(context.get("needs"), Mapping) else {}
+        clean_needs = {
+            str(k)[:24]: str(v)[:24]
+            for k, v in sorted(raw_needs.items())
+            if str(k).strip() and str(v).strip()
+        }
+        dossier: dict[str, Any] = {
             "available": True,
             "reason_code": str(context.get("reason_code") or "")[:64],
             # 能力档：owner 自己的词（AVAILABLE/LIMITED/...），越界一律 UNKNOWN。
@@ -6758,6 +7124,30 @@ class AutonomousLifeCycle:
             # 休息能力：owner 的 REST 判定；None 就是"没读"，不是"不能"。
             "rest_can_start": rest.get("can_start"),
         }
+        if clean_needs:
+            dossier["needs"] = clean_needs
+        # 2026-11-15 规范化（19 章 §一.5）：整档若不含**任何**真实 owner 事实
+        #（能力 UNKNOWN、freshness unknown、无恢复会话、无休息判定）——不管上游把它
+        # 拼成 BODY_NOT_READ 还是 BODY_SITUATION_NOT_READ、"available" 写成什么——
+        # 对处境指纹而言都是同一个"身体没读"，统一收敛为唯一的 BODY_NOT_READ 拼法。
+        # 否则两种拼法会轮番改变处境指纹，"同一处境只考虑一次"的有界沉默（R 协议）
+        # 在第二轮就失效，同样的 NO_STEP 会被重复送进模型（test_day_life_continuity
+        # 实证：R1=BODY_NOT_READ / R2=BODY_SITUATION_NOT_READ → 指纹漂移）。任何真实
+        # owner 事实（LIMITED、会话 OPEN、休息判定、已知 freshness）都原样保留。
+        if (dossier["capacity"] == lbc.CAPACITY_UNKNOWN
+                and dossier["freshness"] == "unknown"
+                and dossier["recovery_session"] == lbc.RECOVERY_SESSION_UNKNOWN
+                and dossier["rest_can_start"] is None
+                and not clean_needs):
+            return {
+                "available": False,
+                "reason_code": "BODY_NOT_READ",
+                "capacity": lbc.CAPACITY_UNKNOWN,
+                "freshness": "unknown",
+                "recovery_session": lbc.RECOVERY_SESSION_UNKNOWN,
+                "rest_can_start": None,
+            }
+        return dossier
 
     def poll_local_contacts(self, *, limit: Optional[int] = None) -> dict[str, Any]:
         """One bounded local-contact pass -- the cycle's own entry to the resident's step.
@@ -6988,6 +7378,7 @@ class AutonomousLifeCycle:
         self._round_work_binding = None
         self._round_decision_record = None
         self._round_park_activity_ref = None
+        self._round_breathing_rhythm = None
         # v0.4 C: per-round report state.  ``last_wait_basis`` is recomputed from this round's
         # owner reads only, and ``last_correlation_id`` names the round a step plan belongs to.
         self.last_wait_basis = None
@@ -7192,9 +7583,18 @@ class AutonomousLifeCycle:
         #: adoption path on its own (the same way the research option does).
         project_available = bool(self._round_project_options) and (
             self._project_owner_ready() or self.practice_available())
+        # v0.8 Wave 3: a real v0.4 clue the bridge collected is a live path of its own --
+        # both as a new Activity (no foreground) and as the continuation of an ACTIVE
+        # daily Activity the same instance already carries.
+        v02_v03__available = bool(
+            act and self._v02_v03_candidates_available()
+            and (not has_foreground
+                 or self._foreground_is_v02_v03_daily(material.get("foreground_activity"))))
         live_adoption_paths = sum(1 for flag in (artifact_available, world_available,
                                                  reading_available, closeout_available,
-                                                 project_available) if flag)
+                                                 project_available,
+                                                 (v02_v03__available and not has_foreground))
+                                  if flag)
 
         if not has_foreground and live_adoption_paths:
             # A work shape is described for *the candidate that won*: several of her works can be
@@ -7217,7 +7617,10 @@ class AutonomousLifeCycle:
                 closeout=closeout_spec,
                 is_closeout=self._decision_chose_closeout,
                 project=project_spec,
-                is_project=self._decision_chose_project)
+                is_project=self._decision_chose_project,
+                v02_v03_=(lambda decision: self._v02_v03_adoption_spec(decision))
+                if v02_v03__available else None,
+                is_v02_v03_=self._decision_chose_v02_v03_daily)
             if live_adoption_paths > 1:
                 adoption_spec: Any = _RoutedAdoptionSpec(
                     artifact=(work_spec if artifact_available
@@ -7232,6 +7635,11 @@ class AutonomousLifeCycle:
                 adoption_spec = self._reading_adoption_spec()
             elif artifact_available:
                 adoption_spec = work_spec
+            elif v02_v03__available:
+                # Only the real v0.4 clue path is on offer: the shape is still bound to the
+                # committed Decision, and it is that clue's own bounded daily step.
+                adoption_spec = _DecisionBoundAdoptionSpec(
+                    lambda decision: self._v02_v03_adoption_spec(decision))
             else:
                 # B6-5: the Activity shape is derived from the observed opportunity *set*,
                 # never from a chosen destination: choosing is AG-1's job and it has not
@@ -7291,6 +7699,15 @@ class AutonomousLifeCycle:
             world_step = _DecisionBoundStepSpec(
                 self._world_step_for_decision, on_build=self._note_step_spec_build)
 
+        # v0.8 Wave 3: the selected real v0.4 clue's bounded daily step.  It submits no AR-0
+        # Action; it settles the neighborhood command through the bridge in the same bounded
+        # step and reports only what that owner confirmed.
+        v02_v03__step = None
+        if act and v02_v03__available and foreground_reading is None:
+            v02_v03__step = _DecisionBoundStepSpec(
+                lambda decision: self._v02_v03_step_spec(decision, observed_at=obs),
+                on_build=self._note_step_spec_build)
+
         # I-r1: a stay she is already in is the *only* legal continuation of its own round --
         # the foreground slot is a single one (AG-2 refuses a second), so while she is staying
         # neither an artifact step nor a reading step may be offered in its place.  The step is
@@ -7318,14 +7735,33 @@ class AutonomousLifeCycle:
             # work starve reading.
             live_paths = [name for name, spec in (("AR0", ar0_step), ("READING", reading_step),
                                                   ("CLOSEOUT", closeout_step),
-                                                  ("WORLD", world_step)) if spec is not None]
+                                                  ("WORLD", world_step),
+                                                  ("V02V03", v02_v03__step))
+                          if spec is not None]
+            # v0.8 Wave 5 compatibility guard: the V02V03 path is now live for every real
+            # 0.2/0.3 clue (not only v0.4 ones), so it is often merely *available* next to
+            # the round's other paths.  The pre-decision step_path label therefore describes
+            # the other paths (V02V03 only when it is the sole one); a V02V03 round rewrites
+            # the label to ``V02V03_DAILY`` in ``_classify_v02_v03_daily_step`` once the
+            # committed Decision actually selected it.
+            label_paths = [name for name in live_paths if name != "V02V03"] or list(live_paths)
             if len(live_paths) > 1:
                 step_spec = _DecisionBoundStepSpec(
                     self._routed_step_builder(resume_point, observed_at=obs,
                                               closeout=closeout_point),
                     on_build=self._note_step_spec_build)
-                base["step_path"] = ("AR0_WORLD_ROUTED" if set(live_paths) == {"AR0", "WORLD"}
-                                     else "%s_ROUTED" % "_".join(live_paths))
+                if set(label_paths) == {"AR0", "WORLD"}:
+                    base["step_path"] = "AR0_WORLD_ROUTED"
+                elif len(label_paths) == 1:
+                    base["step_path"] = {
+                        "AR0": "AR0",
+                        "READING": "READING_AR0",
+                        "CLOSEOUT": "CLOSEOUT_AR0",
+                        "WORLD": "WORLD_AR0",
+                        "V02V03": "V02V03_DAILY",
+                    }.get(label_paths[0], "%s_ROUTED" % "_".join(label_paths))
+                else:
+                    base["step_path"] = "%s_ROUTED" % "_".join(label_paths)
             elif live_paths == ["AR0"]:
                 step_spec = ar0_step
                 base["step_path"] = "AR0"
@@ -7338,6 +7774,9 @@ class AutonomousLifeCycle:
             elif live_paths == ["WORLD"]:
                 step_spec = world_step
                 base["step_path"] = "WORLD_AR0"
+            elif live_paths == ["V02V03"]:
+                step_spec = v02_v03__step
+                base["step_path"] = "V02V03_DAILY"
             else:
                 step_spec = None
                 base["step_path"] = "PORT_DIRECT"
@@ -7496,11 +7935,27 @@ class AutonomousLifeCycle:
             base["decision_facts_dropped"] = sorted(
                 (set(world_facts) | set(material_facts)) - set(decision_facts))
         base["appraisal"] = self._compact_appraisal(self.last_appraisal)
+        #: Stage 1 anti-bedroom-loop: compute desk stuffiness + weather suppression + life outing cue,
+        #: and bind round-scoped rhythm parameters onto candidate_materializer before AG-0 runs.
+        breathing = self._compute_breathing_rhythm(
+            closeout_available=closeout_available,
+            now=obs,
+        )
+        self._round_breathing_rhythm = breathing
+        self.last_breathing_rhythm = dict(breathing)
+        base["breathing_rhythm"] = dict(breathing)
         #: v0.4 C: the situation is built *first* and held, because building it is what reads the
         #: practice slice (and therefore what decides which method handles this round offers).  The
         #: allow-list below must be the same read, not a second one that could disagree.
         situation_context = self.decision_situation_context(
             now=obs, park=park, wait_basis=wait_basis)
+        _mat = getattr(self.runtime, "candidate_materializer", None)
+        _set_rhythm = getattr(_mat, "set_breathing_rhythm_context", None)
+        if callable(_set_rhythm):
+            _set_rhythm(
+                recent_note_streak=int(breathing.get("effective_note_streak") or 0),
+                is_final_closeout_step=bool(breathing.get("is_final_closeout_step")),
+            )
         try:
             out = self.runtime.coordinator.run_decision_and_adoption_cycle(
                 trigger_kind=trigger_kind,
@@ -7538,6 +7993,14 @@ class AutonomousLifeCycle:
                 pre_adoption_mutation_hook=self._pause_gate_hook,
                 fault_hook=self._pause_fault_hook,
             )
+        except V02V03ClueRefused as exc:
+            # The Decision really ran and committed, so this is one paid decision round.  No
+            # Activity was registered and no owner was written: report the clue as a soft
+            # landing and leave the foreground free for the next tick.
+            self.last_error = None
+            return self._soft_land_v02_v03_round(
+                base, reason_code=exc.reason_code, selected_ref=exc.selected_ref,
+                detail=str(exc)[:300], llm_calls=1)
         except life_pause.PauseConfirmedError as exc:
             return self._pause_abort(base, exc, llm_calls=1)
         except ag2.KillSwitchDisabledError as exc:
@@ -7576,14 +8039,30 @@ class AutonomousLifeCycle:
                 # The decision happened; producing the content did not.  Nothing was written.
                 return self._finish(base, OUTCOME_STEP_REFUSED, llm_calls=1,
                                     detail=f"content writer failed: {self.last_error}"[:300])
+            if self._is_cognition_timeout(exc):
+                return self._apply_timeout_soft_landing(
+                    base,
+                    has_foreground=has_foreground,
+                    reason=self.last_error,
+                    llm_calls=0,
+                )
             return self._finish(base, OUTCOME_DECISION_FAILED, llm_calls=0,
                                 detail=self.last_error)
         finally:
+            if callable(_set_rhythm):
+                _set_rhythm(recent_note_streak=0, is_final_closeout_step=False)
             # The lease is only ever held across a finite owner call; releasing it here is
             # what makes a raise anywhere in the round unable to lock the operator out.
             self._pause_lease.release()
 
         dec_res = out.get("decision_result") or {}
+        # v0.8: the candidate cap is a body fact, so the round reports what it
+        # applied and what it removed -- a dropped essential option (rest,
+        # water, the reading continuation) is a named fact, not a mystery.
+        if isinstance(dec_res, Mapping):
+            base["body_candidate_cap"] = dec_res.get("body_candidate_cap")
+            base["body_candidate_cap_dropped"] = list(
+                dec_res.get("body_candidate_cap_dropped") or [])
         record = dec_res.get("decision_record")
         adp_rec = (out.get("adoption_result") or {}).get("adoption_record")
         int_rec = out.get("integration_record")
@@ -7626,6 +8105,13 @@ class AutonomousLifeCycle:
             # offered, so nothing about "already seen" may be advanced here.
             failure = str(dec_res.get("failure_class") or "DECISION_NOT_COMMITTED")
             self.last_error = failure
+            if self._is_cognition_timeout(failure):
+                return self._apply_timeout_soft_landing(
+                    base,
+                    has_foreground=has_foreground,
+                    reason=failure,
+                    llm_calls=1,
+                )
             return self._finish(base, OUTCOME_DECISION_FAILED, llm_calls=1, detail=failure)
 
         # D (life-v1): the Decision committed, so this round really considered what C offered.
@@ -7774,11 +8260,18 @@ class AutonomousLifeCycle:
         if routed:
             if self._decision_chose_world(record):
                 return self._classify_world_step(out, base, obs)
+            if self._decision_chose_v02_v03_daily(record):
+                # v0.8 Wave 3: the routed step is Life's own bounded daily checkpoint; the
+                # existing world classifier already reports internal-checkpoint steps.
+                return self._classify_world_step(out, base, obs)
             # v0.4 C: a routed closeout is still one real AR-0 FILE action, so it is reported by
             # the same classifier that reports every other owner receipt.
             return self._classify_ar0_step(out, base, obs)
 
         if world_step is not None:
+            return self._classify_world_step(out, base, obs)
+
+        if v02_v03__step is not None:
             return self._classify_world_step(out, base, obs)
 
         if reading_step is not None:
@@ -8033,8 +8526,13 @@ class AutonomousLifeCycle:
             self.last_world_observation = dict(seen)
         recorded: list[dict[str, Any]] = []
         for item in observed:
+            ag0_item = (
+                {k: v for k, v in item.items() if k != "reason_hint_cn"}
+                if isinstance(item, Mapping) and "reason_hint_cn" in item
+                else item
+            )
             try:
-                source.record_observed_opportunity(item)
+                source.record_observed_opportunity(ag0_item)
             except Exception as exc:
                 self.last_world_error = f"{type(exc).__name__}: {exc}"
                 continue
@@ -8181,7 +8679,7 @@ class AutonomousLifeCycle:
         if chosen_target.startswith(PURCHASE_REF_PREFIX):
             # 0.7: one counter purchase.  The completion fact is the economy owner's own
             # transaction for exactly this target, never "the money left the wallet".
-            return self._purchase_adoption_spec(origin, chosen_target, lr5)
+            return self._purchase_adoption_spec(origin, chosen_target, lr5, decision=decision)
 
         completion_spec = None
         chosen = self._chosen_place(decision) if decision is not None else ""
@@ -8474,7 +8972,7 @@ class AutonomousLifeCycle:
         return spec.to_dict()
 
     def _purchase_adoption_spec(self, origin: str, chosen_target: str,
-                                lr5: Any) -> dict[str, Any]:
+                                lr5: Any, *, decision: Any = None) -> dict[str, Any]:
         """The Activity shape for one counter purchase she really chose.
 
         Only LR-5's existing vocabulary is used: ``WORLD_ACTION_BOUNDED`` with a
@@ -8491,15 +8989,21 @@ class AutonomousLifeCycle:
                 "the committed Decision chose %r, which names no catalogue item"
                 % (chosen_target,))
         expected = "world_fact:%s" % chosen_target
-        name = ""
-        for item in self.last_world_opportunity_view:
-            if not isinstance(item, Mapping):
-                continue
-            if str(item.get("target_ref") or "") != str(chosen_target):
-                continue
-            purchase = item.get("purchase") if isinstance(item.get("purchase"), Mapping) else {}
-            name = str(purchase.get("name") or "").strip()
-            break
+        choice = getattr(decision, "purchase_choice", None) if decision is not None else None
+        name = (
+            str(choice.get("item_name") or "").strip()
+            if item_id.startswith("shop_slot:") and isinstance(choice, Mapping)
+            else ""
+        )
+        if not name:
+            for item in self.last_world_opportunity_view:
+                if not isinstance(item, Mapping):
+                    continue
+                if str(item.get("target_ref") or "") != str(chosen_target):
+                    continue
+                purchase = item.get("purchase") if isinstance(item.get("purchase"), Mapping) else {}
+                name = str(purchase.get("name") or "").strip()
+                break
         spec = ag2.ActivityAdoptionSpec(
             activity_kind=PURCHASE_ACTIVITY_KIND,
             title=("在店里买「%s」" % name) if name else "在店里买一件东西",
@@ -8542,6 +9046,499 @@ class AutonomousLifeCycle:
             self.last_world_error = f"{type(exc).__name__}: {exc}"
             return None
         return dict(candidate) if isinstance(candidate, Mapping) else None
+
+    # -- v0.8 Wave 3: a real v0.4 street/journal clue is a bounded daily step ------------------
+
+    def _v02_v03_bridge_collected(self) -> Optional[dict[str, Any]]:
+        collected = getattr(self, "last_v02_v03_collected", None)
+        if isinstance(collected, Mapping):
+            return dict(collected)
+        return self._collect_v02_v03_bridge_candidates_safe()
+
+    def _v02_v03_descriptor_for_decision(self, decision_record: Any) -> Optional[dict[str, Any]]:
+        """The raw bridge descriptor the committed Decision selected, when it is executable.
+
+        Only clues the bridge itself turns into a concrete command qualify: a v0.4
+        neighborhood action, or a v0.3 care / idle / independent-work / purchase /
+        intimacy-resume action.  Anything else (a plain clue with no executable event) is
+        not a daily step here.  Resolution goes through the bridge's own descriptor lookup
+        so the ``fitem`` spelling and the raw structured-ref spelling cannot disagree.
+        """
+
+        candidate = self._selected_candidate(decision_record)
+        if not isinstance(candidate, Mapping):
+            return None
+        source_ref = str(candidate.get("source_ref") or "")
+        if not source_ref.startswith(V02_V03_MAPPED_PREFIX):
+            # v0.8 Wave 6: a due ordinary tomorrow note reaches the pool under its own
+            # ``fitem:`` ref (the cycle's TOMORROW_NOTE_DUE entry).  It is a real 0.2
+            # bridge clue, but only when it names no artifact: an artifact-backed due
+            # note keeps its existing "continue the real work" path unchanged.
+            target_refs = [str(ref or "") for ref in (candidate.get("target_refs") or ())]
+            if not source_ref.startswith(lfi.ITEM_REF_NAMESPACE):
+                return None
+            if any(ref.startswith("artifact:") for ref in target_refs):
+                return None
+        try:
+            import v02_v03_daily_loop_bridge as _vbridge
+        except Exception:  # noqa: BLE001 - a missing bridge is a named non-path
+            return None
+        collected = self._v02_v03_bridge_collected()
+        if not isinstance(collected, Mapping):
+            return None
+        # Prefer the descriptor's own origin/target refs when the registry kept them, then
+        # the mapped spelling the bridge itself defines.  The bridge's executable round
+        # event -- not a ``v04_action`` field alone -- is what qualifies a clue here: the
+        # 0.3 care / idle / work / purchase / intimacy-resume clues are executable too.
+        wanted: list[str] = [source_ref]
+        origin = candidate.get("origin_source_ref")
+        if isinstance(origin, str) and origin.strip():
+            wanted.insert(0, origin.strip())
+        for ref in candidate.get("target_refs") or ():
+            text = str(ref or "").strip()
+            if text:
+                wanted.insert(0, text)
+        for ref in wanted:
+            desc = _vbridge.v02_v03_descriptor_for_selected_ref(collected, ref)
+            if not isinstance(desc, Mapping):
+                continue
+            event = _vbridge.v02_v03_round_event_for_selected_candidate(
+                collected, desc.get("source_ref"), now_iso=None)
+            if isinstance(event, Mapping):
+                return dict(desc)
+        return None
+
+    def _v02_v03_raw_ref(self, descriptor: Mapping[str, Any]) -> str:
+        return str(descriptor.get("source_ref") or "").strip()
+
+    def _v02_v03_candidates_available(self) -> bool:
+        collected = self._v02_v03_bridge_collected()
+        if not isinstance(collected, Mapping):
+            return False
+        descriptors = (
+            collected.get("descriptors")
+            if isinstance(collected.get("descriptors"), Mapping)
+            else {}
+        )
+        try:
+            import v02_v03_daily_loop_bridge as _vbridge
+        except Exception:  # noqa: BLE001 - a missing bridge is a named non-path
+            return False
+        for desc in descriptors.values():
+            if not isinstance(desc, Mapping):
+                continue
+            if not str(desc.get("source_ref") or "").strip():
+                continue
+            event = _vbridge.v02_v03_round_event_for_selected_candidate(
+                collected, desc.get("source_ref"))
+            if isinstance(event, Mapping):
+                return True
+        return False
+
+    def _decision_chose_v02_v03_daily(self, decision_record: Any) -> bool:
+        return self._v02_v03_descriptor_for_decision(decision_record) is not None
+
+    def _selected_v02_v03_clue_ref(self, decision_record: Any) -> str:
+        """The mapped ``fitem:v02v03-…`` ref the committed Decision selected, if any.
+
+        Only the mapped spelling identifies a bridge clue whose raw ref had no ``fitem:`` /
+        ``option:`` namespace of its own (``_pack_round_candidates``).  A due ordinary note
+        keeps its ``fitem:`` ref and is handled by the existing tomorrow-note path.
+        """
+
+        candidate = self._selected_candidate(decision_record)
+        if not isinstance(candidate, Mapping):
+            return ""
+        ref = str(candidate.get("source_ref") or "")
+        return ref if ref.startswith(V02_V03_MAPPED_PREFIX) else ""
+
+    def _refuse_unmapped_v02_v03_clue(self, decision_record: Any) -> None:
+        """Raise when the Decision selected a bridge clue with no executable round event.
+
+        This is the gate that keeps an unmapped clue from falling through into
+        ``_work_step_spec_for_decision`` / ``_work_adoption_spec_for_decision`` and adopting an
+        unrelated writing artifact.  It authorizes nothing and writes nothing: raising here
+        happens before any adoption materialises, so the round can be reported as a soft
+        landing with zero Activity and zero artifact.
+        """
+
+        ref = self._selected_v02_v03_clue_ref(decision_record)
+        if not ref:
+            return
+        if self._v02_v03_descriptor_for_decision(decision_record) is None:
+            raise V02V03ClueRefused(ref)
+
+    def _foreground_is_v02_v03_daily(self, foreground_ref: Any) -> bool:
+        ref = str(foreground_ref or "").strip()
+        if not ref:
+            return False
+        try:
+            record = self.runtime.activity_read.get_activity(ref)
+        except Exception:  # noqa: BLE001 - a failed read is simply not this Activity
+            return False
+        return (
+            isinstance(record, Mapping)
+            and str(record.get("activity_kind") or "") == V02_V03_ACTIVITY_KIND
+            and str(record.get("status") or "") == "ACTIVE"
+        )
+
+    def _v02_v03_step_spec(self, decision_record: Any, *, observed_at: str) -> dict[str, Any]:
+        """One bounded, internal daily step for the selected real v0.4 clue.
+
+        Nothing about a writing artifact is involved: the target is the clue's own raw
+        ``v04_*`` ref and the payload carries the exact command the bridge will settle
+        through the neighborhood owner.  ``INTERNAL_CHECKPOINT`` with ``action_kind=None``
+        is AG-2's existing vocabulary for a Life step that crosses no AR-0 fence.
+        """
+
+        self._refuse_unmapped_v02_v03_clue(decision_record)
+        desc = self._v02_v03_descriptor_for_decision(decision_record)
+        if desc is None:
+            raise AutonomousLifeError(
+                "the committed Decision named no executable v02_v03 daily clue")
+        raw_ref = self._v02_v03_raw_ref(desc)
+        candidate = self._selected_candidate(decision_record) or {}
+        decision_id = str(getattr(decision_record, "decision_id", "") or "").strip()
+        payload: dict[str, Any] = {
+            "v02_v03_daily_ref": raw_ref,
+            "v02_v03_selected_ref": str(candidate.get("source_ref") or ""),
+            "v02_v03_candidate_ref": str(candidate.get("candidate_id") or ""),
+            "v02_v03_action_family": str(desc.get("action_family") or ""),
+            "v04_action": str(desc.get("v04_action") or ""),
+            "v04_payload": dict(desc.get("v04_payload") or {}),
+            "v04_action_kind": str(desc.get("v04_action_kind") or ""),
+            "v04_source_ref": raw_ref,
+            "v02_v03_decision_id": decision_id,
+            "v02_v03_at": observed_at,
+        }
+        key = "idem_step:v02:v02v03:%s" % (
+            decision_id or hashlib.sha256(
+                ("%s:%s" % (raw_ref, observed_at)).encode("utf-8")).hexdigest()[:24])
+        return {
+            "step_kind": ag2.STEP_KIND_INTERNAL_CHECKPOINT,
+            # No owner Action crosses AR-0: the neighborhood command is settled by the
+            # bridge in this same bounded step (see ``_classify_v02_v03_daily_step``).
+            "action_kind": None,
+            "target_ref": raw_ref,
+            "payload_spec": payload,
+            "expected_effect_predicates": [],
+            "post_submit_life_behavior": ag2.POST_SUBMIT_KEEP_ACTIVE,
+            "idempotency_key": key,
+        }
+
+    def _v02_v03_adoption_spec(self, decision_record: Any) -> dict[str, Any]:
+        """The Activity shape for one bounded v0.4 daily step.
+
+        The completion fact is emitted only after the bridge's own settlement reports the
+        neighborhood command applied (or idempotently replayed), so a refused or missing
+        command can never complete this Activity.
+        """
+
+        self._refuse_unmapped_v02_v03_clue(decision_record)
+        desc = self._v02_v03_descriptor_for_decision(decision_record)
+        if desc is None:
+            raise AutonomousLifeError(
+                "the committed Decision named no executable v02_v03 daily clue")
+        raw_ref = self._v02_v03_raw_ref(desc)
+        expected = "world_fact:v02_v03_daily:%s" % _safe_ref_token(raw_ref)
+        title = str(desc.get("title") or desc.get("title_hint") or raw_ref)[:80]
+        import activity_progress_completion_lr5 as lr5
+
+        spec = ag2.ActivityAdoptionSpec(
+            activity_kind=V02_V03_ACTIVITY_KIND,
+            title=title or "过一小段街区里的日常",
+            target_refs=[expected],
+            origin_ref=str(desc.get("source_ref") or expected),
+            progress_contract_spec={
+                "progress_kind": "WORLD_ACTION_BOUNDED",
+                "checkpoint_semantics": lr5.CHECKPOINT_SEMANTICS_TARGET_STATE,
+                "target_refs": [expected],
+                "policy_version": lr5.POLICY_POSITION_V1,
+            },
+            completion_contract_spec={
+                "criteria_kind": lr5.CRITERIA_WORLD_FACT_MATCH,
+                "target_refs": [expected],
+                "criteria": {"fact_key": V02_V03_DAILY_FACT_KEY, "expected_value": expected},
+                "required_evidence_kinds": [lr5.SOURCE_KIND_WORLD_FACT],
+                "required_authority_domains": ["world_authority"],
+                "policy_version": lr5.POLICY_WORLD_FACT_V1,
+            },
+            result_binding_spec={
+                "target_refs": [expected],
+                "allowed_evidence_kinds": ["SETTLED_RESULT_EVENT", "WORLD_CANONICAL_OBSERVATION"],
+                "authority_domains": ["result_settlement_authority", "world_authority"],
+                "policy_version": lr5.POLICY_POSITION_V1,
+            },
+        )
+        return spec.to_dict()
+
+    def _release_transient_v02_v03_activity(self, base: dict[str, Any], *,
+                                            reason_code: str,
+                                            raw_ref: str = "") -> dict[str, Any]:
+        """Close a foreground ``V02_V03_DAILY`` Activity whose step soft-landed or was refused.
+
+        The transient Activity exists only for the bounded step.  When that step creates no
+        world fact it must not stay ``ACTIVE`` holding the single foreground slot -- that is
+        the wedge the next tick can never clear.  LR-2's existing ABANDON transition is the
+        legal voluntary exit from ``ACTIVE``; it keeps the goal/checkpoint and every committed
+        result intact, writes no completion, and clears the foreground pointer.
+
+        Failure to release is reported in ``base["soft_land_release"]`` and never replaced by
+        a fabricated success; the Activity is left exactly as the owner has it.
+        """
+
+        release: dict[str, Any] = {
+            "status": "SKIPPED", "reason_code": "", "activity_ref": None,
+        }
+        base["soft_land_release"] = release
+        port = getattr(self.runtime, "ag2_activity_command_port", None)
+        reader = getattr(self.runtime, "activity_read", None)
+        ref = str(base.get("activity_ref") or self._foreground_activity_ref() or "")
+        release["activity_ref"] = ref or None
+        if port is None or reader is None or not ref:
+            release["reason_code"] = "NO_ACTIVITY_PORT_OR_REF"
+            return base
+        try:
+            record = dict(reader.get_activity(ref) or {})
+        except Exception as exc:  # noqa: BLE001 - a failed read never guesses
+            release.update(status="SKIPPED", reason_code="ACTIVITY_READ_FAILED",
+                           error_type=type(exc).__name__)
+            return base
+        kind = str(record.get("activity_kind") or "")
+        status = str(record.get("status") or "")
+        release.update(activity_kind=kind or None, owner_status=status or None)
+        if kind != V02_V03_ACTIVITY_KIND:
+            release["reason_code"] = "NOT_V02_V03_ACTIVITY"
+            return base
+        if status != "ACTIVE":
+            release["reason_code"] = "ACTIVITY_NOT_ACTIVE"
+            return base
+        token = _safe_ref_token(raw_ref or ref)
+        now = self._now_iso()
+        try:
+            result = port.abandon_activity(
+                activity_id=ref,
+                expected_revision=int(record.get("revision") or 0),
+                idempotency_key="idem:soft_land:%s:%s" % (ref, token),
+                source_refs=[
+                    "life:soft_landing",
+                    "world_fact:v02_v03_daily:%s" % token,
+                ],
+                reason_code="SPONTANEOUS_RECONSIDERATION",
+                occurred_at=now,
+                observed_at=now,
+                extra_fields={"soft_landed": True, "reason_code": str(reason_code)},
+            )
+        except Exception as exc:  # noqa: BLE001 - the release is reported, not assumed
+            release.update(status="FAILED", reason_code="ABANDON_RAISED",
+                           error_type=type(exc).__name__, error=str(exc)[:160])
+            return base
+        release.update(
+            status="RELEASED",
+            reason_code=str(reason_code),
+            idempotent_replay=bool(getattr(result, "idempotent_replay", False)),
+        )
+        try:
+            after = dict(reader.get_activity(ref) or {})
+            release["owner_status_after"] = str(after.get("status") or "")
+        except Exception as exc:  # noqa: BLE001 - a failed read never guesses
+            release["owner_status_after"] = None
+            release["owner_status_after_error"] = type(exc).__name__
+        return base
+
+    def _soft_land_v02_v03_round(self, base: dict[str, Any], *, reason_code: str,
+                                 selected_ref: str = "", raw_ref: str = "",
+                                 detail: str = "", llm_calls: int = 1) -> dict[str, Any]:
+        """Report a v02_v03 round that honestly accomplished nothing this instant.
+
+        The round is a refused step, not a completion: no artifact, no arrangement change and
+        no completed item.  The reason travels on the round's own reason codes (which the
+        resident's wake record copies into ``extra``) *and* inside ``v02_v03_daily`` so the
+        post-tick feedback owner can tell a soft landing from a real failure.
+        """
+
+        reason = str(reason_code or V02V03ClueRefused.reason_code).strip() or (
+            V02V03ClueRefused.reason_code)
+        report = base.get("v02_v03_daily")
+        report = dict(report) if isinstance(report, Mapping) else {}
+        if raw_ref and not report.get("source_ref"):
+            report["source_ref"] = str(raw_ref)
+        if selected_ref and not report.get("selected_candidate_ref"):
+            report["selected_candidate_ref"] = str(selected_ref)
+        report.update({
+            "soft_landed": True,
+            "soft_landing": "defer_and_switch",
+            "reason_code": reason,
+            "settlement_status": report.get("settlement_status") or "SOFT_LANDED",
+        })
+        base["v02_v03_daily"] = report
+        base["soft_landed"] = True
+        base["soft_landing"] = "defer_and_switch"
+        base["soft_land_reason_code"] = reason
+        if detail:
+            base["soft_landing_detail"] = str(detail)[:300]
+        codes = [str(code) for code in (base.get("reason_codes") or [])
+                 if str(code).strip()]
+        if reason not in codes:
+            codes.append(reason)
+        base["reason_codes"] = codes
+        base["step_path"] = "V02V03_DAILY"
+        self._release_transient_v02_v03_activity(
+            base, reason_code=reason, raw_ref=raw_ref or selected_ref)
+        return self._finish(
+            base, OUTCOME_STEP_REFUSED, llm_calls=llm_calls,
+            detail=(detail or ("%s: the clue was soft-landed; nothing was created" % reason)))
+
+    def _classify_v02_v03_daily_step(self, step_spec: Any, base: dict[str, Any],
+                                     obs: str) -> dict[str, Any]:
+        """Settle one real v0.3/v0.4 daily command, then report exactly its own result."""
+
+        payload = dict(getattr(step_spec, "payload_spec", None) or {})
+        raw_ref = str(payload.get("v02_v03_daily_ref") or "").strip()
+        if not raw_ref:
+            return self._soft_land_v02_v03_round(
+                base, reason_code="UNMAPPED_BRIDGE_CLUE",
+                detail="the v02_v03 daily step carries no executable command ref")
+        # This step is the V02V03 daily path, whatever kind of clue it settles.  The label is
+        # written here (after the Decision committed and the step ran) so a selected care /
+        # idle / work / purchase / intimacy-resume clue never reads as another path.
+        base["step_path"] = "V02V03_DAILY"
+        try:
+            import v02_v03_daily_loop_bridge as _vbridge
+        except Exception as exc:  # noqa: BLE001 - a missing bridge is a named refusal
+            return self._soft_land_v02_v03_round(
+                base, reason_code="UNMAPPED_BRIDGE_CLUE", raw_ref=raw_ref,
+                detail="the v02_v03 bridge is not importable: %s" % type(exc).__name__)
+        day_root = self._resolve_v02_v03_day_root_for_cycle(_vbridge)
+        decision_id = str(
+            base.get("decision_id") or payload.get("v02_v03_decision_id") or ""
+        ).strip()
+        # Build the SAME event the resident hook would build for this clue, so the
+        # consequence ledger's operation key is identical and the resident's later
+        # settlement of this tick is an idempotent replay instead of a second write.
+        event = _vbridge.v02_v03_round_event_for_selected_candidate(
+            self._v02_v03_bridge_collected() or {},
+            raw_ref,
+            now_iso=obs,
+            decision_id=decision_id or None,
+        )
+        if not isinstance(event, Mapping):
+            v04_action = str(payload.get("v04_action") or "").strip()
+            if not v04_action:
+                return self._soft_land_v02_v03_round(
+                    base, reason_code="UNMAPPED_BRIDGE_CLUE", raw_ref=raw_ref,
+                    detail="the v02_v03 daily step carries no executable command for %s"
+                           % raw_ref)
+            event = {
+                "actor_side": "life_resident",
+                "effect_state": "APPLIED",
+                "action_kind": str(payload.get("v04_action_kind") or "V04_NEIGHBORHOOD_ACTION"),
+                "v04_action": v04_action,
+                "v04_payload": dict(payload.get("v04_payload") or {}),
+                "source_ref": raw_ref,
+                "receipt_ref": "v02v03:%s" % (getattr(step_spec, "step_spec_id", "") or raw_ref),
+                "operation_key": _v02_v03_operation_key(raw_ref, decision_id),
+            }
+        report: dict[str, Any] = {
+            "source_ref": raw_ref,
+            "selected_candidate_ref": base.get("selected_candidate_ref"),
+            "decision": base.get("decision"),
+            "action_family": payload.get("v02_v03_action_family"),
+            "action_kind": event.get("action_kind"),
+            "v04_action": event.get("v04_action") or payload.get("v04_action"),
+            "decision_id": decision_id or None,
+        }
+        base["v02_v03_daily"] = report
+        try:
+            settled = _vbridge.settle_v02_v03_round_consequences(
+                day_root, event, now_iso=obs)
+        except Exception as exc:  # noqa: BLE001 - a failed settle is reported, not assumed
+            # An exception is not a proven soft landing: nothing claims the act happened,
+            # and the transient Activity is still released so the next tick is not wedged.
+            self._release_transient_v02_v03_activity(
+                base, reason_code="SETTLEMENT_RAISED", raw_ref=raw_ref)
+            return self._finish(
+                base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                detail="the v02_v03 settlement raised %s: %s"
+                       % (type(exc).__name__, str(exc)[:160]))
+        report["settlement_status"] = settled.get("status")
+        report["already_applied"] = bool(settled.get("already_applied") is True)
+        report["slices_updated"] = list(settled.get("slices_updated") or [])
+        if not (settled.get("settled") or settled.get("already_applied")):
+            refusal_reason = str(
+                settled.get("reason_code") or settled.get("status") or "UNKNOWN")
+            if settled.get("soft_landed") is True:
+                # The bridge itself refused on a named soft-landing reason (unsupported
+                # capability, object not at its believed spot).  Stamp it on the round and
+                # release the foreground Activity; no completion is written.
+                return self._soft_land_v02_v03_round(
+                    base, reason_code=refusal_reason, raw_ref=raw_ref,
+                    detail="the daily-loop owner soft-landed the command: %s"
+                           % refusal_reason)
+            self._release_transient_v02_v03_activity(
+                base, reason_code=refusal_reason, raw_ref=raw_ref)
+            return self._finish(
+                base, OUTCOME_STEP_REFUSED, llm_calls=1,
+                detail="the daily-loop owner refused the command: %s" % refusal_reason)
+        self._record_v02_v03_daily_progress(
+            base, activity_ref=base.get("activity_ref") or getattr(step_spec, "activity_ref", None),
+            raw_ref=raw_ref, settled=settled)
+        return self._finish(
+            base, OUTCOME_ACTED, llm_calls=1,
+            detail="the daily-loop owner applied %s (%s)"
+                   % (report.get("action_kind") or report.get("v04_action") or "command",
+                      settled.get("status") or "APPROVED"))
+
+    def _record_v02_v03_daily_progress(self, base: dict[str, Any], *, activity_ref: Any,
+                                       raw_ref: str, settled: Mapping[str, Any]) -> None:
+        """Hand LR-5 the settled neighborhood command's own fact -- and only after it wrote."""
+
+        import activity_progress_completion_lr5 as lr5
+
+        if not activity_ref:
+            return
+        expected = "world_fact:v02_v03_daily:%s" % _safe_ref_token(raw_ref)
+        now = self._now_iso()
+        evidence = lr5.LifeProgressEvidence(
+            progress_evidence_id=(
+                "pevid:%s" % hashlib.sha256(
+                    ("%s:%s" % (activity_ref, raw_ref)).encode("utf-8")).hexdigest()[:16]),
+            source_kind=lr5.SOURCE_KIND_WORLD_FACT,
+            source_ref="world:v04_neighborhood:%s" % _safe_ref_token(raw_ref),
+            authority_domain="world_authority",
+            epistemic_kind=lr5.EPISTEMIC_CANONICAL_OBSERVATION,
+            occurred_at=now,
+            observed_at=now,
+            recorded_at=now,
+            idempotency_key="pevid_idem:%s:%s" % (activity_ref, raw_ref),
+            activity_id=str(activity_ref),
+            world_fact_ref=expected,
+            target_ref=expected,
+            observed_facts={
+                V02_V03_DAILY_FACT_KEY: expected,
+                "v02_v03_source_ref": raw_ref,
+                "v02_v03_settlement_status": str(settled.get("status") or ""),
+                "observation_source": "v02_v03_daily_loop_bridge.settle",
+            },
+            correlation_id=str(base.get("correlation_id") or "") or None,
+        )
+        try:
+            result = self.runtime.ag2_progress_port.ingest_progress_evidence(evidence)
+        except Exception as exc:  # noqa: BLE001 - a progress write failure is reported
+            base["progress_ingest_error"] = "%s: %s" % (type(exc).__name__, exc)
+            return
+        state = result.get("progress_state")
+        base["progress_state"] = (state.get("progress_state")
+                                  if isinstance(state, dict) else state)
+        update = result.get("checkpoint_update") or {}
+        base["checkpoint_update_ref"] = update.get("checkpoint_update_id")
+        base["checkpoint_ref"] = update.get("checkpoint_ref") or update.get("new_checkpoint_ref")
+        try:
+            self._emit_world_experience(
+                base, activity_ref=activity_ref,
+                world_refs=[expected, "world:v04_neighborhood:%s" % _safe_ref_token(raw_ref)])
+        except Exception:  # noqa: BLE001 - memory handoff is never the step's own outcome
+            pass
 
     @staticmethod
     def _candidate_is_world(candidate: Optional[Mapping[str, Any]]) -> bool:
@@ -8605,6 +9602,13 @@ class AutonomousLifeCycle:
         def build(decision_record: Any) -> Mapping[str, Any]:
             if self._decision_chose_world(decision_record):
                 return self._world_step_spec(decision_record)
+            # An unmapped bridge clue must not reach the work/project/reading fallbacks below.
+            self._refuse_unmapped_v02_v03_clue(decision_record)
+            if self._decision_chose_v02_v03_daily(decision_record):
+                # v0.8 Wave 3: the step belongs to the clue the Decision named -- a bounded
+                # Life-internal daily step, never another path's payload under this Activity.
+                return self._v02_v03_step_spec(
+                    decision_record, observed_at=observed_at)
             if closeout is not None and self._decision_chose_closeout(decision_record):
                 # v0.4 C: the wrap-up step is W's plan; it is built only for a Decision whose own
                 # candidate named the closeout target, never as a fallback.
@@ -8716,6 +9720,12 @@ class AutonomousLifeCycle:
                     purchase = item.get("purchase")
                     facts = dict(purchase) if isinstance(purchase, Mapping) else {}
                     break
+            raw_choice = getattr(decision_record, "purchase_choice", None)
+            choice = (
+                dict(raw_choice)
+                if item_id.startswith("shop_slot:") and isinstance(raw_choice, Mapping)
+                else {}
+            )
             return {
                 "step_kind": ag2.STEP_KIND_INTERNAL_CHECKPOINT,
                 # No owner Action crosses AR-0: the economy call is this cycle's own bounded
@@ -8728,7 +9738,9 @@ class AutonomousLifeCycle:
                     "purchase_operation_key": key,
                     "purchase_target_ref": target_ref,
                     "purchase_store_place": place,
-                    "purchase_item_name": facts.get("name"),
+                    "purchase_item_name": choice.get("item_name") or facts.get("name"),
+                    "purchase_custom_item_name": choice.get("item_name"),
+                    "purchase_estimated_price": choice.get("estimated_price"),
                     "purchase_price": facts.get("price"),
                     "purchase_currency": facts.get("currency"),
                 },
@@ -9173,6 +10185,10 @@ class AutonomousLifeCycle:
 
         self._round_decision_record = decision_record
         self._pause_confirmed("after_decision_before_adoption")
+        # The Decision is committed but nothing has been adopted yet.  A selected bridge clue
+        # the bridge cannot execute is refused *here*, before any Activity or owner write --
+        # it must never be adopted as some other path's work.
+        self._refuse_unmapped_v02_v03_clue(decision_record)
         # The Decision request was a real wait: what the round read before it is no longer
         # proof of the owners' state.  The very next thing that happens is the owner-side
         # final freshness check (``validate_decision_for_adoption`` -> ``validate_candidate``
@@ -9271,6 +10287,265 @@ class AutonomousLifeCycle:
         place = (seen.get("location") or {}).get("place_id")
         return (str(place) if place else None, seen.get("world_revision"))
 
+    def _resolve_cycle_day_root_zero_write(self) -> Path:
+        """Resolve canonical day_root zero-write via shared instance_paths."""
+        explicit = getattr(self, "_v02_v03_day_root", None)
+        if isinstance(explicit, Path):
+            return explicit
+        _ip: Any = None
+        try:
+            from components.world.scripts import instance_paths as _ip  # type: ignore[no-redef]
+        except ImportError:
+            try:
+                import instance_paths as _ip  # type: ignore[no-redef]
+            except ImportError:
+                _ip = None
+        if _ip is not None:
+            for cand in (self.world_home, self.state_root):
+                if not cand:
+                    continue
+                try:
+                    resolved = _ip.resolve_instance_paths(cand, environment=self.env)
+                    if (
+                        resolved.is_managed_instance
+                        or (resolved.day_root / "world" / "v04_neighborhood_state.json").is_file()
+                        or (resolved.day_root / "phone").is_dir()
+                        or (resolved.day_root / "body").is_dir()
+                    ):
+                        return resolved.day_root
+                except Exception:
+                    continue
+            for cand in (self.state_root, self.world_home):
+                if cand:
+                    try:
+                        return _ip.resolve_instance_paths(cand, environment=self.env).day_root
+                    except Exception:
+                        continue
+        if self.world_home:
+            wh = Path(self.world_home)
+            if (wh.parent / "phone").is_dir() or (wh.parent / "world").is_dir():
+                return wh.parent
+            if wh.parent.name == "one-day":
+                return wh.parent.parent
+            return wh
+        return Path(self.state_root)
+
+    def _has_umbrella_in_world_state_zero_write(
+        self,
+        *,
+        day_root: Path,
+        details: Optional[Mapping[str, Any]] = None,
+    ) -> bool:
+        """Detect whether TA is actually holding/carrying an umbrella (100% zero-write)."""
+        for src in (details, self.last_world_observation):
+            if isinstance(src, Mapping) and isinstance(src.get("has_umbrella"), bool):
+                return bool(src["has_umbrella"])
+
+        umbrella_tokens = ("umbrella", "parasol", "雨伞", "折伞", "长柄伞", "伞")
+
+        def _contains_umbrella(obj: Any) -> bool:
+            if isinstance(obj, str):
+                low = obj.strip().lower()
+                return any(tok in low for tok in umbrella_tokens)
+            if isinstance(obj, Mapping):
+                for key in ("item_id", "object_id", "kind", "label", "label_cn", "name", "held_item", "holding"):
+                    if _contains_umbrella(obj.get(key)):
+                        return True
+                for sub_key in ("hands", "left_hand", "right_hand", "left", "right", "held_objects", "carried_objects", "inventory"):
+                    if sub_key in obj and _contains_umbrella(obj.get(sub_key)):
+                        return True
+                return False
+            if isinstance(obj, (list, tuple, set)):
+                return any(_contains_umbrella(item) for item in obj)
+            return False
+
+        if isinstance(self.last_world_observation, Mapping):
+            for key in ("hands", "held_objects", "carried_objects", "inventory", "body"):
+                if key in self.last_world_observation and _contains_umbrella(self.last_world_observation.get(key)):
+                    return True
+
+        # Check world body_substrate.json hands zero-write if available
+        substrate_candidates: list[Path] = []
+        try:
+            from components.world.scripts import instance_paths as _ip
+            substrate_candidates.append(_ip.resolve_instance_paths(day_root, environment=self.env).body_substrate_json)
+        except Exception:
+            try:
+                import instance_paths as _ip  # type: ignore[no-redef]
+                substrate_candidates.append(_ip.resolve_instance_paths(day_root, environment=self.env).body_substrate_json)
+            except Exception:
+                pass
+        if self.world_home:
+            substrate_candidates.append(Path(self.world_home) / "data" / "body" / "substrate.json")
+        for sub_path in substrate_candidates:
+            try:
+                if sub_path.is_symlink() or not sub_path.is_file():
+                    continue
+                doc = json.loads(sub_path.read_text(encoding="utf-8"))
+                if isinstance(doc, Mapping) and _contains_umbrella(doc.get("hands")):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _maybe_record_outdoor_weather_exposure(
+        self,
+        *,
+        place_id: Any,
+        duration_seconds: float,
+        observed_at: str,
+        operation_key: Optional[str] = None,
+        details: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Hook outdoor move/stay settlement in rain/drizzle -> somatic_comfort_view (zero-crash)."""
+        try:
+            clean_place = str(place_id or "").strip()
+            if clean_place.startswith(PLACE_REF_PREFIX):
+                clean_place = clean_place[len(PLACE_REF_PREFIX):].strip()
+            if not clean_place or float(duration_seconds) <= 0.0:
+                return None
+
+            day_root = self._resolve_cycle_day_root_zero_write()
+            # Read current weather from v04_neighborhood_state.json zero-write
+            weather_raw = ""
+            v04_path = day_root / "world" / "v04_neighborhood_state.json"
+            if v04_path.is_file() and not v04_path.is_symlink():
+                try:
+                    v04_doc = json.loads(v04_path.read_text(encoding="utf-8"))
+                except Exception:
+                    v04_doc = None
+                if isinstance(v04_doc, Mapping):
+                    for key in ("environment", "weather_and_ground", "weather"):
+                        blk = v04_doc.get(key)
+                        if isinstance(blk, Mapping):
+                            cand_w = str(blk.get("weather") or blk.get("condition") or "").strip().lower()
+                            if cand_w:
+                                weather_raw = cand_w
+                                break
+                        elif key == "weather" and isinstance(blk, str) and blk.strip():
+                            weather_raw = blk.strip().lower()
+                            break
+            if not weather_raw and isinstance(self.last_world_observation, Mapping):
+                obs_w = self.last_world_observation.get("weather")
+                if isinstance(obs_w, Mapping):
+                    weather_raw = str(obs_w.get("condition") or obs_w.get("weather") or "").strip().lower()
+                elif isinstance(obs_w, str):
+                    weather_raw = obs_w.strip().lower()
+
+            rain_map = {
+                "light_rain": "drizzle",
+                "drizzle": "drizzle",
+                "rain": "rain",
+                "shower": "shower",
+                "heavy_rain": "rain",
+                "storm": "storm",
+                "thunder_blackout": "storm",
+                "sea_gale": "storm",
+            }
+            norm_weather = rain_map.get(weather_raw, "")
+            if not norm_weather:
+                return None
+
+            is_outdoor = False
+            try:
+                from components.world.scripts import instance_paths as _ip
+                is_outdoor = bool(_ip.map_world_place_to_slices(clean_place).get("is_outdoor"))
+            except Exception:
+                try:
+                    import instance_paths as _ip  # type: ignore[no-redef]
+                    is_outdoor = bool(_ip.map_world_place_to_slices(clean_place).get("is_outdoor"))
+                except Exception:
+                    is_outdoor = clean_place not in ("home", "bookstore", "bookshop", "cafe", "convenience_store", "bakery", "porch")
+            if not is_outdoor:
+                return None
+
+            has_umbrella = self._has_umbrella_in_world_state_zero_write(
+                day_root=day_root, details=details
+            )
+
+            scv: Any = None
+            try:
+                from components.phone import somatic_comfort_view as scv  # type: ignore[no-redef]
+            except Exception:
+                try:
+                    import somatic_comfort_view as scv  # type: ignore[no-redef]
+                except Exception:
+                    return None
+            recorder = getattr(scv, "record_outdoor_weather_exposure", None)
+            if not callable(recorder):
+                return None
+            res = recorder(
+                day_root,
+                place_id=clean_place,
+                weather=norm_weather,
+                duration_seconds=float(duration_seconds),
+                has_umbrella=has_umbrella,
+                operation_key=operation_key,
+                now_iso=str(observed_at or self._now_iso()),
+            )
+            return dict(res) if isinstance(res, Mapping) else None
+        except Exception:
+            return None
+
+    def _maybe_auto_bind_world_sleep(
+        self,
+        base: dict[str, Any],
+        *,
+        action: Mapping[str, Any],
+        observed_at: str,
+    ) -> Optional[dict[str, Any]]:
+        """Hook REST(start, sleep_like) settlement -> v08_composable_body (zero-write if disabled)."""
+        try:
+            day_root = self._resolve_cycle_day_root_zero_write()
+            cb: Any = None
+            try:
+                from components.world.scripts import v08_composable_body as cb  # type: ignore[no-redef]
+            except Exception:
+                try:
+                    import v08_composable_body as cb  # type: ignore[no-redef]
+                except Exception:
+                    return None
+            binder = getattr(cb, "auto_bind_world_sleep_if_enabled", None)
+            if not callable(binder):
+                return None
+
+            started_at_iso = str(observed_at or base.get("observed_at") or self._now_iso()).strip()
+            frozen_payload = action.get("frozen_payload") if isinstance(action.get("frozen_payload"), Mapping) else {}
+            planned_wake_iso = str(
+                frozen_payload.get("planned_wake_iso")
+                or base.get("planned_wake_iso")
+                or ""
+            ).strip()
+            if not planned_wake_iso:
+                try:
+                    raw_ts = started_at_iso[:-1] + "+00:00" if started_at_iso.endswith("Z") else started_at_iso
+                    started_dt = datetime.fromisoformat(raw_ts)
+                    if started_dt.tzinfo is None:
+                        started_dt = started_dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                except Exception:
+                    started_dt = datetime.now(timezone(timedelta(hours=8)))
+                    started_at_iso = started_dt.isoformat(timespec="seconds")
+                planned_wake_iso = (started_dt + timedelta(hours=7)).isoformat(timespec="seconds")
+
+            sleep_activity_id = str(
+                base.get("activity_ref")
+                or action.get("action_id")
+                or f"sleep:{hashlib.sha256(started_at_iso.encode('utf-8')).hexdigest()[:12]}"
+            ).strip()[:64]
+            res = binder(
+                day_root,
+                sleep_activity_id=sleep_activity_id,
+                started_at_iso=started_at_iso,
+                planned_wake_iso=planned_wake_iso,
+            )
+            if isinstance(res, Mapping):
+                out = dict(res)
+                base["composable_body_sleep_bind"] = out
+                return out
+            return None
+        except Exception:
+            return None
+
     def settle_world_journey(self, *, observed_at: Optional[str] = None,
                              settle_only: Optional[bool] = None) -> dict[str, Any]:
         """Let real time settle the W04 journey, and only then record an arrival.
@@ -9344,6 +10619,41 @@ class AutonomousLifeCycle:
             record["arrival_refused"] = "WORLD_POSITION_DOES_NOT_MATCH_TARGET"
             return record
         record["arrived"] = True
+        # Stage 2: real outdoor rain/drizzle exposure on arrived outdoor journey
+        journey_duration = 0.0
+        for d_key in ("elapsed_seconds", "duration_seconds", "travel_seconds", "total_seconds"):
+            val = projection.get(d_key)
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+                journey_duration = float(val)
+                break
+        if journey_duration <= 0.0:
+            started_ts = projection.get("started_at") or projection.get("departed_at")
+            if isinstance(started_ts, str) and started_ts.strip():
+                span = _seconds_between(started_ts, observed_at)
+                if span is not None and span > 0:
+                    journey_duration = float(span)
+        if journey_duration <= 0.0:
+            segs = int(projection.get("segments_confirmed") or 1)
+            journey_duration = float(max(300, 300 * max(1, segs)))
+        exp_op = (
+            f"outdoor_journey:{projection.get('journey_id') or target}:{observed_at}"
+            if projection.get("journey_id")
+            else f"outdoor_journey:{target}:{observed_at}"
+        )[:120]
+        hook = getattr(self, "_maybe_record_outdoor_weather_exposure", None)
+        exp_res = (
+            hook(
+                place_id=target,
+                duration_seconds=journey_duration,
+                observed_at=observed_at,
+                operation_key=exp_op,
+                details=projection,
+            )
+            if callable(hook)
+            else None
+        )
+        if exp_res is not None:
+            record["outdoor_weather_exposure"] = exp_res
         activity_ref = self._foreground_activity_ref()
         record["activity_ref"] = activity_ref
         if not activity_ref:
@@ -9631,6 +10941,10 @@ class AutonomousLifeCycle:
                 # 0.7: the counter purchase.  It is an internal checkpoint step (no AR-0
                 # Action), and its owner call happened in this same bounded step.
                 return self._classify_purchase_step(step_spec, base, obs)
+            if isinstance(payload, Mapping) and payload.get("v02_v03_daily_ref"):
+                # v0.8 Wave 3: one real v0.4 neighborhood command, settled by the bridge in
+                # this same bounded step.
+                return self._classify_v02_v03_daily_step(step_spec, base, obs)
             return self._classify_stay_step(step_spec, base, obs)
         submit = step_res.get("submit_result")
         if not isinstance(submit, Mapping):
@@ -9714,6 +11028,29 @@ class AutonomousLifeCycle:
                 destination=(action.get("frozen_payload") or {}).get("target"),
                 action_ref=action.get("action_id"),
                 correlation_id=base.get("correlation_id"))
+            if verb == MOVE_VERB:
+                move_target = (action.get("frozen_payload") or {}).get("target")
+                move_dur = 300.0
+                for d_key in ("duration_seconds", "elapsed_seconds", "travel_seconds"):
+                    val = details.get(d_key)
+                    if isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+                        move_dur = float(val)
+                        break
+                move_op = f"outdoor_move:{action.get('action_id') or move_target}:{obs}"[:120]
+                hook = getattr(self, "_maybe_record_outdoor_weather_exposure", None)
+                exp_res = (
+                    hook(
+                        place_id=move_target,
+                        duration_seconds=move_dur,
+                        observed_at=obs,
+                        operation_key=move_op,
+                        details=details,
+                    )
+                    if callable(hook)
+                    else None
+                )
+                if exp_res is not None:
+                    base["outdoor_weather_exposure"] = exp_res
             return self._finish(base, OUTCOME_ACTED, llm_calls=1,
                                 detail="world owner applied %s" % (evidence or "the move"))
         if status == "UNKNOWN":
@@ -9916,6 +11253,19 @@ class AutonomousLifeCycle:
         self._record_world_body_progress(
             base, activity_ref=base.get("activity_ref"), parsed=parsed, fact=fact,
             action_ref=action.get("action_id"), correlation_id=base.get("correlation_id"))
+        # Stage 2: REST(start, sleep_like) -> v08_composable_body sleep bind (zero-write if disabled)
+        parsed_verb = str(parsed.get("verb") or verb).strip().upper()
+        parsed_params = parsed.get("params") if isinstance(parsed.get("params"), Mapping) else {}
+        if (
+            parsed_verb == REST_VERB
+            and str(parsed_params.get("state") or "").strip().lower() == "start"
+            and str(parsed_params.get("mode") or "").strip().lower() == "sleep_like"
+        ):
+            self._maybe_auto_bind_world_sleep(
+                base,
+                action=action,
+                observed_at=str(base.get("observed_at") or self._now_iso()),
+            )
         return self._finish(
             base, OUTCOME_ACTED, llm_calls=1,
             detail="the World owner's own observation satisfies %s=%s"
@@ -10208,6 +11558,11 @@ class AutonomousLifeCycle:
             purchase_now = self._now()
         error: Optional[BaseException] = None
         result: Any = None
+        purchase_kwargs: dict[str, Any] = {}
+        if payload.get("purchase_custom_item_name") is not None:
+            purchase_kwargs["custom_item_name"] = payload.get("purchase_custom_item_name")
+        if payload.get("purchase_estimated_price") is not None:
+            purchase_kwargs["estimated_price"] = payload.get("purchase_estimated_price")
         try:
             result = economy.purchase_item(
                 catalog_item_id=item_id,
@@ -10216,6 +11571,7 @@ class AutonomousLifeCycle:
                 hermes_home=self.world_home,
                 environment=self.env,
                 now=purchase_now,
+                **purchase_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - reconciled below, never assumed
             error = exc
@@ -10236,10 +11592,23 @@ class AutonomousLifeCycle:
                 reconciled = True
 
         if status in ("applied", "already_applied"):
+            delivery_status = str((result or {}).get("delivery_status") or "")
+            item_instance_id = (result or {}).get("item_instance_id")
+            if item_instance_id and delivery_status != "PENDING":
+                try:
+                    import world_phone_shopping as phone_shopping
+
+                    phone_shopping.materialize_owned_item(
+                        hermes_home=self.world_home,
+                        item_instance_id=item_instance_id,
+                        environment=self.env,
+                    )
+                except Exception:  # noqa: BLE001 - owner tick materializes on wake if needed
+                    pass
             base["purchase"] = {
                 "status": status,
                 "catalog_item_id": item_id,
-                "item_name": payload.get("purchase_item_name"),
+                "item_name": (result or {}).get("item_name") or payload.get("purchase_item_name"),
                 "price": (result or {}).get("price"),
                 "currency": (result or {}).get("currency"),
                 "transaction_id": (result or {}).get("transaction_id"),
@@ -10468,6 +11837,22 @@ class AutonomousLifeCycle:
             base, activity_ref=activity_ref, plan=plan,
             started_at=started_at, elapsed_seconds=elapsed, complete=complete,
             correlation_id=base.get("correlation_id"))
+        if elapsed > 0 and (complete or elapsed >= 180):
+            stay_op = f"outdoor_stay:{plan['place']}:{started_at}:{int(elapsed)}"[:120]
+            hook = getattr(self, "_maybe_record_outdoor_weather_exposure", None)
+            exp_res = (
+                hook(
+                    place_id=plan["place"],
+                    duration_seconds=float(elapsed),
+                    observed_at=obs,
+                    operation_key=stay_op,
+                    details=stay,
+                )
+                if callable(hook)
+                else None
+            )
+            if exp_res is not None:
+                base["outdoor_weather_exposure"] = exp_res
         if not complete:
             stay["phase"] = STAY_PHASE_ONGOING
             return self._finish(
@@ -11199,6 +12584,7 @@ class AutonomousLifeCycle:
             self.budget.note_cognition(int(llm_calls))
         if base.get("action_id") or outcome in {OUTCOME_ACTED, OUTCOME_ALREADY_DONE}:
             self.budget.note_action()
+        self._record_settled_action_for_rhythm(base, outcome)
         base.update({"outcome": outcome, "detail": detail, "llm_calls": llm_calls,
                      "budget_remaining": self.budget.remaining(),
                      "budget": self.budget.snapshot()})
@@ -11354,6 +12740,9 @@ class AutonomousLifeCycle:
             "step_readiness": self.last_step_readiness,
             "reconsideration": self.last_reconsideration,
             "last_appraisal": self._compact_appraisal(self.last_appraisal),
+            "recent_note_streak": self._recent_note_streak(),
+            "last_breathing_rhythm": self.last_breathing_rhythm,
+            "last_timeout_soft_landing": self.last_timeout_soft_landing,
         }
 
 
@@ -11384,6 +12773,28 @@ def autonomous_life_cycle_from_env(runtime: Any, *, artifact_port: LifeArtifactP
     )
 
 
+def handle_round_timeout_soft_landing(*, foreground_locked: bool = True) -> dict[str, Any]:
+    """第 80 / 82 章：单轮请求超时软着陆——释放前台锁、零盲目重试、原地看窗外 5 分钟。"""
+    _ = foreground_locked
+    return {
+        "status": "IDLE_GLANCE_WINDOW",
+        "duration_minutes": 5,
+        "llm_retries": 0,
+        "foreground_locked": False,
+    }
+
+
+def check_calm_gate_interlude_allowance(
+    last_rare_day: Optional[int],
+    current_day: int,
+    min_gap_days: int = 12,
+) -> bool:
+    """第 104 章：自主节律对停电夜/初雪等稀有插曲的平静间隔检查。"""
+    if last_rare_day is None:
+        return True
+    return (int(current_day) - int(last_rare_day)) >= int(min_gap_days)
+
+
 __all__ = [
     "AutonomousLifeCycle",
     "ContinuationWriter",
@@ -11391,6 +12802,8 @@ __all__ = [
     "RoundBudget",
     "StepReceipt",
     "autonomous_life_cycle_from_env",
+    "check_calm_gate_interlude_allowance",
+    "handle_round_timeout_soft_landing",
     "DEFAULT_MAX_ROUNDS_PER_DAY",
     "ENV_AUTONOMOUS_ENABLED",
     "ENV_MAX_ROUNDS_PER_DAY",

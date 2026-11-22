@@ -32,6 +32,16 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 WARDROBE_SCHEMA = "phone.home.wardrobe.v1"
 POCKET_SCHEMA = "phone.pocket.lists.v1"
 WORK_REVISIT_SCHEMA = "phone.pocket.work_revisit.v1"
@@ -385,9 +395,10 @@ def read_wardrobe_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]
 
 
 def write_wardrobe_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_wardrobe(dict(state))
-    _write_json(wardrobe_state_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(wardrobe_state_path(root)):
+        normalized = _validate_wardrobe(dict(state))
+        _write_json(wardrobe_state_path(root), normalized)
+        return normalized
 
 
 def _bump(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:
@@ -707,9 +718,10 @@ def read_pocket_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]]:
 
 
 def write_pocket_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_pocket(dict(state))
-    _write_json(pocket_state_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(pocket_state_path(root)):
+        normalized = _validate_pocket(dict(state))
+        _write_json(pocket_state_path(root), normalized)
+        return normalized
 
 
 def _pocket_bump(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:

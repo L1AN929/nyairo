@@ -118,19 +118,40 @@ class V04ElasticPlayLearningTest(unittest.TestCase):
         self.assertEqual(c409, 409)
         self.assertEqual(r409["reason_code"], "MISSING_COMPLETION_RECEIPT")
 
-        # With real receipt_ref -> 200
+        # With a receipt that really exists in a persisted store -> 200
+        world = self.day_root / "world"
+        world.mkdir(parents=True, exist_ok=True)
+        (world / "v08_matter_space.json").write_text(
+            json.dumps({
+                "operations": {
+                    "op_bookmark_20261113": {
+                        "fingerprint": "fp_bookmark",
+                        "actor_side": "subject",
+                        "receipt": {
+                            "status": "applied",
+                            "action": "craft_card",
+                            "object_id": "bookmark_20261113",
+                            "at": "2026-11-13T10:00:00+08:00",
+                        },
+                    }
+                }
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
         c_done, r_done = ep_view.mutate_v04_elastic_play_view(
             self.day_root,
             {
                 "action": "set_day_direction",
                 "mode": "record_completed",
                 "completed_summary": "把书签按季节夹好了",
-                "receipt_ref": "note:bookmark-20261113",
+                "receipt_ref": "op_bookmark_20261113",
             },
             actor_side="subject",
         )
         self.assertEqual(c_done, 200)
-        self.assertEqual(len(r_done["data"]["day_direction"]["completed_items"]), 1)
+        done_items = r_done["data"]["day_direction"]["completed_items"]
+        self.assertEqual(len(done_items), 1)
+        self.assertTrue(done_items[0]["verified"])
 
         # Natural interruption yields without failure debt
         c_int, r_int = ep_view.mutate_v04_elastic_play_view(

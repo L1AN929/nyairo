@@ -590,7 +590,9 @@ def resolve_world_provider(environment: Mapping[str, str], *,
         here = str(Path(__file__).resolve().parent)
         if here not in sys.path:
             sys.path.insert(0, here)
-        from world_action_bridge_adapter import WorldBridgeResolver, discover_bridge_dir
+        from world_action_bridge_adapter import (
+            WorldBridgeResolver, discover_bridge_dir, ensure_bridge_on_sys_path,
+        )
         import world_move_opportunity_source as wmos
     except Exception as exc:
         return {"provider": None, "status": "UNAVAILABLE",
@@ -605,8 +607,7 @@ def resolve_world_provider(environment: Mapping[str, str], *,
                           % WORLD_BRIDGE_DIR_ENV}
     text = str(directory)
     try:
-        if text not in sys.path:
-            sys.path.insert(0, text)
+        ensure_bridge_on_sys_path(directory)
         import action_intent as world_action_intent
         import world_body_client as wbc
         client = WorldBridgeResolver(environment=env, bridge_dir=directory).client

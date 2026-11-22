@@ -58,10 +58,12 @@ from typing import Any, Mapping, Optional
 HERE = Path(__file__).resolve().parent
 _COMPONENTS = HERE.parents[1]
 _REPO = HERE.parents[2]
-for _path in (str(HERE), str(_COMPONENTS), str(_COMPONENTS / "world" / "scripts"),
-              str(_COMPONENTS / "world" / "service" / "bridge"),
-              str(_COMPONENTS / "world" / "service"), str(_REPO / "chiyo_bundle"),
-              str(_REPO)):
+for _path in reversed((
+    str(HERE), str(_COMPONENTS), str(_COMPONENTS / "world" / "scripts"),
+    str(_COMPONENTS / "world" / "service" / "bridge"),
+    str(_COMPONENTS / "world" / "service"), str(_REPO / "chiyo_bundle"),
+    str(_REPO),
+)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 

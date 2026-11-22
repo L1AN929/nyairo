@@ -220,14 +220,18 @@ class DailyTokenBudgetTest(unittest.TestCase):
     def test_refuses_when_the_daily_token_budget_is_spent(self) -> None:
         budget = self._budget(utc_day_max=24)
         budget.reserve(lrb.REQUEST_KIND_CONTENT, est_tokens=30_000)
-        budget.reserve(lrb.REQUEST_KIND_CONTENT, est_tokens=30_000)
+        with self.assertRaises(lrb.RequestBudgetError) as overshoot:
+            budget.reserve(lrb.REQUEST_KIND_CONTENT, est_tokens=30_000)
+        self.assertEqual(overshoot.exception.reason_code, lrb.REASON_DAILY_TOKEN_BUDGET)
         view = budget.view()
-        self.assertEqual(view["utc_day_tokens"], 60_000)
+        self.assertEqual(view["utc_day_tokens"], 30_000, "预检越界直接拒，不落账")
         self.assertEqual(view["daily_token_budget"], lrb.DEFAULT_DAILY_TOKEN_BUDGET)
+        budget.reserve(lrb.REQUEST_KIND_CONTENT, est_tokens=20_000)
+        self.assertEqual(budget.view()["utc_day_tokens"], 50_000)
         with self.assertRaises(lrb.RequestBudgetError) as caught:
             budget.reserve(lrb.REQUEST_KIND_CONTENT, est_tokens=1)
         self.assertEqual(caught.exception.reason_code, lrb.REASON_DAILY_TOKEN_BUDGET)
-        self.assertEqual(budget.view()["utc_day_tokens"], 60_000, "拒绝不落账（无退款路径）")
+        self.assertEqual(budget.view()["utc_day_tokens"], 50_000, "拒绝不落账（无退款路径）")
 
     def test_missing_estimate_is_charged_the_conservative_constant(self) -> None:
         # 24 次保守常数（48_000）低于 50_000：调用上限先绑定，token 维度不抢跑。
@@ -311,7 +315,7 @@ class DailyTokenBudgetTest(unittest.TestCase):
         self.assertEqual(record["reservation"]["est_tokens"], 0)
 
     def test_ticket_estimates_summed_into_the_budget_refuse_over_50k_fail_closed(self) -> None:
-        """票 est 汇总入预算：逐票 reserve，日累计越过 50k 后当次即拒（fail-closed）。"""
+        """票 est 汇总入预算：逐票 reserve，即将越过 50k 时预检即拒（fail-closed）。"""
         budget = self._budget(utc_day_max=24)
         accepted = 0
         for est in (20_000, 20_000, 20_000, 20_000):
@@ -321,8 +325,8 @@ class DailyTokenBudgetTest(unittest.TestCase):
             except lrb.RequestBudgetError as exc:
                 self.assertEqual(exc.reason_code, lrb.REASON_DAILY_TOKEN_BUDGET)
                 break
-        self.assertEqual(accepted, 3, "60k 越界后第四张 20k 票被拒")
-        self.assertEqual(budget.view()["utc_day_tokens"], 60_000)
+        self.assertEqual(accepted, 2, "40k 后第三张 20k 票在预检阶段越界被拒")
+        self.assertEqual(budget.view()["utc_day_tokens"], 40_000)
 
 
 if __name__ == "__main__":

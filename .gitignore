@@ -33,6 +33,9 @@ local-profile*/
 /dist/
 /life_request_budget.lock
 .tmp_*.py
+.agents/progress/
+.agents/release-id.txt
+website/downloads/*.exe
 components/supply/lifesupply2/
 components/supply/lifesupply_real/
 components/supply/lifysupply/

@@ -47,7 +47,7 @@ from components.life.scripts import (  # noqa: E402
 )
 from components.phone import stance_containment_view as phone_sc  # noqa: E402
 
-FROZEN_ASSEMBLY_SHA256 = "5f51c9e82a417d9354d08608841d3472fc5a869e6bd3c9d9a7ebed0b15397f7a"
+FROZEN_ASSEMBLY_SHA256 = "f14fe6291e1a604520318ebf69acedb583dfc876bfde42f538d6f91017f37434"
 FROZEN_SHARING_SHA256 = "0becf7df4d9b34881817ff6f1defdcc15929eacbd6183d4c8a38c5a048d46038"
 FORBIDDEN_IMPORTS = {"random", "secrets", "openai", "anthropic", "httpx", "requests"}
 
@@ -1064,16 +1064,34 @@ class V03ClockEvaporationStanceWorldTest(unittest.TestCase):
         self.assertIn("sub_box", mv["moved_child_container_ids"])
         self.assertIn("sketch_pencil", mv["moved_child_item_ids"])
 
-        # Physical place is dining_table, but subject_last_seen_place stays study_desk (impression_stale=True)
+        # Subject view BEFORE observing room: the move must not leak into her
+        # impression. She still believes the pencil is on study_desk, and the
+        # God-view staleness flag is withheld from her projection.
         proj_stale = phone_sc.read_stance_containment(
             self.root, now="2026-04-06T18:11:00+09:00", subject_view=True
         )
         pen_stale = next(
             it for it in proj_stale["object_containment"]["items"] if it["item_id"] == "sketch_pencil"
         )
-        self.assertEqual(pen_stale["place_id"], "dining_table")
+        self.assertEqual(pen_stale["place_id"], "study_desk")
+        self.assertEqual(pen_stale["effective_place_id"], "study_desk")
         self.assertEqual(pen_stale["subject_last_seen_place"], "study_desk")
-        self.assertTrue(pen_stale["impression_stale"])
+        self.assertNotIn("impression_stale", pen_stale)
+
+        # Partner (God) view is not masked: the physical move to dining_table is
+        # visible, while subject_last_seen_place stays study_desk.
+        proj_partner = phone_sc.read_stance_containment(
+            self.root, now="2026-04-06T18:11:00+09:00", subject_view=False
+        )
+        pen_partner = next(
+            it
+            for it in proj_partner["object_containment"]["items"]
+            if it["item_id"] == "sketch_pencil"
+        )
+        self.assertEqual(pen_partner["place_id"], "dining_table")
+        self.assertEqual(pen_partner["effective_place_id"], "dining_table")
+        self.assertEqual(pen_partner["subject_last_seen_place"], "study_desk")
+        self.assertTrue(pen_partner["impression_stale"])
 
         # Subject enters kitchen_dining and observes room -> impression refreshes to dining_table!
         phone_sc.apply_stance_containment_action(
@@ -1088,8 +1106,9 @@ class V03ClockEvaporationStanceWorldTest(unittest.TestCase):
         pen_fresh = next(
             it for it in proj_fresh["object_containment"]["items"] if it["item_id"] == "sketch_pencil"
         )
+        self.assertEqual(pen_fresh["place_id"], "dining_table")
         self.assertEqual(pen_fresh["subject_last_seen_place"], "dining_table")
-        self.assertFalse(pen_fresh["impression_stale"])
+        self.assertNotIn("impression_stale", pen_fresh)
 
     def test_23_bidirectional_sync_owner_mutation_visible_in_phone_view_zero_write(self) -> None:
         # Mutate directly on owner substrate (without creating phone/stance_containment.json)

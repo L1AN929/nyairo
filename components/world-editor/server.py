@@ -61,7 +61,7 @@ def _confine_editor_dir(raw: str, label: str, extra_roots=()) -> Path:
     )
 
 
-def nyairo_export(data, *, extra_roots=()):
+def nyairo_export(data, *, extra_roots=(), default_original_dir=None):
     """「导出 NyAiro 世界包」（v0.2 桥接）：以原始世界包为基础回写编辑器修改。
 
     编辑器 v3 文件不包含 NPC、环境事件、世界规则等完整世界事实，因此回写
@@ -69,6 +69,8 @@ def nyairo_export(data, *, extra_roots=()):
     明确拒绝，不假装 v3 包含全部世界信息。输出永远是新目录，原始包不被覆盖。
     """
     original_raw = data.get("original_dir")
+    if (not isinstance(original_raw, str) or not original_raw.strip()) and isinstance(default_original_dir, str) and default_original_dir.strip():
+        original_raw = default_original_dir
     if not isinstance(original_raw, str) or not original_raw.strip():
         fail("需要提供原始 WorldGen 世界包目录（original_dir）。")
     original = _confine_editor_dir(original_raw, "原始世界包目录", extra_roots=extra_roots)
@@ -138,6 +140,71 @@ def nyairo_perception(data, *, extra_roots=()):
         )
     except ValueError as exc:
         fail(str(exc))
+
+
+def _trial_sandbox_module():
+    """Load the v0.4 Ch.44 isolated trial / provenance / merge module."""
+
+    repo_root = ROOT.parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    import trial_sandbox
+
+    return trial_sandbox
+
+
+def nyairo_trial_hour(data):
+    """「隔离试住一小时」（v0.4 Ch.44）：在临时沙箱里真实跑一小时物理。
+
+    只写临时目录，真实生活目录不会被读写；返回微区光风、纸片受潮与
+    发现的台面/物件，并可附带 A/B 世界包差异。
+    """
+
+    module = _trial_sandbox_module()
+    return module.run_isolated_trial_hour(
+        data.get("package"),
+        weather=data.get("weather", "clear"),
+        window_state=data.get("window_state", "closed"),
+        season=data.get("season", "autumn"),
+        hour=data.get("hour", 14),
+        compare_package=data.get("compare_package"),
+        seed_note_cn=data.get("seed_note_cn", "窗边晾着一张刚抄完的卡片"),
+    )
+
+
+def nyairo_provenance(data, *, extra_roots=()):
+    """「造物者视角 / 角色视角」（v0.4 Ch.44 §五）：只读解释物件来历。"""
+
+    instance_raw = data.get("instance_root")
+    if not isinstance(instance_raw, str) or not instance_raw.strip():
+        fail("需要提供实例目录（instance_root）。")
+    instance_root = _confine_editor_dir(instance_raw, "实例目录", extra_roots=extra_roots)
+    object_id = data.get("object_id")
+    if not isinstance(object_id, str) or not object_id.strip():
+        fail("需要提供物件 ID（object_id）。")
+    module = _trial_sandbox_module()
+    return module.explain_matter_provenance_for_builder(instance_root, object_id.strip())
+
+
+def nyairo_diff_merge(data, *, extra_roots=()):
+    """「保留生活痕迹的世界包差量合并」（v0.4 Ch.44 §六/§八）。"""
+
+    instance_raw = data.get("instance_root")
+    if not isinstance(instance_raw, str) or not instance_raw.strip():
+        fail("需要提供实例目录（instance_root）。")
+    instance_root = _confine_editor_dir(instance_raw, "实例目录", extra_roots=extra_roots)
+    new_package = data.get("new_editor_package")
+    if not isinstance(new_package, dict):
+        fail("需要提供新的编辑器世界包（new_editor_package）。")
+    dry_run = data.get("dry_run", True)
+    if not isinstance(dry_run, bool):
+        fail("dry_run 需要是布尔值（true/false）。")
+    module = _trial_sandbox_module()
+    return module.merge_package_preserving_lived_matter(
+        instance_root, new_package, dry_run=dry_run
+    )
 
 
 def nyairo_interior(data):
@@ -395,12 +462,23 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(201, {"url": "/api/exports/" + token, "filename": filename, "local_file": "exports/" + local_name, "cover_file": "exports/" + cover_file if cover_file else None})
                 if path == "/api/nyairo/export":
                     active_extra = (self.store.path.parent, getattr(self.server, "active_world_parent", None))
-                    return self.send(200, nyairo_export(data, extra_roots=active_extra))
+                    active_info = getattr(self.server, "active_world", None)
+                    default_orig = active_info.get("package_dir") if isinstance(active_info, dict) else None
+                    return self.send(200, nyairo_export(data, extra_roots=active_extra, default_original_dir=default_orig))
                 if path == "/api/nyairo/interior":
                     return self.send(200, nyairo_interior(data))
                 if path == "/api/nyairo/perception":
                     active_extra = (self.store.path.parent, getattr(self.server, "active_world_parent", None))
                     return self.send(200, nyairo_perception(data, extra_roots=active_extra))
+                if path == "/api/nyairo/trial-hour":
+                    return self.send(200, nyairo_trial_hour(data))
+                if path == "/api/nyairo/provenance":
+                    active_extra = (self.store.path.parent, getattr(self.server, "active_world_parent", None))
+                    return self.send(200, nyairo_provenance(data, extra_roots=active_extra))
+                if path == "/api/nyairo/diff-merge":
+                    active_extra = (self.store.path.parent, getattr(self.server, "active_world_parent", None))
+                    merged = nyairo_diff_merge(data, extra_roots=active_extra)
+                    return self.send(409 if merged.get("ok") is False else 200, merged)
                 if len(parts) == 4 and parts[:2] == ["api", "trials"] and parts[3] == "actions":
                     return self.send(200, self.store.execute(parts[2], data.get("execution_id"), data.get("revision"), data.get("command")))
             else:

@@ -34,7 +34,7 @@
       "description": "We recommend the admin-free native Windows desktop client (with a two-step SmartScreen vector guide and automated environment setup); pure WSL 2 CLI instal...",
       "url": "https://nyairo.com/en/docs/windows/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -474,11 +474,11 @@
 
         <article class="markdown-body">
           <h2 id="windows-desktop">Option 1: Windows Desktop Client (Recommended)</h2>
-<p>Windows 10 / 11 users can install the native desktop client directly (about 5.8 MB; installs into your current user directory with no administrator privileges required):</p>
+<p>Windows 10 / 11 users can install the native desktop client directly (about 6.0 MB; installs into your current user directory with no administrator privileges required):</p>
 <ol>
-<li>Download the installer: <a href="../../../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe"><strong>nyairo-0.7.0-setup.exe</strong></a> (SHA256: <code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code>);</li>
+<li>Download the installer: <a href="../../../downloads/nyairo-0.8.0-setup.exe" download="nyairo-0.8.0-setup.exe"><strong>nyairo-0.8.0-setup.exe</strong></a> (SHA256: <code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code>);</li>
 <li>Double-click to install and launch <strong>nyairo</strong> (if a SmartScreen prompt appears on first launch, follow the two-step diagram below: click "More info → Run anyway"). The app icon stays accessible in the bottom-right system tray;</li>
-<li>On first startup, the client walks you through a two-step setup: <strong>Step 1 prepares the environment automatically</strong> (downloads and verifies the <code>v0.7.0</code> release bundle → installs Python dependencies → initializes an isolated personal data directory → generates a local communication token → starts the gateway → runs a health check); <strong>Step 2 handles configuration</strong> (set how to address your companion, their pronouns, model name, and API Key on the spot, or connect to a local Ollama instance—see the <a href="../configuration/#configuration-beginner-model">Zero-Barrier Beginner Model Guide</a>);</li>
+<li>On first startup, the client walks you through a two-step setup: <strong>Step 1 prepares the environment automatically</strong> (downloads and verifies the <code>v0.8.0</code> release bundle → installs Python dependencies → initializes an isolated personal data directory → generates a local communication token → starts the gateway → runs a health check); <strong>Step 2 handles configuration</strong> (set how to address your companion, their pronouns, model name, and API Key on the spot, or connect to a local Ollama instance—see the <a href="../configuration/#configuration-beginner-model">Zero-Barrier Beginner Model Guide</a>);</li>
 <li>Click "Finish and Start" to open the main window. For details on each view and keyboard shortcuts, see the <a href="../desktop-guide/">Desktop Client User Guide</a>.</li>
 </ol>
 <div class="callout callout-info"><div class="callout-title">Uninstalling Will Not Delete Memories</div><p>The desktop UI is installed under <code>%LOCALAPPDATA%\Programs\nyairo</code>, while chat memories and persona files live separately inside your WSL personal data directory. Uninstalling the desktop client only stops the gateway and cleans up auto-start entries and window caches—your personal data stays untouched (see <a href="../data/">Data Directories, Backups, and Uninstallation</a>).</p></div>
@@ -487,7 +487,7 @@
 <p>Why does this prompt appear? Microsoft shows this standard warning for newly released independent open-source software that has not purchased a commercial EV code-signing certificate (which costs thousands of RMB per year)—it does not mean the file is unsafe. Follow these three steps to verify and run it:</p>
 <ol>
 <li><strong>Step 1 · Click "More info"</strong>: Below the "Windows protected your PC" warning text, click the underlined "<strong>More info</strong>" link;</li>
-<li><strong>Verify the SHA256 checksum (optional)</strong>: Open PowerShell in the folder containing the installer, run <code>Get-FileHash .\nyairo-0.7.0-setup.exe -Algorithm SHA256</code>, and confirm the output matches <code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code> published on the official site character for character;</li>
+<li><strong>Verify the SHA256 checksum (optional)</strong>: Open PowerShell in the folder containing the installer, run <code>Get-FileHash .\nyairo-0.8.0-setup.exe -Algorithm SHA256</code>, and confirm the output matches <code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code> published on the official site character for character;</li>
 <li><strong>Step 2 · Click "Run anyway"</strong>: Click the newly revealed "<strong>Run anyway</strong>" button at the bottom of the window to start installation normally.</li>
 </ol>
 <div class="smartscreen-guide" style="margin: 16px 0 20px;">
@@ -522,9 +522,9 @@
   </g>
   <text x="382" y="64" fill="var(--fg)" font-size="14" font-weight="600" font-family="var(--font-sans, sans-serif)">Windows protected your PC</text>
   <rect x="382" y="78" width="276" height="66" rx="6" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
-  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">App: nyairo-0.7.0-setup.exe</text>
+  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">App: nyairo-0.8.0-setup.exe</text>
   <text x="394" y="116" fill="var(--muted)" font-size="11" font-family="var(--font-sans, sans-serif)">Publisher: Unknown (safe once hash matches)</text>
-  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 174e4597...14dd8</text>
+  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 36ed8ef7...76eb8</text>
   <text x="528" y="169" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600" font-family="var(--font-sans, sans-serif)">2. Click "Run anyway"</text>
   <rect x="482" y="182" width="92" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
   <text x="528" y="200" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600" font-family="var(--font-sans, sans-serif)">Run anyway</text>
@@ -554,11 +554,11 @@
 <p>If you prefer to verify the checksum before running the installer, use these commands to check the SHA256 hash first:</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256
-python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
+<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
 </div>
 <p>Follow the on-screen prompts to enter your model API Key. Afterward, whenever you open Ubuntu, simply type <code>nyairo</code> to start chatting.</p>
         </article>

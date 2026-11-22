@@ -46,7 +46,12 @@ for entry in (str(ROOT), str(ROOT / "components"),
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
-from test_one_day_life import CycleTest, StubCognition, StubObservation, StubWriter, posix_only
+import test_one_day_life as _odl  # noqa: E402
+
+StubCognition = _odl.StubCognition
+StubObservation = _odl.StubObservation
+StubWriter = _odl.StubWriter
+posix_only = _odl.posix_only
 
 
 class NoMaterialOwner:
@@ -132,7 +137,7 @@ class MemoryFixture:
 
 
 @posix_only
-class DScenarioBase(CycleTest):
+class DScenarioBase(_odl.OneDayTestCase):
     """真实 Supply owner + 真实 World home + 真实 runtime + loopback 替身 + 真实隔离 M0。"""
 
     # -- fixture -------------------------------------------------------------------------

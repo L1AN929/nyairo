@@ -38,6 +38,10 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(ROOT / "tests") not in sys.path:
+    # 兄弟套件导入（test_world_journey）需要 tests 目录本身在 sys.path 上：
+    # `python -m unittest tests.<模块>` 只把仓库根放上去，discover 会放。
+    sys.path.insert(0, str(ROOT / "tests"))
 
 from test_world_journey import JourneyTestCase, posix_only  # noqa: E402
 

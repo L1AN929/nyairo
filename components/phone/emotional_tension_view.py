@@ -44,6 +44,16 @@ from typing import Any, Mapping, Optional
 
 from . import sensory_character_view as char_view
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 EMOTIONAL_TENSION_SCHEMA = "phone.emotional.tension.v1"
 STATE_DIRNAME = "phone"
 EMOTIONAL_TENSION_FILENAME = "emotional_tension.json"
@@ -264,6 +274,7 @@ LOCAL_ID_RE = re.compile(r"^[A-Za-z0-9._:@#\-]{1,120}$")
 HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 MAX_OPERATION_KEY = 120
 MAX_OPERATION_RECEIPTS = 64
+MAX_COMMITTED_OP_RING = 256
 
 FORBIDDEN_FOREIGN_KEYS: frozenset[str] = frozenset({
     "subject_id",
@@ -1481,6 +1492,9 @@ def default_emotional_tension_state(root: Optional[Path | str] = None) -> dict[s
             "favor_seq": 0,
         },
         "operation_receipts": [],
+        "next_op_seq": 0,
+        "committed_op_ring": [],
+        "evicted_up_to_revision": 0,
     }
 
 
@@ -1811,6 +1825,145 @@ def _rupture_conditions_met(rupture: Mapping[str, Any], now_dt: datetime) -> boo
     return True
 
 
+CROSS_STORE_GONE_STATUSES: frozenset[str] = frozenset({
+    "consumed",
+    "discarded",
+    "returned_out",
+    "deleted",
+})
+
+
+def _cross_store_source_exists(
+    root: Path | str, ref: Optional[str]
+) -> Optional[bool]:
+    """Zero-write cross-store existence check for Ch.42 / Ch.44 §二 ``SOURCE_GONE``.
+
+    Only structured cross-repository refs intervene; legacy un-prefixed ids return
+    ``None`` so every historical caller keeps its previous behaviour. A missing
+    store file (or missing row) means the source is gone (``False``); this helper
+    never creates a directory and never writes.
+    """
+
+    if not isinstance(ref, str):
+        return None
+    text = ref.strip()
+    if not text or ":" not in text:
+        return None
+    prefix, _, target = text.partition(":")
+    target = target.strip()
+    if prefix not in ("matter", "v04_card", "v04_project"):
+        return None
+    if not target:
+        return False
+    root_path = Path(root)
+
+    if prefix == "matter":
+        doc = _safe_read_json_mapping(root_path / "world" / "v08_matter_space.json")
+        if doc is None:
+            return False
+        objects = doc.get("matter_objects")
+        if not isinstance(objects, Mapping):
+            objects = doc.get("objects")
+        if not isinstance(objects, Mapping):
+            return False
+        row = objects.get(target)
+        if not isinstance(row, Mapping):
+            return False
+        if any(
+            row.get(flag) is True
+            for flag in ("consumed", "discarded", "returned_out", "delivered_to_board")
+        ):
+            return False
+        if str(row.get("status") or "").strip().lower() in CROSS_STORE_GONE_STATUSES:
+            return False
+        return True
+
+    if prefix == "v04_card":
+        doc = _safe_read_json_mapping(
+            root_path / "world" / "v04_neighborhood_state.json"
+        )
+        if doc is None:
+            return False
+        bench = doc.get("craft_bench")
+        if not isinstance(bench, Mapping):
+            return False
+        cards = bench.get("cards")
+        if isinstance(cards, Mapping):
+            return isinstance(cards.get(target), Mapping)
+        if isinstance(cards, list):
+            return any(
+                isinstance(row, Mapping) and row.get("card_id") == target
+                for row in cards
+            )
+        return False
+
+    # v04_project
+    doc = _safe_read_json_mapping(root_path / "phone" / "v04_elastic_play.json")
+    if doc is None:
+        return False
+    projects = doc.get("personal_projects")
+    if not isinstance(projects, list):
+        return False
+    for row in projects:
+        if not isinstance(row, Mapping) or row.get("project_id") != target:
+            continue
+        if row.get("deleted") is True:
+            return False
+        if str(row.get("status") or "").strip().lower() in CROSS_STORE_GONE_STATUSES:
+            return False
+        return True
+    return False
+
+
+def _stored_emotional_source_refs(
+    missing_dom: Mapping[str, Any], asking_dom: Mapping[str, Any]
+) -> list[str]:
+    """Every ref currently held by kept notes / open or deferred favors."""
+
+    refs: list[str] = []
+    for note in missing_dom.get("kept_notes") or []:
+        if isinstance(note, Mapping):
+            ref = note.get("source_ref")
+            if isinstance(ref, str) and ref.strip():
+                refs.append(ref.strip())
+    open_fav = asking_dom.get("open_favor")
+    if isinstance(open_fav, Mapping):
+        ref = open_fav.get("target_object_ref")
+        if isinstance(ref, str) and ref.strip():
+            refs.append(ref.strip())
+    deferred = asking_dom.get("deferred_favors")
+    if isinstance(deferred, Mapping):
+        for fav in deferred.values():
+            if not isinstance(fav, Mapping):
+                continue
+            ref = fav.get("target_object_ref")
+            if isinstance(ref, str) and ref.strip():
+                refs.append(ref.strip())
+    return refs
+
+
+def _invalidated_refs_for(
+    root: Optional[Path | str],
+    ctx: Mapping[str, Any],
+    extra_refs: tuple[str, ...] | list[str] = (),
+) -> set[str]:
+    """Stored invalidations plus cross-store refs whose real source is gone.
+
+    Read-only: when ``root`` is ``None`` (pure in-memory projection) only the
+    persisted invalidations apply. Cross-store checks never write.
+    """
+
+    refs = {str(r) for r in ctx.get("invalidated_source_refs", [])}
+    if root is None:
+        return refs
+    for ref in extra_refs:
+        if not isinstance(ref, str) or ref in refs:
+            continue
+        if _cross_store_source_exists(root, ref) is False:
+            refs.add(ref)
+    return refs
+
+
 def _valid_kept_notes(
     missing_dom: Mapping[str, Any],
     invalidated_refs: set[str],
@@ -2048,13 +2201,18 @@ def project_emotional_tension(
     now_dt: datetime,
     now_iso: str,
     subject_view: bool = False,
+    root: Optional[Path | str] = None,
 ) -> dict[str, Any]:
     ctx = state["context"]
     q_dom = state["quarrel_domain"]
     m_dom = state["missing_domain"]
     lm_dom = state["low_mood_domain"]
     ask_dom = state["asking_domain"]
-    invalidated_refs = set(str(r) for r in ctx.get("invalidated_source_refs", []))
+    invalidated_refs = _invalidated_refs_for(
+        root,
+        ctx,
+        extra_refs=_stored_emotional_source_refs(m_dom, ask_dom),
+    )
     last_woke_iso = ctx.get("last_woke_at")
 
     intimacy_info = (
@@ -2251,7 +2409,146 @@ def read_emotional_tension(
         now_dt=now_dt,
         now_iso=now_iso,
         subject_view=bool(subject_view),
+        root=root,
     )
+
+
+def _latest_expired_tension_cue(
+    state: Mapping[str, Any], now_dt: datetime
+) -> Optional[dict[str, Any]]:
+    """Read-only identifier of the newest expired favor / not-a-repair apology."""
+
+    newest: Optional[tuple[datetime, dict[str, Any]]] = None
+    ask_dom = state.get("asking_domain")
+    if isinstance(ask_dom, Mapping):
+        open_fav = ask_dom.get("open_favor")
+        if isinstance(open_fav, Mapping):
+            exp_dt = _parse_iso(open_fav.get("expires_at"))
+            if exp_dt is not None and now_dt >= exp_dt:
+                newest = (
+                    exp_dt,
+                    {
+                        "kind": "FAVOR_EXPIRED",
+                        "favor_id": str(open_fav.get("favor_id") or ""),
+                        "favor_kind": str(open_fav.get("favor_kind") or ""),
+                        "at": open_fav.get("expires_at"),
+                    },
+                )
+    q_dom = state.get("quarrel_domain")
+    ruptures = q_dom.get("ruptures") if isinstance(q_dom, Mapping) else None
+    if isinstance(ruptures, Mapping):
+        for rup_id, rup in ruptures.items():
+            if not isinstance(rup, Mapping):
+                continue
+            for attempt in rup.get("non_repair_attempts") or []:
+                if not isinstance(attempt, Mapping):
+                    continue
+                if attempt.get("attempt_kind") != "APOLOGY":
+                    continue
+                at_dt = _parse_iso(attempt.get("at"))
+                if at_dt is None:
+                    continue
+                if newest is None or at_dt >= newest[0]:
+                    newest = (
+                        at_dt,
+                        {
+                            "kind": "APOLOGY_NOT_REPAIR",
+                            "rupture_id": str(rup_id),
+                            "at": attempt.get("at"),
+                        },
+                    )
+    return newest[1] if newest is not None else None
+
+
+def scan_emotional_tension_cues_zero_write(
+    root: Path | str,
+    now: str | datetime | None = None,
+) -> dict[str, Any]:
+    """Zero-write emotional-tension cue summary for the daily loop / context.
+
+    A missing state file yields a calm empty summary and creates nothing.
+    Private note text and favor wording never leak; only counts and ids do.
+    """
+
+    now_dt, now_iso = _normalize_now(now)
+    state, state_reason = read_emotional_tension_state(root)
+    calm: dict[str, Any] = {
+        "in_low_mood": False,
+        "active_spaces_count": 0,
+        "open_ruptures_count": 0,
+        "unsurfaced_missing_notes_count": 0,
+        "open_favor": None,
+        "declined_kinds_until_sleep": [],
+        "latest_expired_favor_or_rejected_apology": None,
+        "evaluated_at": now_iso,
+        "read_only": True,
+        "private_content_excluded": True,
+    }
+    if state_reason is not None:
+        return calm
+
+    char_bundle = _read_character_pack_bundle(root)
+    proj = project_emotional_tension(
+        state,
+        char_bundle=char_bundle,
+        now_dt=now_dt,
+        now_iso=now_iso,
+        subject_view=True,
+        root=root,
+    )
+
+    quarrel = proj["quarrel"]
+    ruptures = quarrel.get("ruptures") or []
+    open_ruptures_count = sum(
+        1
+        for row in ruptures
+        if isinstance(row, Mapping) and row.get("status") in LIVE_RUPTURE_STATUSES
+    )
+
+    m_dom = state["missing_domain"]
+    kept_notes = proj["missing_partner"].get("kept_notes") or []
+    surfaced = {str(nid) for nid in m_dom.get("surfaced_note_ids", [])}
+    shared = {str(nid) for nid in m_dom.get("shared_note_ids", [])}
+    unsurfaced = sum(
+        1
+        for note in kept_notes
+        if isinstance(note, Mapping)
+        and str(note.get("note_id") or "") not in surfaced
+        and str(note.get("note_id") or "") not in shared
+    )
+
+    open_fav_raw = proj["asking_partner"].get("open_favor")
+    open_favor: Optional[dict[str, Any]] = None
+    if isinstance(open_fav_raw, Mapping):
+        open_favor = {
+            "favor_id": open_fav_raw.get("favor_id"),
+            "favor_kind": open_fav_raw.get("favor_kind"),
+            "status": open_fav_raw.get("status"),
+            "asked_at": open_fav_raw.get("asked_at"),
+            "expires_at": open_fav_raw.get("expires_at"),
+            "no_obligation_when_declined": True,
+        }
+
+    declined = sorted(
+        _active_declined_favor_kinds(
+            state["asking_domain"], state["context"].get("last_woke_at")
+        ).keys()
+    )
+
+    return {
+        "in_low_mood": bool(proj["low_mood"].get("in_low_mood_spell")),
+        "active_spaces_count": len(quarrel.get("active_spaces") or []),
+        "open_ruptures_count": int(open_ruptures_count),
+        "unsurfaced_missing_notes_count": int(unsurfaced),
+        "open_favor": open_favor,
+        "declined_kinds_until_sleep": declined,
+        "latest_expired_favor_or_rejected_apology": _latest_expired_tension_cue(
+            state, now_dt
+        ),
+        "evaluated_at": now_iso,
+        "read_only": True,
+        "private_content_excluded": True,
+    }
 
 
 # ---------------------------------------------------------------------------------------------
@@ -2274,8 +2571,48 @@ def _lookup_receipt(
     return None
 
 
+def _next_op_seq(state: Mapping[str, Any]) -> int:
+    highest = 0
+    raw = state.get("next_op_seq")
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > highest:
+        highest = raw
+    for field in ("operation_receipts", "committed_op_ring"):
+        rows = state.get(field)
+        if not isinstance(rows, list):
+            continue
+        for rec in rows:
+            if not isinstance(rec, Mapping):
+                continue
+            seq = rec.get("op_seq")
+            if isinstance(seq, int) and not isinstance(seq, bool) and seq > highest:
+                highest = seq
+    return highest + 1
+
+
+def _lookup_ring_receipt(
+    ring: Any,
+    *,
+    operation_key: str,
+    action: str,
+    fingerprint: str,
+) -> Optional[dict[str, Any]]:
+    """Match an evicted receipt in ``committed_op_ring`` (安全重放 / 409 同键不同意)."""
+
+    if not isinstance(ring, list):
+        return None
+    for rec in reversed(ring):
+        if not isinstance(rec, Mapping):
+            continue
+        if rec.get("operation_key") != operation_key:
+            continue
+        if rec.get("action") != action or rec.get("fingerprint") != fingerprint:
+            raise EmotionalTensionConflictError("OPERATION_KEY_PAYLOAD_MISMATCH")
+        return dict(rec)
+    return None
+
+
 def _record_receipt(
-    receipts: list[dict[str, Any]],
+    state: dict[str, Any],
     *,
     operation_key: str,
     action: str,
@@ -2283,15 +2620,53 @@ def _record_receipt(
     target_id: Optional[str],
     now_iso: str,
 ) -> None:
+    """Append a receipt in commit order; evict oldest by ``op_seq`` into the ring."""
+
+    receipts = state.setdefault("operation_receipts", [])
+    ring = state.setdefault("committed_op_ring", [])
+    if not isinstance(ring, list):
+        ring = []
+        state["committed_op_ring"] = ring
+
+    op_seq = _next_op_seq(state)
+    state["next_op_seq"] = op_seq
     receipts.append({
         "operation_key": operation_key,
         "action": action,
         "fingerprint": fingerprint,
         "target_id": target_id,
         "recorded_at": now_iso,
+        "op_seq": op_seq,
+        "revision": int(state.get("revision") or 0),
     })
+
     while len(receipts) > MAX_OPERATION_RECEIPTS:
-        receipts.pop(0)
+        oldest = min(
+            receipts,
+            key=lambda rec: (
+                int(rec.get("op_seq") or 0) if isinstance(rec, Mapping) else -1
+            ),
+        )
+        receipts.remove(oldest)
+        if not isinstance(oldest, Mapping):
+            continue
+        ring.append({
+            "operation_key": oldest.get("operation_key"),
+            "action": oldest.get("action"),
+            "fingerprint": oldest.get("fingerprint"),
+            "target_id": oldest.get("target_id"),
+            "recorded_at": oldest.get("recorded_at"),
+            "op_seq": oldest.get("op_seq"),
+            "revision": oldest.get("revision"),
+        })
+        evicted_rev = oldest.get("revision")
+        if isinstance(evicted_rev, int) and not isinstance(evicted_rev, bool):
+            current = state.get("evicted_up_to_revision")
+            base = current if isinstance(current, int) and not isinstance(current, bool) else 0
+            state["evicted_up_to_revision"] = max(base, evicted_rev)
+
+    while len(ring) > MAX_COMMITTED_OP_RING:
+        ring.pop(0)
 
 
 def _resolve_actor(
@@ -2373,7 +2748,29 @@ def apply_emotional_tension_action(
     now: str | datetime | None = None,
     subject_view: bool = False,
 ) -> dict[str, Any]:
-    """Validate and apply one explicit action on ``<root>/phone/emotional_tension.json``."""
+    """Validate and apply one explicit action under one exclusive write lock.
+
+    The whole read-check-mutate-write cycle runs inside ``state_file_lock`` so
+    two writers can never interleave: stale ``expected_revision`` is re-checked
+    against the freshly re-read state, never against a pre-lock copy.
+    """
+
+    if not isinstance(payload, Mapping):
+        raise EmotionalTensionValidationError("PAYLOAD_NOT_OBJECT")
+    with _tx.state_file_lock(emotional_tension_state_path(root)):
+        return _apply_emotional_tension_action_locked(
+            root, payload, now=now, subject_view=subject_view
+        )
+
+
+def _apply_emotional_tension_action_locked(
+    root: Path | str,
+    payload: Mapping[str, Any],
+    *,
+    now: str | datetime | None = None,
+    subject_view: bool = False,
+) -> dict[str, Any]:
+    """Inner write body; callers must already hold ``state_file_lock``."""
     if not isinstance(payload, Mapping):
         raise EmotionalTensionValidationError("PAYLOAD_NOT_OBJECT")
 
@@ -2450,6 +2847,13 @@ def apply_emotional_tension_action(
             action=action,
             fingerprint=fp,
         )
+        if existing_rec is None:
+            existing_rec = _lookup_ring_receipt(
+                state.get("committed_op_ring"),
+                operation_key=op_key,
+                action=action,
+                fingerprint=fp,
+            )
         if existing_rec is not None:
             proj = project_emotional_tension(
                 state,
@@ -2457,6 +2861,7 @@ def apply_emotional_tension_action(
                 now_dt=now_dt,
                 now_iso=now_iso,
                 subject_view=bool(subject_view),
+                root=root,
             )
             out_replay = dict(proj)
             out_replay.update({
@@ -2469,6 +2874,17 @@ def apply_emotional_tension_action(
                 "target_id": existing_rec.get("target_id"),
             })
             return out_replay
+
+    if op_key is not None and expected_rev is not None:
+        evicted_up_to = state.get("evicted_up_to_revision")
+        current_rev = int(state["revision"])
+        if (
+            isinstance(evicted_up_to, int)
+            and not isinstance(evicted_up_to, bool)
+            and evicted_up_to > 0
+            and expected_rev <= evicted_up_to < current_rev
+        ):
+            raise EmotionalTensionConflictError("RETRY_WINDOW_EXPIRED")
 
     if expected_rev is not None and int(state["revision"]) != expected_rev:
         raise EmotionalTensionConflictError("REVISION_CONFLICT")
@@ -2491,7 +2907,7 @@ def apply_emotional_tension_action(
         state["updated_at"] = now_iso
         if op_key is not None:
             _record_receipt(
-                state["operation_receipts"],
+                state,
                 operation_key=op_key,
                 action=action,
                 fingerprint=fp,
@@ -2505,6 +2921,7 @@ def apply_emotional_tension_action(
             now_dt=now_dt,
             now_iso=now_iso,
             subject_view=bool(subject_view),
+            root=root,
         )
         out = dict(proj)
         out.update({
@@ -3292,13 +3709,19 @@ def apply_emotional_tension_action(
         )
 
     # ---- 3. Missing Partner (MH01-MH18) ----
-    invalidated_set = set(str(r) for r in ctx.get("invalidated_source_refs", []))
+    invalidated_set = _invalidated_refs_for(
+        root,
+        ctx,
+        extra_refs=_stored_emotional_source_refs(m_dom, ask_dom),
+    )
 
     if action == "add_missing_note":
         _check_forbidden_tags(
             payload, "pressure_tags", MISSING_PRESSURE_TAGS, conflict_code="MISSING_PRESSURE_FORBIDDEN"
         )
         sref = _require_id(payload.get("source_ref"), reason_code="SOURCE_REF_INVALID")
+        if _cross_store_source_exists(root, sref) is False:
+            raise EmotionalTensionConflictError("SOURCE_GONE")
         if sref in invalidated_set:
             raise EmotionalTensionConflictError("SOURCE_REF_INVALIDATED")
         sdom = _clean_text(
@@ -3635,6 +4058,8 @@ def apply_emotional_tension_action(
         else:
             target_ref = _require_id(raw_ref, reason_code="TARGET_OBJECT_REF_REQUIRED")
 
+        if target_ref is not None and _cross_store_source_exists(root, target_ref) is False:
+            raise EmotionalTensionConflictError("SOURCE_GONE")
         if target_ref is not None and target_ref in invalidated_set:
             raise EmotionalTensionConflictError("TARGET_OBJECT_INVALIDATED")
 
@@ -3828,6 +4253,196 @@ def apply_emotional_tension_action(
     raise EmotionalTensionValidationError(f"ACTION_INVALID:{action}")
 
 
+_MISSING_OUTREACH_PREFIX_BY_KIND: dict[str, str] = {
+    "MADE": "收拾桌角时又看见之前做的小物：",
+    "FOUND": "手边留着之前顺手记下的一件小事：",
+    "HAPPENED": "想起前阵子记下的一件日常小事：",
+    "LEARNED": "翻东西时又想起之前记下的一点小收获：",
+}
+
+
+def mature_missing_partner_notes_for_outreach(
+    root: Path | str,
+    *,
+    now: str | datetime | None = None,
+    min_age_hours: float = 6.0,
+    max_age_hours: float = 68.0,
+    mark_surfaced: bool = False,
+) -> dict[str, Any]:
+    """Zero-LLM bounded maturation helper surfacing genuine lived missing_partner notes for outreach.
+
+    Strictly preserves Ch. 42 invariants:
+    - 100% zero-write when state file does not exist or ``mark_surfaced=False``;
+    - Never tracks partner absence duration or accumulates longing/absence debt;
+    - Suppresses when ``in_space``, open relational/US rupture, ``partner_urgent``, or active private scene;
+    - Excludes private/intimate sources and invalidated refs; returns at most 1 matured candidate.
+    """
+    now_dt, now_iso = _normalize_now(now)
+    state_path = emotional_tension_state_path(root)
+    if not state_path.exists() or state_path.is_symlink():
+        return {
+            "ok": True,
+            "evaluated_at": now_iso,
+            "suppressed": False,
+            "suppression_reason": None,
+            "candidate": None,
+            "candidates": [],
+            "matured_count": 0,
+            "tracks_absence_duration": False,
+            "accumulates_longing_weight": False,
+            "absence_debt": 0,
+            "sends_outbound_harassment": False,
+            "zero_write": True,
+            "llm_calls": 0,
+        }
+
+    state, state_reason = read_emotional_tension_state(root)
+    if state_reason is not None:
+        return {
+            "ok": False,
+            "evaluated_at": now_iso,
+            "suppressed": True,
+            "suppression_reason": state_reason,
+            "candidate": None,
+            "candidates": [],
+            "matured_count": 0,
+            "tracks_absence_duration": False,
+            "accumulates_longing_weight": False,
+            "absence_debt": 0,
+            "sends_outbound_harassment": False,
+            "zero_write": True,
+            "llm_calls": 0,
+        }
+
+    ctx = state["context"]
+    q_dom = state["quarrel_domain"]
+    m_dom = state["missing_domain"]
+    ask_dom = state["asking_domain"]
+    char_bundle = _read_character_pack_bundle(root)
+    intimacy_info = (
+        char_bundle.get("adult_intimacy")
+        if isinstance(char_bundle.get("adult_intimacy"), Mapping)
+        else {}
+    )
+    effective_private_scene = bool(ctx.get("private_scene_active", False)) or bool(
+        intimacy_info.get("active_scene", False)
+    )
+    in_space = bool(_active_spaces(q_dom, ctx.get("last_woke_at"), now_dt))
+    open_rel_rupture_ids = [
+        str(r.get("rupture_id") or rid)
+        for rid, r in sorted(q_dom.get("ruptures", {}).items())
+        if isinstance(r, Mapping)
+        and r.get("status") in LIVE_RUPTURE_STATUSES
+        and r.get("scope") in RELATIONAL_SCOPES
+    ]
+
+    suppression_reason: Optional[str] = None
+    if in_space:
+        suppression_reason = "SUPPRESSED_BY_IN_SPACE"
+    elif open_rel_rupture_ids:
+        suppression_reason = "SUPPRESSED_BY_OPEN_RUPTURE"
+    elif bool(ctx.get("partner_urgent", False)):
+        suppression_reason = "SUPPRESSED_BY_PARTNER_URGENT"
+    elif effective_private_scene:
+        suppression_reason = "SUPPRESSED_BY_PRIVATE_SCENE"
+
+    if suppression_reason is not None:
+        return {
+            "ok": True,
+            "evaluated_at": now_iso,
+            "suppressed": True,
+            "suppression_reason": suppression_reason,
+            "in_space": in_space,
+            "open_relational_rupture_ids": open_rel_rupture_ids,
+            "candidate": None,
+            "candidates": [],
+            "matured_count": 0,
+            "tracks_absence_duration": False,
+            "accumulates_longing_weight": False,
+            "absence_debt": 0,
+            "sends_outbound_harassment": False,
+            "zero_write": True,
+            "llm_calls": 0,
+        }
+
+    invalidated_refs = _invalidated_refs_for(
+        root,
+        ctx,
+        extra_refs=_stored_emotional_source_refs(m_dom, ask_dom),
+    )
+    valid_notes = _valid_kept_notes(m_dom, invalidated_refs, now_dt)
+    shared_ids = {str(x) for x in m_dom.get("shared_note_ids", [])}
+    matured_ids = {str(x) for x in m_dom.get("outreach_matured_note_ids", [])}
+    min_age_sec = max(0.0, float(min_age_hours) * 3600.0)
+    max_age_sec = min(float(MISSING_KEEP_SECONDS), max(min_age_sec, float(max_age_hours) * 3600.0))
+
+    matured_list: list[dict[str, Any]] = []
+    for note in valid_notes:
+        nid = str(note.get("note_id") or "").strip()
+        if not nid or nid in shared_ids or nid in matured_ids:
+            continue
+        sdom = str(note.get("source_domain") or "daily_life").strip().lower()
+        if sdom in FORBIDDEN_MISSING_SOURCES:
+            continue
+        created_dt = _parse_iso(note.get("created_at"))
+        if created_dt is None:
+            continue
+        age_sec = (now_dt - created_dt).total_seconds()
+        if age_sec < min_age_sec or age_sec >= max_age_sec:
+            continue
+        summary = str(note.get("summary") or "").strip()
+        if not summary:
+            continue
+        nkind = str(note.get("kind") or "FOUND").strip().upper()
+        prefix = _MISSING_OUTREACH_PREFIX_BY_KIND.get(nkind, _MISSING_OUTREACH_PREFIX_BY_KIND["FOUND"])
+        suggested_text = f"{prefix}{summary}"[:140]
+        matured_list.append({
+            "note_id": nid,
+            "source_ref": str(note.get("source_ref") or ""),
+            "source_domain": sdom,
+            "kind": nkind,
+            "summary": summary,
+            "created_at": str(note.get("created_at") or ""),
+            "age_hours": round(age_sec / 3600.0, 2),
+            "suggested_text_cn": suggested_text,
+            "tracks_absence_duration": False,
+            "absence_debt": 0,
+        })
+
+    # Oldest matured note first so it shares gently before naturally fading at 72h.
+    matured_list.sort(key=lambda item: (str(item.get("created_at") or ""), str(item.get("note_id") or "")))
+    selected = matured_list[0] if matured_list else None
+    did_write = False
+
+    if mark_surfaced and selected is not None:
+        matured_ring = [str(x) for x in m_dom.get("outreach_matured_note_ids", [])]
+        if selected["note_id"] not in matured_ring:
+            matured_ring.append(selected["note_id"])
+            m_dom["outreach_matured_note_ids"] = matured_ring[-32:]
+            state["revision"] = int(state.get("revision") or 0) + 1
+            state["updated_at"] = now_iso
+            write_emotional_tension_state(root, state)
+            did_write = True
+
+    return {
+        "ok": True,
+        "evaluated_at": now_iso,
+        "suppressed": False,
+        "suppression_reason": None,
+        "in_space": False,
+        "open_relational_rupture_ids": [],
+        "candidate": copy.deepcopy(selected),
+        "candidates": [copy.deepcopy(selected)] if selected is not None else [],
+        "matured_count": len(matured_list),
+        "tracks_absence_duration": False,
+        "accumulates_longing_weight": False,
+        "absence_debt": 0,
+        "sends_outbound_harassment": False,
+        "zero_write": not did_write,
+        "llm_calls": 0,
+    }
+
+
 __all__ = [
     "ACTION_ALLOWED_FIELDS",
     "BEHAVIOR_REPAIR_KINDS",
@@ -3855,8 +4470,10 @@ __all__ = [
     "default_emotional_tension_state",
     "derive_weekly_low_mood_window",
     "emotional_tension_state_path",
+    "mature_missing_partner_notes_for_outreach",
     "project_emotional_tension",
     "read_emotional_tension",
     "read_emotional_tension_state",
+    "scan_emotional_tension_cues_zero_write",
     "write_emotional_tension_state",
 ]

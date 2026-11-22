@@ -34,7 +34,7 @@
       "description": "怎么一键生成免选风貌的全随机专属世界、切换 7 套内置世界与 4 种主题风格、使用深浅双色离线地图编辑器改建店铺与房间，以及当前的真实工程边界。",
       "url": "https://nyairo.com/docs/world-editor/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -484,7 +484,7 @@
 
 <h2 id="we-editor">深浅双色离线地图编辑器：画房间与设店铺</h2>
 <p>仓库 <code>components/world-editor/</code> 内置了一套焕新升级、支持<strong>深色与浅色双主题切换</strong>的纯本地可视化空间编辑器（只监听本机 <code>127.0.0.1</code>，无需联网、不耗模型额度）。你可以直接从桌面端「街区 → 编辑器」标签展开使用，也可以在终端手动启动它：</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>cd ~/.local/share/nyairo/releases/v0.7.0/components/world-editor
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>cd ~/.local/share/nyairo/releases/v0.8.0/components/world-editor
 python3 server.py --port 8766</code></pre></div>
 <p>随后在浏览器打开 <code>http://127.0.0.1:8766</code>，就可以动手改造世界了：</p>
 <ol>
@@ -494,9 +494,9 @@ python3 server.py --port 8766</code></pre></div>
 </ol>
 
 <h2 id="we-cli">免选风貌全随机专属世界与种子生成</h2>
-<p>在 <code>v0.7.0</code> 中，除了按「临海坡道小镇（<code>coastal_town</code>）」「山间温泉町（<code>mountain_town</code>）」「近郊住宅街（<code>residential_town</code>）」「田园农庄（<code>rural_farming</code>）」四种主题生成外，打开桌面端「<strong>街区 → 生成新小镇</strong>」已支持<strong>免选风貌的全随机专属世界一键生成</strong>（<code>procedural</code> 模式）：无需挑选预设风格，生成器会按随机种子从 <strong>6 种地貌</strong>（海岬坡道、运河水巷、山麓溪谷、铁道驿町、果园台地、林间湖畔）中混搭互补风貌，组合 <strong>4 种异构连通道路网</strong>（星型枢纽、环街回路、长街步道、分岔大道）、<strong>8 类商业店铺</strong>与<strong>多房间住宅</strong>（在卧室之外自动搭配客厅、檐廊、小厨房或书斋角及冷热干湿物态家具），并支持「生成后立即热切换生效」。</p>
+<p>在 <code>v0.8.0</code> 中，除了按「临海坡道小镇（<code>coastal_town</code>）」「山间温泉町（<code>mountain_town</code>）」「近郊住宅街（<code>residential_town</code>）」「田园农庄（<code>rural_farming</code>）」四种主题生成外，打开桌面端「<strong>街区 → 生成新小镇</strong>」已支持<strong>免选风貌的全随机专属世界一键生成</strong>（<code>procedural</code> 模式）：无需挑选预设风格，生成器会按随机种子从 <strong>6 种地貌</strong>（海岬坡道、运河水巷、山麓溪谷、铁道驿町、果园台地、林间湖畔）中混搭互补风貌，组合 <strong>4 种异构连通道路网</strong>（星型枢纽、环街回路、长街步道、分岔大道）、<strong>8 类商业店铺</strong>与<strong>多房间住宅</strong>（在卧室之外自动搭配客厅、檐廊、小厨房或书斋角及冷热干湿物态家具），并支持「生成后立即热切换生效」。</p>
 <p>如果你在 Linux / WSL 终端使用，也可以直接调用 <code>components.worldgen</code> 指定 <code>--theme procedural</code>（或任一主题）与数字种子一键生成确定性专属世界：</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.8.0"
 cd "$REL"
 # 免选预设风貌，凭种子一键生成全随机专属世界并校验、输出预览地图
 "$REL/vendor/hermes/.venv/bin/python" -m components.worldgen generate \

@@ -37,6 +37,16 @@ import world_social_presence as wsp
 import world_timeline as wt
 import world_travel_delivery as wtd
 
+try:
+    from components.world.scripts import v05_season_solar_pulse as vsp
+except ImportError:  # pragma: no cover - flat script import fallback
+    import v05_season_solar_pulse as vsp  # type: ignore[no-redef]
+
+try:
+    from components.world.scripts import instance_paths as _instance_paths
+except ImportError:  # pragma: no cover - flat script import fallback
+    import instance_paths as _instance_paths  # type: ignore[no-redef]
+
 FEATURE_ENV = "CHIYO_WORLD_LIVING_SKELETON_ENABLED"
 WORLD_ID = "shiomi_city"
 LEGACY_WORLD_ID = "chiyo-world"
@@ -106,6 +116,12 @@ _DEFAULT_WEATHER = {
     "condition": "clear",
     "description": "\u6674\u6717",
     "source": "configured_v1",
+}
+
+_V04_WEATHER_DESCRIPTIONS: dict[str, str] = {
+    "clear": "\u6674\u6717",
+    "drizzle": "\u5fae\u96e8",
+    "rain": "\u964d\u96e8",
 }
 
 
@@ -290,14 +306,45 @@ def read_world_state(
     return _load_state(hermes_home, environment)
 
 
-def _season(month: int) -> str:
-    if month in (3, 4, 5):
-        return "spring"
-    if month in (6, 7, 8):
-        return "summer"
-    if month in (9, 10, 11):
-        return "autumn"
-    return "winter"
+def _season(month_or_dt: int | datetime) -> str:
+    if isinstance(month_or_dt, datetime):
+        return vsp.resolve_effective_season(month_or_dt)[0]
+    return vsp.calendar_season_for_month(month_or_dt)
+
+
+def _resolve_live_weather_zero_write(
+    hermes_home: Optional[Path | str],
+    environment: Optional[Mapping[str, str]] = None,
+) -> dict[str, str]:
+    """Read live weather from ``<day_root>/world/v04_neighborhood_state.json`` zero-write."""
+    home_raw: Optional[Path | str] = hermes_home
+    if home_raw is None and isinstance(environment, Mapping):
+        home_raw = environment.get("HERMES_HOME") or environment.get("CHIYO_WORLD_HOME")
+    try:
+        base_home = _home(home_raw)
+    except Exception:
+        return _copy_json(_DEFAULT_WEATHER)
+    try:
+        paths = _instance_paths.resolve_instance_paths(base_home, environment=environment)
+        nb_path = paths.day_root / "world" / "v04_neighborhood_state.json"
+        if not nb_path.is_file() or nb_path.is_symlink():
+            return _copy_json(_DEFAULT_WEATHER)
+        doc = json.loads(nb_path.read_text(encoding="utf-8"))
+        if not isinstance(doc, Mapping):
+            return _copy_json(_DEFAULT_WEATHER)
+        env_block = doc.get("environment")
+        if not isinstance(env_block, Mapping):
+            return _copy_json(_DEFAULT_WEATHER)
+        cond = str(env_block.get("weather") or "").strip().lower()
+        if cond in _V04_WEATHER_DESCRIPTIONS:
+            return {
+                "condition": cond,
+                "description": _V04_WEATHER_DESCRIPTIONS[cond],
+                "source": "v04_neighborhood_weather",
+            }
+    except Exception:
+        pass
+    return _copy_json(_DEFAULT_WEATHER)
 
 
 def _weather_projection(weather: Optional[Mapping[str, Any]]) -> dict[str, str]:
@@ -624,6 +671,11 @@ def observe_world(
                 travel_projection = candidate
         except Exception:
             travel_projection = None
+    resolved_weather = (
+        weather
+        if weather is not None
+        else _resolve_live_weather_zero_write(hermes_home, environment)
+    )
     result = {
         "kind": OBSERVATION_KIND,
         "schema_version": SCHEMA_VERSION,
@@ -634,8 +686,8 @@ def observe_world(
         "local_time": local.isoformat(timespec="seconds"),
         "local_date": local.date().isoformat(),
         "weekday": local.isoweekday(),
-        "season": _season(local.month),
-        "weather": _weather_projection(weather),
+        "season": _season(local),
+        "weather": _weather_projection(resolved_weather),
         "current_location": current,
         "home_location": home,
         "reachable_locations": reachable,

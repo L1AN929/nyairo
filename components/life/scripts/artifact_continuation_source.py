@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 _LIFE_SCRIPTS = str(Path(__file__).resolve().parent)
 if _LIFE_SCRIPTS not in sys.path:
@@ -59,6 +59,98 @@ from life_artifact_port import (  # noqa: E402
 
 #: Availability as the candidate contract spells it (the value AG-1 reads).
 AVAILABILITY_OPEN = CANDIDATE_STATUS_OPEN
+
+#: v0.8: light structured identity written onto the candidate's
+#: ``provenance_chain`` (``step="signal"``).  It is appended *after* the
+#: candidate id / semantic identity are computed, so the ``CandidateRecord``
+#: fields and every existing dedupe hash stay byte-identical.  AG-1 reads it to
+#: refuse real creative work without guessing from a hashed ``semcand:`` string.
+SIGNAL_STEP_KIND = "signal"
+DOMAIN_READING_CONTINUATION = "reading_continuation"
+DOMAIN_CARE_REST = "care_rest"
+DOMAIN_CARE_HYDRATION = "care_hydration"
+DOMAIN_IDLE_DAYDREAM = "idle_daydream"
+DOMAIN_EVERYDAY = "everyday"
+DOMAIN_BOUND_WORK_CONTINUATION = "bound_work_continuation"
+DOMAIN_BOUND_WORK_CLOSEOUT = "bound_work_closeout"
+DOMAIN_MANUSCRIPT_WORK = "manuscript_work"
+DOMAIN_CREATIVE_PROJECT = "creative_project"
+
+
+def _signal_steps(
+    *, domain: str, creative_intensive: Optional[bool],
+    source_ref: Any = None, action_family: str = "",
+) -> list[dict[str, Any]]:
+    """The domain/creative tags a producer appends to ``provenance_chain``."""
+
+    steps: list[dict[str, Any]] = [
+        {"step": SIGNAL_STEP_KIND, "signal": "domain", "value": str(domain)},
+    ]
+    if creative_intensive is not None:
+        steps.append({
+            "step": SIGNAL_STEP_KIND, "signal": "creative_intensive",
+            "value": "1" if creative_intensive else "0",
+        })
+    if source_ref:
+        steps.append({
+            "step": SIGNAL_STEP_KIND, "signal": "source_ref",
+            "value": str(source_ref),
+        })
+    if action_family:
+        steps.append({
+            "step": SIGNAL_STEP_KIND, "signal": "action_family",
+            "value": str(action_family),
+        })
+    return steps
+
+
+def _classify_extra(
+    detail: Mapping[str, Any], source_ref: str, target_refs: Sequence[str],
+) -> tuple[str, bool]:
+    """Map one non-artifact opportunity to (domain, creative_intensive).
+
+    The producer's own fields decide: the raw ref it came from, the care/idle
+    kind and the ``creative_intensive`` flag the v02/v03 bridge already
+    computed.  Nothing is inferred from a title.
+    """
+
+    raw_ref = str(detail.get("origin_source_ref") or source_ref or "")
+    care_kind = str(detail.get("care_event_kind") or "")
+    idle_kind = str(detail.get("idle_kind") or "")
+    action_family = str(detail.get("action_family") or "")
+    if (care_kind == "bed_rest_block"
+            or raw_ref.startswith(("v03_care:bed_rest_block", "v03_care-bed_rest_block"))):
+        return DOMAIN_CARE_REST, False
+    if (care_kind == "warm_hydration"
+            or raw_ref.startswith(("v03_care:warm_hydration", "v03_care-warm_hydration"))):
+        return DOMAIN_CARE_HYDRATION, False
+    if idle_kind or raw_ref.startswith(("v03_idle:", "v03_idle-")):
+        return DOMAIN_IDLE_DAYDREAM, False
+    if raw_ref.startswith("reading:reading_ar0:") or detail.get("reading_state"):
+        return DOMAIN_READING_CONTINUATION, False
+    if (raw_ref.startswith("v03_job:manuscript_fee")
+            or str(detail.get("job_kind") or "") == "manuscript_fee"):
+        return DOMAIN_MANUSCRIPT_WORK, True
+    flagged = detail.get("creative_intensive")
+    if flagged is True:
+        if action_family in {"advance_workbench_draft", "follow_tomorrow_note",
+                             "continue_bound_work"}:
+            return DOMAIN_BOUND_WORK_CONTINUATION, True
+        return DOMAIN_CREATIVE_PROJECT, True
+    if source_ref.startswith("popt:") or raw_ref.startswith("popt:"):
+        # A project option is creative only while its producer says so; a
+        # reserved self-planned todo without a work target is ordinary life.
+        if flagged is False:
+            return DOMAIN_EVERYDAY, False
+        return DOMAIN_CREATIVE_PROJECT, True
+    if flagged is False:
+        # The producer already said this is not high-cost work (a plant
+        # observation, a tentative plan, a plain todo).  An artifact it names is
+        # its object, not a manuscript to continue.
+        return DOMAIN_EVERYDAY, False
+    if any(str(ref).startswith("artifact:") for ref in target_refs):
+        return DOMAIN_BOUND_WORK_CONTINUATION, True
+    return DOMAIN_EVERYDAY, False
 
 
 class ArtifactContinuationSource(CandidateSourceAdapter):
@@ -363,6 +455,15 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                     "kind": str(row.get("kind") or ""),
                     "extra": str(row.get("kind") or "EXTRA"),
                     "due_at": row.get("due_at"),
+                    #: v0.8: the producer's own identity for this opportunity --
+                    #: where it really came from and whether it is high-cost
+                    #: creative work.  Read as data, never as authority.
+                    "origin_source_ref": str(row.get("origin_source_ref") or ""),
+                    "action_family": str(row.get("action_family") or ""),
+                    "care_event_kind": str(row.get("care_event_kind") or ""),
+                    "idle_kind": str(row.get("idle_kind") or ""),
+                    "job_kind": str(row.get("job_kind") or ""),
+                    "creative_intensive": row.get("creative_intensive"),
                     #: v0.5: a reserved today slot names the *already validated* real work it
                     #: would continue.  It stays out of ``target_refs`` (the reserved slot's own
                     #: ref is the candidate's source), but it is what lets this source drop a
@@ -710,6 +811,8 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
         ref = str(item["source_ref"])
         revision = int(item.get("source_revision") or 1)
         target_refs = [str(r) for r in (item.get("target_refs") or [])]
+        detail = item.get("detail") if isinstance(item.get("detail"), Mapping) else {}
+        domain, creative_intensive = _classify_extra(detail, ref, target_refs)
         cand_id = self.extra_candidate_id(ref, revision)
         sem_id = f"semcand:{sha256_hex(f'{GLOBAL_SUBJECT_ID}:{self.source_kind}:{ref}')[:16]}"
         return CandidateRecord(
@@ -736,6 +839,11 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                  "owner": self.canonical_owner},
                 {"step": "personal_opportunity", "ref": ref,
                  "revision": revision, "availability": item["availability"]},
+                *_signal_steps(
+                    domain=domain, creative_intensive=creative_intensive,
+                    source_ref=detail.get("origin_source_ref") or ref,
+                    action_family=str(detail.get("action_family") or ""),
+                ),
             ],
             semantic_identity=sem_id,
             idempotency_key=f"idem_cand:extra:{ref}:v{revision}",
@@ -767,6 +875,16 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
             # are untouched, byte for byte.
             detail = item.get("detail") if isinstance(item.get("detail"), Mapping) else {}
             closeout_target = str((detail or {}).get("closeout_target") or "")
+            is_reading = bool(
+                (self.reading_artifact_id and artifact_id == self.reading_artifact_id)
+                or detail.get("reading_state")
+            )
+            if is_reading:
+                domain, creative_intensive = DOMAIN_READING_CONTINUATION, False
+            elif closeout_target:
+                domain, creative_intensive = DOMAIN_BOUND_WORK_CLOSEOUT, True
+            else:
+                domain, creative_intensive = DOMAIN_BOUND_WORK_CONTINUATION, True
             if closeout_target:
                 cand_id = f"cand:{sha256_hex(f'{self.source_kind}:closeout:{artifact_id}:v{revision}')[:16]}"
                 sem_id = (f"semcand:{sha256_hex(f'{GLOBAL_SUBJECT_ID}:{self.source_kind}:closeout:{artifact_id}')[:16]}")
@@ -799,6 +917,10 @@ class ArtifactContinuationSource(CandidateSourceAdapter):
                      "owner": self.canonical_owner},
                     {"step": "canonical_source", "ref": str(item["source_ref"]),
                      "revision": revision, "availability": item["availability"]},
+                    *_signal_steps(
+                        domain=domain, creative_intensive=creative_intensive,
+                        source_ref=str(item["source_ref"]),
+                    ),
                 ],
                 semantic_identity=sem_id,
                 idempotency_key=idem_key,

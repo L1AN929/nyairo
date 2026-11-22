@@ -30,6 +30,14 @@ for _entry in (str(REPO_ROOT), str(_LIFE_SCRIPTS)):
         sys.path.insert(0, _entry)
 
 from components.life.scripts import v02_agency_depth_engine as ad_engine
+from components.life.scripts import v02_representation_lease_forget as _rlf
+from components.phone import v02_honest_ux_view as _honest_ux
+from components.phone import v02_midscale_ecology_view as _ecology_growth
+
+try:  # P12 叙事 owner 与 recall projection 同模块；两处导入路径都兼容。
+    from components.life.scripts import v02_recall_projection as _recall_projection
+except ImportError:  # pragma: no cover - flat life/scripts import path
+    import v02_recall_projection as _recall_projection  # type: ignore[no-redef]
 
 ENDPOINT_PATH = "/api/phone/v02/agency-depth"
 VIEW_SCHEMA = "nyairo.v02.agency_depth.v1"
@@ -45,8 +53,10 @@ COMMON_COMMAND_FIELDS: frozenset[str] = frozenset({
 PARTNER_ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "offer_low_cost_option",
     "propose_shared_gentle_rule",
+    "share_inquiry_clue",
     "share_incubation_clue",
     "withdraw_partner_option",
+    "propose_commitment_tradeoff",
 })
 
 SUBJECT_ALLOWED_ACTIONS: frozenset[str] = PARTNER_ALLOWED_ACTIONS | frozenset({
@@ -56,6 +66,40 @@ SUBJECT_ALLOWED_ACTIONS: frozenset[str] = PARTNER_ALLOWED_ACTIONS | frozenset({
     "record_regret_reflection",
     "manage_second_order_rule",
     "manage_open_incubation",
+    "open_bounded_inquiry",
+    "record_inquiry_evidence",
+    "conclude_or_stop_inquiry",
+    "place_memory_cue",
+    "update_placed_cue_visibility",
+    "curate_info_source",
+    "create_future_capsule",
+    "resolve_future_capsule",
+    "set_optional_next_gesture",
+    "peek_optional_next_gesture",
+    "act_or_archive_gesture",
+    "settle_legacy_tool",
+    "register_gentle_responsibility",
+    "review_gentle_responsibility",
+    "resolve_commitment_value_conflict",
+    # 这三个主体独占动作由 honest-ux 视图持有状态；本视图只做门与字段闸门后委托。
+    "salvage_work_scrap",
+    "simplify_personal_tool",
+    "record_period_snapshot",
+})
+
+#: 委托给 ``v02_honest_ux_view`` 执行的主体独占动作（本视图不复制其状态机）。
+HONEST_UX_DELEGATED_ACTIONS: frozenset[str] = frozenset({
+    "salvage_work_scrap",
+    "simplify_personal_tool",
+    "record_period_snapshot",
+})
+
+#: 委托给 ``v02_midscale_ecology_view`` 执行的 Wave B1 主体独占动作（本视图不复制其状态机）。
+ECOLOGY_GROWTH_DELEGATED_ACTIONS: frozenset[str] = frozenset({
+    "snapshot_room_expectations",
+    "record_absence_observation",
+    "record_ecology_chain_link",
+    "record_practice_standard_evolution",
 })
 
 ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
@@ -129,7 +173,152 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "question_id",
         "topic",
     }),
+    "open_bounded_inquiry": COMMON_COMMAND_FIELDS | frozenset({
+        "question",
+        "topic_tag",
+        "shared",
+        "candidate_explanations",
+        "next_evidence_needed",
+        "step_budget",
+    }),
+    "record_inquiry_evidence": COMMON_COMMAND_FIELDS | frozenset({
+        "inquiry_id",
+        "note",
+        "source_ref",
+        "candidate_explanations",
+        "next_evidence_needed",
+    }),
+    "share_inquiry_clue": COMMON_COMMAND_FIELDS | frozenset({
+        "inquiry_id",
+        "clue_text",
+    }),
+    "conclude_or_stop_inquiry": COMMON_COMMAND_FIELDS | frozenset({
+        "inquiry_id",
+        "outcome",
+        "conclusion",
+        "stop_reason",
+        "previous_belief_cn",
+    }),
+    "place_memory_cue": COMMON_COMMAND_FIELDS | frozenset({
+        "cue_id",
+        "artifact_ref",
+        "spot_id",
+        "cue_text_cn",
+        "visible",
+        "shared",
+    }),
+    "update_placed_cue_visibility": COMMON_COMMAND_FIELDS | frozenset({
+        "cue_id",
+        "spot_id",
+        "visible",
+        "occluded",
+        "removed",
+    }),
+    "curate_info_source": COMMON_COMMAND_FIELDS | frozenset({
+        "source_id",
+        "title_cn",
+        "mode",
+        "reason_cn",
+        "shared",
+    }),
+    "create_future_capsule": COMMON_COMMAND_FIELDS | frozenset({
+        "capsule_id",
+        "unlock_after",
+        "title_cn",
+        "note_cn",
+        "artifact_ref",
+        "shared",
+    }),
+    "resolve_future_capsule": COMMON_COMMAND_FIELDS | frozenset({
+        "capsule_id",
+        "decision",
+    }),
+    "set_optional_next_gesture": COMMON_COMMAND_FIELDS | frozenset({
+        "gesture_id",
+        "artifact_ref",
+        "gesture_cn",
+        "shared",
+    }),
+    "peek_optional_next_gesture": COMMON_COMMAND_FIELDS | frozenset({
+        "gesture_id",
+    }),
+    "act_or_archive_gesture": COMMON_COMMAND_FIELDS | frozenset({
+        "gesture_id",
+        "decision",
+        "new_question_cn",
+    }),
+    "settle_legacy_tool": COMMON_COMMAND_FIELDS | frozenset({
+        "tool_id",
+        "title_cn",
+        "dependency_error_cn",
+        "linked_work_refs",
+        "ending",
+        "fallback_artifact_ref",
+        "shared",
+    }),
+    "register_gentle_responsibility": COMMON_COMMAND_FIELDS | frozenset({
+        "resp_id",
+        "title_cn",
+        "target_kind",
+        "last_touched_at",
+        "shared",
+    }),
+    "review_gentle_responsibility": COMMON_COMMAND_FIELDS | frozenset({
+        "resp_id",
+        "decision",
+        "partner_agreed",
+    }),
+    "resolve_commitment_value_conflict": COMMON_COMMAND_FIELDS | frozenset({
+        "resp_id",
+        "new_value_cn",
+        "conflict_note_cn",
+        "tradeoff_decision",
+        "partner_agreed",
+        "shared",
+    }),
+    "propose_commitment_tradeoff": COMMON_COMMAND_FIELDS | frozenset({
+        "resp_id",
+        "resp_title",
+        "new_value_cn",
+        "conflict_note_cn",
+        "suggested_decision",
+    }),
+    "salvage_work_scrap": COMMON_COMMAND_FIELDS | frozenset({
+        "scrap_id",
+        "title_cn",
+        "note_cn",
+        "source_work_id",
+        "source_version_id",
+        "source_outcome",
+        "fragment_title",
+        "reusable_payload",
+        "applicability_tags",
+        "provenance_receipt",
+        "shared",
+    }),
+    "simplify_personal_tool": COMMON_COMMAND_FIELDS | frozenset({
+        "tool_id",
+        "script_id",
+        "title_cn",
+        "note_cn",
+        "shortcut_keys",
+        "removed_option_ids",
+        "reason",
+        "shared",
+    }),
+    "record_period_snapshot": COMMON_COMMAND_FIELDS | frozenset({
+        "period_id",
+        "title_cn",
+        "summary_cn",
+        "note",
+        "visibility",
+        "shared",
+    }),
 }
+
+for _eco_action in ECOLOGY_GROWTH_DELEGATED_ACTIONS:
+    if _eco_action in _ecology_growth.ACTION_ALLOWED_FIELDS:
+        ACTION_ALLOWED_FIELDS[_eco_action] = _ecology_growth.ACTION_ALLOWED_FIELDS[_eco_action]
 
 _OPTIONAL_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "operation_key",
@@ -156,6 +345,25 @@ _OPTIONAL_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "topic",
     "evidence_ref",
     "clue_text",
+    "topic_tag",
+    "source_ref",
+    "conclusion",
+    "stop_reason",
+    "candidate_explanations",
+    "next_evidence_needed",
+    "step_budget",
+    "spot_id",
+    "visible",
+    "occluded",
+    "removed",
+    "artifact_ref",
+    "new_question_cn",
+    "fallback_artifact_ref",
+    "partner_agreed",
+    "previous_belief_cn",
+    "resp_id",
+    "resp_title",
+    "conflict_note_cn",
 })
 
 _OPTIONAL_BLANK_STRING_FIELDS: frozenset[str] = frozenset({
@@ -175,6 +383,18 @@ _OPTIONAL_BLANK_STRING_FIELDS: frozenset[str] = frozenset({
     "topic",
     "evidence_ref",
     "clue_text",
+    "topic_tag",
+    "conclusion",
+    "stop_reason",
+    "next_evidence_needed",
+    "spot_id",
+    "artifact_ref",
+    "new_question_cn",
+    "fallback_artifact_ref",
+    "previous_belief_cn",
+    "resp_id",
+    "resp_title",
+    "conflict_note_cn",
 })
 
 _MIRRORED_DATA_KEYS: tuple[str, ...] = (
@@ -192,6 +412,17 @@ _MIRRORED_DATA_KEYS: tuple[str, ...] = (
     "method_adjustments",
     "regret_reflections",
     "regret_reflections_withheld",
+    "inquiries",
+    "placed_memory_cues",
+    "info_environment_curations",
+    "future_self_capsules",
+    "optional_next_gestures",
+    "legacy_tool_endings",
+    "gentle_responsibility_reviews",
+    "belief_revisions",
+    "rule_enforcements",
+    "commitment_tradeoffs",
+    "p12_autobiographical_narrative",
     "llm_calls",
 )
 
@@ -267,7 +498,18 @@ def _validate_request_payload(payload: Any, *, actor_side: str) -> str:
         if k == "action":
             continue
         if v is None:
-            if k in _OPTIONAL_NULLABLE_FIELDS:
+            if k in _OPTIONAL_NULLABLE_FIELDS and not (
+                (action == "place_memory_cue" and k in ("spot_id", "artifact_ref"))
+                or (action == "set_optional_next_gesture" and k == "artifact_ref")
+                or (
+                    action in (
+                        "register_gentle_responsibility",
+                        "review_gentle_responsibility",
+                        "resolve_commitment_value_conflict",
+                    )
+                    and k == "resp_id"
+                )
+            ):
                 continue
             raise ad_engine.V02ValidationError("INVALID_FIELDS", f"Null field not allowed: {k}")
         if isinstance(v, str) and not v.strip():
@@ -275,6 +517,16 @@ def _validate_request_payload(payload: Any, *, actor_side: str) -> str:
                 (action == "share_incubation_clue" and k == "clue_text")
                 or (action == "record_choice_episode" and k == "chosen")
                 or (action == "propose_shared_gentle_rule" and k in ("title", "trigger_window"))
+                or (action == "place_memory_cue" and k in ("spot_id", "artifact_ref"))
+                or (action == "set_optional_next_gesture" and k == "artifact_ref")
+                or (
+                    action in (
+                        "register_gentle_responsibility",
+                        "review_gentle_responsibility",
+                        "resolve_commitment_value_conflict",
+                    )
+                    and k == "resp_id"
+                )
             ):
                 continue
             raise ad_engine.V02ValidationError("INVALID_FIELDS", f"Blank string not allowed: {k}")
@@ -310,19 +562,80 @@ def _compose_envelope(
     return envelope
 
 
+def _apply_forget_barrier(
+    projected: Mapping[str, Any],
+    barrier: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Filter all agency-depth collections, cues, curations, and P12 narrative through the zero-write barrier."""
+    out = copy.deepcopy(dict(projected))
+
+    for list_key in (
+        "preferences",
+        "choice_episodes",
+        "partner_options",
+        "low_cost_options",
+        "parked_conflicts",
+        "open_incubations",
+        "second_order_rules",
+        "method_adjustments",
+        "regret_reflections",
+        "inquiries",
+        "future_self_capsules",
+        "optional_next_gestures",
+        "legacy_tool_endings",
+        "gentle_responsibility_reviews",
+        "belief_revisions",
+        "rule_enforcements",
+        "commitment_tradeoffs",
+    ):
+        if isinstance(out.get(list_key), list):
+            out[list_key] = _rlf.filter_collection_by_barrier(out[list_key], barrier)
+
+    cues = out.get("placed_memory_cues")
+    if isinstance(cues, dict):
+        for ckey in ("active_cues", "items"):
+            if isinstance(cues.get(ckey), list):
+                cues[ckey] = _rlf.filter_collection_by_barrier(cues[ckey], barrier)
+
+    cur = out.get("info_environment_curations")
+    if isinstance(cur, dict):
+        for ikey in ("curated_feed", "unfiltered_control_entries"):
+            if isinstance(cur.get(ikey), list):
+                cur[ikey] = _rlf.filter_collection_by_barrier(cur[ikey], barrier)
+
+    p12 = out.get("p12_autobiographical_narrative")
+    if isinstance(p12, dict):
+        for pkey in ("chapters", "turning_points", "recurring_motifs", "attested_source_refs"):
+            if isinstance(p12.get(pkey), list):
+                p12[pkey] = _rlf.filter_collection_by_barrier(p12[pkey], barrier)
+
+    return out
+
+
 def read_v02_agency_depth_view(
     day_root: Path | str,
     *,
     has_subject_capability: bool = False,
     now_iso: Optional[str] = None,
+    now: Optional[str] = None,
 ) -> tuple[int, dict[str, Any]]:
-    """读取品味演化与二阶意愿视图（100% 零磁盘写入，伴侣视角过滤未共享项与后悔内容）。"""
+    """读取品味演化与二阶意愿视图（100% 零磁盘写入，伴侣视角过滤未共享项与后悔内容，并执行遗忘屏障）。"""
+    eff_now = now_iso if now_iso is not None else now
     try:
+        barrier = _rlf.load_unified_forget_barrier_readonly(day_root)
         projected = ad_engine.project_v02_agency_depth(
             day_root,
             has_subject_capability=bool(has_subject_capability),
-            now_iso=now_iso,
+            now_iso=eff_now,
         )
+        projected["p12_autobiographical_narrative"] = (
+            _recall_projection.project_p12_autobiographical_narrative(
+                day_root,
+                has_subject_capability=bool(has_subject_capability),
+                now_iso=projected.get("observed_at"),
+            )
+        )
+        projected = _apply_forget_barrier(projected, barrier)
         return 200, _compose_envelope(projected, read_only=True, command_status="READ")
     except ad_engine.V02AgencyDepthError as exc:
         return _error_response(exc.status_code, exc.reason_code, exc.message)
@@ -337,7 +650,29 @@ def mutate_v02_agency_depth_view(
 ) -> tuple[int, dict[str, Any]]:
     """执行品味演化、后悔反思或二阶小规矩写动作（白名单闸门 + 权限隔离 + 幂等重放）。"""
     try:
-        _validate_request_payload(payload, actor_side=actor_side)
+        raw_action = payload.get("action") if isinstance(payload, Mapping) else None
+        if isinstance(raw_action, str) and raw_action in ECOLOGY_GROWTH_DELEGATED_ACTIONS:
+            _scan_payload_keys_recursive(payload)
+            if actor_side != "subject":
+                return _error_response(
+                    403,
+                    "FORBIDDEN_ACTOR_SIDE",
+                    f"Action {raw_action!r} is not permitted for {actor_side}",
+                )
+            return _ecology_growth.mutate_v02_ecology_growth_view(
+                day_root,
+                payload,
+                actor_side="subject",
+                now_iso=now_iso,
+            )
+        action = _validate_request_payload(payload, actor_side=actor_side)
+        if action in HONEST_UX_DELEGATED_ACTIONS:
+            return _honest_ux.mutate_v02_honest_ux_view(
+                day_root,
+                payload,
+                actor_side="subject",
+                now_iso=now_iso,
+            )
         projected, cmd_status = ad_engine.apply_agency_depth_mutation(
             day_root,
             payload,
@@ -354,18 +689,31 @@ def summarize_agency_depth_for_context(
     *,
     include_private: bool = True,
     now_iso: Optional[str] = None,
+    now: Optional[str] = None,
 ) -> dict[str, Any]:
-    """100% 零磁盘写入辅助摘要，供聊天背景与日常候选桥接读取。"""
-    return ad_engine.summarize_agency_depth_state_for_context(
+    """100% 零磁盘写入辅助摘要，供聊天背景与日常候选桥接读取（执行统一遗忘屏障）。"""
+    eff_now = now_iso if now_iso is not None else now
+    barrier = _rlf.load_unified_forget_barrier_readonly(day_root)
+    summary = ad_engine.summarize_agency_depth_state_for_context(
         day_root,
         include_private=bool(include_private),
-        now_iso=now_iso,
+        now_iso=eff_now,
     )
+    if isinstance(summary, Mapping):
+        filtered = _rlf.filter_document_by_barrier(
+            summary,
+            barrier,
+            preserve_keys=("state_exists", "include_private", "revision", "observed_at"),
+        )
+        if isinstance(filtered, dict):
+            return filtered
+    return summary
 
 
 __all__ = [
     "ACTION_ALLOWED_FIELDS",
     "COMMON_COMMAND_FIELDS",
+    "ECOLOGY_GROWTH_DELEGATED_ACTIONS",
     "ENDPOINT_PATH",
     "PARTNER_ALLOWED_ACTIONS",
     "SUBJECT_ALLOWED_ACTIONS",

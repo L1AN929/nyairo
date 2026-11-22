@@ -42,10 +42,14 @@ for entry in (str(ROOT), str(ROOT / "components"),
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
-from test_one_day_life import (  # noqa: E402
-    CycleTest, StubCognition, StubObservation, StubWriter, WorldGateway,
-    _current_place, posix_only,
-)
+import test_one_day_life as _odl  # noqa: E402
+
+StubCognition = _odl.StubCognition
+StubObservation = _odl.StubObservation
+StubWriter = _odl.StubWriter
+WorldGateway = _odl.WorldGateway
+_current_place = _odl._current_place
+posix_only = _odl.posix_only
 
 import autonomous_life_cycle as alc  # noqa: E402
 import life_pause  # noqa: E402
@@ -78,8 +82,10 @@ class RecordingCognition(StubCognition):
 
 
 @posix_only
-class W05RTestCase(CycleTest):
+class W05RTestCase(_odl.OneDayTestCase):
     """在 W05 夹具之上加几个读盘助手。"""
+
+    _runtime = _odl.CycleTest._runtime
 
     def _head(self, data) -> dict:
         return odl.supply_call(self.services.supply_path,

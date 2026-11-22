@@ -34,7 +34,7 @@
       "description": "各ステップのスクリプトを自分で確認したい方や、リリースアーカイブを手元に保存したい方、サーバーへ手動デプロイしたい方向けの手順です。",
       "url": "https://nyairo.com/ja/docs/linux/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -491,28 +491,28 @@ sh /tmp/uv-install.sh</code></pre></div>
 uv python install 3.13</code></pre></div>
 
 <h2 id="linux-section-2">ルート A：Git タグを指定してクローン・導入する</h2>
-<p>ルート A とルート B はどちらか一方を選べば十分です。Git を使う場合は、リリース済みの固定タグ <code>v0.7.0</code> をチェックアウトしてください（変更が続く開発ブランチをそのまま導入しないようご注意ください）。</p>
+<p>ルート A とルート B はどちらか一方を選べば十分です。Git を使う場合は、リリース済みの固定タグ <code>v0.8.0</code> をチェックアウトしてください（変更が続く開発ブランチをそのまま導入しないようご注意ください）。</p>
 <div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>mkdir -p "$HOME/apps"
-git clone --branch v0.7.0 --depth 1 \
-  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0"
+git clone --branch v0.8.0 --depth 1 \
+  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0"
 bash scripts/bootstrap.sh</code></pre></div>
 <p>固定タグをチェックアウトすると Git が <code>detached HEAD</code> と表示しますが、これは正常な状態です。インストール完了後、以下のマニフェスト自己チェックを実行してすべてのファイルが欠損なく揃っていることを確認できます。</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>~/.local/share/nyairo/releases/v0.7.0/vendor/hermes/.venv/bin/python -B \
-  ~/.local/share/nyairo/releases/v0.7.0/scripts/verify_manifest.py</code></pre></div>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>~/.local/share/nyairo/releases/v0.8.0/vendor/hermes/.venv/bin/python -B \
+  ~/.local/share/nyairo/releases/v0.8.0/scripts/verify_manifest.py</code></pre></div>
 <p>出力に <code>"valid": true</code> が含まれていれば、ファイル構成の検証が完全に一致したことを示します。</p>
 
 <h2 id="linux-section-3">ルート B：公式 ZIP をダウンロード・検証して導入する</h2>
 <p>先にリリースアーカイブを手元に保存し、ハッシュを照合してから展開・導入したい場合は次の手順で行います。</p>
 <div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>mkdir -p "$HOME/apps" &amp;&amp; cd "$HOME/apps"
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256</code></pre></div>
-<p>画面に <code>nyairo-v0.7.0.zip: OK</code> と出力されたことを確認したら、アーカイブを展開して同梱のインストーラーを実行します。</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0"
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256</code></pre></div>
+<p>画面に <code>nyairo-v0.8.0.zip: OK</code> と出力されたことを確認したら、アーカイブを展開して同梱のインストーラーを実行します。</p>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0"
 bash scripts/bootstrap.sh</code></pre></div>
-<p>Windows 側のブラウザで事前に ZIP をダウンロードしてある場合は、WSL 内から <code>/mnt/c/Users/あなたのWindowsユーザー名/Downloads/nyairo-v0.7.0.zip</code> のように参照できます。</p>
+<p>Windows 側のブラウザで事前に ZIP をダウンロードしてある場合は、WSL 内から <code>/mnt/c/Users/あなたのWindowsユーザー名/Downloads/nyairo-v0.8.0.zip</code> のように参照できます。</p>
 
 <h2 id="linux-section-4">すでに Hermes を導入済みの環境について</h2>
 <p>既存の Hermes を削除する必要はありません。nyairo はバージョン整合性を検証済みの専用 Hermes 環境を内部に備えており、データも <code>~/.nyairo</code> 配下に独立して管理されるため、既存の環境と干渉することはありません。ただし、nyairo のプラグインディレクトリを別バージョンの Hermes へ手動でコピーして混在させると、インターフェースの違いによりエラーの原因となりますのでお控えください。</p>

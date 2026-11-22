@@ -320,7 +320,7 @@ class RealBridgeReads(BridgeTestCase):
         self.assertEqual(view["freshness"], bread.FRESHNESS_FRESH)
         self.assertEqual(view["observed_body_id"], BODY_ID)
         self.assertEqual(view["observed_revision"], "bodyrev:3")
-        self.assertEqual(view["evidence"], ["fatigue_noticeable:mild"])
+        self.assertEqual(view["evidence"], ["fatigue_noticeable:mild", "health"])
         self.assertEqual(view["source_outcome"], "OK")
         self.assertFalse(view["degraded"])
         for flag in ("identity_bound", "revision_bound", "observation_time_bound"):
@@ -1002,6 +1002,82 @@ class Ag1UnknownPolicy(BridgeTestCase):
             bcs.BodyCapacitySource(port=self.port, home=self.home).ag1_capacity_kwargs(
                 self.view, unknown_capacity_policy="DEFER_FOREVER"
             )
+
+class HealthCapacityGate(BridgeTestCase):
+    """v0.8: the S02 health block narrows capacity and carries the candidate cap."""
+
+    def _payload(self, moment, health=None):
+        payload = {
+            "ok": True,
+            "result": {
+                "available": True,
+                "recovery": {"state": "inactive", "mode": None, "trend": "stalled"},
+                "signals": [
+                    {"signal_type": "fatigue_high", "qualitative_band": "strong",
+                     "body_id": BODY_ID, "source_body_version": 9,
+                     "occurred_at": moment.isoformat(), "carries_raw_values": False}
+                ],
+            },
+        }
+        if health is not None:
+            payload["result"]["health"] = health
+        return payload
+
+    def test_health_limited_carries_the_candidate_cap(self):
+        home = self.make_home()
+        state, moment = burdened_state(3)
+        payload = self._payload(moment, {
+            "status": "ACUTE_ILLNESS", "capacity_state": "LIMITED", "candidate_cap": 3,
+        })
+        port, _ = self.make_port(state, moment, responder=lambda c, a: payload)
+        view = bcs.read_body_capacity(port, home=home, now=moment.isoformat())
+
+        self.assertEqual(view["body_capacity_state"], bcs.CAPACITY_LIMITED)
+        self.assertIn("health", view["evidence"])
+        self.assertEqual(view["body_candidate_cap"], 3)
+        kwargs = bcs.ag1_body_limit_kwargs(view)
+        self.assertEqual(kwargs["body_candidate_cap"], 3)
+
+    def test_without_health_there_is_no_cap(self):
+        home = self.make_home()
+        state, moment = burdened_state(3)
+        port, _ = self.make_port(state, moment, responder=lambda c, a: self._payload(moment))
+        view = bcs.read_body_capacity(port, home=home, now=moment.isoformat())
+
+        self.assertIsNone(view["body_candidate_cap"])
+        self.assertEqual(bcs.ag1_body_limit_kwargs(view), {})
+
+    def test_an_illegal_cap_is_refused(self):
+        home = self.make_home()
+        state, moment = burdened_state(3)
+        payload = self._payload(moment, {"capacity_state": "LIMITED", "candidate_cap": -2})
+        port, _ = self.make_port(state, moment, responder=lambda c, a: payload)
+        view = bcs.read_body_capacity(port, home=home, now=moment.isoformat())
+
+        # A negative cap is not a body fact; the adapter ignores it rather than
+        # inventing a value.
+        self.assertIsNone(view["body_candidate_cap"])
+
+
+class CandidateCapTest(unittest.TestCase):
+    """The AG-1 side of the cap: order-preserving truncation, nothing else."""
+
+    def test_truncation_keeps_order_and_does_not_invent(self):
+        import agency_decision_ag1 as ag1
+
+        items = [object(), object(), object(), object(), object()]
+        self.assertEqual(ag1.apply_candidate_cap(items, 2), items[:2])
+        self.assertEqual(ag1.apply_candidate_cap(items, 99), items)
+        self.assertEqual(ag1.apply_candidate_cap(items, 0), [])
+        self.assertEqual(ag1.apply_candidate_cap(items, None), items)
+
+    def test_bad_caps_are_refused(self):
+        import agency_decision_ag1 as ag1
+
+        for bad in (-1, True, "3", 2.5):
+            with self.assertRaises(Exception):
+                ag1.apply_candidate_cap([], bad)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

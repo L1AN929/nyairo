@@ -80,6 +80,7 @@ COLLECTION_STATUSES: frozenset[str] = frozenset({
     "stale_source",
     "revisited",
     "resting",
+    "archived",
 })
 
 COLLECTION_STATUS_LABELS_CN: dict[str, str] = {
@@ -87,6 +88,7 @@ COLLECTION_STATUS_LABELS_CN: dict[str, str] = {
     "stale_source": "原来源已失效",
     "revisited": "已回访重看",
     "resting": "安静搁置中",
+    "archived": "已温和收起",
 }
 
 COLLECTION_SOURCE_KINDS: frozenset[str] = frozenset({
@@ -97,6 +99,57 @@ COLLECTION_SOURCE_KINDS: frozenset[str] = frozenset({
     "album_media",
     "note",
 })
+
+BOX_CURATION_STATES: frozenset[str] = frozenset({
+    "kept",
+    "reused_fragment",
+    "shelved",
+    "dropped",
+    "selected_to_show",
+})
+
+BOX_CURATION_STATE_LABELS_CN: dict[str, str] = {
+    "kept": "暂时留存",
+    "reused_fragment": "拆出局部复用",
+    "shelved": "先搁置一边",
+    "dropped": "收起弃用",
+    "selected_to_show": "选出来准备给你看",
+}
+
+BOX_REUSE_MODES: frozenset[str] = frozenset({
+    "none",
+    "quote",
+    "adapt",
+    "structure_ref",
+    "direct_reuse",
+})
+
+AUDIO_NOTE_MAX_ENTRIES = 32
+AUDIO_FORMATS: frozenset[str] = frozenset({
+    "wav",
+    "ogg",
+    "mp3",
+    "m4a",
+    "webm",
+    "voice_memo",
+})
+AUDIO_SOURCE_KINDS: frozenset[str] = frozenset({
+    "mic_capture",
+    "local_file",
+    "ambient_memo",
+})
+AUDIO_TRANSCRIPT_STATUS_USER_SUPPLIED = "USER_SUPPLIED"
+AUDIO_TRANSCRIPT_STATUS_UNAVAILABLE = "UNAVAILABLE_LOCAL_ASR"
+AUDIO_TRANSCRIPT_STATUSES: frozenset[str] = frozenset({
+    AUDIO_TRANSCRIPT_STATUS_USER_SUPPLIED,
+    AUDIO_TRANSCRIPT_STATUS_UNAVAILABLE,
+})
+AUDIO_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+RECALL_PROJECTION_REL_PATHS: tuple[tuple[str, ...], ...] = (
+    ("phone", "v02_recall_projection.json"),
+    ("memory", "v02_recall_projection_state.json"),
+)
 
 FORBIDDEN_FOREIGN_AND_SCORE_KEYS: frozenset[str] = frozenset({
     "actor_side",
@@ -1003,6 +1056,9 @@ def _empty_raw_state() -> dict[str, Any]:
         "color_trial_pad": _empty_trial_pad(),
         "reading_uncertainty_marks": [],
         "collection_items": [],
+        "unshown_work_box": [],
+        "audio_notes": [],
+        "invalidated_box_artifact_ids": [],
         "invalidated_album_ids": [],
         "invalidated_sha256s": [],
         "operation_ledger": {},
@@ -1084,6 +1140,8 @@ def _project_single_study(
         "height": int(study.get("height") or 0),
         "content_type": str(study.get("content_type") or ""),
     }
+    if study.get("linked_work_id"):
+        out["linked_work_id"] = str(study["linked_work_id"])
 
     if has_subject_capability:
         out["album_id"] = study.get("album_id")
@@ -1147,6 +1205,199 @@ def _project_single_study(
         },
     }
     return out
+
+
+def _read_recall_tombstoned_ids_readonly(day_root: Path | str) -> frozenset[str]:
+    """零写读取 recall_projection 墓碑与已删除条目 ID（支持 phone 与 memory 路径）。"""
+    root = Path(day_root)
+    if not root.exists() or not root.is_dir():
+        return frozenset()
+
+    tomb_ids: set[str] = set()
+
+    def _collect_str(val: Any) -> None:
+        if isinstance(val, str) and val.strip():
+            tomb_ids.add(val.strip())
+
+    def _collect_container(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for key, val in node.items():
+                if val is False:
+                    continue
+                if isinstance(val, Mapping):
+                    if val.get("tombstoned") is False or (
+                        val.get("deleted") is False and val.get("tombstoned") is not True
+                    ):
+                        continue
+                    _collect_str(key)
+                    for id_key in ("memory_id", "id", "artifact_id", "box_item_id"):
+                        _collect_str(val.get(id_key))
+                else:
+                    _collect_str(key)
+        elif isinstance(node, (list, tuple, set, frozenset)):
+            for item in node:
+                if isinstance(item, str):
+                    _collect_str(item)
+                elif isinstance(item, Mapping):
+                    if item.get("tombstoned") is False or (
+                        item.get("deleted") is False and item.get("tombstoned") is not True
+                    ):
+                        continue
+                    for id_key in ("memory_id", "id", "artifact_id", "box_item_id"):
+                        _collect_str(item.get(id_key))
+
+    for rel in RECALL_PROJECTION_REL_PATHS:
+        cand = root.joinpath(*rel)
+        try:
+            if cand.is_symlink() or not cand.is_file():
+                continue
+            doc = json.loads(cand.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            continue
+        if not isinstance(doc, Mapping):
+            continue
+
+        for key in ("tombstoned_ids", "deleted_ids", "deleted_artifact_ids", "tombstones", "tombstone_ledger"):
+            if key in doc:
+                _collect_container(doc.get(key))
+
+        for col_key in ("memories", "items", "direct_recall_items", "active_items"):
+            rows = doc.get(col_key)
+            iter_rows = rows.values() if isinstance(rows, Mapping) else (rows if isinstance(rows, list) else ())
+            for row in iter_rows:
+                if not isinstance(row, Mapping):
+                    continue
+                is_del = bool(
+                    row.get("deleted")
+                    or row.get("tombstoned")
+                    or str(row.get("status") or "").strip().lower() in ("deleted", "tombstoned")
+                    or str(row.get("decay_mode") or "").strip() == "GOVERNANCE_TOMBSTONE"
+                )
+                if is_del:
+                    for id_key in ("memory_id", "id", "artifact_id", "box_item_id"):
+                        _collect_str(row.get(id_key))
+
+    return frozenset(tomb_ids)
+
+
+def _is_id_in_tombstones(identifier: str, tomb_ids: frozenset[str] | set[str]) -> bool:
+    clean = str(identifier or "").strip()
+    if not clean or not tomb_ids:
+        return False
+    if clean in tomb_ids:
+        return True
+    if clean.startswith("artifact:"):
+        return clean.split(":", 1)[1] in tomb_ids
+    return f"artifact:{clean}" in tomb_ids
+
+
+def _project_unshown_work_box_readonly(
+    day_root: Path | str,
+    raw_state: Mapping[str, Any],
+    *,
+    has_subject_capability: bool,
+) -> dict[str, Any]:
+    """第 15 章 §10.A：还没给你看的盒子零写投影（伴侣侧仅见 visible_items，绝不漏出其他状态或数量）。"""
+    tomb_ids = _read_recall_tombstoned_ids_readonly(day_root)
+    invalidated_artifacts = {
+        str(x).strip()
+        for x in (raw_state.get("invalidated_box_artifact_ids") or ())
+        if str(x).strip()
+    }
+
+    visible_items: list[dict[str, Any]] = []
+    all_items: list[dict[str, Any]] = []
+    by_state: dict[str, list[dict[str, Any]]] = {st: [] for st in BOX_CURATION_STATES}
+    invalidated_items: list[dict[str, Any]] = []
+
+    for raw_item in raw_state.get("unshown_work_box") or []:
+        if not isinstance(raw_item, Mapping):
+            continue
+        box_item_id = str(raw_item.get("box_item_id") or "").strip()
+        artifact_id = str(raw_item.get("artifact_id") or "").strip()
+        version_id = str(raw_item.get("version_id") or "").strip()
+        title_cn = str(raw_item.get("title_cn") or "").strip()
+        raw_state_val = str(raw_item.get("curation_state") or "kept").strip()
+        if raw_state_val not in BOX_CURATION_STATES:
+            raw_state_val = "kept"
+        reuse_mode = str(raw_item.get("reuse_mode") or "none").strip()
+        if reuse_mode not in BOX_REUSE_MODES:
+            reuse_mode = "none"
+        note_cn = str(raw_item.get("note_cn") or "").strip()
+
+        tombstoned = _is_id_in_tombstones(artifact_id, tomb_ids) or _is_id_in_tombstones(
+            box_item_id, tomb_ids
+        )
+        src_deleted = bool(raw_item.get("source_deleted", False)) or _is_id_in_tombstones(
+            artifact_id, invalidated_artifacts
+        )
+        is_invalidated = bool(raw_item.get("candidate_invalidated", False)) or src_deleted or tombstoned
+
+        if is_invalidated:
+            eff_state = "dropped" if raw_state_val == "selected_to_show" else raw_state_val
+            selected_eligible = False
+            work_intact = False if (src_deleted or tombstoned) else bool(raw_item.get("work_intact", True))
+        else:
+            eff_state = raw_state_val
+            selected_eligible = True
+            work_intact = bool(raw_item.get("work_intact", True))
+
+        if eff_state == "selected_to_show" and not is_invalidated:
+            visible_items.append({
+                "box_item_id": box_item_id,
+                "artifact_id": artifact_id,
+                "version_id": version_id,
+                "title_cn": title_cn,
+                "curation_state": "selected_to_show",
+                "curation_state_label_cn": BOX_CURATION_STATE_LABELS_CN["selected_to_show"],
+                "note_cn": note_cn,
+                "candidate_invalidated": False,
+                "work_intact": work_intact,
+                "updated_at": raw_item.get("updated_at"),
+            })
+
+        if has_subject_capability:
+            subj_entry = {
+                "box_item_id": box_item_id,
+                "artifact_id": artifact_id,
+                "version_id": version_id,
+                "title_cn": title_cn,
+                "curation_state": eff_state,
+                "curation_state_label_cn": BOX_CURATION_STATE_LABELS_CN[eff_state],
+                "reuse_mode": reuse_mode,
+                "note_cn": note_cn,
+                "source_deleted": src_deleted,
+                "tombstoned_in_recall": tombstoned,
+                "candidate_invalidated": is_invalidated,
+                "selected_to_show_eligible": selected_eligible,
+                "work_intact": work_intact,
+                "created_at": raw_item.get("created_at"),
+                "updated_at": raw_item.get("updated_at"),
+            }
+            all_items.append(subj_entry)
+            by_state[eff_state].append(subj_entry)
+            if is_invalidated:
+                invalidated_items.append(subj_entry)
+
+    if not has_subject_capability:
+        # 严格伴侣隐私边界：仅投影当前主动选出展示的 visible_items，不暴露其他分类或任何数量统计
+        return {
+            "visible_items": visible_items,
+        }
+
+    return {
+        "visible_items": visible_items,
+        "items": all_items,
+        "kept": by_state["kept"],
+        "reused_fragment": by_state["reused_fragment"],
+        "shelved": by_state["shelved"],
+        "dropped": by_state["dropped"],
+        "selected_to_show": by_state["selected_to_show"],
+        "invalidated_items": invalidated_items,
+        "counts_by_state": {st: len(by_state[st]) for st in ("kept", "reused_fragment", "shelved", "dropped", "selected_to_show")},
+        "total_count": len(all_items),
+        "hidden_count": len(all_items) - len(visible_items),
+    }
 
 
 def project_v02_crossmodal(
@@ -1275,6 +1526,10 @@ def project_v02_crossmodal(
         if has_subject_capability:
             projected_item["album_id"] = item.get("album_id")
             projected_item["source_ref"] = item.get("source_ref")
+        elif is_shared and not item.get("album_id") and item.get("source_ref"):
+            projected_item["source_ref"] = item.get("source_ref")
+        if item.get("curated_by"):
+            projected_item["curated_by"] = str(item.get("curated_by"))
         visible_collections.append(projected_item)
 
     collection_health: dict[str, Any] = {
@@ -1286,6 +1541,41 @@ def project_v02_crossmodal(
         "saved_equals_permanent_like": False,
     }
 
+    unshown_work_box = _project_unshown_work_box_readonly(
+        day_root,
+        raw_state,
+        has_subject_capability=has_subject_capability,
+    )
+
+    visible_audio_notes: list[dict[str, Any]] = []
+    for raw_note in (raw_state.get("audio_notes") or [])[:AUDIO_NOTE_MAX_ENTRIES]:
+        if not isinstance(raw_note, Mapping):
+            continue
+        is_shared = bool(raw_note.get("shared", False))
+        if not has_subject_capability and not is_shared:
+            continue
+        t_cn = str(raw_note.get("transcript_cn") or "").strip()
+        t_status = (
+            AUDIO_TRANSCRIPT_STATUS_USER_SUPPLIED
+            if t_cn
+            else AUDIO_TRANSCRIPT_STATUS_UNAVAILABLE
+        )
+        visible_audio_notes.append({
+            "audio_note_id": str(raw_note.get("audio_note_id") or ""),
+            "title_cn": str(raw_note.get("title_cn") or ""),
+            "duration_seconds": round(float(raw_note.get("duration_seconds") or 0.0), 2),
+            "audio_format": str(raw_note.get("audio_format") or "voice_memo"),
+            "source_kind": str(raw_note.get("source_kind") or "local_file"),
+            "sha256_hex": str(raw_note.get("sha256_hex") or ""),
+            "transcript_cn": t_cn,
+            "transcript_status": t_status,
+            "ambient_tag_cn": str(raw_note.get("ambient_tag_cn") or ""),
+            "author_side": str(raw_note.get("author_side") or "partner"),
+            "shared": is_shared,
+            "not_lived_event_claim": True,
+            "created_at": raw_note.get("created_at"),
+        })
+
     return {
         "state_exists": bool(exists),
         "perspective": "subject" if has_subject_capability else "partner",
@@ -1296,6 +1586,9 @@ def project_v02_crossmodal(
         "color_trial_pad": trial_pad,
         "reading_uncertainty_marks": visible_marks,
         "collection_health": collection_health,
+        "unshown_work_box": unshown_work_box,
+        "audio_notes": visible_audio_notes,
+        "audio_note_count": len(visible_audio_notes),
         "private_studies_withheld_count": private_studies_withheld_count if not has_subject_capability else 0,
         "private_marks_withheld_count": private_marks_withheld_count if not has_subject_capability else 0,
         "llm_calls": 0,
@@ -1858,9 +2151,13 @@ def apply_crossmodal_mutation(
                 has_subject_capability=has_cap,
                 now_iso=obs_iso,
             )
+            cached_receipt = ledger_entry.get("action_receipt")
+            if isinstance(cached_receipt, Mapping):
+                projected["action_receipt"] = copy.deepcopy(dict(cached_receipt))
             return projected, "DUPLICATE"
 
     action = str(payload.get("action") or "").strip()
+    action_receipt: Optional[dict[str, Any]] = None
 
     if action == "analyze_image_palette":
         title = _require_clean_str(payload.get("title"), "title", max_len=120)
@@ -1903,6 +2200,7 @@ def apply_crossmodal_mutation(
             source_kind = "album_media"
 
         study_id = _allocate_id(state, "pal")
+        linked_work_id = _optional_clean_str(payload.get("work_id"), "work_id", max_len=96)
         study_doc: dict[str, Any] = {
             "study_id": study_id,
             "title": title,
@@ -1925,6 +2223,7 @@ def apply_crossmodal_mutation(
             "content_type": palette["content_type"],
             "mood_summary_cn": palette["mood_summary_cn"],
             "applied_works": [],
+            **({"linked_work_id": linked_work_id} if linked_work_id else {}),
         }
         state.setdefault("palette_studies", []).insert(0, study_doc)
 
@@ -2217,6 +2516,87 @@ def apply_crossmodal_mutation(
             })
         state["collection_items"] = items
 
+    elif action == "curate_shared_collection":
+        item_id_in = _optional_clean_str(payload.get("item_id"), "item_id", max_len=64)
+        title_in = _optional_clean_str(payload.get("title"), "title", max_len=160)
+        raw_kind = payload.get("source_kind")
+        source_kind = _optional_clean_str(raw_kind, "source_kind", max_len=40) or "link"
+        if source_kind not in COLLECTION_SOURCE_KINDS:
+            raise V02ValidationError("INVALID_FIELDS", f"Unsupported collection source_kind: {source_kind!r}")
+        source_ref = _optional_clean_str(payload.get("source_ref"), "source_ref", max_len=240)
+        note_cn = _optional_clean_str(payload.get("note_cn"), "note_cn", max_len=200)
+
+        raw_status = _optional_clean_str(payload.get("status"), "status", max_len=40)
+        if raw_status and raw_status not in COLLECTION_STATUSES:
+            raise V02ValidationError("INVALID_FIELDS", f"Invalid collection status: {raw_status!r}")
+
+        raw_share = payload.get("share_with_room")
+        if raw_share is not None and not isinstance(raw_share, bool):
+            raise V02ValidationError("INVALID_FIELDS", "share_with_room must be a boolean")
+
+        items = list(state.get("collection_items") or [])
+        if item_id_in:
+            found_item = None
+            for it in items:
+                if isinstance(it, dict) and it.get("item_id") == item_id_in:
+                    found_item = it
+                    break
+            if found_item is None:
+                raise V02NotFoundError("COLLECTION_ITEM_NOT_FOUND", f"Collection item not found: {item_id_in!r}")
+            if actor_side == "partner" and not bool(found_item.get("shared", False)):
+                raise V02PermissionError(
+                    "FORBIDDEN_ACTOR_SIDE",
+                    "Partner cannot access or modify a private collection item",
+                )
+            if title_in:
+                found_item["title"] = title_in
+            if raw_kind is not None:
+                found_item["source_kind"] = source_kind
+            if payload.get("source_ref") is not None:
+                found_item["source_ref"] = source_ref
+            if payload.get("note_cn") is not None:
+                found_item["note_cn"] = note_cn
+            if raw_status:
+                found_item["status"] = raw_status
+            if actor_side == "partner":
+                found_item["shared"] = True
+            elif raw_share is not None:
+                found_item["shared"] = raw_share
+            eff_st = str(found_item.get("status") or "fresh")
+            aid_existing = found_item.get("album_id")
+            if eff_st == "stale_source":
+                found_item["source_available"] = False
+            elif isinstance(aid_existing, str) and aid_existing:
+                found_item["source_available"] = (
+                    aid_existing not in set(state.get("invalidated_album_ids") or ())
+                    and resolve_album_media_bytes(day_root, aid_existing) is not None
+                )
+            else:
+                found_item["source_available"] = True
+            found_item["curated_by"] = actor_side
+            found_item["checked_at"] = obs_iso
+        else:
+            if not title_in:
+                raise V02ValidationError("INVALID_FIELDS", "Field 'title' is required for new collection entry")
+            eff_status = raw_status or "fresh"
+            eff_shared = True if actor_side == "partner" else (bool(raw_share) if raw_share is not None else True)
+            items.insert(0, {
+                "item_id": _allocate_id(state, "col"),
+                "title": title_in,
+                "source_kind": source_kind,
+                "album_id": None,
+                "source_ref": source_ref or "",
+                "status": eff_status,
+                "source_available": eff_status != "stale_source",
+                "note_cn": note_cn,
+                "saved_equals_read": False,
+                "saved_equals_permanent_like": False,
+                "shared": eff_shared,
+                "curated_by": actor_side,
+                "checked_at": obs_iso,
+            })
+        state["collection_items"] = items
+
     elif action == "invalidate_deleted_media_source":
         if actor_side != "subject":
             raise V02PermissionError("FORBIDDEN_ACTOR_SIDE", "Only subject can invalidate media sources")
@@ -2288,19 +2668,309 @@ def apply_crossmodal_mutation(
                     col["source_available"] = False
                     col["checked_at"] = obs_iso
 
+    elif action == "curate_unshown_box_item":
+        if actor_side != "subject":
+            raise V02PermissionError("FORBIDDEN_ACTOR_SIDE", "Only subject can curate unshown work box")
+        box_id_in = _optional_clean_str(payload.get("box_item_id"), "box_item_id", max_len=120)
+        box_items: list[dict[str, Any]] = list(state.get("unshown_work_box") or [])
+        existing_box: Optional[dict[str, Any]] = None
+        if box_id_in:
+            for entry in box_items:
+                if isinstance(entry, dict) and entry.get("box_item_id") == box_id_in:
+                    existing_box = entry
+                    break
+
+        if existing_box is None:
+            artifact_id = _require_clean_str(payload.get("artifact_id"), "artifact_id", max_len=160)
+            title_cn = _require_clean_str(payload.get("title_cn"), "title_cn", max_len=160)
+            version_id = _optional_clean_str(payload.get("version_id"), "version_id", max_len=128)
+            note_cn = _optional_clean_str(payload.get("note_cn"), "note_cn", max_len=240)
+            raw_cur_state = _require_clean_str(payload.get("curation_state"), "curation_state", max_len=40)
+            if raw_cur_state not in BOX_CURATION_STATES:
+                raise V02ValidationError("INVALID_FIELDS", f"Invalid curation_state: {raw_cur_state!r}")
+            raw_reuse = payload.get("reuse_mode")
+            if raw_reuse is None:
+                reuse_mode = "none"
+            else:
+                reuse_mode = _require_clean_str(raw_reuse, "reuse_mode", max_len=40)
+                if reuse_mode not in BOX_REUSE_MODES:
+                    raise V02ValidationError("INVALID_FIELDS", f"Invalid reuse_mode: {reuse_mode!r}")
+            raw_src_del = payload.get("source_deleted", False)
+            if raw_src_del is None:
+                source_deleted = False
+            elif not isinstance(raw_src_del, bool):
+                raise V02ValidationError("INVALID_FIELDS", "Field 'source_deleted' must be a boolean")
+            else:
+                source_deleted = raw_src_del
+            box_item_id = box_id_in or _allocate_id(state, "box")
+            created_at = obs_iso
+        else:
+            artifact_id = (
+                _require_clean_str(payload["artifact_id"], "artifact_id", max_len=160)
+                if "artifact_id" in payload and payload["artifact_id"] is not None
+                else str(existing_box.get("artifact_id") or "")
+            )
+            title_cn = (
+                _require_clean_str(payload["title_cn"], "title_cn", max_len=160)
+                if "title_cn" in payload and payload["title_cn"] is not None
+                else str(existing_box.get("title_cn") or "")
+            )
+            version_id = (
+                _optional_clean_str(payload.get("version_id"), "version_id", max_len=128)
+                if "version_id" in payload
+                else str(existing_box.get("version_id") or "")
+            )
+            note_cn = (
+                _optional_clean_str(payload.get("note_cn"), "note_cn", max_len=240)
+                if "note_cn" in payload
+                else str(existing_box.get("note_cn") or "")
+            )
+            if "curation_state" in payload and payload["curation_state"] is not None:
+                raw_cur_state = _require_clean_str(payload["curation_state"], "curation_state", max_len=40)
+                if raw_cur_state not in BOX_CURATION_STATES:
+                    raise V02ValidationError("INVALID_FIELDS", f"Invalid curation_state: {raw_cur_state!r}")
+            else:
+                raw_cur_state = str(existing_box.get("curation_state") or "kept")
+            if "reuse_mode" in payload:
+                raw_reuse = payload.get("reuse_mode")
+                if raw_reuse is None:
+                    reuse_mode = "none"
+                else:
+                    reuse_mode = _require_clean_str(raw_reuse, "reuse_mode", max_len=40)
+                    if reuse_mode not in BOX_REUSE_MODES:
+                        raise V02ValidationError("INVALID_FIELDS", f"Invalid reuse_mode: {reuse_mode!r}")
+            else:
+                reuse_mode = str(existing_box.get("reuse_mode") or "none")
+            if "source_deleted" in payload and payload["source_deleted"] is not None:
+                if not isinstance(payload["source_deleted"], bool):
+                    raise V02ValidationError("INVALID_FIELDS", "Field 'source_deleted' must be a boolean")
+                source_deleted = bool(payload["source_deleted"])
+            else:
+                source_deleted = bool(existing_box.get("source_deleted", False))
+            box_item_id = str(existing_box.get("box_item_id") or box_id_in)
+            created_at = existing_box.get("created_at") or obs_iso
+
+        tomb_ids = _read_recall_tombstoned_ids_readonly(day_root)
+        inv_arts = {
+            str(x).strip()
+            for x in (state.get("invalidated_box_artifact_ids") or ())
+            if str(x).strip()
+        }
+        tombstoned = _is_id_in_tombstones(artifact_id, tomb_ids) or _is_id_in_tombstones(box_item_id, tomb_ids)
+        is_invalidated = source_deleted or tombstoned or _is_id_in_tombstones(artifact_id, inv_arts)
+
+        eff_curation_state = raw_cur_state
+        prev_curation_state: Optional[str] = None
+        if is_invalidated:
+            candidate_invalidated = True
+            selected_eligible = False
+            work_intact = False
+            if eff_curation_state == "selected_to_show":
+                prev_curation_state = "selected_to_show"
+                eff_curation_state = "dropped"
+        else:
+            candidate_invalidated = False
+            selected_eligible = True
+            work_intact = True
+
+        new_box_doc: dict[str, Any] = {
+            "box_item_id": box_item_id,
+            "artifact_id": artifact_id,
+            "version_id": version_id,
+            "title_cn": title_cn,
+            "curation_state": eff_curation_state,
+            "curation_state_label_cn": BOX_CURATION_STATE_LABELS_CN[eff_curation_state],
+            "reuse_mode": reuse_mode,
+            "note_cn": note_cn,
+            "source_deleted": bool(source_deleted or _is_id_in_tombstones(artifact_id, inv_arts)),
+            "candidate_invalidated": candidate_invalidated,
+            "selected_to_show_eligible": selected_eligible,
+            "work_intact": work_intact,
+            "created_at": created_at,
+            "updated_at": obs_iso,
+        }
+        if prev_curation_state is not None:
+            new_box_doc["previous_curation_state"] = prev_curation_state
+
+        if existing_box is not None:
+            existing_box.clear()
+            existing_box.update(new_box_doc)
+        else:
+            box_items.insert(0, new_box_doc)
+        state["unshown_work_box"] = box_items
+
+    elif action == "withdraw_box_show_intent":
+        if actor_side != "subject":
+            raise V02PermissionError("FORBIDDEN_ACTOR_SIDE", "Only subject can withdraw box show intent")
+        box_id_req = _require_clean_str(payload.get("box_item_id"), "box_item_id", max_len=120)
+        box_items = list(state.get("unshown_work_box") or [])
+        target_box: Optional[dict[str, Any]] = None
+        for entry in box_items:
+            if isinstance(entry, dict) and entry.get("box_item_id") == box_id_req:
+                target_box = entry
+                break
+        if target_box is None:
+            raise V02NotFoundError("BOX_ITEM_NOT_FOUND", f"Unshown box item not found: {box_id_req!r}")
+
+        tomb_ids = _read_recall_tombstoned_ids_readonly(day_root)
+        inv_arts = {
+            str(x).strip()
+            for x in (state.get("invalidated_box_artifact_ids") or ())
+            if str(x).strip()
+        }
+        art_id = str(target_box.get("artifact_id") or "")
+        if (
+            bool(target_box.get("source_deleted", False))
+            or bool(target_box.get("candidate_invalidated", False))
+            or _is_id_in_tombstones(art_id, inv_arts)
+            or _is_id_in_tombstones(art_id, tomb_ids)
+            or _is_id_in_tombstones(box_id_req, tomb_ids)
+        ):
+            raise V02ConflictError(
+                "SOURCE_MEDIA_UNAVAILABLE",
+                f"Box item {box_id_req!r} source is deleted or invalidated",
+            )
+
+        cur_state = str(target_box.get("curation_state") or "kept")
+        if cur_state not in ("selected_to_show", "kept"):
+            raise V02ConflictError(
+                "SHOW_INTENT_NOT_ACTIVE",
+                f"Box item {box_id_req!r} is in state {cur_state!r}, not 'selected_to_show'",
+            )
+        target_box["curation_state"] = "kept"
+        target_box["curation_state_label_cn"] = BOX_CURATION_STATE_LABELS_CN["kept"]
+        target_box["work_intact"] = True
+        target_box["show_intent_withdrawn_at"] = obs_iso
+        target_box["updated_at"] = obs_iso
+        state["unshown_work_box"] = box_items
+
+    elif action == "invalidate_deleted_box_source":
+        if actor_side != "subject":
+            raise V02PermissionError(
+                "FORBIDDEN_ACTOR_SIDE", "Only subject can invalidate deleted box sources"
+            )
+        artifact_target = _require_clean_str(payload.get("artifact_id"), "artifact_id", max_len=160)
+        inv_arts_list = list(state.get("invalidated_box_artifact_ids") or [])
+        if artifact_target not in inv_arts_list:
+            inv_arts_list.append(artifact_target)
+        state["invalidated_box_artifact_ids"] = inv_arts_list
+
+        target_set = frozenset({artifact_target})
+        for entry in state.get("unshown_work_box") or []:
+            if not isinstance(entry, dict):
+                continue
+            if _is_id_in_tombstones(str(entry.get("artifact_id") or ""), target_set):
+                entry["source_deleted"] = True
+                entry["candidate_invalidated"] = True
+                entry["work_intact"] = False
+                entry["selected_to_show_eligible"] = False
+                if entry.get("curation_state") == "selected_to_show":
+                    entry["previous_curation_state"] = "selected_to_show"
+                    entry["curation_state"] = "dropped"
+                    entry["curation_state_label_cn"] = BOX_CURATION_STATE_LABELS_CN["dropped"]
+                entry["invalidated_at"] = obs_iso
+                entry["updated_at"] = obs_iso
+
+    elif action == "ingest_audio_note":
+        if "actor_side" in payload:
+            raise V02ValidationError("INVALID_FIELDS", "Forbidden key: 'actor_side'")
+        title_cn = _require_clean_str(payload.get("title_cn"), "title_cn", max_len=80)
+        raw_dur = payload.get("duration_seconds")
+        if isinstance(raw_dur, bool) or not isinstance(raw_dur, (int, float)):
+            raise V02ValidationError("INVALID_FIELDS", "Field 'duration_seconds' must be a number in 0.5..600")
+        dur_float = float(raw_dur)
+        if not math.isfinite(dur_float) or dur_float < 0.5 or dur_float > 600.0:
+            raise V02ValidationError("INVALID_FIELDS", "Field 'duration_seconds' must be in range 0.5..600")
+        duration_val = round(dur_float, 2)
+
+        audio_format = _require_clean_str(payload.get("audio_format"), "audio_format", max_len=32).lower()
+        if audio_format not in AUDIO_FORMATS:
+            raise V02ValidationError("INVALID_FIELDS", f"Unsupported audio_format: {audio_format!r}")
+
+        raw_source_kind = payload.get("source_kind")
+        if raw_source_kind is None or (isinstance(raw_source_kind, str) and not raw_source_kind.strip()):
+            source_kind = "local_file"
+        else:
+            source_kind = _require_clean_str(raw_source_kind, "source_kind", max_len=32).lower()
+            if source_kind not in AUDIO_SOURCE_KINDS:
+                raise V02ValidationError("INVALID_FIELDS", f"Unsupported audio source_kind: {source_kind!r}")
+
+        raw_sha = _optional_clean_str(payload.get("sha256_hex"), "sha256_hex", max_len=64)
+        if raw_sha:
+            if not AUDIO_SHA256_RE.match(raw_sha):
+                raise V02ValidationError("INVALID_FIELDS", "Field 'sha256_hex' must be a 64-char hex digest")
+            sha256_hex = raw_sha.lower()
+        else:
+            sha256_hex = hashlib.sha256(f"{title_cn}|{obs_iso}".encode("utf-8")).hexdigest()
+
+        transcript_cn = _optional_clean_str(payload.get("transcript_cn"), "transcript_cn", max_len=240)
+        raw_tstatus = _optional_clean_str(payload.get("transcript_status"), "transcript_status", max_len=40)
+        if raw_tstatus and raw_tstatus not in AUDIO_TRANSCRIPT_STATUSES:
+            raise V02ValidationError("INVALID_FIELDS", f"Unsupported transcript_status: {raw_tstatus!r}")
+        transcript_status = (
+            AUDIO_TRANSCRIPT_STATUS_USER_SUPPLIED
+            if transcript_cn
+            else AUDIO_TRANSCRIPT_STATUS_UNAVAILABLE
+        )
+
+        ambient_tag_cn = _optional_clean_str(payload.get("ambient_tag_cn"), "ambient_tag_cn", max_len=40)
+
+        raw_shared = payload.get("shared")
+        if raw_shared is None:
+            shared_flag = True if actor_side == "partner" else False
+        elif not isinstance(raw_shared, bool):
+            raise V02ValidationError("INVALID_FIELDS", "Field 'shared' must be a boolean")
+        else:
+            shared_flag = raw_shared
+
+        audio_note_id = _allocate_id(state, "aud")
+        note_doc: dict[str, Any] = {
+            "audio_note_id": audio_note_id,
+            "title_cn": title_cn,
+            "duration_seconds": duration_val,
+            "audio_format": audio_format,
+            "source_kind": source_kind,
+            "sha256_hex": sha256_hex,
+            "transcript_cn": transcript_cn,
+            "transcript_status": transcript_status,
+            "ambient_tag_cn": ambient_tag_cn,
+            "author_side": actor_side,
+            "shared": shared_flag,
+            "not_lived_event_claim": True,
+            "created_at": obs_iso,
+        }
+        notes = list(state.get("audio_notes") or [])
+        notes.insert(0, note_doc)
+        state["audio_notes"] = notes[:AUDIO_NOTE_MAX_ENTRIES]
+        action_receipt = {
+            "audio_note_id": audio_note_id,
+            "title_cn": title_cn,
+            "duration_seconds": duration_val,
+            "audio_format": audio_format,
+            "source_kind": source_kind,
+            "transcript_status": transcript_status,
+            "sha256_hex": sha256_hex,
+            "author_side": actor_side,
+            "shared": shared_flag,
+            "created_at": obs_iso,
+        }
+
     else:
         raise V02ValidationError("INVALID_ACTION", f"Unsupported action: {action!r}")
 
     state["revision"] = int(state.get("revision") or 0) + 1
     state["updated_at"] = obs_iso
     if op_key:
-        ledger[op_key] = {
+        ledger_rec: dict[str, Any] = {
             "fingerprint": fp,
             "action": action,
             "actor_side": actor_side,
             "applied_at": obs_iso,
             "revision": state["revision"],
         }
+        if action_receipt is not None:
+            ledger_rec["action_receipt"] = copy.deepcopy(action_receipt)
+        ledger[op_key] = ledger_rec
         # 控制幂等账本上限避免无界增长
         if len(ledger) > 256:
             oldest_keys = list(ledger.keys())[: len(ledger) - 256]
@@ -2313,6 +2983,8 @@ def apply_crossmodal_mutation(
         has_subject_capability=has_cap,
         now_iso=obs_iso,
     )
+    if action_receipt is not None:
+        projected["action_receipt"] = copy.deepcopy(action_receipt)
     return projected, "APPLIED"
 
 
@@ -2405,12 +3077,22 @@ def summarize_crossmodal_state_for_context(
         "recent_palettes": recent_palettes,
         "open_reading_uncertainties": open_uncertainties,
         "stale_collection_count": stale_count,
+        "unshown_work_box_visible": list(projected["unshown_work_box"]["visible_items"]),
         "context_hint_cn": context_hint_cn,
         "llm_calls": 0,
     }
 
 
 __all__ = [
+    "AUDIO_FORMATS",
+    "AUDIO_NOTE_MAX_ENTRIES",
+    "AUDIO_SOURCE_KINDS",
+    "AUDIO_TRANSCRIPT_STATUSES",
+    "AUDIO_TRANSCRIPT_STATUS_UNAVAILABLE",
+    "AUDIO_TRANSCRIPT_STATUS_USER_SUPPLIED",
+    "BOX_CURATION_STATES",
+    "BOX_CURATION_STATE_LABELS_CN",
+    "BOX_REUSE_MODES",
     "BRIGHTNESS_LABELS_CN",
     "COLLECTION_SOURCE_KINDS",
     "COLLECTION_STATUSES",

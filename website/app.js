@@ -1,5 +1,5 @@
 /**
- * nyairo Official Website Controller (v0.7.0 — Editorial Motion Edition)
+ * nyairo Official Website Controller (v0.8.0 — Editorial Motion Edition)
  * - Circular clip-path View Transition theme switcher (Dark <-> Light) + meta theme-color sync
  * - Dual-layer Header Nav physics (hover magnetic pill + scrollspy spring lamp + scroll progress)
  * - Smooth container height morphing & directional slide transitions
@@ -2504,7 +2504,7 @@ function ensureDocsLoaded() {
   }
   if (docsLoadPromise) return docsLoadPromise;
   const appScript = document.querySelector('script[data-docs-src]');
-  const src = (appScript && appScript.getAttribute('data-docs-src')) || 'docs-data.js?v=20261121-v070-58';
+  const src = (appScript && appScript.getAttribute('data-docs-src')) || 'docs-data.js?v=20261122-v080-59';
   docsLoadPromise = new Promise(resolve => {
     const s = document.createElement('script');
     s.src = src;
@@ -3225,13 +3225,13 @@ function initCommandPalette() {
   const quickCommands = [
     {
       group: '快捷操作',
-      title: '下载 Windows 桌面客户端 (v0.7.0 · 5.8 MB)',
-      summary: '直接获取 nyairo-0.7.0-setup.exe 安装包（免管理员权限）',
+      title: '下载 Windows 桌面客户端 (v0.8.0 · 6.0 MB)',
+      summary: '直接获取 nyairo-0.8.0-setup.exe 安装包（免管理员权限）',
       badge: '下载',
       run: () => {
         const a = document.createElement('a');
-        a.href = 'downloads/nyairo-0.7.0-setup.exe';
-        a.download = 'nyairo-0.7.0-setup.exe';
+        a.href = 'downloads/nyairo-0.8.0-setup.exe';
+        a.download = 'nyairo-0.8.0-setup.exe';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -3305,10 +3305,10 @@ function initCommandPalette() {
     },
     {
       group: '常用文档',
-      title: 'v0.7.0 版本动态与更新说明',
+      title: 'v0.8.0 版本动态与更新说明',
       summary: '查看个人手艺本、换模型对照、深度自主、房间实录及公开测试边界说明',
       badge: 'NEW',
-      href: '#changelog-v0-7-0'
+      href: '#changelog-v0-8-0'
     },
     {
       group: '常用文档',

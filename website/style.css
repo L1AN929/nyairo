@@ -8637,7 +8637,7 @@ html[data-theme="light"] .app-stage {
 }
 
 /* ==========================================================================
-   Noir Sakura Dark (#0c0b0d × #f4c2d1) & Deep Sea Light (#f5efea × #122e8a) Editorial Craft (v070-46)
+   Noir Sakura Dark (#0c0b0d × #f4c2d1) & Deep Sea Light (#f5efea × #122e8a) Editorial Craft (v080-46)
    - Zero neon/glow blobs; transform: none at rest for razor-sharp CJK
    ========================================================================== */
 ::selection {
@@ -9096,7 +9096,7 @@ html[data-theme="light"] .magpie-final-cta .magpie-final-emblem .on-light {
 }
 
 /* ==========================================================================
-   v070-47 Multi-Palette Token Themes (5 Extra Curated Classic Pairings)
+   v080-47 Multi-Palette Token Themes (5 Extra Curated Classic Pairings)
    Specificity (0,2,1) guarantees clean override on /, /en/, and /ja/
    ========================================================================== */
 html:root[data-palette="forest-mint"],
@@ -9620,7 +9620,7 @@ html[data-theme="light"][data-palette="berry-peach"] {
 }
 
 /* ==========================================================================
-   v070-52 Header Dual Capsule + 3x2 Flat Dual-Dot Chips + Aurora Silk Ribbon
+   v080-52 Header Dual Capsule + 3x2 Flat Dual-Dot Chips + Aurora Silk Ribbon
    ========================================================================== */
 .palette-dropdown {
   position: relative;
@@ -10135,7 +10135,7 @@ html.vt-palette .palette-wash-beam {
 }
 
 /* ==========================================================================
-   v070-58 Weekly Sunday Release Countdown (Pill & Cadence Progress Bar)
+   v080-58 Weekly Sunday Release Countdown (Pill & Cadence Progress Bar)
    ========================================================================== */
 .hero-kicker-countdown {
   display: inline-flex;

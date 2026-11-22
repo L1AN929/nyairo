@@ -47,9 +47,11 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import socket
 import time
 import urllib.parse
+import uuid
 from typing import Any, Mapping, Optional
 
 #: A plain, honest user agent.  Not a disguise -- just not the default library string that the
@@ -57,6 +59,28 @@ from typing import Any, Mapping, Optional
 USER_AGENT = "nyairo-life/0.2 (+https://nyairo.com)"
 
 DEFAULT_PURPOSE = "agency_cognition"
+
+
+def _env_positive_int(name: str) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return 0
+    try:
+        val = int(raw)
+    except ValueError:
+        return 0
+    return val if 0 < val <= 65536 else 0
+
+
+def _env_positive_float(name: str) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        val = float(raw)
+    except ValueError:
+        return 0.0
+    return val if 0.0 < val <= 600.0 else 0.0
 
 
 def _shape_metadata(*, finish_reason: Any, content_chars: int, reasoning_chars: int,
@@ -150,6 +174,15 @@ class OpenAICompatibleTransport:
         self._pause_guard = pause_guard
         self.backend = "openai_compatible_http"
         self.call_count = 0
+        self._opencode_session_id = "nyairo-%s-%s" % (
+            "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in str(purpose or DEFAULT_PURPOSE))[:24] or "life",
+            uuid.uuid4().hex[:12],
+        )
+
+    def _is_opencode_host(self, host: str) -> bool:
+        prov = str(self.provider or "").strip().lower()
+        h = str(host or "").strip().lower()
+        return prov.startswith("opencode") or h == "opencode.ai" or h.endswith(".opencode.ai")
 
     def describe(self) -> dict[str, Any]:
         return {"backend": self.backend, "provider": self.provider, "model": self.model,
@@ -174,11 +207,13 @@ class OpenAICompatibleTransport:
 
     def _build_payload(self, system_prompt: str, user_prompt: str,
                        max_output_tokens: Optional[int]) -> bytes:
+        asked_tokens = int(max_output_tokens or 512)
+        env_min_tokens = _env_positive_int("CHIYO_WRITER_MIN_OUTPUT_TOKENS")
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "system", "content": system_prompt},
                          {"role": "user", "content": user_prompt}],
-            "max_tokens": int(max_output_tokens or 512),
+            "max_tokens": max(asked_tokens, env_min_tokens) if env_min_tokens else asked_tokens,
             "temperature": self.temperature,
             "stream": False,
         }
@@ -196,7 +231,9 @@ class OpenAICompatibleTransport:
 
         payload = self._build_payload(system_prompt, user_prompt, max_output_tokens)
         scheme, host, port, path = self._target()
-        timeout = float(timeout_s or self.timeout_s)
+        asked_timeout = float(timeout_s or self.timeout_s)
+        env_min_timeout = _env_positive_float("CHIYO_MODEL_MIN_TIMEOUT_S")
+        timeout = max(asked_timeout, env_min_timeout) if env_min_timeout else asked_timeout
         connection = (http.client.HTTPSConnection(host, port, timeout=timeout)
                       if scheme == "https"
                       else http.client.HTTPConnection(host, port, timeout=timeout))
@@ -210,6 +247,8 @@ class OpenAICompatibleTransport:
             connection.putheader("User-Agent", USER_AGENT)
             connection.putheader("Accept", "application/json")
             connection.putheader("X-Chiyo-Purpose", self.purpose)
+            if self._is_opencode_host(host):
+                connection.putheader("x-opencode-session", self._opencode_session_id)
             connection.endheaders()
             connection.send(payload)
         except (socket.timeout, TimeoutError) as exc:

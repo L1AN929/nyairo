@@ -55,7 +55,8 @@ import resident_projection_counts as projection_counts
 
 HERE = Path(__file__).resolve().parent
 _COMPONENTS = HERE.parents[1]
-for _path in (str(HERE), str(_COMPONENTS / "native"), str(_COMPONENTS / "native" / "src"),
+for _path in (str(HERE), str(_COMPONENTS / "world" / "scripts"),
+              str(_COMPONENTS / "native"), str(_COMPONENTS / "native" / "src"),
               str(_COMPONENTS / "native" / "memory_runtime_v1"),
               str(_COMPONENTS.parent / "chiyo_bundle")):
     if _path not in sys.path:
@@ -1106,6 +1107,13 @@ class AutonomousLifeResident:
         # A failure is recorded and does not block the start.
         try:
             self.cold_recovery = self.runtime.coordinator.recover_all_and_reconcile()
+            wal_rec = getattr(self.runtime, "startup_reconciler_recovery", None)
+            if callable(getattr(self.runtime, "reconcile_canonical_wal_on_startup", None)) and not (
+                isinstance(wal_rec, dict) and wal_rec.get("recovered")
+            ):
+                wal_rec = self.runtime.reconcile_canonical_wal_on_startup()
+            if isinstance(wal_rec, dict):
+                self.cold_recovery["canonical_wal_reconciler"] = wal_rec
         except Exception as exc:
             self.last_error = "COLD_RECOVERY_FAILED: %s: %s" % (type(exc).__name__, exc)
             self.cold_recovery = {"error": self.last_error}
@@ -1293,7 +1301,31 @@ class AutonomousLifeResident:
         )
         pre_collected = self._prepare_v02_v03_pre_tick_candidates(now_iso=pre_now_iso)
 
-        result = assembly.runner_tick(self.assembled, act=self.act)
+        timeout_landing: Optional[dict[str, Any]] = None
+        try:
+            result = assembly.runner_tick(self.assembled, act=self.act)
+        except Exception as exc:
+            import autonomous_life_cycle as _cycle_mod
+
+            if _cycle_mod.AutonomousLifeCycle._is_cognition_timeout(exc):
+                timeout_landing = _cycle_mod.handle_round_timeout_soft_landing(
+                    foreground_locked=True
+                )
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                result = {
+                    "events": [],
+                    "feed_errors": [],
+                    "due": {
+                        "status": _cycle_mod.OUTCOME_DECISION_FAILED,
+                        "detail": f"timeout_soft_landing:{timeout_landing['status']}",
+                        "timeout_soft_landing": dict(timeout_landing),
+                        "soft_landing": timeout_landing["status"],
+                        "llm_retries": int(timeout_landing["llm_retries"]),
+                        "foreground_locked": bool(timeout_landing["foreground_locked"]),
+                    },
+                }
+            else:
+                raise
         try:
             reconciled = self.assembled["runner"].reconcile_pending()
         except Exception as exc:  # a read failure is reported, never hidden
@@ -1311,6 +1343,8 @@ class AutonomousLifeResident:
                   "journey": settled,
                   # 本地消息 lane 的计数（只有数字；正文与回复永远不进 journal）。
                   "message_lane": self.message_lane_stats()}
+        if timeout_landing is not None:
+            record["timeout_soft_landing"] = dict(timeout_landing)
         self.ticks += 1
         self.last_tick = record
         if stop_results:
@@ -1331,14 +1365,40 @@ class AutonomousLifeResident:
     def _resolve_v02_v03_day_root(self) -> Path:
         import v02_v03_daily_loop_bridge as _vbridge
 
+        env_map = getattr(self, "env", None) or {}
+        try:
+            from components.world.scripts import instance_paths as _ip
+        except ImportError:
+            _ip = None
+            try:
+                import instance_paths as _ip  # type: ignore[no-redef]
+            except ImportError:
+                _ip = None
+        if _ip is not None:
+            try:
+                p_state = _ip.resolve_instance_paths(self.state_root, environment=env_map)
+                if p_state.is_managed_instance or (p_state.day_root / "phone").is_dir():
+                    return p_state.day_root
+            except Exception:
+                pass
+            wh_raw = str(env_map.get("CHIYO_WORLD_HOME") or env_map.get("HERMES_HOME") or "").strip()
+            if wh_raw:
+                try:
+                    p_wh = _ip.resolve_instance_paths(wh_raw, environment=env_map)
+                    if p_wh.is_managed_instance or (p_wh.day_root / "phone").is_dir():
+                        return p_wh.day_root
+                except Exception:
+                    pass
         inst_root, _ = _vbridge.resolve_day_and_life_roots(self.state_root)
         if (inst_root / "phone").is_dir():
             return inst_root
-        wh = str((getattr(self, "env", None) or {}).get("CHIYO_WORLD_HOME") or "").strip()
+        wh = str(env_map.get("CHIYO_WORLD_HOME") or env_map.get("HERMES_HOME") or "").strip()
         if wh:
             wh_parent = Path(wh).parent
             if (wh_parent / "phone").is_dir():
                 return wh_parent
+            if wh_parent.name == "one-day" and (wh_parent.parent / "phone").is_dir():
+                return wh_parent.parent
         return inst_root
 
     def _resolve_practice_service_for_feedback(self) -> Any:
@@ -1491,6 +1551,98 @@ class AutonomousLifeResident:
                             now_iso=now_iso,
                         )
                     )
+
+                # v0.8 Wave 2/3: only a Decision that really advanced (START / CONTINUE)
+                # AND whose bounded step the cycle reports as executed may settle a real
+                # v0.4 neighborhood command.  WAIT / NO_ACTION / DEFER / a refused or
+                # unknown step never mutates the world here.
+                selected_ref = extra.get("selected_candidate_ref")
+                due_decision = str(due.get("decision") or extra.get("decision") or "").strip().upper()
+                due_status = str(due.get("status") or "").strip().upper()
+                due_status_class = str(due.get("status_class") or "").strip().lower()
+                advanced = (
+                    due_decision in ("START", "CONTINUE")
+                    and (due_status == "ACTED" or due_status_class == "acted")
+                )
+                if isinstance(selected_ref, str) and selected_ref.strip() and advanced:
+                    assembled_now = self.assembled if isinstance(self.assembled, Mapping) else {}
+                    cycle_now = assembled_now.get("cycle")
+                    reader = getattr(getattr(cycle_now, "runtime", None), "candidate_read", None)
+                    selected_payload = None
+                    if reader is not None and callable(getattr(reader, "get_candidate", None)):
+                        try:
+                            selected_payload = reader.get_candidate(selected_ref.strip())
+                        except Exception:
+                            selected_payload = None
+                    # The candidate record keeps the mapped ``fitem:v02v03-...`` spelling;
+                    # the raw ``v04_*`` ref travels in target_refs (and in the producer's
+                    # own origin_source_ref when the registry kept it).
+                    candidate_refs: list[str] = []
+                    origin_text = ""
+                    source_text = ""
+                    target_texts: list[str] = []
+                    if isinstance(selected_payload, Mapping):
+                        origin = selected_payload.get("origin_source_ref")
+                        if isinstance(origin, str) and origin.strip():
+                            origin_text = origin.strip()
+                            candidate_refs.append(origin_text)
+                        for ref in selected_payload.get("target_refs") or ():
+                            text = str(ref or "").strip()
+                            # v0.8 Wave 6: any executable daily clue may travel in
+                            # target_refs -- v0.4 neighborhood refs, the 0.3 care / idle /
+                            # work / purchase / intimacy-resume refs, and every real 0.2
+                            # ref (``tomorrow_note:`` / ``plan:`` / ``book:`` / ``route:`` /
+                            # ``plant:`` / ``common_ground:`` / ``artifact:`` / ``tray:``).
+                            # The bridge's own event builder is the single authority on
+                            # whether a ref is executable, so nothing is filtered here.
+                            if text:
+                                target_texts.append(text)
+                                candidate_refs.append(text)
+                        source_text = str(selected_payload.get("source_ref") or "").strip()
+                        if source_text:
+                            candidate_refs.append(source_text)
+                    elif isinstance(selected_ref, str):
+                        source_text = selected_ref.strip()
+                        candidate_refs.append(source_text)
+                    # This is the same eligibility rule the Cycle's daily descriptor lookup
+                    # applies: a mapped bridge clue, or an ordinary due tomorrow note that
+                    # names no artifact.  An artifact-backed note keeps its "continue the
+                    # real work" path, so the Resident must not settle a *different* bridge
+                    # clue merely because a target ref happened to match one.
+                    mapped_source = source_text.startswith("fitem:v02v03-")
+                    artifact_target = any(ref.startswith("artifact:") for ref in target_texts)
+                    bridge_candidate = mapped_source or (
+                        source_text.startswith("fitem:") and not artifact_target
+                    )
+                    decision_id = str(extra.get("decision_id") or "").strip()
+                    seen_refs: set[str] = set()
+                    for candidate_ref in (candidate_refs if bridge_candidate else ()):
+                        if not candidate_ref or candidate_ref in seen_refs:
+                            continue
+                        seen_refs.add(candidate_ref)
+                        # The Cycle builds the same event for this Decision, so the
+                        # consequence ledger's operation key is shared: the resident's
+                        # settlement is an idempotent replay, never a second write.
+                        daily_event = _vbridge.v02_v03_round_event_for_selected_candidate(
+                            collected,
+                            candidate_ref,
+                            now_iso=now_iso,
+                            decision_id=decision_id or None,
+                        )
+                        if not isinstance(daily_event, Mapping):
+                            continue
+                        event_source = str(daily_event.get("source_ref") or "").strip()
+                        if not (
+                            event_source in (origin_text, source_text)
+                            or (mapped_source and event_source)
+                        ):
+                            continue
+                        settlements.append(
+                            _vbridge.settle_v02_v03_round_consequences(
+                                day_root, daily_event, now_iso=now_iso
+                            )
+                        )
+                        break
 
             feedback = _vdepth.record_post_tick_execution_feedback(
                 day_root,
@@ -2129,6 +2281,10 @@ class AutonomousLifeResident:
             "last_error": self.last_error,
             **({"v02_v03_bridge": self.last_v02_v03_bridge}
                if getattr(self, "last_v02_v03_bridge", None) is not None else {}),
+            **({"last_breathing_rhythm": getattr(cycle, "last_breathing_rhythm", None)}
+               if cycle is not None and getattr(cycle, "last_breathing_rhythm", None) is not None else {}),
+            **({"last_timeout_soft_landing": getattr(cycle, "last_timeout_soft_landing", None)}
+               if cycle is not None and getattr(cycle, "last_timeout_soft_landing", None) is not None else {}),
         }
 
 

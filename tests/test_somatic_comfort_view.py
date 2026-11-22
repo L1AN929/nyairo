@@ -45,7 +45,7 @@ CAP_TOKEN = "{{SECRET_somatic9cap}}"
 #: The two frozen load-bearing files must stay byte-identical for this slice.
 FROZEN_ANCHORS = {
     "components/life/scripts/autonomous_life_assembly.py":
-        "5f51c9e82a417d9354d08608841d3472fc5a869e6bd3c9d9a7ebed0b15397f7a",
+        "f14fe6291e1a604520318ebf69acedb583dfc876bfde42f538d6f91017f37434",
     "components/life/scripts/life_sharing_service.py":
         "0becf7df4d9b34881817ff6f1defdcc15929eacbd6183d4c8a38c5a048d46038",
 }
@@ -154,6 +154,21 @@ class SomaticProjectionTest(unittest.TestCase):
             now_iso="2026-11-11T12:00:00+08:00")
         moved = _somatic(other)
         self.assertEqual(moved["modalities"]["thermal"]["status"], "unknown")
+
+    def test_an_ajar_window_projects_a_valid_salience(self):
+        """``ajar`` used to pass "mild", which is not in SALIENCE and raised."""
+
+        ajar = _somatic(_window_side_state("ajar"))
+        thermal = ajar["modalities"]["thermal"]
+        self.assertEqual(thermal["status"], "available")
+        self.assertEqual(thermal["quality"], "cool")
+        self.assertIn(thermal["salience"], view.SALIENCE)
+        self.assertTrue(thermal["simulation"])
+
+        open_thermal = _somatic(_window_side_state("open"))["modalities"]["thermal"]
+        self.assertIn(open_thermal["salience"], view.SALIENCE)
+        self.assertNotEqual(ajar["modalities"]["thermal"]["salience"],
+                            open_thermal["salience"])
 
     def test_outerwear_is_exclusive_and_new_instance_is_unknown(self):
         state = view.empty_state()

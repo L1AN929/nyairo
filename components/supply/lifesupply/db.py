@@ -75,7 +75,22 @@ __all__ = [
     "register_owner_writer_connection",
     "install_owner_write_guards",
     "activate_owner_epoch",
+    "readonly_sqlite_uri",
 ]
+
+
+def readonly_sqlite_uri(path: str | Path) -> str:
+    """Build a zero-sidecar read-only SQLite URI (``immutable=1`` when no active WAL/SHM exists)."""
+    db_path = Path(path)
+    shm_exists = db_path.with_name(db_path.name + "-shm").is_file()
+    wal_path = db_path.with_name(db_path.name + "-wal")
+    has_wal = wal_path.is_file() and wal_path.stat().st_size > 0
+    try:
+        base_uri = db_path.resolve().as_uri()
+    except OSError:
+        base_uri = f"file:{path}"
+    query = "?mode=ro" if (shm_exists or has_wal) else "?mode=ro&immutable=1"
+    return base_uri + query
 
 
 # ---------------------------------------------------------------------------------
@@ -842,7 +857,8 @@ class LifeSupplyDB:
         self.clock = clock
         self.created_at = float(clock())
         self._local = threading.local()
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        if not self.read_only:
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         if self.read_only:
             self._verify_schema()
         else:
@@ -894,9 +910,29 @@ class LifeSupplyDB:
 
     # -- connections -----------------------------------------------------------
 
+    def _is_effective_read_only(self) -> bool:
+        return bool(self.read_only or getattr(self._local, "force_read_only", False))
+
+    @contextmanager
+    def read_only_scope(self) -> Iterator[None]:
+        """Temporarily bind the current thread to immutable/read-only connections for pure READ_OPS."""
+        prev = getattr(self._local, "force_read_only", False)
+        self._local.force_read_only = True
+        try:
+            yield
+        finally:
+            self._local.force_read_only = prev
+
     def _raw_connection(self) -> sqlite3.Connection:
-        uri = f"file:{self.path}?mode=ro" if self.read_only else self.path
-        con = sqlite3.connect(uri, uri=self.read_only, timeout=10, isolation_level=None)
+        if self._is_effective_read_only():
+            con = sqlite3.connect(
+                readonly_sqlite_uri(self.path), uri=True, timeout=10, isolation_level=None
+            )
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only=ON")
+            con.execute("PRAGMA busy_timeout=10000")
+            return con
+        con = sqlite3.connect(self.path, uri=False, timeout=10, isolation_level=None)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys=ON")
         con.execute("PRAGMA busy_timeout=10000")
@@ -904,11 +940,12 @@ class LifeSupplyDB:
 
     def _open(self) -> sqlite3.Connection:
         con = self._raw_connection()
-        try:
-            register_owner_writer_connection(con, self.owners, self.fences)
-        except Exception:
-            con.close()
-            raise
+        if not self._is_effective_read_only():
+            try:
+                register_owner_writer_connection(con, self.owners, self.fences)
+            except Exception:
+                con.close()
+                raise
         return con
 
     @property

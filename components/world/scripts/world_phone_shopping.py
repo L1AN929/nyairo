@@ -46,6 +46,7 @@ import json
 import os
 import socket
 import sys
+import tempfile
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -203,7 +204,11 @@ def materialize_purchase(
         return {"status": STATUS_REJECTED, "reason_code": "NOT_AN_ECONOMY_INSTANCE"}
     if item["disposition"] != economy.DISPOSITION_OWNED:
         return {"status": STATUS_REJECTED, "reason_code": "NOT_OWNED"}
-    if item["current_location"] != economy.HOME_ITEM_LOCATION:
+    raw_location = str(item.get("current_location") or "").strip()
+    if not raw_location or raw_location.startswith("in_transit/") or "/" not in raw_location:
+        return {"status": STATUS_REJECTED, "reason_code": "NOT_DELIVERED"}
+    target_place, target_area = raw_location.split("/", 1)
+    if not target_place or not target_area:
         return {"status": STATUS_REJECTED, "reason_code": "NOT_DELIVERED"}
     voucher = contract.purchase_voucher(state, item_id)
     if not voucher["ok"]:
@@ -215,8 +220,8 @@ def materialize_purchase(
 
     target = {
         "kind": "room",
-        "location_id": HOME_PLACE_ID,
-        "area_id": HOME_AREA_ID,
+        "location_id": target_place,
+        "area_id": target_area,
     }
     path = substrate.substrate_path(hermes_home)
     store = substrate.SubstrateStore(path)
@@ -417,6 +422,9 @@ class PhoneShopping:
                 STATUS_DISABLED if status == "disabled" else STATUS_UNAVAILABLE,
                 projection.get("reason_code") or "WALLET_UNAVAILABLE",
             )
+        catalog_names = {
+            entry["catalog_item_id"]: entry["name"] for entry in economy.CATALOG
+        }
         return _ok(
             STATUS_APPLIED,
             {
@@ -434,6 +442,11 @@ class PhoneShopping:
                             ("amount", entry["amount"]),
                             ("occurred_at", entry["occurred_at"]),
                             ("catalog_item_id", entry.get("catalog_item_id")),
+                            (
+                                "item_name",
+                                entry.get("item_name")
+                                or catalog_names.get(str(entry.get("catalog_item_id") or "")),
+                            ),
                             ("purchase_intent_id", entry.get("purchase_intent_id")),
                         )
                         if value_ is not None
@@ -524,7 +537,13 @@ class PhoneShopping:
             return _fail(STATUS_UNAVAILABLE, projection.get("reason_code") or "UNAVAILABLE", data)
         return _fail(STATUS_REJECTED, projection.get("reason_code") or "STORE_UNAVAILABLE", data)
 
-    def store_purchase(self, catalog_item_id: Any, operation_key: Any) -> dict[str, Any]:
+    def store_purchase(
+        self,
+        catalog_item_id: Any,
+        operation_key: Any,
+        *,
+        item_name: Any = None,
+    ) -> dict[str, Any]:
         """POST /api/phone/store/purchases -- one counter sale, one key.
 
         The key lives in the *same* namespace as every other phone operation: a
@@ -559,9 +578,16 @@ class PhoneShopping:
         except economy.PropertyEconomyError:
             return _fail(STATUS_UNAVAILABLE, "ECONOMY_STATE_ERROR")
         if recorded is not None:
+            name_conflict = (
+                isinstance(item_name, str)
+                and bool(item_name.strip())
+                and bool(recorded.get("item_name"))
+                and " ".join(item_name.split()) != recorded.get("item_name")
+            )
             if (
                 recorded.get("channel") != economy.CHANNEL_HOME_GOODS_STORE
                 or recorded.get("catalog_item_id") != str(catalog_item_id)
+                or name_conflict
             ):
                 return _fail(
                     STATUS_REJECTED,
@@ -582,6 +608,7 @@ class PhoneShopping:
                 hermes_home=self.hermes_home,
                 environment=self.environment,
                 now=self._now(),
+                custom_item_name=item_name,
             )
         except economy.PropertyEconomyError:
             return _fail(STATUS_UNAVAILABLE, "ECONOMY_STATE_ERROR")
@@ -608,6 +635,15 @@ class PhoneShopping:
             return _fail(
                 STATUS_REJECTED, result.get("reason_code") or "STORE_PURCHASE_REJECTED", data
             )
+        if result.get("item_instance_id") and result.get("delivery_status") != "PENDING":
+            try:
+                materialize_owned_item(
+                    hermes_home=self.hermes_home,
+                    item_instance_id=result["item_instance_id"],
+                    environment=self.environment,
+                )
+            except Exception:
+                pass
         data = {
             "channel": economy.CHANNEL_HOME_GOODS_STORE,
             "transaction_id": result["transaction_id"],
@@ -628,6 +664,8 @@ class PhoneShopping:
             "delivery_timeline_status": result.get("delivery_timeline_status"),
             "placement_requires": "ARRANGE",
         }
+        if result.get("item_name"):
+            data["item_name"] = result["item_name"]
         return _ok(
             STATUS_APPLIED if status == "applied" else STATUS_ALREADY_APPLIED, data
         )
@@ -655,9 +693,11 @@ class PhoneShopping:
             item_id = item["item_instance_id"]
             placement = placements.get(item_id)
             consumed = [r for r in receipts if r["object_id"] == item_id]
+            item_meta = item.get("item_meta") if isinstance(item.get("item_meta"), Mapping) else {}
+            meta_name = str(item_meta.get("name") or "").strip()
             entry: dict[str, Any] = {
                 "item_instance_id": item_id,
-                "name": catalog_names.get(item["catalog_item_id"], item["catalog_item_id"]),
+                "name": meta_name or catalog_names.get(item["catalog_item_id"], item["catalog_item_id"]),
                 "catalog_item_id": item["catalog_item_id"],
                 "ownership": item["disposition"],
                 "location": (
@@ -670,6 +710,10 @@ class PhoneShopping:
                 "consumed": bool(consumed),
                 "usable": False,
             }
+            if item_meta.get("category"):
+                entry["category"] = str(item_meta["category"])
+            if item_meta.get("price_tier"):
+                entry["price_tier"] = str(item_meta["price_tier"])
             if consumed:
                 # Terminal state: the instance was consumed, so it has no
                 # position any more and nothing left to materialize.  Reporting
@@ -1030,6 +1074,8 @@ class PhoneShopping:
                 "catalog_item_id": purchase.get("catalog_item_id"),
                 "current_balance": purchase.get("current_balance"),
             }
+            if purchase.get("item_name"):
+                data["item_name"] = purchase["item_name"]
             if purchase.get("status") == "unknown":
                 return _fail(
                     STATUS_UNKNOWN,
@@ -1274,9 +1320,170 @@ class PhoneShopping:
 
 __all__ = [
     "PhoneShopping",
+    "entryway_parcels_path",
     "execution_id_for",
     "materialize_purchase",
     "materialize_owned_item",
+    "place_next_day_parcel_order",
+    "read_entryway_parcels_zero_write",
+    "settle_arrived_entryway_parcels",
+    "unpack_arrived_entryway_parcel",
     "HOME_PLACE_ID",
     "HOME_AREA_ID",
 ]
+
+
+# ---------------------------------------------------------------------------
+# 0.5 Step 3: Next-Day In-Transit Entryway Parcel & Cat Carton Bridge
+# ---------------------------------------------------------------------------
+
+
+def entryway_parcels_path(hermes_home: Path | str) -> Path:
+    return Path(hermes_home) / "data" / "world" / "world_entryway_parcels.json"
+
+
+def _read_entryway_parcels_readonly(path: Path) -> tuple[bool, dict[str, Any]]:
+    if path.is_symlink():
+        raise ValueError("PARCEL_STATE_SYMLINK_REFUSED")
+    if not path.is_file():
+        return False, {"schema_version": "world.entryway_parcels.v1", "revision": 0, "deliveries": {}, "ops": {}}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        raise ValueError("PARCEL_STATE_CORRUPT")
+    doc.setdefault("deliveries", {})
+    doc.setdefault("ops", {})
+    return True, doc
+
+
+def _write_entryway_parcels_atomic(path: Path, doc: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = (json.dumps(doc, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(prefix=".parcels_", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(raw)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def read_entryway_parcels_zero_write(hermes_home: Path | str) -> dict[str, Any]:
+    """100% zero-write read of next-day entryway parcel deliveries & cat carton state."""
+    path = entryway_parcels_path(hermes_home)
+    exists, doc = _read_entryway_parcels_readonly(path)
+    deliveries = list((doc.get("deliveries") or {}).values())
+    return {
+        "state_exists": bool(exists),
+        "revision": int(doc.get("revision") or 0),
+        "deliveries": deliveries,
+        "at_entrance": [d for d in deliveries if d.get("delivered_to_entrance") and not d.get("unpacked")],
+        "in_transit": [d for d in deliveries if not d.get("delivered_to_entrance")],
+        "cat_boxes": [d for d in deliveries if d.get("empty_box_occupied_by_cat")],
+        "llm_calls": 0,
+    }
+
+
+def place_next_day_parcel_order(
+    hermes_home: Path | str,
+    *,
+    order_id: str,
+    item_name_cn: str,
+    current_day: int,
+    arrive_hour: int = 15,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """第 87 章网购隔日下午落盘玄关待拆：绝不秒到，zero-LLM。"""
+    oid = _bounded_key(order_id)
+    if oid is None:
+        raise ValueError("INVALID_ORDER_ID")
+    name = str(item_name_cn or "").strip()[:80]
+    if not name:
+        raise ValueError("INVALID_ITEM_NAME")
+    path = entryway_parcels_path(hermes_home)
+    _, doc = _read_entryway_parcels_readonly(path)
+    op_k = _bounded_key(operation_key) if operation_key else None
+    if op_k and op_k in doc["ops"]:
+        return dict(doc["ops"][op_k])
+    entry = {
+        "order_id": oid,
+        "item_name_cn": name,
+        "ordered_day": int(current_day),
+        "arrive_day": int(current_day) + 1,
+        "arrive_hour": max(8, min(21, int(arrive_hour))),
+        "delivered_to_entrance": False,
+        "unpacked": False,
+        "empty_box_occupied_by_cat": False,
+    }
+    doc["deliveries"][oid] = entry
+    doc["revision"] = int(doc.get("revision") or 0) + 1
+    out = {"ok": True, "status": "in_transit", "delivery": dict(entry), "llm_calls": 0}
+    if op_k:
+        doc["ops"][op_k] = out
+    _write_entryway_parcels_atomic(path, doc)
+    return out
+
+
+def settle_arrived_entryway_parcels(
+    hermes_home: Path | str,
+    *,
+    current_day: int,
+    current_hour: int,
+) -> list[str]:
+    """推进时钟检查是否有在途网购包裹到达玄关；无变化时不写盘。"""
+    path = entryway_parcels_path(hermes_home)
+    exists, doc = _read_entryway_parcels_readonly(path)
+    if not exists:
+        return []
+    arrived: list[str] = []
+    for oid, d in doc["deliveries"].items():
+        if not d.get("delivered_to_entrance") and (
+            int(current_day) > int(d.get("arrive_day") or 0)
+            or (
+                int(current_day) == int(d.get("arrive_day") or 0)
+                and int(current_hour) >= int(d.get("arrive_hour") or 15)
+            )
+        ):
+            d["delivered_to_entrance"] = True
+            arrived.append(oid)
+    if arrived:
+        doc["revision"] = int(doc.get("revision") or 0) + 1
+        _write_entryway_parcels_atomic(path, doc)
+    return arrived
+
+
+def unpack_arrived_entryway_parcel(
+    hermes_home: Path | str,
+    *,
+    order_id: str,
+    cat_present: bool = True,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """拆开已到玄关的隔日包裹，未到货前拒绝，有猫时顺手留出猫占空纸箱。"""
+    oid = _bounded_key(order_id)
+    if oid is None:
+        raise ValueError("INVALID_ORDER_ID")
+    path = entryway_parcels_path(hermes_home)
+    _, doc = _read_entryway_parcels_readonly(path)
+    op_k = _bounded_key(operation_key) if operation_key else None
+    if op_k and op_k in doc["ops"]:
+        return dict(doc["ops"][op_k])
+    if oid not in doc["deliveries"]:
+        raise ValueError("ORDER_NOT_FOUND")
+    d = doc["deliveries"][oid]
+    if not d.get("delivered_to_entrance"):
+        raise ValueError("PARCEL_STILL_IN_TRANSIT")
+    d["unpacked"] = True
+    if cat_present:
+        d["empty_box_occupied_by_cat"] = True
+    doc["revision"] = int(doc.get("revision") or 0) + 1
+    out = {"ok": True, "status": "unpacked", "delivery": dict(d), "llm_calls": 0}
+    if op_k:
+        doc["ops"][op_k] = out
+    _write_entryway_parcels_atomic(path, doc)
+    return out

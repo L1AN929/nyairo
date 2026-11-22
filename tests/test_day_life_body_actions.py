@@ -780,5 +780,31 @@ class RealWorldBodyActionChainTests(unittest.TestCase):
         return path.read_bytes() if path.is_file() else b""
 
 
+class OneDayLifeBridgePrecedenceTests(unittest.TestCase):
+    """Ensure ``one_day_life`` imports ``bridge/action_intent.py`` (including TOILET)."""
+
+    def test_one_day_life_puts_world_bridge_ahead_of_world_service(self) -> None:
+        import subprocess
+        import sys
+
+        repo_root = Path(__file__).resolve().parents[1]
+        code = (
+            "import sys; "
+            f"sys.path.insert(0, {str(repo_root / 'components' / 'life' / 'scripts')!r}); "
+            "import one_day_life, world_action_bridge_adapter as waba; "
+            "ai, _, _ = waba.WorldBridgeResolver()._bridge(); "
+            "print(ai.__file__); "
+            "assert 'TOILET' in ai.ACTION_ALLOWLIST; "
+            "print('OK')"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True, check=False, timeout=20,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("bridge", proc.stdout)
+        self.assertIn("OK", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

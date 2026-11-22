@@ -12,6 +12,62 @@ DEFAULT_ACTIONS={**legacy.DEFAULT_ACTIONS,'dispenser':['fill','toggle_device'],'
 PARAMETERS={**legacy.PARAMETERS,'fill':{'minutes':(2,1,60,'装水分钟'),'servings':(1,1,20,'装入份数')},'toggle_device':{'minutes':(1,1,60,'设备切换分钟')},'toggle':{'minutes':(1,1,60,'开关分钟')}}
 ACTIONS=set().union(*DEFAULT_ACTIONS.values())
 ALL_ACTIONS=ACTIONS|{'walk','move','stand','wait'}|set(DOOR_ACTIONS)
+SUPPORTS_AFFORDANCE_TRAITS=True
+AFFORDANCE_TRAITS=(
+    'movable',
+    'insertable',
+    'container',
+    'inscribable',
+    'switchable',
+    'thermal_or_damp',
+    'usable',
+    'combinable',
+)
+DEFAULT_AFFORDANCE_TRAITS={
+    'lamp':('switchable','usable'),
+    'dispenser':('switchable','usable'),
+    'cup':('usable','thermal_or_damp','movable'),
+    'cabinet':('container','combinable'),
+    'table':('container','inscribable'),
+    'chair':('usable','movable'),
+    'bed':('usable','movable'),
+    'book':('inscribable','insertable','movable'),
+}
+
+def default_affordance_traits(kind,portable=False,capacity=0):
+    traits=list(DEFAULT_AFFORDANCE_TRAITS.get(kind,()))
+    if portable and 'movable' not in traits: traits.append('movable')
+    if type(capacity) is int and capacity>0 and 'container' not in traits: traits.append('container')
+    return [t for i,t in enumerate(traits) if t in AFFORDANCE_TRAITS and t not in traits[:i]]
+SUPPORTS_MATTER_PROFILE=True
+MATTER_AMBIENT_ZONES=('room','cold','heating')
+MATTER_ITEM_KINDS=('ingredient','prepared_food','drink','vessel','tool','paper','keepsake','everyday')
+MATTER_ASSEMBLY_ROLES=('none','host_frame','insert_part')
+MATTER_PROFILE_KEYS=('ambient_zone','water_source','capacity_slots','item_kind','paper_like','shelf_life_hours','portions','material_units','assembly_role')
+MATTER_COLD_NAMES=('冷柜','冰箱','fridge','cooler')
+MATTER_HEATING_NAMES=('炉','灶','壶','oven','stove','kettle')
+
+def _matter_capacity(capacity,fallback):
+    try: return int(capacity or fallback)
+    except (TypeError,ValueError): return fallback
+
+def default_matter_profile(kind,portable=False,capacity=0,name=''):
+    """Sensible physical defaults so authored objects work with generic matter physics."""
+    profile={'ambient_zone':'room','water_source':False,'capacity_slots':0,'item_kind':'everyday','paper_like':False}
+    if kind=='cup':
+        profile.update(capacity_slots=1,item_kind='vessel',portions=1)
+    elif kind=='book':
+        profile.update(item_kind='paper',paper_like=True)
+    elif kind in ('cabinet','table'):
+        profile.update(capacity_slots=max(_matter_capacity(capacity,4),1))
+    elif kind=='dispenser':
+        profile.update(water_source=True,capacity_slots=2)
+    lname=(name or '').lower()
+    if any(token in lname for token in MATTER_COLD_NAMES):
+        profile.update(ambient_zone='cold',capacity_slots=max(_matter_capacity(capacity,0),8))
+    elif any(token in lname for token in MATTER_HEATING_NAMES):
+        profile.update(ambient_zone='heating',capacity_slots=max(_matter_capacity(capacity,0),3))
+    return profile
 STATUS={'cup':('empty','water'),'dispenser':('available','unavailable'),'lamp':('off','on')}
 
 def default_behavior(kind):
@@ -30,7 +86,10 @@ def templates():
 def upgrade(p):
     p=copy.deepcopy(p);p.update(format=FORMAT,requires=ENGINE,assets={})
     for r in p['rooms']: r['space']=empty_space()
-    for o in p['objects']: o.update(asset_id=None,initial_status=default_status(o['kind'],o['servings']),interaction={'near':False,'radius':2})
+    for o in p['objects']:
+        o.update(asset_id=None,initial_status=default_status(o['kind'],o['servings']),interaction={'near':False,'radius':2})
+        if 'affordance_traits' not in o: o['affordance_traits']=default_affordance_traits(o['kind'],o.get('portable',False),o.get('capacity',0))
+        if 'matter_profile' not in o: o['matter_profile']=default_matter_profile(o['kind'],o.get('portable',False),o.get('capacity',0),o.get('name',''))
     return p
 
 def projection(p, for_save=False):
@@ -38,6 +97,8 @@ def projection(p, for_save=False):
     for r in b['rooms']: del r['space']
     for o in b['objects']:
         for k in ('asset_id','interaction','initial_status'): del o[k]
+        o.pop('affordance_traits',None)
+        o.pop('matter_profile',None)
         if o['kind'] in ('dispenser','lamp'): o.update(kind='table',actions=[],behavior={})
         if for_save and o['kind']=='cup': o['servings']=20
     return b
@@ -57,9 +118,49 @@ def validate_package(raw):
     if not isinstance(p['rooms'],list) or not isinstance(p['objects'],list): fail('区域和物件需要是列表。')
     for r in p['rooms']:
         fields(r,['id','name','description','kind','x','y','w','h','hours','visual','space'],'区域');validate_space(r['space'],p['assets'])
+    object_fields=['id','name','description','kind','room_id','x','y','actions','portable','capacity','servings','visual','behavior','asset_id','interaction','initial_status']
     for o in p['objects']:
-        fields(o,['id','name','description','kind','room_id','x','y','actions','portable','capacity','servings','visual','behavior','asset_id','interaction','initial_status'],'物件')
+        fields(o,object_fields+[k for k in ('affordance_traits','matter_profile') if k in o],'物件')
         if not isinstance(o['kind'],str) or o['kind'] not in KINDS: fail('物件类型不支持。')
+        traits=o.get('affordance_traits')
+        if traits is None:
+            o['affordance_traits']=default_affordance_traits(o['kind'],o['portable'],o['capacity'])
+        elif (not isinstance(traits,list) or any(not isinstance(t,str) for t in traits)
+              or len(set(traits))!=len(traits) or any(t not in AFFORDANCE_TRAITS for t in traits)):
+            fail('物件通用交互属性无效。')
+        mp=o.get('matter_profile')
+        if mp is None:
+            o['matter_profile']=default_matter_profile(o['kind'],o['portable'],o['capacity'],o['name'])
+        elif not isinstance(mp,dict):
+            fail('物件物理与盛放属性需要是对象。')
+        else:
+            if set(mp)-set(MATTER_PROFILE_KEYS): fail('物件物理与盛放属性含有不支持的字段。')
+            zone=mp.get('ambient_zone','room')
+            if zone not in MATTER_AMBIENT_ZONES: fail('物件温区无效。')
+            water=mp.get('water_source',False)
+            if type(water) is not bool: fail('物件清水洗涤标记需要是布尔值。')
+            slots=mp.get('capacity_slots',0)
+            if type(slots) is not int or not 0<=slots<=24: fail('物件盛放格位数需要是 0–24 的整数。')
+            item_kind=mp.get('item_kind','everyday')
+            if item_kind not in MATTER_ITEM_KINDS: fail('物件材质类别无效。')
+            paper_like=mp.get('paper_like',False)
+            if type(paper_like) is not bool: fail('物件怕潮纸质标记需要是布尔值。')
+            if mp.get('shelf_life_hours') is not None:
+                hours=mp['shelf_life_hours']
+                if isinstance(hours,bool) or not isinstance(hours,(int,float)) or not 0<hours<=8760: fail('物件保鲜小时数无效。')
+            if mp.get('portions') is not None:
+                portions=mp['portions']
+                if type(portions) is not int or not 1<=portions<=24: fail('物件份数无效。')
+            if 'material_units' in mp:
+                units=mp['material_units']
+                if type(units) is not int or not 1<=units<=24: fail('物件可用份数需要是 1–24 的整数。')
+            if 'assembly_role' in mp:
+                role=mp['assembly_role']
+                if not isinstance(role,str) or role not in MATTER_ASSEMBLY_ROLES: fail('物件装配角色无效。')
+            normalized={'ambient_zone':zone,'water_source':water,'capacity_slots':slots,'item_kind':item_kind,'paper_like':paper_like}
+            for k in ('shelf_life_hours','portions','material_units','assembly_role'):
+                if k in mp: normalized[k]=mp[k]
+            o['matter_profile']=normalized
         if not isinstance(o['actions'],list) or any(a not in DEFAULT_ACTIONS[o['kind']] for a in o['actions']) or len(set(o['actions']))!=len(o['actions']): fail('物件用途需要来自受支持的模板。')
         if o['asset_id'] is not None and o['asset_id'] not in p['assets']: fail('物件引用的素材不存在。')
         fields(o['interaction'],['near','radius'],'交互条件')

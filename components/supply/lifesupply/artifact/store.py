@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping
 
 from lifesupply.artifact import album as album_media
+from lifesupply.db import readonly_sqlite_uri
 from lifesupply.fencing import (
     WriterFence,
     activate_writer_epoch,
@@ -170,12 +171,19 @@ class ManagedArtifactStore:
             finally:
                 con.close()
             return
-        uri = f"file:{self.db_path}?mode=ro" if self.read_only else self.db_path
-        con = sqlite3.connect(uri, uri=self.read_only, timeout=10, isolation_level=None)
-        con.row_factory = sqlite3.Row
-        con.execute("PRAGMA foreign_keys=ON")
-        con.execute("PRAGMA busy_timeout=10000")
-        register_writer_connection(con, self.writer_fence)
+        if self.read_only:
+            con = sqlite3.connect(
+                readonly_sqlite_uri(self.db_path), uri=True, timeout=10, isolation_level=None
+            )
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only=ON")
+            con.execute("PRAGMA busy_timeout=10000")
+        else:
+            con = sqlite3.connect(self.db_path, uri=False, timeout=10, isolation_level=None)
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA foreign_keys=ON")
+            con.execute("PRAGMA busy_timeout=10000")
+            register_writer_connection(con, self.writer_fence)
         if self._is_merged_layout(con):
             # The single-database file's guards call the owner-parameterised functions.  With no
             # fence the store is a *reader*; epoch -1 makes any guarded write abort by name

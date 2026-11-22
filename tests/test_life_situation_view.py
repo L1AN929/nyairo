@@ -165,7 +165,7 @@ class RealBodyColumn(SituationTestCase):
         self.assertEqual(view["schema_version"], lsv.SCHEMA_LIFE_SITUATION_VIEW)
         self.assertEqual(view["body"]["state"], bcs.CAPACITY_LIMITED)
         self.assertEqual(view["body"]["ref"], "bodycap:chiyo_body:bodyrev:3")
-        self.assertEqual(view["body"]["evidence"], ["fatigue_noticeable:mild"])
+        self.assertEqual(view["body"]["evidence"], ["fatigue_noticeable:mild", "health"])
         self.assertEqual(view["body"]["reason_code"], bcs.REASON_OK_LIMITED)
         self.assertEqual(view["body"]["derived_by"], "body_capacity_source.read_body_capacity")
         self.assertEqual(view["dimensions"][lsv.DIMENSION_BODY], bcs.CAPACITY_LIMITED)

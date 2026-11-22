@@ -1,4 +1,4 @@
-import {emptySpace,localPoint,snap5,spaceCopy,spacePaste,removeSpace,translateSpace,spaceSvg,assetUri,objectArt} from '/space.mjs';
+import {emptySpace,localPoint,snap5,spaceCopy,spacePaste,removeSpace,translateSpace,spaceSvg,assetUri,objectArt,mapTone} from '/space.mjs';
 import {DraftHistory, RecoveryStore, fingerprint, editableShape} from '/editor-state.mjs';
 import {ref,entries,center,drop,translate,resize,boxSelect,copySelection,paste,arrange} from '/layout.mjs';
 const $ = id => document.getElementById(id);
@@ -8,6 +8,34 @@ const kinds = {chair:'椅子',bed:'床',book:'书',cup:'杯子',cabinet:'储物�
 const icons = {chair:'▤',bed:'▰',book:'▥',cup:'◡',cabinet:'▦',table:'⊞',plant:'♧'};
 const verbs = {sit:'坐下',rest:'休息',read:'阅读',pick_up:'拿起',place:'放下',store:'收纳持有物',retrieve:'取出',drink:'喝一份饮品',fill:'给持有杯装水',toggle_device:'切换设备可用状态',toggle:'开关灯'};
 const defaults = {chair:['sit'],bed:['rest'],book:['pick_up','place','read'],cup:['pick_up','place','drink'],cabinet:['store','retrieve'],table:[],plant:[],dispenser:['fill','toggle_device'],lamp:['toggle']};
+const traitKinds = ['movable','insertable','container','inscribable','switchable','thermal_or_damp','usable','combinable'];
+const traitDefaults = {lamp:['switchable','usable'],dispenser:['switchable','usable'],cup:['usable','thermal_or_damp','movable'],cabinet:['container','combinable'],table:['container','inscribable'],chair:['usable','movable'],bed:['usable','movable'],book:['inscribable','insertable','movable']};
+function defaultAffordanceTraits(kind, portable=false, capacity=0) {
+  const out = [...(traitDefaults[kind] || [])];
+  if (portable && !out.includes('movable')) out.push('movable');
+  if (Number(capacity) > 0 && !out.includes('container')) out.push('container');
+  return out.filter((t, i) => traitKinds.includes(t) && out.indexOf(t) === i);
+}
+function ensureAffordanceTraits(p) {
+  for (const o of p.objects) if (!Array.isArray(o.affordance_traits)) o.affordance_traits = defaultAffordanceTraits(o.kind, o.portable, o.capacity);
+  return p;
+}
+function defaultMatterProfile(kind, portable=false, capacity=0, name='') {
+  const slots = (fallback) => { const n = Number(capacity); return Number.isFinite(n) && n !== 0 ? Math.trunc(n) : fallback; };
+  const out = {ambient_zone:'room', water_source:false, capacity_slots:0, item_kind:'everyday', paper_like:false};
+  if (kind === 'cup') Object.assign(out, {capacity_slots:1, item_kind:'vessel', portions:1});
+  else if (kind === 'book') Object.assign(out, {item_kind:'paper', paper_like:true});
+  else if (kind === 'cabinet' || kind === 'table') out.capacity_slots = Math.max(slots(4), 1);
+  else if (kind === 'dispenser') Object.assign(out, {water_source:true, capacity_slots:2});
+  const lname = String(name || '').toLowerCase();
+  if (/冷柜|冰箱|fridge|cooler/.test(lname)) Object.assign(out, {ambient_zone:'cold', capacity_slots:Math.max(slots(0), 8)});
+  else if (/炉|灶|壶|oven|stove|kettle/.test(lname)) Object.assign(out, {ambient_zone:'heating', capacity_slots:Math.max(slots(0), 3)});
+  return out;
+}
+function ensureMatterProfiles(p) {
+  for (const o of p.objects) if (!o.matter_profile || typeof o.matter_profile !== 'object' || Array.isArray(o.matter_profile)) o.matter_profile = defaultMatterProfile(o.kind, o.portable, o.capacity, o.name);
+  return p;
+}
 let draft, draftRevision=0, dirty=false, edits=0, mode='edit', selected={type:'room',id:null}, trial=null, trialList=[], actionBusy=false, saveBusy=false, ready=false;
 let selection=new Set(),view={x:0,y:0,zoom:1},tool='select',snap=true,clipboard=null,placing=null,ghostPoint=null,connectFrom=null,ignoreClick=false,spaceHeld=false,rulePreview=null;
 let themes={},actionSpecs={},drawing={};
@@ -151,7 +179,7 @@ function select(type,id,add=false){
 }
 function themeVisual(kind='room'){const key=kind==='outdoor'?'street':kind==='shop'?'bookstore':'bedroom';return {theme:key,...Object.fromEntries(Object.entries(themes[key]).filter(([k])=>k!=='name'))};}
 function behaviorDefaults(kind){return Object.fromEntries(defaults[kind].filter(v=>actionSpecs[v]?.parameters.length).map(v=>[v,Object.fromEntries(actionSpecs[v].parameters.map(param=>[param.key,param.default]))]));}
-function upgradeEditable(p){p=clone(p);if(p.format.endsWith('.v1')){p.format='nyairo.world-package.v2';p.requires='nyairo.editor-runtime.v2';p.scene={background:'#f8f9fc',grid:true,decorations:true};p.rooms.forEach(r=>r.visual=themeVisual(r.kind));p.objects.forEach(o=>{o.visual={scale:100,rotation:0,layer:0,show_name:true};o.behavior=behaviorDefaults(o.kind);});}if(!p.format.endsWith('.v3')){p.format='nyairo.world-package.v3';p.requires='nyairo.editor-runtime.v3';p.assets={};p.rooms.forEach(r=>r.space=emptySpace());p.objects.forEach(o=>{o.asset_id=null;o.initial_status=o.kind==='cup'?(o.servings?'water':'empty'):'neutral';o.interaction={near:false,radius:2};});}return p;}
+function upgradeEditable(p){p=clone(p);if(p.format.endsWith('.v1')){p.format='nyairo.world-package.v2';p.requires='nyairo.editor-runtime.v2';p.scene={background:'#f8f9fc',grid:true,decorations:true};p.rooms.forEach(r=>r.visual=themeVisual(r.kind));p.objects.forEach(o=>{o.visual={scale:100,rotation:0,layer:0,show_name:true};o.behavior=behaviorDefaults(o.kind);});}if(!p.format.endsWith('.v3')){p.format='nyairo.world-package.v3';p.requires='nyairo.editor-runtime.v3';p.assets={};p.rooms.forEach(r=>r.space=emptySpace());p.objects.forEach(o=>{o.asset_id=null;o.initial_status=o.kind==='cup'?(o.servings?'water':'empty'):'neutral';o.interaction={near:false,radius:2};});}return ensureMatterProfiles(ensureAffordanceTraits(p));}
 function applyPackage(next,keys=null){draft=next;if(keys){selection=keys;const e=entries(draft,keys)[0];selected=e?{type:e.type,id:e.item.id}:{type:'room',id:draft.initial.room_id};}touch();renderAll();}
 function copyObjects(){if(spatialSelection){const {room}=spatialItem();spaceClipboard=spaceCopy(room,spatialSelection.type,spatialSelection.id);toast('空间对象已复制，墙壁包括依附门窗。');return;}clipboard=copySelection(draft,selectionKeys());renderHeader();toast(`已复制 ${clipboard.rooms.length} 个区域、${clipboard.objects.length} 个物件。`);}
 function pasteObjects(duplicate=false){if(spatialSelection||editDomain==='space')return pasteSpatial(duplicate);const clip=duplicate?copySelection(draft,selectionKeys()):clipboard;const target=duplicate?null:selected.type==='room'?selected.id:draft.objects.find(o=>o.id===selected.id)?.room_id;const result=paste(draft,clip,target);applyPackage(result.package,result.keys);toast('副本已创建；一次撤销可移除整批副本。');}
@@ -173,6 +201,31 @@ async function previewRules(){
   rulePreview=new Map(result.rooms.map(r=>[r.id,r.open]));$('feedback-panel').open=true;
   $('rule-results').innerHTML=result.rooms.map(r=>`<div class="rule-row"><span>${esc(draft.rooms.find(x=>x.id===r.id).name)}</span><strong class="${r.open?'open':'closed'}">${r.open?'时间允许进入':'当前关闭'}</strong></div>`).join('')+'<p class="field-hint">仅预览开放时间。真实移动还需直接连接并释放当前家具；不会改变试运行时间。</p>';renderMap();
 }
+const trialWeatherNames={clear:'晴天光线',drizzle:'细雨微风',rain:'下雨天气'};
+const trialWindowNames={closed:'关着窗',ajar:'半开着窗',open:'开着窗'};
+const trialSeasonNames={spring:'春',summer:'夏',autumn:'秋',winter:'冬'};
+const trialLegibilityNames={clear:'字迹清晰',smudged:'字迹洇开'};
+const trialMoistureNames={dry:'干燥',damp:'返潮',wet:'湿透'};
+function trialHourValue(){
+  const value=$('rule-time').value.trim(),match=value.match(/^(\d{1,2})(?::\d{2})?$/);
+  if(match){const hour=Number(match[1]);if(Number.isInteger(hour)&&hour>=0&&hour<=23)return hour;}
+  return 14;
+}
+async function runIsolatedTrialHour(){
+  const weather=$('trial-hour-weather').value,windowState=$('trial-hour-window').value,season=$('trial-hour-season')?.value||'autumn',hour=trialHourValue();
+  const result=await api('/api/nyairo/trial-hour',{package:draft,weather,window_state:windowState,season,hour});
+  $('feedback-panel').open=true;
+  const micro=result.microzone_summary||{},note=result.paper_note_state||{};
+  const steps=Array.isArray(result.trial_steps_cn)?result.trial_steps_cn.filter(step=>step!=null&&String(step).trim()):[];
+  const spot=micro.observation_cn||'这次试住没有记录到额外的环境变化。';
+  const legibility=trialLegibilityNames[note.note_legibility]||'没有记录到字迹变化';
+  const moisture=trialMoistureNames[note.moisture];
+  const noteSummary=moisture?`${legibility}，纸面${moisture}`:legibility;
+  const seasonName=trialSeasonNames[season]||'秋';
+  const seasonHint=String(result.seasonal_hint_cn||(result.microzone_summary||{}).seasonal_hint_cn||'').trim();
+  const meta=`天气：${trialWeatherNames[weather]||'晴天光线'} · 窗户：${trialWindowNames[windowState]||'关着窗'} · 从 ${String(hour).padStart(2,'0')}:00 开始`;
+  $('rule-results').innerHTML=`<div class="trial-hour-box"><h3>隔离试住一小时</h3><p class="trial-hour-meta">${esc(meta)}</p><p class="trial-hour-meta">季节：${esc(seasonName)}${seasonHint?` · ${esc(seasonHint)}`:''}</p>${steps.length?`<ol class="trial-hour-steps">${steps.map(step=>`<li>${esc(step)}</li>`).join('')}</ol>`:'<p class="field-hint">这次试住没有记录到可读的步骤。</p>'}<div class="trial-hour-grid"><div><small>窗边光线与气流</small><span>${esc(spot)}</span></div><div><small>卡片字迹</small><span>${esc(noteSummary)}</span></div></div><p class="trial-hour-safe">此次试住在完全隔离的临时目录完成，未触碰任何真实生活存档。</p></div>`;
+}
 function verbLabel(v,o){return ['read','rest'].includes(v)?`${verbs[v]} ${o.behavior[v].minutes} 分钟`:verbs[v];}
 
 function selectionKeys(){return selection.size?selection:new Set(selected.id&&['room','object'].includes(selected.type)?[ref(selected.type,selected.id)]:[]);}
@@ -182,30 +235,32 @@ function roomOpen(room,minutes){if(!room.hours)return true;const h=Math.floor(mi
 function trialMinute(){const t=trial.package.initial.time.slice(11).split(':').map(Number);return t[0]*60+t[1]+trial.state.minutes;}
 function renderMap(){
   const p=source();if(!p)return;const map=$('map'),edit=mode==='edit',preview=mode==='preview',rooms=Object.fromEntries(p.rooms.map(r=>[r.id,r]));
+  const dark=document.documentElement.dataset.theme!=='light',accentHex=dark?'#7da6db':'#3b76a8',edgeIdle=dark?'#4a5366':'#91a7bb';
   map.setAttribute('viewBox',`${view.x} ${view.y} ${1000/view.zoom} ${620/view.zoom}`);$('zoom-label').textContent=Math.round(view.zoom*100)+'%';
   map.classList.toggle('tool-pan',tool==='pan');map.classList.toggle('tool-box',edit&&tool==='box');map.classList.toggle('placing',!!placing&&edit);
-  let html='<defs><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#cbd6e9"/></pattern></defs>';
-  html+=`<rect x="-10000" y="-10000" width="20000" height="20000" fill="${esc(p.scene.background)}"/>`;
+  let html=`<defs><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="${esc(mapTone('#cbd6e9','grid'))}"/></pattern></defs>`;
+  html+=`<rect x="-10000" y="-10000" width="20000" height="20000" fill="${esc(mapTone(p.scene.background,'canvas'))}"/>`;
   if(edit&&p.scene.grid)html+='<rect width="1000" height="620" fill="url(#grid)"/>';
   for(const [i,e] of p.connections.entries()){
     const a=rooms[e.from],b=rooms[e.to];if(!a||!b)continue;
-    if(!preview)html+=`<path class="map-edge" data-edge="${i}" d="M ${a.x+a.w/2} ${a.y+a.h/2} L ${b.x+b.w/2} ${b.y+b.h/2}" stroke="${selected.type==='connection'&&selected.id===String(i)?'#396be4':'#91a7bb'}" fill="none" stroke-width="3" stroke-dasharray="8 6"/>`;
+    if(!preview)html+=`<path class="map-edge" data-edge="${i}" d="M ${a.x+a.w/2} ${a.y+a.h/2} L ${b.x+b.w/2} ${b.y+b.h/2}" stroke="${selected.type==='connection'&&selected.id===String(i)?accentHex:edgeIdle}" fill="none" stroke-width="3" stroke-dasharray="8 6"/>`;
   }
   for(const r of p.rooms){
     const v=r.visual,active=edit&&selectionKeys().has(ref('room',r.id)),candidate=edit&&tool==='connect'&&connectFrom&&connectFrom!==r.id;
     const closed=mode==='trial'?!roomOpen(r,trialMinute()):rulePreview?.get(r.id)===false;
+    const floorHex=mapTone(v.floor,'floor'),borderHex=mapTone(v.border,'border'),hdrHex=mapTone(v.background,'header');
     const pid='floor-'+r.id,size=v.texture==='planks'?60:30,lines=v.texture==='planks'?'<path d="M0 0H60M0 30H60M30 0V30M0 30V60"/>':'<path d="M0 0H30V30H0Z"/>';
-    if(v.texture!=='none')html+=`<defs><pattern id="${esc(pid)}" width="${size}" height="${size}" patternUnits="userSpaceOnUse"><rect width="${size}" height="${size}" fill="${esc(v.floor)}"/><g fill="none" stroke="${esc(v.border)}" opacity=".18" stroke-width="1">${lines}</g></pattern></defs>`;
-    const fill=v.texture==='none'?v.floor:`url(#${pid})`,nameLimit=Math.max(3,Math.min(24,Math.floor((r.w-40)/17)));
-    html+=`<g class="map-room ${active?'selected':''} ${closed&&!preview?'room-closed':''} ${candidate?'connect-candidate':''}" role="button" tabindex="${preview?-1:0}" aria-label="选择区域 ${esc(r.name)}" data-map-room="${esc(r.id)}"><rect class="room-bg" x="${r.x}" y="${r.y}" width="${Math.max(0,r.w)}" height="${Math.max(0,r.h)}" rx="10" fill="${esc(fill)}" stroke="${v.border_style==='none'?'none':esc(v.border)}" stroke-width="2" ${v.border_style==='dashed'?'stroke-dasharray="8 5"':''}/>`;
+    if(v.texture!=='none')html+=`<defs><pattern id="${esc(pid)}" width="${size}" height="${size}" patternUnits="userSpaceOnUse"><rect width="${size}" height="${size}" fill="${esc(floorHex)}"/><g fill="none" stroke="${esc(borderHex)}" opacity="${dark?'.22':'.18'}" stroke-width="1">${lines}</g></pattern></defs>`;
+    const fill=v.texture==='none'?floorHex:`url(#${pid})`,nameLimit=Math.max(3,Math.min(24,Math.floor((r.w-40)/17)));
+    html+=`<g class="map-room ${active?'selected':''} ${closed&&!preview?'room-closed':''} ${candidate?'connect-candidate':''}" role="button" tabindex="${preview?-1:0}" aria-label="选择区域 ${esc(r.name)}" data-map-room="${esc(r.id)}"><rect class="room-bg" x="${r.x}" y="${r.y}" width="${Math.max(0,r.w)}" height="${Math.max(0,r.h)}" rx="10" fill="${esc(fill)}" stroke="${v.border_style==='none'?'none':esc(borderHex)}" stroke-width="2" ${v.border_style==='dashed'?'stroke-dasharray="8 5"':''}/>`;
     html+=spaceSvg(r,p,mode==='trial'?trial.state:null,spatialSelection,edit?visibleLayers:{floors:true,walls:true},'floor',edit&&editDomain==='space');
-    if(p.scene.decorations)html+=`<rect x="${r.x+10}" y="${r.y+10}" width="${Math.max(0,r.w-20)}" height="38" rx="5" fill="${esc(v.background)}" pointer-events="none"/>`;
+    if(p.scene.decorations)html+=`<rect x="${r.x+10}" y="${r.y+10}" width="${Math.max(0,r.w-20)}" height="38" rx="6" fill="${esc(hdrHex)}" pointer-events="none"/>`;
     html+=`<text class="room-name" x="${r.x+20}" y="${r.y+32}">${esc(r.name.length>nameLimit?r.name.slice(0,nameLimit-1)+'…':r.name)}</text>`;
     if(!preview)html+=`<text class="room-kind" x="${r.x+20}" y="${r.y+63}">${r.hours?`${r.hours.open}:00–${r.hours.close}:00${r.hours.open>r.hours.close?' · 跨夜':''}`:'全天开放'}${closed?' · 当前关闭':''}</text>`;
     html+='</g>';
   }
   for(const r of p.rooms)html+=spaceSvg(r,p,mode==='trial'?trial.state:null,spatialSelection,edit?visibleLayers:{walls:true,floors:true},'walls',edit&&editDomain==='space');
-  if(mode==='trial'&&trial.state.path.points.length){const r=rooms[trial.state.path.room_id];html+=`<polyline class="walk-path" points="${trial.state.path.points.map(pos=>`${r.x+r.w*(pos.x+.5)/20},${r.y+r.h*(pos.y+.5)/20}`).join(' ')}" fill="none" stroke="#789dbc" stroke-width="2" stroke-dasharray="4 4" pointer-events="none"/>`;}
+  if(mode==='trial'&&trial.state.path.points.length){const r=rooms[trial.state.path.room_id];html+=`<polyline class="walk-path" points="${trial.state.path.points.map(pos=>`${r.x+r.w*(pos.x+.5)/20},${r.y+r.h*(pos.y+.5)/20}`).join(' ')}" fill="none" stroke="${accentHex}" stroke-width="2" stroke-dasharray="4 4" pointer-events="none"/>`;}
   for(const o of [...p.objects].sort((a,b)=>a.visual.layer-b.visual.layer)){
     if(edit&&!visibleLayers.objects)continue;const state=mode==='trial'?trial.state.objects[o.id]:null;if(state&&state.placement!=='room')continue;
     const room=rooms[state?.room_id||o.room_id];if(!room)continue;
@@ -223,14 +278,14 @@ function renderMap(){
     if(room.space.enabled){x=room.x+room.w*(r.position.x+.5)/20;y=room.y+room.h*(r.position.y+.5)/20;}
     if(using&&!room.space.enabled){x=room.x+room.w*using.x/100+35;y=room.y+room.h*using.y/100;}
     const posture=r.pose==='lying'?'<g transform="rotate(-90)"><circle cy="-14" r="7"/><path d="M0 -5V15M-9 3H9M-6 25L0 15L6 25" stroke-width="6"/></g>':r.pose==='sitting'?'<circle cy="-18" r="7"/><path d="M0 -8V7H13V24M-10 -2L0 5" stroke-width="6"/>':'<circle cy="-19" r="7"/><path d="M0 -9V9M-11 -3L0 2L11 -3M-8 25L0 9L8 25" stroke-width="6"/>';
-    html+=`<g id="resident-marker" transform="translate(${x},${y})" data-pose="${r.pose}" data-room="${esc(r.room_id)}" aria-label="居民${esc(({standing:'站立',sitting:'坐下',lying:'躺下'})[r.pose])}"><circle r="30" fill="#fff" opacity=".95"/><g fill="#4f79da" stroke="#4f79da" stroke-linecap="round" stroke-linejoin="round">${posture}</g>`;
+    html+=`<g id="resident-marker" transform="translate(${x},${y})" data-pose="${r.pose}" data-room="${esc(r.room_id)}" aria-label="居民${esc(({standing:'站立',sitting:'坐下',lying:'躺下'})[r.pose])}"><circle r="30" fill="${dark?'#1e232d':'#ffffff'}" stroke="${accentHex}" stroke-opacity=".35" opacity=".95"/><g fill="${accentHex}" stroke="${accentHex}" stroke-linecap="round" stroke-linejoin="round">${posture}</g>`;
     if(r.held){const item=p.objects.find(o=>o.id===r.held);html+=`<g data-held="${esc(item.id)}" transform="translate(32,-6)">${objectArt(p,item,drawing,.55)}</g>`;}
-    html+=`<text y="47" text-anchor="middle" fill="#315dc5" font-size="11">${esc(r.name)} · ${esc(({standing:'站立',sitting:'坐着',lying:'躺下'})[r.pose])}</text></g>`;
+    html+=`<text y="47" text-anchor="middle" fill="${accentHex}" font-size="11">${esc(r.name)} · ${esc(({standing:'站立',sitting:'坐着',lying:'躺下'})[r.pose])}</text></g>`;
   }
   if(edit&&selectionKeys().size===1&&selected.type==='room'){
     const r=rooms[selected.id];if(r)html+=`<rect class="resize-handle" data-resize="${esc(r.id)}" x="${r.x+r.w-7}" y="${r.y+r.h-7}" width="14" height="14" rx="3" role="button" tabindex="0" aria-label="调整区域尺寸（拖动或方向键）"/>`;
   }
-  if(edit&&placing&&ghostPoint){const change=drop(p,ghostPoint);if(change)html+=`<g opacity=".55" transform="translate(${ghostPoint.x},${ghostPoint.y})" pointer-events="none">${placingAsset?objectArt(p,{asset_id:placingAsset,kind:placing},drawing):sprite(placing)}<text y="43" text-anchor="middle" fill="#396be4" font-size="12">点击放置${kinds[placing]}</text></g>`;}
+  if(edit&&placing&&ghostPoint){const change=drop(p,ghostPoint);if(change)html+=`<g opacity=".55" transform="translate(${ghostPoint.x},${ghostPoint.y})" pointer-events="none">${placingAsset?objectArt(p,{asset_id:placingAsset,kind:placing},drawing):sprite(placing)}<text y="43" text-anchor="middle" fill="${accentHex}" font-size="12">点击放置${kinds[placing]}</text></g>`;}
   if(dragging?.kind==='box'&&dragging.rect){const b=dragging.rect;html+=`<rect class="selection-box" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}"/>`;}
   map.innerHTML=html;
 }
@@ -341,6 +396,62 @@ function objectVisualFields(item){return '<details class="visual-section" open><
 function behaviorFields(item){
   return '<details class="behavior-section" open><summary>行为与规则 · 真实运行时模板</summary>'+defaults[item.kind].map(v=>{const spec=actionSpecs[v],enabled=item.actions.includes(v);return `<section class="behavior-card ${enabled?'':'disabled'}"><label class="check-row"><input type="checkbox" data-verb="${v}" ${enabled?'checked':''}>${esc(spec.label)}</label><p>条件：${esc(spec.condition)}</p><p class="behavior-flow">${esc(spec.result)}</p>${spec.parameters.length?'<div class="field-pair">'+spec.parameters.map(param=>field(param.label,'behavior.'+v+'.'+param.key,item.behavior[v][param.key],'number',`min="${param.min}" max="${param.max}" ${enabled?'':'disabled'}`)).join('')+'</div>':''}</section>`;}).join('')+(defaults[item.kind].length?'':'<p class="field-hint">此素材是陈设，没有运行时行为。</p>')+'</details>';
 }
+function affordanceFields(item){
+  const template=$('affordance-template');
+  return template?template.innerHTML:'';
+}
+function bindAffordanceControls(item){
+  const boxes=$('inspector').querySelectorAll('[data-trait]');
+  boxes.forEach(el=>{
+    el.checked=item.affordance_traits.includes(el.dataset.trait);
+    el.onchange=()=>{
+      item.affordance_traits=traitKinds.filter(t=>[...boxes].some(box=>box.dataset.trait===t&&box.checked));
+      touch({group:'traits:'+item.id});
+    };
+  });
+}
+function matterFields(item){
+  const template=$('matter-template');
+  return template?template.innerHTML:'';
+}
+function bindMatterControls(item){
+  const root=$('inspector').querySelector('#matter-section');if(!root)return;
+  const mp=item.matter_profile;
+  const zone=root.querySelector('[data-matter="ambient_zone"]');
+  if(zone){zone.value=mp.ambient_zone||'room';zone.onchange=()=>{mp.ambient_zone=zone.value;touch({group:'matter:'+item.id});};}
+  const water=root.querySelector('[data-matter="water_source"]');
+  if(water){water.checked=!!mp.water_source;water.onchange=()=>{mp.water_source=water.checked;touch({group:'matter:'+item.id});};}
+  const slots=root.querySelector('[data-matter="capacity_slots"]');
+  if(slots){slots.value=Number.isInteger(mp.capacity_slots)?mp.capacity_slots:0;slots.onchange=()=>{const v=Number(slots.value);mp.capacity_slots=Number.isInteger(v)?Math.min(24,Math.max(0,v)):0;touch({group:'matter:'+item.id});};}
+  const itemKind=root.querySelector('[data-matter="item_kind"]');
+  if(itemKind){itemKind.value=mp.item_kind||'everyday';itemKind.onchange=()=>{mp.item_kind=itemKind.value;touch({group:'matter:'+item.id});};}
+  const paper=root.querySelector('[data-matter="paper_like"]');
+  if(paper){paper.checked=!!mp.paper_like;paper.onchange=()=>{mp.paper_like=paper.checked;touch({group:'matter:'+item.id});};}
+  const shelf=root.querySelector('[data-matter="shelf_life_hours"]');
+  if(shelf){
+    shelf.value=Number.isFinite(mp.shelf_life_hours)?mp.shelf_life_hours:'';
+    shelf.onchange=()=>{const raw=shelf.value.trim(),v=Number(raw);if(raw===''||!Number.isFinite(v)||v<=0)delete mp.shelf_life_hours;else mp.shelf_life_hours=v;touch({group:'matter:'+item.id});};
+  }
+  const units=root.querySelector('[data-matter="material_units"]');
+  if(units){
+    units.value=Number.isInteger(mp.material_units)?mp.material_units:'';
+    units.onchange=()=>{
+      const raw=units.value.trim(),v=Number(raw);
+      if(raw===''||!Number.isInteger(v)||v<1||v>24){delete mp.material_units;units.value='';}
+      else mp.material_units=v;
+      touch({group:'matter:'+item.id});
+    };
+  }
+  const role=root.querySelector('[data-matter="assembly_role"]');
+  if(role){
+    role.value=['none','host_frame','insert_part'].includes(mp.assembly_role)?mp.assembly_role:'none';
+    role.onchange=()=>{
+      if(role.value==='none')delete mp.assembly_role;
+      else mp.assembly_role=role.value;
+      touch({group:'matter:'+item.id});
+    };
+  }
+}
 function bindVisualControls(item){
   if($('show-name'))$('show-name').onchange=e=>{item.visual.show_name=e.target.checked;touch();};
   if($('raise-layer'))$('raise-layer').onclick=()=>layerObjects(true);
@@ -416,15 +527,17 @@ function renderInspector() {
     if($('connect-btn'))$('connect-btn').onclick=()=>{p.connections.push({from:item.id,to:$('connect-select').value});touch();renderInspector();};
     $('inspector').querySelectorAll('[data-remove-edge]').forEach(el=>el.onclick=()=>{p.connections=p.connections.filter(e=>!((e.from===item.id&&e.to===el.dataset.removeEdge)||(e.to===item.id&&e.from===el.dataset.removeEdge)));touch();renderInspector();});
   } else {
+    if(!Array.isArray(item.affordance_traits))item.affordance_traits=defaultAffordanceTraits(item.kind,item.portable,item.capacity);
+    if(!item.matter_profile||typeof item.matter_profile!=='object'||Array.isArray(item.matter_profile))item.matter_profile=defaultMatterProfile(item.kind,item.portable,item.capacity,item.name);
     html+=`<div class="notice-box">${kinds[item.kind]} · 只有已启用的用途才能在试运行中执行。</div>`;
     html+=choices('所在区域','room_id',item.room_id,p.rooms.map(r=>[r.id,r.name]));
     html+='<div class="field-pair">'+field('横向位置 %','x',item.x,'number','min="5" max="95"')+field('纵向位置 %','y',item.y,'number','min="15" max="90"')+'</div><div class="inspector-section">物件用途</div>';
-    html+=objectVisualFields(item)+choices('图片素材','asset_id',item.asset_id||'',[['','内置图形'],...Object.values(p.assets).map(a=>[a.id,a.name])])+`<div class="notice-box">执行者：独立测试居民。行为结果由本机运行时提交。</div><label class="check-row"><input id="near-toggle" type="checkbox" ${item.interaction.near?'checked':''}>要求沿可达路径接近目标</label>`+field('接近距离（网格）','interaction.radius',item.interaction.radius,'number','min="1" max="8"')+'<p class="field-hint">接近条件在区域启用室内空间时生效；墙后的直线近距离仍不可交互。</p>'+(['cup','dispenser','lamp'].includes(item.kind)?choices('初始物件状态','initial_status',item.initial_status,(item.kind==='cup'?['empty','water']:item.kind==='dispenser'?['available','unavailable']:['off','on']).map(k=>[k,statusNames[k]])):'')+behaviorFields(item);
+    html+=objectVisualFields(item)+choices('图片素材','asset_id',item.asset_id||'',[['','内置图形'],...Object.values(p.assets).map(a=>[a.id,a.name])])+`<div class="notice-box">执行者：独立测试居民。行为结果由本机运行时提交。</div><label class="check-row"><input id="near-toggle" type="checkbox" ${item.interaction.near?'checked':''}>要求沿可达路径接近目标</label>`+field('接近距离（网格）','interaction.radius',item.interaction.radius,'number','min="1" max="8"')+'<p class="field-hint">接近条件在区域启用室内空间时生效；墙后的直线近距离仍不可交互。</p>'+(['cup','dispenser','lamp'].includes(item.kind)?choices('初始物件状态','initial_status',item.initial_status,(item.kind==='cup'?['empty','water']:item.kind==='dispenser'?['available','unavailable']:['off','on']).map(k=>[k,statusNames[k]])):'')+behaviorFields(item)+affordanceFields(item)+matterFields(item);
     if(['book','cup'].includes(item.kind))html+=`<label class="check-row"><input id="portable-toggle" type="checkbox" ${item.portable?'checked':''}>可被拿起并带走</label>`;
     if(item.kind==='cabinet')html+=field('储物容量','capacity',item.capacity,'number','min="1" max="20"');
   if(item.kind==='cup')html+=field('初始饮品份数','servings',item.servings,'number','min="0" max="20"');
     html+='<button id="delete-item" class="danger">删除物件</button>';
-    $('inspector').innerHTML=html;bindFields(item,key=>{if(key==='asset_id'&&!item.asset_id)item.asset_id=null;if(item.kind==='cup'&&['servings','initial_status'].includes(key)){if(key==='servings')item.initial_status=item.servings>0?'water':'empty';else item.servings=item.initial_status==='empty'?0:Math.max(1,item.servings);touch({group:`object:${item.id}:${key}`});if(key==='initial_status')renderInspector();} });bindVisualControls(item);$('near-toggle').onchange=e=>{item.interaction.near=e.target.checked;touch();};
+    $('inspector').innerHTML=html;bindFields(item,key=>{if(key==='asset_id'&&!item.asset_id)item.asset_id=null;if(item.kind==='cup'&&['servings','initial_status'].includes(key)){if(key==='servings')item.initial_status=item.servings>0?'water':'empty';else item.servings=item.initial_status==='empty'?0:Math.max(1,item.servings);touch({group:`object:${item.id}:${key}`});if(key==='initial_status')renderInspector();} });bindVisualControls(item);bindAffordanceControls(item);bindMatterControls(item);$('near-toggle').onchange=e=>{item.interaction.near=e.target.checked;touch();};
     $('inspector').querySelectorAll('[data-verb]').forEach(el=>el.onchange=()=>{item.actions=Array.from($('inspector').querySelectorAll('[data-verb]:checked')).map(c=>c.dataset.verb);if(item.actions.includes('pick_up')||item.actions.includes('place'))item.portable=true;touch();renderInspector();});
     if($('portable-toggle'))$('portable-toggle').onchange=e=>{item.portable=e.target.checked;if(!item.portable)item.actions=item.actions.filter(v=>!['pick_up','place'].includes(v));touch();renderInspector();};
   }
@@ -470,7 +583,7 @@ function addObject(kind,point=null) {
   let roomId=selected.type==='room'?selected.id:selected.type==='object'?draft.objects.find(o=>o.id===selected.id)?.room_id:draft.initial.room_id;
   if(!draft.rooms.some(r=>r.id===roomId))roomId=draft.initial.room_id;
   const n=draft.objects.filter(o=>o.room_id===roomId).length,id=kind+'-'+crypto.randomUUID().slice(0,8);
-  draft.objects.push({id,name:'新'+kinds[kind],description:'',kind,room_id:roomId,x:25+(n%3)*25,y:30+(Math.floor(n/3)%3)*22,...placement,actions:clone(defaults[kind]),portable:['book','cup'].includes(kind),capacity:kind==='cabinet'?4:0,servings:kind==='cup'?2:0,visual:{scale:100,rotation:0,layer:0,show_name:true},behavior:behaviorDefaults(kind),asset_id:placingAsset,interaction:{near:true,radius:2},initial_status:kind==='cup'?'water':kind==='dispenser'?'available':kind==='lamp'?'off':'neutral'});
+  draft.objects.push({id,name:'新'+kinds[kind],description:'',kind,room_id:roomId,x:25+(n%3)*25,y:30+(Math.floor(n/3)%3)*22,...placement,actions:clone(defaults[kind]),portable:['book','cup'].includes(kind),capacity:kind==='cabinet'?4:0,servings:kind==='cup'?2:0,affordance_traits:defaultAffordanceTraits(kind,['book','cup'].includes(kind),kind==='cabinet'?4:0),matter_profile:defaultMatterProfile(kind,['book','cup'].includes(kind),kind==='cabinet'?4:0,'新'+kinds[kind]),visual:{scale:100,rotation:0,layer:0,show_name:true},behavior:behaviorDefaults(kind),asset_id:placingAsset,interaction:{near:true,radius:2},initial_status:kind==='cup'?'water':kind==='dispenser'?'available':kind==='lamp'?'off':'neutral'});
   if(placingAsset){const a=draft.assets[placingAsset],o=draft.objects.at(-1);o.visual=clone(a.visual);o.name=a.name;if(!a.interactive)o.actions=[];}placingAsset=null;
   placing=null;ghostPoint=null;
   touch();select('object',id);
@@ -611,7 +724,7 @@ bind('arrange-btn',()=>applyPackage(arrange(draft,selectionKeys(),$('arrange-sel
 bind('zoom-in',()=>setZoom(view.zoom*1.25));bind('zoom-out',()=>setZoom(view.zoom/1.25));bind('fit-view',()=>{view={x:0,y:0,zoom:1};renderMap();});
 bind('toggle-library',()=>{const hidden=document.body.classList.toggle('left-closed');$('toggle-library').setAttribute('aria-expanded',!hidden);});
 bind('toggle-inspector',()=>{const hidden=document.body.classList.toggle('right-closed');$('toggle-inspector').setAttribute('aria-expanded',!hidden);});
-bind('rule-preview-btn',previewRules);$('search-input').oninput=()=>{renderList();renderAssetLibrary();};
+bind('rule-preview-btn',previewRules);bind('trial-hour-btn',runIsolatedTrialHour);$('search-input').oninput=()=>{renderList();renderAssetLibrary();};
 for(const [id,fn] of [['ctx-copy',copyObjects],['ctx-duplicate',()=>pasteObjects(true)],['ctx-delete',deleteSelected],['ctx-connect',()=>setTool('connect')],['ctx-front',()=>layerObjects(true)],['ctx-back',()=>layerObjects(false)]])bind(id,()=>{ $('context-menu').hidden=true;return fn();});
 document.addEventListener('pointerdown',e=>{if(!$('context-menu').contains(e.target))$('context-menu').hidden=true;});
 
@@ -740,10 +853,17 @@ for(const key of ['walls','floors','objects'])$('layer-'+key).onchange=e=>{visib
 bind('space-copy-btn',()=>{if(spatialSelection)copyObjects();else toast('先选择墙、门窗或地面。');});bind('space-paste-btn',()=>pasteSpatial());bind('space-delete-btn',deleteSpatial);
 bind('import-asset-btn',()=>{$('asset-file').value='';$('asset-file').click();});$('asset-category').onchange=()=>{renderList();renderAssetLibrary();};$('asset-collection').onchange=renderAssetLibrary;
 bind('walk-btn',()=>execute({action:'walk',x:Number($('walk-x').value),y:Number($('walk-y').value)}));
+if($('editor-theme-btn'))$('editor-theme-btn').addEventListener('click',()=>{
+  const next=document.documentElement.dataset.theme==='light'?'dark':'light';
+  document.documentElement.dataset.theme=next;
+  const cs=document.querySelector('meta[name="color-scheme"]');if(cs)cs.setAttribute('content',next);
+  try{localStorage.setItem('nyairo-editor-theme',next);}catch{}
+  if(ready)renderMap();
+});
 
 for(const el of document.querySelectorAll('button'))el.disabled=true;
 run(async()=>{
-  const result=await api('/api/bootstrap');themes=result.themes;actionSpecs=result.actions;drawing=result.assets;draft=result.draft.package;draftRevision=result.draft.revision;trialList=result.trials;selected.id=draft.initial.room_id;selection=new Set([ref('room',selected.id)]);
+  const result=await api('/api/bootstrap');themes=result.themes;actionSpecs=result.actions;drawing=result.assets;draft=ensureMatterProfiles(ensureAffordanceTraits(result.draft.package));draftRevision=result.draft.revision;trialList=result.trials;selected.id=draft.initial.room_id;selection=new Set([ref('room',selected.id)]);
   savedPackage=clone(draft);savedFingerprint=fingerprint(draft);recoveryBase={revision:draftRevision,fingerprint:savedFingerprint};history=new DraftHistory(draft);
   try {
     // A new document gets its own key: a refresh/duplicated tab must never

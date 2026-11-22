@@ -36,6 +36,7 @@ import json
 import math
 import os
 import tempfile
+from collections import deque
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -1283,7 +1284,7 @@ class BodyStore:
         with _locked(self.transitions_path):
             self.transitions_path.parent.mkdir(parents=True, exist_ok=True)
             try:
-                with self.transitions_path.open("a", encoding="utf-8") as handle:
+                with self.transitions_path.open("a", encoding="utf-8", newline="\n") as handle:
                     handle.write(
                         json.dumps(normalized, ensure_ascii=False, sort_keys=True) + "\n"
                     )
@@ -1292,6 +1293,161 @@ class BodyStore:
             except OSError as exc:
                 raise BodyRuntimeError("transitions cannot be appended") from exc
         return normalized
+
+    def compact_transitions_if_needed(
+        self,
+        *,
+        max_records: int = MAX_TRANSITIONS,
+        max_bytes: int = 2_097_152,
+    ) -> dict[str, Any]:
+        """Atomically trim ``transitions.jsonl`` to the latest ``max_records`` valid JSONL lines.
+
+        Performs zero disk writes (and creates no directories or lock files) when
+        the log is absent or already within bounds.
+        """
+        if isinstance(max_records, bool) or not isinstance(max_records, int) or max_records < 1:
+            raise BodyRuntimeError("max_records must be a positive integer")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+            raise BodyRuntimeError("max_bytes must be a positive integer")
+
+        if self.transitions_path.is_symlink() or not self.transitions_path.is_file():
+            return {
+                "compacted": False,
+                "reason": "absent",
+                "before_records": 0,
+                "after_records": 0,
+                "dropped_records": 0,
+                "invalid_lines": 0,
+                "before_bytes": 0,
+                "after_bytes": 0,
+            }
+
+        try:
+            probe_bytes = self.transitions_path.stat().st_size
+        except OSError:
+            return {
+                "compacted": False,
+                "reason": "unreadable",
+                "before_records": 0,
+                "after_records": 0,
+                "dropped_records": 0,
+                "invalid_lines": 0,
+                "before_bytes": 0,
+                "after_bytes": 0,
+            }
+
+        # Zero-write fast path: avoid touching .lock when file is small and within record cap.
+        if probe_bytes <= max_bytes:
+            non_empty = 0
+            try:
+                with self.transitions_path.open("r", encoding="utf-8", errors="replace") as handle:
+                    for raw_line in handle:
+                        if raw_line.strip():
+                            non_empty += 1
+                            if non_empty > max_records:
+                                break
+            except OSError:
+                return {
+                    "compacted": False,
+                    "reason": "unreadable",
+                    "before_records": 0,
+                    "after_records": 0,
+                    "dropped_records": 0,
+                    "invalid_lines": 0,
+                    "before_bytes": probe_bytes,
+                    "after_bytes": probe_bytes,
+                }
+            if non_empty <= max_records:
+                return {
+                    "compacted": False,
+                    "reason": "within_bounds",
+                    "before_records": non_empty,
+                    "after_records": non_empty,
+                    "dropped_records": 0,
+                    "invalid_lines": 0,
+                    "before_bytes": probe_bytes,
+                    "after_bytes": probe_bytes,
+                }
+
+        with _locked(self.transitions_path):
+            if self.transitions_path.is_symlink() or not self.transitions_path.is_file():
+                return {
+                    "compacted": False,
+                    "reason": "absent",
+                    "before_records": 0,
+                    "after_records": 0,
+                    "dropped_records": 0,
+                    "invalid_lines": 0,
+                    "before_bytes": 0,
+                    "after_bytes": 0,
+                }
+            before_bytes = self.transitions_path.stat().st_size
+            kept: deque[str] = deque(maxlen=max_records)
+            total_valid = 0
+            invalid_lines = 0
+            blank_lines = 0
+            with self.transitions_path.open("r", encoding="utf-8", errors="replace") as handle:
+                for raw_line in handle:
+                    stripped = raw_line.strip()
+                    if not stripped:
+                        blank_lines += 1
+                        continue
+                    try:
+                        normalized = validate_transition(json.loads(stripped))
+                    except (TypeError, ValueError, BodyRuntimeError):
+                        invalid_lines += 1
+                        continue
+                    total_valid += 1
+                    kept.append(
+                        json.dumps(normalized, ensure_ascii=False, sort_keys=True) + "\n"
+                    )
+
+            dropped_records = max(0, total_valid - len(kept))
+            payload_text = "".join(kept)
+            after_bytes = len(payload_text.encode("utf-8"))
+            needs_rewrite = (
+                dropped_records > 0
+                or invalid_lines > 0
+                or (before_bytes > max_bytes and (blank_lines > 0 or after_bytes < before_bytes))
+            )
+            if not needs_rewrite:
+                return {
+                    "compacted": False,
+                    "reason": "already_at_record_cap",
+                    "before_records": total_valid,
+                    "after_records": len(kept),
+                    "dropped_records": 0,
+                    "invalid_lines": 0,
+                    "before_bytes": before_bytes,
+                    "after_bytes": before_bytes,
+                }
+
+            descriptor, temporary = tempfile.mkstemp(
+                dir=str(self.transitions_path.parent),
+                prefix=self.transitions_path.name + ".",
+                suffix=".tmp",
+            )
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(payload_text)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self.transitions_path)
+            except BaseException:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+                raise
+
+            return {
+                "compacted": True,
+                "reason": "compacted",
+                "before_records": total_valid,
+                "after_records": len(kept),
+                "dropped_records": dropped_records,
+                "invalid_lines": invalid_lines,
+                "before_bytes": before_bytes,
+                "after_bytes": after_bytes,
+            }
 
     def read_transitions(self) -> list[dict[str, Any]]:
         if not self.transitions_path.exists():

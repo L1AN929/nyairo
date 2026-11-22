@@ -956,10 +956,22 @@
       "reason": "Public upstream fixture/example or generic user tutorial path"
     },
     {
+      "path": "website/index.html",
+      "pattern": "redacted_infra_host",
+      "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",
+      "reason": "Official site footer friend link; maintainer approved making this host public (2026-11-15)"
+    },
+    {
       "path": "website/en/docs-data.js",
       "pattern": "wsl_home",
       "match_sha256": "856bd58b55aa1fdc1cfdcf9572ecea51cee0bd6d2907c07a7c6445ddf7adf616",
       "reason": "Public upstream fixture/example or generic user tutorial path"
+    },
+    {
+      "path": "website/en/index.html",
+      "pattern": "redacted_infra_host",
+      "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",
+      "reason": "Official site footer friend link; maintainer approved making this host public (2026-11-15)"
     },
     {
       "path": "website/ja/docs-data.js",
@@ -984,18 +996,6 @@
       "pattern": "wsl_home",
       "match_sha256": "6c50ce3f6eb5fabb6666edcd84942979fdf576d02e220ee0c88cafffe9520388",
       "reason": "Static SEO doc page mirroring approved WSL path placeholder in website/ja/docs-data.js (2026-11-21)"
-    },
-    {
-      "path": "website/index.html",
-      "pattern": "redacted_infra_host",
-      "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",
-      "reason": "Official site footer friend link; maintainer approved making this host public (2026-11-15)"
-    },
-    {
-      "path": "website/en/index.html",
-      "pattern": "redacted_infra_host",
-      "match_sha256": "50440c13e062a5094d39afad48c63739f189a3b5d036c284d33a2f27660355f2",
-      "reason": "Official site footer friend link; maintainer approved making this host public (2026-11-15)"
     }
   ],
   "public_data_files": [

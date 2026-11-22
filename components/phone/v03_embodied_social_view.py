@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Mapping
 from pathlib import Path
 import sys
@@ -25,6 +26,7 @@ _WORLD_SCRIPTS = REPO_ROOT / "components" / "world" / "scripts"
 if str(_WORLD_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_WORLD_SCRIPTS))
 
+import instance_paths as _instance_paths  # noqa: E402
 import v03_embodied_npc_ecology as ecology  # noqa: E402
 from . import service as phone_service  # noqa: E402
 from . import somatic_comfort_view as somatic_view  # noqa: E402
@@ -543,6 +545,109 @@ def _sync_somatic_drink_on_consume(
     return changed
 
 
+def read_world_substrate_hand_locks_readonly(day_root: Path | str) -> dict[str, dict[str, Any]]:
+    """Pure 100% zero-write read of World physical hand occupancy from ``body_substrate.json``."""
+
+    locks: dict[str, dict[str, Any]] = {}
+    try:
+        paths = _instance_paths.resolve_instance_paths(day_root)
+        sub_path = paths.body_substrate_json
+    except Exception:
+        return locks
+    try:
+        if sub_path.is_symlink() or not sub_path.is_file():
+            return locks
+        doc = json.loads(sub_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return locks
+    if not isinstance(doc, Mapping):
+        return locks
+
+    placements = doc.get("placements")
+    if isinstance(placements, Mapping):
+        for raw_obj_id, target in sorted(placements.items(), key=lambda kv: str(kv[0])):
+            if not isinstance(target, Mapping):
+                continue
+            if str(target.get("kind") or "") != "hand":
+                continue
+            slot_id = str(target.get("slot_id") or "").strip()
+            if slot_id in ("left_hand", "right_hand") and slot_id not in locks:
+                oid = str(raw_obj_id).strip()
+                if oid:
+                    locks[slot_id] = {
+                        "state": "holding_object",
+                        "object_id": oid,
+                        "label": oid,
+                        "two_handed": False,
+                        "contact_id": None,
+                        "contact_kind": None,
+                        "cross_module_source": "world_body_substrate",
+                    }
+
+    reservations = doc.get("reservations")
+    if isinstance(reservations, Mapping):
+        for slot_id in ("left_hand", "right_hand"):
+            if slot_id in locks:
+                continue
+            res_info = reservations.get(slot_id)
+            if isinstance(res_info, Mapping):
+                oid = str(
+                    res_info.get("object_id")
+                    or res_info.get("execution_id")
+                    or f"world_reserved:{slot_id}"
+                ).strip()
+                if oid:
+                    locks[slot_id] = {
+                        "state": "holding_object",
+                        "object_id": oid,
+                        "label": oid,
+                        "two_handed": False,
+                        "contact_id": None,
+                        "contact_kind": None,
+                        "cross_module_source": "world_body_substrate_reservation",
+                    }
+    return locks
+
+
+def _world_substrate_hands_summary_readonly(
+    day_root: Path,
+    world_locks: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    present = False
+    try:
+        sub_path = _instance_paths.resolve_instance_paths(day_root).body_substrate_json
+        present = bool(sub_path.is_file() and not sub_path.is_symlink())
+    except Exception:
+        present = False
+    return {
+        "source": "world_body_substrate",
+        "present": present,
+        "left_hand": (
+            str(world_locks["left_hand"].get("object_id"))
+            if "left_hand" in world_locks and world_locks["left_hand"].get("object_id")
+            else None
+        ),
+        "right_hand": (
+            str(world_locks["right_hand"].get("object_id"))
+            if "right_hand" in world_locks and world_locks["right_hand"].get("object_id")
+            else None
+        ),
+    }
+
+
+def _merge_world_hand_locks_readonly(
+    day_root: Path,
+    base_locks: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {
+        str(k): copy.deepcopy(dict(v)) for k, v in base_locks.items() if isinstance(v, Mapping)
+    }
+    for sname, info in read_world_substrate_hand_locks_readonly(day_root).items():
+        if sname not in merged:
+            merged[sname] = copy.deepcopy(info)
+    return merged
+
+
 def _compose_view_envelope(
     day_root: Path,
     *,
@@ -555,6 +660,43 @@ def _compose_view_envelope(
     kitchen["somatic_comfort_drink_bridge"] = _somatic_drink_bridge_readonly(
         day_root, list(kitchen.get("consumption_receipts") or [])
     )
+    embodied_contact = copy.deepcopy(dict(projected["embodied_contact"]))
+    world_hand_locks = read_world_substrate_hand_locks_readonly(day_root)
+    embodied_contact["world_substrate_hands"] = _world_substrate_hands_summary_readonly(
+        day_root, world_hand_locks
+    )
+    if world_hand_locks:
+        ext_locks = (
+            dict(embodied_contact.get("external_hand_locks") or {})
+            if isinstance(embodied_contact.get("external_hand_locks"), Mapping)
+            else {}
+        )
+        hand_slots = (
+            dict(embodied_contact.get("hand_slots") or {})
+            if isinstance(embodied_contact.get("hand_slots"), Mapping)
+            else {}
+        )
+        for sname, lock_info in world_hand_locks.items():
+            if sname not in ext_locks:
+                ext_locks[sname] = copy.deepcopy(lock_info)
+            cur_slot = hand_slots.get(sname)
+            if isinstance(cur_slot, Mapping) and cur_slot.get("state") == "free":
+                hand_slots[sname] = copy.deepcopy(lock_info)
+        embodied_contact["external_hand_locks"] = ext_locks
+        embodied_contact["hand_slots"] = hand_slots
+        embodied_contact["free_hand_count"] = sum(
+            1
+            for sname in ("left_hand", "right_hand")
+            if isinstance(hand_slots.get(sname), Mapping)
+            and hand_slots[sname].get("state") == "free"
+        )
+        embodied_contact["non_object_hand_count"] = sum(
+            1
+            for sname in ("left_hand", "right_hand")
+            if isinstance(hand_slots.get(sname), Mapping)
+            and hand_slots[sname].get("state") != "holding_object"
+        )
+
     data_block: dict[str, Any] = {
         "schema": VIEW_SCHEMA,
         "view": projected["view"],
@@ -563,7 +705,7 @@ def _compose_view_envelope(
         "revision": projected["revision"],
         "character": copy.deepcopy(projected["character"]),
         "kitchen": kitchen,
-        "embodied_contact": copy.deepcopy(projected["embodied_contact"]),
+        "embodied_contact": embodied_contact,
         "npc_ecology": copy.deepcopy(projected["npc_ecology"]),
         "town_npcs": copy.deepcopy(projected["town_npcs"]),
         "style_migration": copy.deepcopy(projected["style_migration"]),
@@ -741,7 +883,9 @@ def mutate_v03_embodied_social_view(
             stance_view.cascade_pause_adult_scene_permit(
                 root, now_iso=resolved_now, reason="avatar_expired"
             )
-        ext_hand_locks = ecology.read_containment_hand_locks_readonly(root)
+        ext_hand_locks = _merge_world_hand_locks_readonly(
+            root, ecology.read_containment_hand_locks_readonly(root)
+        )
 
         char_info = ecology.read_character_identity_readonly(root)
         theme_info = ecology.detect_world_theme_readonly(root)
@@ -1104,5 +1248,6 @@ __all__ = [
     "VIEW_SCHEMA",
     "mutate_v03_embodied_social_view",
     "read_v03_embodied_social_view",
+    "read_world_substrate_hand_locks_readonly",
     "v03_embodied_social_state_path",
 ]

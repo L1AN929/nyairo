@@ -437,7 +437,12 @@ def _read_decisions_zero_write(root: Path, resolved_day: str) -> list[dict[str, 
     return day_records
 
 
-def _read_timeline_entries_zero_write(root: Path, resolved_day: str) -> list[dict[str, Any]]:
+def _read_timeline_entries_zero_write(
+    root: Path,
+    resolved_day: str,
+    *,
+    service: Optional[Any] = None,
+) -> list[dict[str, Any]]:
     """Read today's timeline entries gracefully (never failing on ``CANONICAL_STATE_ABSENT``)."""
     from . import day_timeline as dt_mod
 
@@ -460,14 +465,59 @@ def _read_timeline_entries_zero_write(root: Path, resolved_day: str) -> list[dic
     try:
         from . import service as phone_service
 
-        svc = phone_service.PhoneService(root)
-        ans = svc.day_timeline(subject_view=False)
-        if isinstance(ans, Mapping):
-            data = ans.get("data") if isinstance(ans.get("data"), Mapping) else ans
-            ans_day = str(data.get("day") or "").strip()
-            entries = data.get("entries")
-            if isinstance(entries, list) and (not ans_day or ans_day == resolved_day):
-                return [dict(e) for e in entries if isinstance(e, Mapping)]
+        svc = service
+        if svc is None:
+            inst_doc = _read_json_readonly(root / "instance.json")
+            if isinstance(inst_doc, Mapping):
+                svc = phone_service.PhoneService(inst_doc)
+            else:
+                world_home = next(
+                    (
+                        cand
+                        for cand in (root, root / "world", root / "world-home")
+                        if (cand / "state" / "world_property_economy.json").is_file()
+                    ),
+                    None,
+                )
+                if world_home is not None:
+                    svc = phone_service.PhoneService(
+                        {
+                            "root": str(root),
+                            "subject": "chiyo",
+                            "world_home": str(world_home),
+                            "supply_socket": str(root / "run" / "supply.sock"),
+                            "private_items_artifact_id": "",
+                            "artifact_grant_id": "",
+                            "workspace_id": "",
+                            "features": {"CHIYO_WORLD_PROPERTY_ECONOMY_ENABLED": "1"},
+                        }
+                    )
+        if svc is not None:
+            ans = svc.day_timeline(subject_view=False)
+            if isinstance(ans, Mapping) and ans.get("ok"):
+                data = ans.get("data") if isinstance(ans.get("data"), Mapping) else ans
+                ans_day = str(data.get("day") or "").strip()
+                entries = data.get("entries")
+                if isinstance(entries, list) and (not ans_day or ans_day == resolved_day):
+                    return [dict(e) for e in entries if isinstance(e, Mapping)]
+            explicit_ans = dt_mod.timeline_envelope(
+                service=svc,
+                state_root=svc._today_state_root(),
+                subject_id=svc.subject,
+                clock={
+                    "source": "system_clock",
+                    "logical_at": f"{resolved_day}T12:00:00+08:00",
+                    "day": resolved_day,
+                },
+                subject_view=False,
+                world_home=Path(svc.world_home),
+                world_clock_injected=svc._world_clock is not None,
+            )
+            if isinstance(explicit_ans, Mapping) and explicit_ans.get("ok"):
+                data = explicit_ans.get("data") if isinstance(explicit_ans.get("data"), Mapping) else explicit_ans
+                entries = data.get("entries")
+                if isinstance(entries, list):
+                    return [dict(e) for e in entries if isinstance(e, Mapping)]
     except Exception:
         pass
 
@@ -693,7 +743,7 @@ def _default_because_for_timeline_entry(entry: Mapping[str, Any], domain: str) -
         return BECAUSE_REST
     if domain == "workbench" or "稿" in title or "写" in title or "作品" in title:
         return BECAUSE_DRAFT
-    if kind == "wallet_tx" or "PURCHASE" in act_kind or "买" in title:
+    if kind in ("wallet_tx", "wallet_transaction") or "PURCHASE" in act_kind or "买" in title:
         return BECAUSE_SHOPPING
     if "DAILY_ACTION" in act_kind or "BODY_ACTION" in act_kind:
         return BECAUSE_HABIT
@@ -709,7 +759,7 @@ def _timeline_entry_to_story_item(
     used_decision_ids: set[str],
 ) -> Optional[dict[str, Any]]:
     kind = str(entry.get("kind") or "activity").strip().lower()
-    _, hhmm, norm_at = _local_day_and_hhmm(entry.get("at"))
+    _, hhmm, norm_at = _local_day_and_hhmm(entry.get("at") or entry.get("occurred_at"))
     if not norm_at:
         norm_at = f"{resolved_day}T09:00:00+08:00"
         hhmm = "09:00"
@@ -751,11 +801,21 @@ def _timeline_entry_to_story_item(
         domain = "crossmodal"
         title = "往相册里存下了一张眼前的画面"
         detail = "顺手把这一刻的光影留作纪念。"
-    elif kind == "wallet_tx":
+    elif kind in ("wallet_tx", "wallet_transaction"):
         domain = "ecology"
-        item_name = _clean_warm_text(entry.get("item_name") or raw_title, 36)
-        title = f"添置了「{item_name}」" if item_name else "添置了一件日常小物"
-        detail = "按手头预算记下了一笔清清楚楚的日常开销。"
+        raw_item = str(entry.get("item_name") or raw_title or "").strip()
+        if raw_item.startswith(("shop_slot:", "shop_item:")):
+            raw_item = ""
+        item_name = _clean_warm_text(raw_item, 36)
+        if item_name:
+            title = f"添置了「{item_name}」"
+            detail = "按手头预算记下了一笔清清楚楚的日常开销。"
+        elif str(entry.get("direction") or "").upper() == "CREDIT":
+            title = "记下了一笔日常账目入账"
+            detail = "账本里添上了一笔清楚的日常收支记录。"
+        else:
+            title = "添置了一件日常小物"
+            detail = "按手头预算记下了一笔清清楚楚的日常开销。"
     else:
         if "READ" in act_kind or "读" in raw_title or "书" in raw_title:
             domain = "reading"
@@ -1231,6 +1291,7 @@ def read_today_story_zero_write(
     day_root: Path | str,
     *,
     day: Optional[str] = None,
+    service: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Read unified causal day story with 100% zero disk writes and zero LLM calls."""
     root = Path(day_root)
@@ -1245,7 +1306,9 @@ def read_today_story_zero_write(
     seen_ids: set[str] = set()
 
     # 1. Timeline items + decision causal attribution
-    timeline_entries = _read_timeline_entries_zero_write(root, resolved_day)
+    timeline_entries = _read_timeline_entries_zero_write(
+        root, resolved_day, service=service
+    )
     for entry in timeline_entries:
         item = _timeline_entry_to_story_item(
             entry,

@@ -55,6 +55,16 @@ import re
 import tempfile
 from typing import Any, Iterable, Mapping, Optional
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 FIRST_ROOM_HABITS_SCHEMA = "phone.longterm.first_room_habits.v1"
 GIFTS_LANTERN_SCHEMA = "phone.longterm.gifts_lantern.v1"
 RESUME_HUB_SCHEMA = "phone.longterm.resume_hub.v1"
@@ -484,15 +494,16 @@ def read_room_habits_state(root: Path | str) -> tuple[dict[str, Any], Optional[s
 
 def write_room_habits_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
     path = room_habits_state_path(root)
-    if path.exists() and not path.is_symlink() and path.is_file():
-        existing_raw, existing_reason = _read_json(path)
-        if existing_reason is not None:
-            raise LongtermStateError("ROOM_HABITS_" + existing_reason, conflict=True)
-        if existing_raw is not None:
-            _validate_room_habits_state(existing_raw)
-    normalized = _validate_room_habits_state(dict(state))
-    _write_json(path, normalized, prefix="ROOM_HABITS")
-    return normalized
+    with _tx.state_file_lock(path):
+        if path.exists() and not path.is_symlink() and path.is_file():
+            existing_raw, existing_reason = _read_json(path)
+            if existing_reason is not None:
+                raise LongtermStateError("ROOM_HABITS_" + existing_reason, conflict=True)
+            if existing_raw is not None:
+                _validate_room_habits_state(existing_raw)
+        normalized = _validate_room_habits_state(dict(state))
+        _write_json(path, normalized, prefix="ROOM_HABITS")
+        return normalized
 
 
 def _bump_room_habits(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:
@@ -1113,15 +1124,16 @@ def read_gifts_lantern_state(root: Path | str) -> tuple[dict[str, Any], Optional
 
 def write_gifts_lantern_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
     path = gifts_lantern_state_path(root)
-    if path.exists() and not path.is_symlink() and path.is_file():
-        existing_raw, existing_reason = _read_json(path)
-        if existing_reason is not None:
-            raise LongtermStateError("GIFTS_LANTERN_" + existing_reason, conflict=True)
-        if existing_raw is not None:
-            _validate_gifts_lantern_state(existing_raw)
-    normalized = _validate_gifts_lantern_state(dict(state))
-    _write_json(path, normalized, prefix="GIFTS_LANTERN")
-    return normalized
+    with _tx.state_file_lock(path):
+        if path.exists() and not path.is_symlink() and path.is_file():
+            existing_raw, existing_reason = _read_json(path)
+            if existing_reason is not None:
+                raise LongtermStateError("GIFTS_LANTERN_" + existing_reason, conflict=True)
+            if existing_raw is not None:
+                _validate_gifts_lantern_state(existing_raw)
+        normalized = _validate_gifts_lantern_state(dict(state))
+        _write_json(path, normalized, prefix="GIFTS_LANTERN")
+        return normalized
 
 
 def _bump_gifts_lantern(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:

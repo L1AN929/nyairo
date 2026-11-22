@@ -302,6 +302,23 @@ def object_capability(hermes_home: Optional[Path | str] = None,
             continue
         if str(item.get("disposition")) != "OWNED":
             return {}
+        meta = item.get("item_meta")
+        if isinstance(meta, Mapping):
+            try:
+                import sys
+
+                scripts_dir = str(Path(__file__).resolve().parent)
+                if scripts_dir not in sys.path:
+                    sys.path.insert(0, scripts_dir)
+                import world_open_storefront as open_storefront
+
+                cap = open_storefront.capability_for_category(
+                    str(meta.get("category") or "")
+                )
+                if cap:
+                    return cap
+            except ImportError:  # pragma: no cover
+                pass
         try:
             import world_property_economy as economy_module
         except ImportError:  # pragma: no cover

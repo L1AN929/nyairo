@@ -20,22 +20,23 @@ _WORLD_MOVE_GUIDANCE=(
 
 
 _PHONE_AND_WORLD_GUIDANCE=(
-    "【随身手机与世界：chiyo_phone / world_move】\n"
-    "若工具含 chiyo_phone，涉及出门移动、坐卧开关灯、随笔书签商店日记，或读写穿搭声景、拒绝锁、"
-    "话头心事、账本病休、院子手作、回忆与共同认知或亲密边界时，先调 chiyo_phone 拿回执再答，勿假装：\n"
-    "- 基础：chiyo_phone(action=\"world\") 看地点，world_action"
+    "【手机与世界：chiyo_phone / world_move】\n"
+    "若含 chiyo_phone：出门、坐卧开关灯、随笔书签商店日记、穿搭声景、拒绝心事、"
+    "账本病休、手作边界，先调 chiyo_phone，勿假装：\n"
+    "- chiyo_phone(action=\"world\")，world_action"
     "（MOVE/POSE/REST/TOGGLE_FIXTURE/PICK_UP/PLACE/ARRANGE/TOILET，带 operation_key）；"
-    "另有 note_save、reading_material/reading_position/reading_annotate、shop/store_purchase/use、diary_write、work_context。\n"
-    "- 只读：desk_presence、desk_notes、home_window、home_keepsakes、"
+    "note_save、reading_material/reading_position/reading_annotate、shop/store_purchase/use、diary_write、work_context。\n"
+    "- 读：desk_presence、desk_notes、home_window、home_keepsakes、"
     "home_letters、home_workbench、home_curios、home_trio、home_reunion_anchor、home_recipes、"
     "home_tentative_plans、wardrobe、pocket_lists、outing_bench_bookstore、outing_routes_market、"
     "outing_gallery_blueprint、longterm_habits、longterm_gifts_lantern、longterm_resume_hub、"
     "body_somatic、body_garment_window、body_care、body_sensory、character_pack、autonomy_rhythm、"
     "emotional_tension、stance_containment、adult_intimacy、v03_clock、v03_ecology、v03_embodied_social、"
     "v04_neighborhood、v04_builder_trylive、v04_elastic_play、v02_agency_depth、v02_crossmodal、"
-    "v02_runtime_migration、v02_recall_projection、v02_common_ground。\n"
-    "- 生活写：chiyo_phone(action=\"phone_life_update\", target_surface=\"<面板>\", "
-    "payload={\"action\": \"...\"}, operation_key=\"...\")，仅改自身侧，以 status（applied/rejected）为准。"
+    "v02_runtime_migration、v02_recall_projection、v02_common_ground、v08_living_traces、v08_emergent_echoes、v03_encounters、v08_composable_body。\n"
+    "- 写：chiyo_phone(action=\"phone_life_update\", target_surface=\"<面板>\", "
+    "payload={\"action\":\"...\"}, operation_key=\"...\")，改自身，以 status 准"
+    "；compose_open_act 自由组合"
 )
 
 

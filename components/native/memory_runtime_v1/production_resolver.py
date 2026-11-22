@@ -31,7 +31,7 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from urllib.parse import quote
 
 RUNTIME_ROOT = pathlib.Path(os.environ.get("CHIYO_NATIVE_MEMORY_RUNTIME_ROOT")
@@ -153,6 +153,128 @@ def _ensure_dependency_aliases() -> None:
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
+
+
+def _load_ch131_clarity_and_barrier_helpers():
+    """Lazy loader for Ch. 131 fuzzy clarity projection and zero-write unified forget barrier."""
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    life_scripts = repo_root / "components" / "life" / "scripts"
+    for cand in (str(repo_root), str(life_scripts)):
+        if cand not in sys.path:
+            sys.path.append(cand)
+    apply_fn = None
+    load_barrier_fn = None
+    is_blocked_fn = None
+    try:
+        from components.life.scripts import v02_recall_projection as _v02_rp
+        apply_fn = getattr(_v02_rp, "apply_ch131_two_stage_clarity_to_memory_objects", None)
+    except Exception:
+        try:
+            import v02_recall_projection as _v02_rp  # type: ignore[no-redef]
+            apply_fn = getattr(_v02_rp, "apply_ch131_two_stage_clarity_to_memory_objects", None)
+        except Exception:
+            apply_fn = None
+    try:
+        from components.life.scripts import v02_representation_lease_forget as _v02_rlf
+        load_barrier_fn = getattr(_v02_rlf, "load_unified_forget_barrier_readonly", None)
+        is_blocked_fn = getattr(_v02_rlf, "is_entity_forget_blocked", None)
+    except Exception:
+        try:
+            import v02_representation_lease_forget as _v02_rlf  # type: ignore[no-redef]
+            load_barrier_fn = getattr(_v02_rlf, "load_unified_forget_barrier_readonly", None)
+            is_blocked_fn = getattr(_v02_rlf, "is_entity_forget_blocked", None)
+        except Exception:
+            load_barrier_fn = None
+            is_blocked_fn = None
+    return apply_fn, load_barrier_fn, is_blocked_fn
+
+
+def _collect_unit_source_refs(
+    unit: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    row_meta: Mapping[str, Any],
+) -> list[str]:
+    """Collect deduplicated source reference identifiers from unit, candidate, and M0 row metadata."""
+    refs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(val: Any) -> None:
+        if not isinstance(val, str):
+            return
+        s = val.strip()
+        if s and s not in seen:
+            seen.add(s)
+            refs.append(s)
+
+    for base in (unit.get("source_ref"), unit.get("event_id"), candidate.get("candidate_id")):
+        _add(base)
+
+    raw_items: list[Any] = []
+    raw_meta_refs = row_meta.get("source_refs")
+    if isinstance(raw_meta_refs, (list, tuple)):
+        raw_items.extend(raw_meta_refs)
+    elif isinstance(raw_meta_refs, (str, Mapping)):
+        raw_items.append(raw_meta_refs)
+
+    raw_json = row_meta.get("source_refs_json")
+    if isinstance(raw_json, str) and raw_json.strip():
+        try:
+            decoded = json.loads(raw_json)
+            if isinstance(decoded, list):
+                raw_items.extend(decoded)
+            elif isinstance(decoded, (str, Mapping)):
+                raw_items.append(decoded)
+        except (ValueError, TypeError):
+            pass
+
+    for item in raw_items:
+        if isinstance(item, str):
+            _add(item)
+        elif isinstance(item, Mapping):
+            kind = str(item.get("kind") or item.get("type") or "").strip()
+            matched_val = False
+            for key in ("id", "ref", "source_id", "source_ref", "value", "entity_id", "memory_id", "episode_key"):
+                raw_v = item.get(key)
+                if isinstance(raw_v, str) and raw_v.strip():
+                    val = raw_v.strip()
+                    matched_val = True
+                    _add(val)
+                    if kind:
+                        _add(f"{kind}:{val}")
+            if not matched_val:
+                for k, v in item.items():
+                    if k in ("kind", "type", "namespace"):
+                        continue
+                    if isinstance(v, str) and v.strip():
+                        val = v.strip()
+                        _add(val)
+                        if kind:
+                            _add(f"{kind}:{val}")
+        elif isinstance(item, (list, tuple)):
+            parts = [str(p).strip() for p in item if isinstance(p, str) and str(p).strip()]
+            for part in parts:
+                _add(part)
+            if len(parts) >= 2:
+                _add(f"{parts[0]}:{parts[1]}")
+
+    return refs
+
+
+def _resolve_barrier_readonly(
+    barrier: Mapping[str, Any] | None,
+    day_root: pathlib.Path | str | None,
+    load_barrier_fn: Any,
+) -> Mapping[str, Any] | None:
+    if isinstance(barrier, Mapping):
+        return barrier
+    if day_root is not None and str(day_root).strip() and callable(load_barrier_fn):
+        try:
+            loaded = load_barrier_fn(day_root)
+            if isinstance(loaded, Mapping):
+                return loaded
+        except Exception:
+            return None
+    return None
 
 
 class ScopedVisibleReader:
@@ -365,7 +487,10 @@ class ProductionNativeMemoryResolver:
 
     def _resolve(self, *, agent: Any = None, ids: dict[str, Any] | None = None,
                  current_user_event_id: Any = None, current_user_text: Any = None,
-                 messages: Any = None) -> tuple[MemoryObject, ...]:
+                 messages: Any = None, consulted_archive: bool = False,
+                 now_iso: str | None = None,
+                 day_root: pathlib.Path | str | None = None,
+                 barrier: Mapping[str, Any] | None = None) -> tuple[MemoryObject, ...]:
         self.stats.invocations += 1
         if self.state != "READY":
             return ()
@@ -396,7 +521,16 @@ class ProductionNativeMemoryResolver:
             if not str(avail.get("outcome", "")).startswith("SURFACE"):
                 self.stats.no_surface += 1
                 return ()
-            objects = self._consume(got, trigger, mapping, ids)
+            objects = self._consume(
+                got,
+                trigger,
+                mapping,
+                ids,
+                consulted_archive=bool(consulted_archive),
+                now_iso=now_iso,
+                day_root=day_root,
+                barrier=barrier,
+            )
             self.stats.emitted_memory_objects += len(objects)
             return tuple(objects)
         except Exception:
@@ -404,7 +538,22 @@ class ProductionNativeMemoryResolver:
             return ()
 
     def _consume(self, got: dict[str, Any], trigger: dict[str, Any],
-                 mapping: dict[str, Any], ids: dict[str, Any]) -> list[MemoryObject]:
+                 mapping: dict[str, Any], ids: dict[str, Any], *,
+                 consulted_archive: bool = False,
+                 now_iso: str | None = None,
+                 day_root: pathlib.Path | str | None = None,
+                 barrier: Mapping[str, Any] | None = None) -> list[MemoryObject]:
+        apply_ch131_fn, load_barrier_fn, is_blocked_fn = _load_ch131_clarity_and_barrier_helpers()
+        env_map = getattr(self, "environment", None)
+        eff_day_root = (
+            day_root
+            if day_root is not None
+            else (env_map.get("NYAIRO_DAY_ROOT") if isinstance(env_map, Mapping) else None)
+        )
+        eff_barrier = _resolve_barrier_readonly(barrier, eff_day_root, load_barrier_fn)
+        if isinstance(eff_barrier, Mapping) and eff_barrier.get("fail_closed"):
+            return []
+
         selected = {str(x) for x in (got["availability"].get("selected_refs") or [])}
         chosen = [c for c in got["candidates"] if c["candidate_id"] in selected]
         all_events = self._adapter.reader.events()
@@ -430,14 +579,18 @@ class ProductionNativeMemoryResolver:
             conversation=str(ids["conversation_id"]),
             turn=str(ids["turn_id"]),
         )
+        eff_now_iso = now_iso or str(trigger_event.get("occurred_at") or "").strip() or None
+        max_mem = int(getattr(self, "max_memories", 8))
         out: list[MemoryObject] = []
         for candidate in chosen:
             units = []
+            unit_rows: dict[str, dict[str, Any]] = {}
             for eid in candidate["source_event_ids"]:
                 row = by_id.get(str(eid))
                 if row is None:
                     continue
                 role = SPEAKER_TO_ROLE.get(str(row.get("speaker") or ""), "unknown")
+                unit_rows[str(row["event_id"])] = row
                 units.append({
                     "event_id": str(row["event_id"]),
                     "source_role": role,
@@ -476,6 +629,21 @@ class ProductionNativeMemoryResolver:
             # ONE MemoryObject per evidence unit: Runtime V1 carries a single authority per
             # object, so a bundle must never be collapsed into one promoted object.
             for unit in units:
+                if isinstance(eff_barrier, Mapping) and eff_barrier and callable(is_blocked_fn):
+                    row_meta = unit_rows.get(unit["event_id"]) or {}
+                    probe = {
+                        "memory_id": "%s#%s" % (candidate["candidate_id"], unit["event_id"]),
+                        "episode_id": str(candidate.get("episode_id") or ""),
+                        "event_id": unit["event_id"],
+                        "turn_id": str(row_meta.get("turn_id") or ""),
+                        "source_ref": unit["source_ref"],
+                        "source_refs": _collect_unit_source_refs(unit, candidate, row_meta),
+                    }
+                    try:
+                        if is_blocked_fn(probe, eff_barrier):
+                            continue
+                    except Exception:
+                        pass
                 out.append(MemoryObject(
                     memory_id="%s#%s" % (candidate["candidate_id"], unit["event_id"]),
                     text=unit["content"],
@@ -485,9 +653,18 @@ class ProductionNativeMemoryResolver:
                     uncertainty="NONE",
                     valid_from=unit["timestamp"] or None,
                 ))
-                if len(out) >= self.max_memories:
-                    return out
-        return out
+                if len(out) >= max_mem:
+                    break
+            if len(out) >= max_mem:
+                break
+        if callable(apply_ch131_fn):
+            out = apply_ch131_fn(
+                out,
+                now_iso=eff_now_iso,
+                consulted_archive=bool(consulted_archive),
+                barrier=eff_barrier,
+            )
+        return out[:max_mem]
 
     # ----------------------------------------------------------- reporting --- #
     def report(self) -> dict[str, Any]:

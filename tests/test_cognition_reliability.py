@@ -4,25 +4,28 @@ The suite exercises crash windows, unknown send states, late results, budget acc
 journal retention, using an in-process fixture transport: no socket is opened, no credential is
 read and no paid call is made.
 """
-import io
 import json
-import runpy
+import subprocess
+import sys
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 
 SUITE = Path(__file__).resolve().parent / "cognition_reliability_suite.py"
+_CACHED_RESULT: tuple[str, int] | None = None
 
 
-def _run():
-    buf = io.StringIO()
-    rc = 0
-    with redirect_stdout(buf):
-        try:
-            runpy.run_path(str(SUITE), run_name="__main__")
-        except SystemExit as exc:
-            rc = exc.code or 0
-    return buf.getvalue(), rc
+def _run() -> tuple[str, int]:
+    global _CACHED_RESULT
+    if _CACHED_RESULT is None:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(SUITE)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        _CACHED_RESULT = ((proc.stdout or "") + (proc.stderr or ""), proc.returncode)
+    return _CACHED_RESULT
 
 
 def test_cognition_reliability_suite_reports_no_failed_checks():

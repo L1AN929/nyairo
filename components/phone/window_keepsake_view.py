@@ -27,11 +27,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
+
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
 
 WINDOW_SCHEMA = "phone.home.window.v1"
 KEEPSAKES_SCHEMA = "phone.home.keepsakes.v1"
@@ -52,7 +63,45 @@ MAX_PINS = 50
 #: 慢信强制冷静期（设计 CHIYO v3.0 第10章 §一.2 原文："一封信从动念起草到寄出，
 #: 必须至少间隔 3 个日历日"）。寄出入口校验 ``now >= drafted_at + 72h``，不满足拒绝。
 SLOW_LETTER_COOLING_PERIOD_HOURS = 72.0
+SLOW_LETTER_COOLING_SECONDS = 72 * 3600
 SLOW_LETTER_COOLING_PERIOD = "SLOW_LETTER_COOLING_PERIOD"
+MAX_SLOW_LETTER_DRAFTS_PER_AUTHOR = 10
+MAX_COMMITTED_OP_RING = 256
+DEFAULT_POSTED_DELAY_HOURS = 12
+MIN_POSTED_DELAY_HOURS = 1.0
+MAX_POSTED_DELAY_HOURS = 168.0
+
+SLOW_LETTER_DRAFT_ACTIONS = frozenset({
+    "save_slow_letter_draft",
+    "revise_slow_letter_draft",
+    "discard_slow_letter_draft",
+    "post_drafted_slow_letter",
+})
+ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
+    "save_slow_letter_draft": frozenset({
+        "action", "title", "body", "postmark_place", "operation_key",
+    }),
+    "revise_slow_letter_draft": frozenset({
+        "action", "draft_id", "title", "body", "postmark_place", "operation_key",
+    }),
+    "discard_slow_letter_draft": frozenset({
+        "action", "draft_id", "operation_key",
+    }),
+    "post_drafted_slow_letter": frozenset({
+        "action", "draft_id", "delay_hours", "postmark_place", "operation_key",
+    }),
+}
+
+
+class SlowLetterCoolingError(ValueError):
+    """Raised when attempting to post a slow-letter draft before its 72h cooling window ends."""
+
+    def __init__(self, *, cools_until: str, remaining_cooling_seconds: int) -> None:
+        super().__init__(SLOW_LETTER_COOLING_PERIOD)
+        self.reason_code = SLOW_LETTER_COOLING_PERIOD
+        self.cools_until = str(cools_until)
+        self.remaining_cooling_seconds = int(remaining_cooling_seconds)
+        self.http_status = 409
 
 LOCAL_DELIVERED = "LOCAL_DELIVERED"
 #: 只有「还没发」与「已本地投递」会进入信的投影；DROPPED/EXPIRED 是终态，不是信。
@@ -211,8 +260,80 @@ def state_path(root: Path | str) -> Path:
 
 
 def empty_state() -> dict[str, Any]:
-    return {"schema_version": STATE_SCHEMA_VERSION, "revision": 0,
-            "updated_at": None, "lockscreen": None, "pins": [], "slow_letters": []}
+    return {
+        "schema_version": STATE_SCHEMA_VERSION,
+        "revision": 0,
+        "updated_at": None,
+        "lockscreen": None,
+        "pins": [],
+        "slow_letters": [],
+        "slow_letter_drafts": [],
+        "committed_op_ring": [],
+    }
+
+
+def _validate_slow_letter_draft_entry(item: Any) -> dict[str, Any]:
+    if not isinstance(item, Mapping):
+        raise ValueError("invalid slow letter draft")
+    draft_id = item.get("draft_id")
+    if not isinstance(draft_id, str) or not draft_id.strip():
+        raise ValueError("invalid slow letter draft id")
+    author = str(item.get("author_side") or "").strip().lower()
+    if author not in ("subject", "partner"):
+        raise ValueError("invalid slow letter draft author_side")
+    title = _one_line(item.get("title"), 120)
+    body = _bounded_body(item.get("body"), MAX_LETTER_TEXT)
+    if not title or not body:
+        raise ValueError("invalid slow letter draft content")
+    drafted_at = _iso_text(item.get("drafted_at"))
+    cools_until = _iso_text(item.get("cools_until"))
+    if not drafted_at or not cools_until:
+        raise ValueError("invalid slow letter draft timestamps")
+    updated_at = _iso_text(item.get("updated_at")) or drafted_at
+    status = str(item.get("status") or "cooling_draft").strip()
+    if status != "cooling_draft":
+        raise ValueError("invalid slow letter draft status")
+    place = _one_line(item.get("postmark_place"), 80) or "镇上邮筒"
+    op_key = _one_line(item.get("operation_key"), 128) or None
+    return {
+        "draft_id": draft_id.strip()[:120],
+        "author_side": author,
+        "title": title,
+        "body": body,
+        "postmark_place": place,
+        "drafted_at": drafted_at,
+        "cools_until": cools_until,
+        "updated_at": updated_at,
+        "status": "cooling_draft",
+        "operation_key": op_key,
+    }
+
+
+def _validate_committed_op_ring_entry(item: Any) -> dict[str, Any]:
+    if not isinstance(item, Mapping):
+        raise ValueError("invalid committed_op_ring entry")
+    op_key = _one_line(item.get("operation_key"), 128)
+    action = _one_line(item.get("action"), 64)
+    author = str(item.get("author_side") or "").strip().lower()
+    fingerprint = _one_line(item.get("fingerprint"), 128)
+    if not op_key or not action or author not in ("subject", "partner") or not fingerprint:
+        raise ValueError("invalid committed_op_ring fields")
+    revision = _int_or_none(item.get("revision"))
+    if revision is None or revision < 0:
+        raise ValueError("invalid committed_op_ring revision")
+    snapshot = item.get("snapshot")
+    if snapshot is not None and not isinstance(snapshot, Mapping):
+        raise ValueError("invalid committed_op_ring snapshot")
+    return {
+        "operation_key": op_key,
+        "action": action,
+        "author_side": author,
+        "fingerprint": fingerprint,
+        "target_id": _one_line(item.get("target_id"), 120) or None,
+        "recorded_at": _iso_text(item.get("recorded_at")),
+        "revision": revision,
+        "snapshot": dict(snapshot) if isinstance(snapshot, Mapping) else None,
+    }
 
 
 def _validate_slow_letter_entry(item: Any) -> dict[str, Any]:
@@ -298,9 +419,45 @@ def _validate_state(raw: Any) -> dict[str, Any]:
             continue
         seen_letters.add(entry["letter_id"])
         slow_letters.append(entry)
-    return {"schema_version": STATE_SCHEMA_VERSION, "revision": int(revision),
-            "updated_at": _iso_text(raw.get("updated_at")),
-            "lockscreen": lockscreen, "pins": pins, "slow_letters": slow_letters}
+
+    drafts_raw = raw.get("slow_letter_drafts")
+    if drafts_raw is None:
+        drafts_raw = []
+    if not isinstance(drafts_raw, list) or len(drafts_raw) > MAX_SLOW_LETTER_DRAFTS_PER_AUTHOR * 2:
+        raise ValueError("invalid slow_letter_drafts")
+    slow_letter_drafts: list[dict[str, Any]] = []
+    seen_drafts: set[str] = set()
+    per_author_counts: dict[str, int] = {"subject": 0, "partner": 0}
+    for item in drafts_raw:
+        d_entry = _validate_slow_letter_draft_entry(item)
+        if d_entry["draft_id"] in seen_drafts:
+            continue
+        author_key = d_entry["author_side"]
+        per_author_counts[author_key] = per_author_counts.get(author_key, 0) + 1
+        if per_author_counts[author_key] > MAX_SLOW_LETTER_DRAFTS_PER_AUTHOR:
+            raise ValueError("slow_letter_drafts author limit exceeded")
+        seen_drafts.add(d_entry["draft_id"])
+        slow_letter_drafts.append(d_entry)
+
+    ring_raw = raw.get("committed_op_ring")
+    if ring_raw is None:
+        ring_raw = []
+    if not isinstance(ring_raw, list):
+        raise ValueError("invalid committed_op_ring")
+    committed_op_ring = [_validate_committed_op_ring_entry(item) for item in ring_raw]
+    if len(committed_op_ring) > MAX_COMMITTED_OP_RING:
+        committed_op_ring = committed_op_ring[-MAX_COMMITTED_OP_RING:]
+
+    return {
+        "schema_version": STATE_SCHEMA_VERSION,
+        "revision": int(revision),
+        "updated_at": _iso_text(raw.get("updated_at")),
+        "lockscreen": lockscreen,
+        "pins": pins,
+        "slow_letters": slow_letters,
+        "slow_letter_drafts": slow_letter_drafts,
+        "committed_op_ring": committed_op_ring,
+    }
 
 
 def _iso_text(value: Any) -> Optional[str]:
@@ -330,35 +487,36 @@ def read_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]]:
 def write_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
     """Atomically replace the selection file; the caller already decided something changed."""
 
-    normalized = _validate_state(dict(state))
     path = state_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(normalized, ensure_ascii=False, sort_keys=True,
-                         separators=(",", ":")) + "\n"
-    descriptor, temporary = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent),
-                                             text=True)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
+    with _tx.state_file_lock(path):
+        normalized = _validate_state(dict(state))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(normalized, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":")) + "\n"
+        descriptor, temporary = tempfile.mkstemp(prefix="." + path.name + ".",
+                                                 dir=str(path.parent), text=True)
         try:
-            os.chmod(temporary, 0o600)
-        except OSError:
-            pass
-        os.replace(temporary, path)
-        temporary = None
-    finally:
-        if temporary is not None:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
             try:
-                os.unlink(temporary)
+                os.chmod(temporary, 0o600)
             except OSError:
                 pass
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-    return normalized
+            os.replace(temporary, path)
+            temporary = None
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return normalized
 
 
 def _bump(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:
@@ -454,48 +612,49 @@ def post_slow_letter(
     deliver_dt = now_dt + timedelta(hours=float(delay_hours))
     deliver_iso = _format_instant_iso(deliver_dt)
 
-    current, reason = read_state(root)
-    if reason is not None:
-        raise ValueError(reason)
+    with _tx.state_file_lock(state_path(root)):
+        current, reason = read_state(root)
+        if reason is not None:
+            raise ValueError(reason)
 
-    if clean_op is not None:
-        for existing in current["slow_letters"]:
-            if existing.get("operation_key") == clean_op:
-                if (existing.get("title") != clean_title
-                        or existing.get("body") != clean_body
-                        or existing.get("author_side") != norm_author):
-                    raise ValueError("OPERATION_FINGERPRINT_MISMATCH")
-                status_now = "in_transit" if now_dt < (parse_instant(existing["deliver_after"]) or deliver_dt) else "delivered"
-                return {**dict(existing), "status": status_now, "duplicate": True, "revision": current["revision"]}
+        if clean_op is not None:
+            for existing in current["slow_letters"]:
+                if existing.get("operation_key") == clean_op:
+                    if (existing.get("title") != clean_title
+                            or existing.get("body") != clean_body
+                            or existing.get("author_side") != norm_author):
+                        raise ValueError("OPERATION_FINGERPRINT_MISMATCH")
+                    status_now = "in_transit" if now_dt < (parse_instant(existing["deliver_after"]) or deliver_dt) else "delivered"
+                    return {**dict(existing), "status": status_now, "duplicate": True, "revision": current["revision"]}
 
-    drafted_dt = parse_instant(drafted_at) if drafted_at is not None else None
-    if drafted_dt is not None:
-        earliest_send_dt = drafted_dt + timedelta(hours=SLOW_LETTER_COOLING_PERIOD_HOURS)
-        if now_dt < earliest_send_dt:
-            raise ValueError(SLOW_LETTER_COOLING_PERIOD)
-    else:
-        drafted_dt = now_dt
-    drafted_iso = _format_instant_iso(drafted_dt)
+        drafted_dt = parse_instant(drafted_at) if drafted_at is not None else None
+        if drafted_dt is not None:
+            earliest_send_dt = drafted_dt + timedelta(hours=SLOW_LETTER_COOLING_PERIOD_HOURS)
+            if now_dt < earliest_send_dt:
+                raise ValueError(SLOW_LETTER_COOLING_PERIOD)
+        else:
+            drafted_dt = now_dt
+        drafted_iso = _format_instant_iso(drafted_dt)
 
-    seed = f"{clean_title}\x00{sent_iso}\x00{norm_author}\x00{clean_op or current['revision']}"
-    letter_id = "slow_letter_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
-    entry = {
-        "letter_id": letter_id,
-        "title": clean_title,
-        "body": clean_body,
-        "postmark_place": clean_place,
-        "author_side": norm_author,
-        "sent_at": sent_iso,
-        "drafted_at": drafted_iso,
-        "deliver_after": deliver_iso,
-        "delay_hours": round(float(delay_hours), 3),
-        "acked_at": None,
-        "operation_key": clean_op,
-    }
-    current["slow_letters"] = [*(current.get("slow_letters") or []), entry][-MAX_PINS:]
-    saved = write_state(root, _bump(current, sent_iso))
-    status_now = "in_transit" if now_dt < deliver_dt else "delivered"
-    return {**entry, "status": status_now, "duplicate": False, "revision": saved["revision"]}
+        seed = f"{clean_title}\x00{sent_iso}\x00{norm_author}\x00{clean_op or current['revision']}"
+        letter_id = "slow_letter_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+        entry = {
+            "letter_id": letter_id,
+            "title": clean_title,
+            "body": clean_body,
+            "postmark_place": clean_place,
+            "author_side": norm_author,
+            "sent_at": sent_iso,
+            "drafted_at": drafted_iso,
+            "deliver_after": deliver_iso,
+            "delay_hours": round(float(delay_hours), 3),
+            "acked_at": None,
+            "operation_key": clean_op,
+        }
+        current["slow_letters"] = [*(current.get("slow_letters") or []), entry][-MAX_PINS:]
+        saved = write_state(root, _bump(current, sent_iso))
+        status_now = "in_transit" if now_dt < deliver_dt else "delivered"
+        return {**entry, "status": status_now, "duplicate": False, "revision": saved["revision"]}
 
 
 def ack_slow_letter(
@@ -511,28 +670,567 @@ def ack_slow_letter(
     now_dt = parse_instant(now) or datetime.now(tz=timezone(timedelta(hours=8)))
     now_iso = _format_instant_iso(now_dt)
 
-    current, reason = read_state(root)
-    if reason is not None:
-        raise ValueError(reason)
+    with _tx.state_file_lock(state_path(root)):
+        current, reason = read_state(root)
+        if reason is not None:
+            raise ValueError(reason)
 
-    found: Optional[dict[str, Any]] = None
-    for row in current["slow_letters"]:
-        if row.get("letter_id") == clean_id:
-            found = row
-            break
-    if found is None:
-        raise KeyError("SLOW_LETTER_NOT_FOUND")
+        found: Optional[dict[str, Any]] = None
+        for row in current["slow_letters"]:
+            if row.get("letter_id") == clean_id:
+                found = row
+                break
+        if found is None:
+            raise KeyError("SLOW_LETTER_NOT_FOUND")
 
-    deliver_dt = parse_instant(found.get("deliver_after"))
-    if deliver_dt is not None and now_dt < deliver_dt:
-        raise ValueError("SLOW_LETTER_STILL_IN_TRANSIT")
+        deliver_dt = parse_instant(found.get("deliver_after"))
+        if deliver_dt is not None and now_dt < deliver_dt:
+            raise ValueError("SLOW_LETTER_STILL_IN_TRANSIT")
 
-    if found.get("acked_at"):
-        return {**dict(found), "status": "delivered", "acked": True, "duplicate": True, "revision": current["revision"]}
+        if found.get("acked_at"):
+            return {**dict(found), "status": "delivered", "acked": True, "duplicate": True, "revision": current["revision"]}
 
-    found["acked_at"] = now_iso
-    saved = write_state(root, _bump(current, now_iso))
-    return {**dict(found), "status": "delivered", "acked": True, "duplicate": False, "revision": saved["revision"]}
+        found["acked_at"] = now_iso
+        saved = write_state(root, _bump(current, now_iso))
+        return {**dict(found), "status": "delivered", "acked": True, "duplicate": False, "revision": saved["revision"]}
+
+
+def _normalize_actor_side(actor_side: Optional[str], author_side: Optional[str] = None) -> str:
+    raw = actor_side if actor_side is not None else author_side
+    norm = str(raw or "").strip().lower()
+    if norm not in ("subject", "partner"):
+        raise ValueError("INVALID_SLOW_LETTER_AUTHOR")
+    return norm
+
+
+def _clean_operation_key(operation_key: Any) -> Optional[str]:
+    if operation_key is None:
+        return None
+    if not isinstance(operation_key, str):
+        raise ValueError("INVALID_OPERATION_KEY")
+    cleaned = " ".join(operation_key.split()).strip()
+    if not cleaned or len(cleaned) > 128:
+        raise ValueError("INVALID_OPERATION_KEY")
+    return cleaned
+
+
+def _clean_draft_title(title: Any, *, allow_default: bool) -> str:
+    if title is None:
+        if allow_default:
+            return "慢信手稿"
+        raise ValueError("SLOW_LETTER_TITLE_INVALID")
+    if not isinstance(title, str):
+        raise ValueError("SLOW_LETTER_TITLE_INVALID")
+    collapsed = " ".join(title.split()).strip()
+    if len(collapsed) > 120:
+        raise ValueError("SLOW_LETTER_TITLE_TOO_LONG")
+    if not collapsed:
+        if allow_default:
+            return "慢信手稿"
+        raise ValueError("SLOW_LETTER_TITLE_INVALID")
+    return collapsed
+
+
+def _clean_draft_body(body: Any) -> str:
+    if not isinstance(body, str):
+        raise ValueError("SLOW_LETTER_CONTENT_REQUIRED")
+    stripped = body.strip()
+    if not stripped:
+        raise ValueError("SLOW_LETTER_CONTENT_REQUIRED")
+    if len(stripped) > MAX_LETTER_TEXT:
+        raise ValueError("SLOW_LETTER_BODY_TOO_LONG")
+    return stripped
+
+
+def _clean_postmark_place(postmark_place: Any, *, default: str = "镇上邮筒") -> str:
+    if postmark_place is None:
+        return default
+    if not isinstance(postmark_place, str):
+        raise ValueError("SLOW_LETTER_PLACE_INVALID")
+    collapsed = " ".join(postmark_place.split()).strip()
+    if len(collapsed) > 80:
+        raise ValueError("SLOW_LETTER_PLACE_TOO_LONG")
+    return collapsed or default
+
+
+def _clean_draft_id(draft_id: Any) -> str:
+    if not isinstance(draft_id, str):
+        raise ValueError("DRAFT_ID_REQUIRED")
+    cleaned = " ".join(draft_id.split()).strip()
+    if not cleaned or len(cleaned) > 120:
+        raise ValueError("DRAFT_ID_REQUIRED")
+    return cleaned
+
+
+def _op_fingerprint(action: str, actor_side: str, *parts: Any) -> str:
+    joined = "\x1f".join([action, actor_side, *[str(p if p is not None else "") for p in parts]])
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:32]
+
+
+def _lookup_op_ring(
+    state: Mapping[str, Any],
+    *,
+    actor_side: str,
+    operation_key: Optional[str],
+) -> Optional[dict[str, Any]]:
+    if not operation_key:
+        return None
+    for entry in reversed(state.get("committed_op_ring") or []):
+        if (
+            isinstance(entry, Mapping)
+            and entry.get("author_side") == actor_side
+            and entry.get("operation_key") == operation_key
+        ):
+            return dict(entry)
+    return None
+
+
+def _append_op_ring(
+    state: dict[str, Any],
+    *,
+    operation_key: Optional[str],
+    action: str,
+    actor_side: str,
+    fingerprint: str,
+    target_id: Optional[str],
+    recorded_at: str,
+    revision: int,
+    snapshot: Mapping[str, Any],
+) -> None:
+    if not operation_key:
+        return
+    ring = list(state.get("committed_op_ring") or [])
+    ring.append({
+        "operation_key": operation_key,
+        "action": action,
+        "author_side": actor_side,
+        "fingerprint": fingerprint,
+        "target_id": target_id,
+        "recorded_at": recorded_at,
+        "revision": int(revision),
+        "snapshot": dict(snapshot),
+    })
+    if len(ring) > MAX_COMMITTED_OP_RING:
+        ring = ring[-MAX_COMMITTED_OP_RING:]
+    state["committed_op_ring"] = ring
+
+
+def _project_slow_letter_draft_row(
+    raw: Mapping[str, Any],
+    *,
+    now_dt: datetime,
+) -> dict[str, Any]:
+    drafted_at_str = _iso_text(raw.get("drafted_at"))
+    cools_until_str = _iso_text(raw.get("cools_until"))
+    cools_dt = parse_instant(cools_until_str)
+    if cools_dt is None:
+        base_dt = parse_instant(drafted_at_str) or now_dt
+        cools_dt = base_dt + timedelta(hours=SLOW_LETTER_COOLING_PERIOD_HOURS)
+        cools_until_str = _format_instant_iso(cools_dt)
+    ready = bool(now_dt >= cools_dt)
+    delta_secs = (cools_dt - now_dt).total_seconds()
+    remaining = 0 if ready else max(1, int(math.ceil(delta_secs)))
+    return {
+        "draft_id": str(raw.get("draft_id") or ""),
+        "author_side": str(raw.get("author_side") or ""),
+        "title": _one_line(raw.get("title"), 120) or "慢信手稿",
+        "body": _bounded_body(raw.get("body"), MAX_LETTER_TEXT),
+        "postmark_place": _one_line(raw.get("postmark_place"), 80) or "镇上邮筒",
+        "drafted_at": drafted_at_str,
+        "cools_until": cools_until_str,
+        "updated_at": _iso_text(raw.get("updated_at")) or drafted_at_str,
+        "status": "cooling_draft",
+        "ready_to_post": ready,
+        "remaining_cooling_seconds": remaining,
+    }
+
+
+def save_slow_letter_draft(
+    root: Path | str,
+    *,
+    actor_side: Optional[str] = None,
+    author_side: Optional[str] = None,
+    title: Any = None,
+    body: Any = None,
+    postmark_place: Any = "镇上邮筒",
+    now: Any = None,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """Create a 72h cooling slow-letter draft in ``window_keepsakes.json``."""
+    norm_actor = _normalize_actor_side(actor_side, author_side)
+    clean_title = _clean_draft_title(title, allow_default=True)
+    clean_body = _clean_draft_body(body)
+    clean_place = _clean_postmark_place(postmark_place)
+    clean_op = _clean_operation_key(operation_key)
+
+    now_dt = parse_instant(now) or datetime.now(tz=timezone(timedelta(hours=8)))
+    drafted_iso = _format_instant_iso(now_dt)
+    cools_dt = now_dt + timedelta(hours=SLOW_LETTER_COOLING_PERIOD_HOURS)
+    cools_iso = _format_instant_iso(cools_dt)
+    fp = _op_fingerprint("save_slow_letter_draft", norm_actor, clean_title, clean_body, clean_place)
+
+    with _tx.state_file_lock(state_path(root)):
+        current, reason = read_state(root)
+        if reason is not None:
+            raise ValueError(reason)
+
+        cached = _lookup_op_ring(current, actor_side=norm_actor, operation_key=clean_op)
+        if cached is not None:
+            if cached.get("action") != "save_slow_letter_draft" or cached.get("fingerprint") != fp:
+                raise ValueError("OPERATION_FINGERPRINT_MISMATCH")
+            snap_draft = cached.get("snapshot") or {}
+            live_match = next(
+                (d for d in current["slow_letter_drafts"] if d.get("draft_id") == cached.get("target_id")),
+                snap_draft,
+            )
+            projected = _project_slow_letter_draft_row(live_match, now_dt=now_dt)
+            return {
+                **projected,
+                "draft": projected,
+                "duplicate": True,
+                "revision": current["revision"],
+            }
+
+        own_active = [
+            d for d in current["slow_letter_drafts"] if d.get("author_side") == norm_actor
+        ]
+        if len(own_active) >= MAX_SLOW_LETTER_DRAFTS_PER_AUTHOR:
+            raise ValueError("SLOW_LETTER_DRAFT_LIMIT_REACHED")
+
+        seed = f"{norm_actor}\x00{clean_title}\x00{drafted_iso}\x00{clean_op or (current['revision'] + 1)}"
+        draft_id = "slow_draft_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+        entry = {
+            "draft_id": draft_id,
+            "author_side": norm_actor,
+            "title": clean_title,
+            "body": clean_body,
+            "postmark_place": clean_place,
+            "drafted_at": drafted_iso,
+            "cools_until": cools_iso,
+            "updated_at": drafted_iso,
+            "status": "cooling_draft",
+            "operation_key": clean_op,
+        }
+        current["slow_letter_drafts"] = [*current["slow_letter_drafts"], entry]
+        bumped = _bump(current, drafted_iso)
+        _append_op_ring(
+            bumped,
+            operation_key=clean_op,
+            action="save_slow_letter_draft",
+            actor_side=norm_actor,
+            fingerprint=fp,
+            target_id=draft_id,
+            recorded_at=drafted_iso,
+            revision=bumped["revision"],
+            snapshot=entry,
+        )
+        saved = write_state(root, bumped)
+        projected = _project_slow_letter_draft_row(entry, now_dt=now_dt)
+        return {
+            **projected,
+            "draft": projected,
+            "duplicate": False,
+            "revision": saved["revision"],
+        }
+
+
+def revise_slow_letter_draft(
+    root: Path | str,
+    *,
+    actor_side: Optional[str] = None,
+    author_side: Optional[str] = None,
+    draft_id: Any = None,
+    title: Any = None,
+    body: Any = None,
+    postmark_place: Any = None,
+    now: Any = None,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """Revise own cooling slow-letter draft without resetting ``drafted_at`` or ``cools_until``."""
+    norm_actor = _normalize_actor_side(actor_side, author_side)
+    clean_id = _clean_draft_id(draft_id)
+    if title is None and body is None and postmark_place is None:
+        raise ValueError("SLOW_LETTER_REVISION_EMPTY")
+    new_title = _clean_draft_title(title, allow_default=False) if title is not None else None
+    new_body = _clean_draft_body(body) if body is not None else None
+    new_place = _clean_postmark_place(postmark_place) if postmark_place is not None else None
+    clean_op = _clean_operation_key(operation_key)
+
+    now_dt = parse_instant(now) or datetime.now(tz=timezone(timedelta(hours=8)))
+    now_iso = _format_instant_iso(now_dt)
+    fp = _op_fingerprint(
+        "revise_slow_letter_draft", norm_actor, clean_id, new_title, new_body, new_place
+    )
+
+    with _tx.state_file_lock(state_path(root)):
+        current, reason = read_state(root)
+        if reason is not None:
+            raise ValueError(reason)
+
+        cached = _lookup_op_ring(current, actor_side=norm_actor, operation_key=clean_op)
+        if cached is not None:
+            if cached.get("action") != "revise_slow_letter_draft" or cached.get("fingerprint") != fp:
+                raise ValueError("OPERATION_FINGERPRINT_MISMATCH")
+            snap_draft = cached.get("snapshot") or {}
+            live_match = next(
+                (
+                    d
+                    for d in current["slow_letter_drafts"]
+                    if d.get("draft_id") == clean_id and d.get("author_side") == norm_actor
+                ),
+                snap_draft,
+            )
+            projected = _project_slow_letter_draft_row(live_match, now_dt=now_dt)
+            return {
+                **projected,
+                "draft": projected,
+                "duplicate": True,
+                "revision": current["revision"],
+            }
+
+        target: Optional[dict[str, Any]] = None
+        for row in current["slow_letter_drafts"]:
+            if row.get("draft_id") == clean_id and row.get("author_side") == norm_actor:
+                target = row
+                break
+        if target is None:
+            raise KeyError("DRAFT_NOT_FOUND")
+
+        if new_title is not None:
+            target["title"] = new_title
+        if new_body is not None:
+            target["body"] = new_body
+        if new_place is not None:
+            target["postmark_place"] = new_place
+        target["updated_at"] = now_iso
+        # Strictly preserve original drafted_at and cools_until!
+        bumped = _bump(current, now_iso)
+        _append_op_ring(
+            bumped,
+            operation_key=clean_op,
+            action="revise_slow_letter_draft",
+            actor_side=norm_actor,
+            fingerprint=fp,
+            target_id=clean_id,
+            recorded_at=now_iso,
+            revision=bumped["revision"],
+            snapshot=dict(target),
+        )
+        saved = write_state(root, bumped)
+        projected = _project_slow_letter_draft_row(target, now_dt=now_dt)
+        return {
+            **projected,
+            "draft": projected,
+            "duplicate": False,
+            "revision": saved["revision"],
+        }
+
+
+def discard_slow_letter_draft(
+    root: Path | str,
+    *,
+    actor_side: Optional[str] = None,
+    author_side: Optional[str] = None,
+    draft_id: Any = None,
+    now: Any = None,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """Discard own cooling slow-letter draft cleanly with zero omission debt."""
+    norm_actor = _normalize_actor_side(actor_side, author_side)
+    clean_id = _clean_draft_id(draft_id)
+    clean_op = _clean_operation_key(operation_key)
+
+    now_dt = parse_instant(now) or datetime.now(tz=timezone(timedelta(hours=8)))
+    now_iso = _format_instant_iso(now_dt)
+    fp = _op_fingerprint("discard_slow_letter_draft", norm_actor, clean_id)
+
+    with _tx.state_file_lock(state_path(root)):
+        current, reason = read_state(root)
+        if reason is not None:
+            raise ValueError(reason)
+
+        cached = _lookup_op_ring(current, actor_side=norm_actor, operation_key=clean_op)
+        if cached is not None:
+            if cached.get("action") != "discard_slow_letter_draft" or cached.get("fingerprint") != fp:
+                raise ValueError("OPERATION_FINGERPRINT_MISMATCH")
+            return {
+                "draft_id": clean_id,
+                "discarded": True,
+                "status": "discarded",
+                "omission_debt": 0,
+                "duplicate": True,
+                "revision": current["revision"],
+            }
+
+        kept: list[dict[str, Any]] = []
+        matched = False
+        for row in current["slow_letter_drafts"]:
+            if row.get("draft_id") == clean_id and row.get("author_side") == norm_actor:
+                matched = True
+            else:
+                kept.append(row)
+        if not matched:
+            raise KeyError("DRAFT_NOT_FOUND")
+
+        current["slow_letter_drafts"] = kept
+        bumped = _bump(current, now_iso)
+        _append_op_ring(
+            bumped,
+            operation_key=clean_op,
+            action="discard_slow_letter_draft",
+            actor_side=norm_actor,
+            fingerprint=fp,
+            target_id=clean_id,
+            recorded_at=now_iso,
+            revision=bumped["revision"],
+            snapshot={"draft_id": clean_id, "discarded": True, "omission_debt": 0},
+        )
+        saved = write_state(root, bumped)
+        return {
+            "draft_id": clean_id,
+            "discarded": True,
+            "status": "discarded",
+            "omission_debt": 0,
+            "duplicate": False,
+            "revision": saved["revision"],
+        }
+
+
+def post_drafted_slow_letter(
+    root: Path | str,
+    *,
+    actor_side: Optional[str] = None,
+    author_side: Optional[str] = None,
+    draft_id: Any = None,
+    delay_hours: Any = DEFAULT_POSTED_DELAY_HOURS,
+    postmark_place: Any = None,
+    now: Any = None,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """Post an own cooling draft once ``now >= cools_until`` (``drafted_at + 72h``)."""
+    norm_actor = _normalize_actor_side(actor_side, author_side)
+    clean_id = _clean_draft_id(draft_id)
+    if delay_hours is None:
+        raw_delay = float(DEFAULT_POSTED_DELAY_HOURS)
+    elif (
+        isinstance(delay_hours, bool)
+        or not isinstance(delay_hours, (int, float))
+        or not math.isfinite(float(delay_hours))
+    ):
+        raise ValueError("INVALID_SLOW_LETTER_DELAY")
+    else:
+        raw_delay = float(delay_hours)
+    clamped_delay = round(
+        max(MIN_POSTED_DELAY_HOURS, min(MAX_POSTED_DELAY_HOURS, raw_delay)), 3
+    )
+    override_place = (
+        _clean_postmark_place(postmark_place) if postmark_place is not None else None
+    )
+    clean_op = _clean_operation_key(operation_key)
+
+    now_dt = parse_instant(now) or datetime.now(tz=timezone(timedelta(hours=8)))
+    sent_iso = _format_instant_iso(now_dt)
+    fp = _op_fingerprint(
+        "post_drafted_slow_letter", norm_actor, clean_id, clamped_delay, override_place
+    )
+
+    with _tx.state_file_lock(state_path(root)):
+        current, reason = read_state(root)
+        if reason is not None:
+            raise ValueError(reason)
+
+        cached = _lookup_op_ring(current, actor_side=norm_actor, operation_key=clean_op)
+        if cached is not None:
+            if cached.get("action") != "post_drafted_slow_letter" or cached.get("fingerprint") != fp:
+                raise ValueError("OPERATION_FINGERPRINT_MISMATCH")
+            snap_letter = cached.get("snapshot") or {}
+            live_letter = next(
+                (
+                    item
+                    for item in current["slow_letters"]
+                    if item.get("letter_id") == cached.get("target_id")
+                ),
+                snap_letter,
+            )
+            deliv_dt = parse_instant(live_letter.get("deliver_after"))
+            status_now = (
+                "in_transit"
+                if deliv_dt is not None and now_dt < deliv_dt
+                else "delivered"
+            )
+            return {
+                **dict(live_letter),
+                "draft_id": clean_id,
+                "status": status_now,
+                "duplicate": True,
+                "revision": current["revision"],
+            }
+
+        target_draft: Optional[dict[str, Any]] = None
+        kept_drafts: list[dict[str, Any]] = []
+        for row in current["slow_letter_drafts"]:
+            if row.get("draft_id") == clean_id and row.get("author_side") == norm_actor:
+                target_draft = row
+            else:
+                kept_drafts.append(row)
+        if target_draft is None:
+            raise KeyError("DRAFT_NOT_FOUND")
+
+        cools_until_str = str(target_draft.get("cools_until") or "")
+        cools_dt = parse_instant(cools_until_str)
+        if cools_dt is None:
+            base_dt = parse_instant(target_draft.get("drafted_at")) or now_dt
+            cools_dt = base_dt + timedelta(hours=SLOW_LETTER_COOLING_PERIOD_HOURS)
+            cools_until_str = _format_instant_iso(cools_dt)
+
+        if now_dt < cools_dt:
+            remaining = max(1, int(math.ceil((cools_dt - now_dt).total_seconds())))
+            raise SlowLetterCoolingError(
+                cools_until=cools_until_str,
+                remaining_cooling_seconds=remaining,
+            )
+
+        deliver_dt = now_dt + timedelta(hours=clamped_delay)
+        deliver_iso = _format_instant_iso(deliver_dt)
+        eff_place = override_place or target_draft["postmark_place"]
+        seed = f"{clean_id}\x00{sent_iso}\x00{norm_actor}\x00{clean_op or (current['revision'] + 1)}"
+        letter_id = "slow_letter_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+        letter_entry = {
+            "letter_id": letter_id,
+            "title": target_draft["title"],
+            "body": target_draft["body"],
+            "postmark_place": eff_place,
+            "author_side": norm_actor,
+            "sent_at": sent_iso,
+            "drafted_at": target_draft["drafted_at"],
+            "deliver_after": deliver_iso,
+            "delay_hours": clamped_delay,
+            "acked_at": None,
+            "operation_key": clean_op,
+        }
+        current["slow_letter_drafts"] = kept_drafts
+        current["slow_letters"] = [*(current.get("slow_letters") or []), letter_entry][-MAX_PINS:]
+        bumped = _bump(current, sent_iso)
+        _append_op_ring(
+            bumped,
+            operation_key=clean_op,
+            action="post_drafted_slow_letter",
+            actor_side=norm_actor,
+            fingerprint=fp,
+            target_id=letter_id,
+            recorded_at=sent_iso,
+            revision=bumped["revision"],
+            snapshot=letter_entry,
+        )
+        saved = write_state(root, bumped)
+        status_now = "in_transit" if now_dt < deliver_dt else "delivered"
+        return {
+            **letter_entry,
+            "draft_id": clean_id,
+            "status": status_now,
+            "duplicate": False,
+            "revision": saved["revision"],
+        }
 
 
 # ---------------------------------------------------------------------------------------------
@@ -997,16 +1695,25 @@ def letter_row(*, share_row: Mapping[str, Any], timeline: Mapping[str, Any],
     }
 
 
-def _read_slow_letters_zero_write(
+def _read_slow_letters_and_drafts_zero_write(
     *,
     root: Optional[Path | str] = None,
     state: Optional[Mapping[str, Any]] = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if isinstance(state, Mapping):
-        raw_list = state.get("slow_letters")
-        if isinstance(raw_list, list):
-            return [dict(x) for x in raw_list if isinstance(x, Mapping)]
-        return []
+        raw_letters = state.get("slow_letters")
+        raw_drafts = state.get("slow_letter_drafts")
+        letters = (
+            [dict(x) for x in raw_letters if isinstance(x, Mapping)]
+            if isinstance(raw_letters, list)
+            else []
+        )
+        drafts = (
+            [dict(x) for x in raw_drafts if isinstance(x, Mapping)]
+            if isinstance(raw_drafts, list)
+            else []
+        )
+        return letters, drafts
     candidates: list[Path] = []
     if root is not None:
         candidates.append(Path(root))
@@ -1030,12 +1737,31 @@ def _read_slow_letters_zero_write(
         try:
             if not sp.is_symlink() and sp.is_file():
                 st_doc, reason = read_state(cand)
-                if reason is None and isinstance(st_doc.get("slow_letters"), list):
-                    return [dict(x) for x in st_doc["slow_letters"] if isinstance(x, Mapping)]
-                return []
+                if reason is None:
+                    letters = [
+                        dict(x)
+                        for x in (st_doc.get("slow_letters") or [])
+                        if isinstance(x, Mapping)
+                    ]
+                    drafts = [
+                        dict(x)
+                        for x in (st_doc.get("slow_letter_drafts") or [])
+                        if isinstance(x, Mapping)
+                    ]
+                    return letters, drafts
+                return [], []
         except OSError:
             continue
-    return []
+    return [], []
+
+
+def _read_slow_letters_zero_write(
+    *,
+    root: Optional[Path | str] = None,
+    state: Optional[Mapping[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    letters, _drafts = _read_slow_letters_and_drafts_zero_write(root=root, state=state)
+    return letters
 
 
 def _project_slow_letter_row(
@@ -1047,6 +1773,7 @@ def _project_slow_letter_row(
 ) -> dict[str, Any]:
     deliver_after_str = _iso_text(raw.get("deliver_after"))
     sent_at_str = _iso_text(raw.get("sent_at"))
+    drafted_at_str = _iso_text(raw.get("drafted_at")) or sent_at_str
     deliver_dt = parse_instant(deliver_after_str)
     is_in_transit = bool(deliver_dt is not None and now_dt < deliver_dt)
     status = "in_transit" if is_in_transit else "delivered"
@@ -1054,7 +1781,8 @@ def _project_slow_letter_row(
     place = _one_line(raw.get("postmark_place"), 80) or "镇上邮筒"
     title = _one_line(raw.get("title"), 120) or "慢信"
     author_side = str(raw.get("author_side") or "subject")
-    withhold_body = bool(is_in_transit and not subject_view)
+    viewer_side = "subject" if subject_view else "partner"
+    withhold_body = bool(is_in_transit and viewer_side != author_side)
     raw_body = _bounded_body(raw.get("body"), MAX_LETTER_TEXT) if not withhold_body else None
     return {
         "letter_id": str(raw.get("letter_id") or ""),
@@ -1065,6 +1793,7 @@ def _project_slow_letter_row(
         "delivered": not is_in_transit,
         "acked": bool(acked_at) and not is_in_transit,
         "acked_at": acked_at if not is_in_transit else None,
+        "drafted_at": drafted_at_str,
         "sent_at": sent_at_str,
         "deliver_after": deliver_after_str,
         "estimated_delivery_at": deliver_after_str,
@@ -1072,6 +1801,7 @@ def _project_slow_letter_row(
         "postmark_place": place,
         "postmark": {
             "place": place,
+            "drafted_at": drafted_at_str,
             "sent_at": sent_at_str,
             "sent_day": local_day(sent_at_str, offset),
             "deliver_after": deliver_after_str,
@@ -1101,7 +1831,8 @@ def letters_block(*, rows: list[Mapping[str, Any]], offset: str,
         or parse_instant((clock or {}).get("logical_at") if isinstance(clock, Mapping) else None)
         or datetime.now(tz=timezone(timedelta(hours=8)))
     )
-    slow_raw = _read_slow_letters_zero_write(root=root, state=state)
+    viewer_side = "subject" if subject_view else "partner"
+    slow_raw, drafts_raw = _read_slow_letters_and_drafts_zero_write(root=root, state=state)
     slow_projected = [
         _project_slow_letter_row(item, now_dt=now_dt, offset=offset, subject_view=subject_view)
         for item in slow_raw
@@ -1109,6 +1840,17 @@ def letters_block(*, rows: list[Mapping[str, Any]], offset: str,
     slow_projected.sort(key=lambda r: (str(r.get("sent_at") or ""), str(r.get("letter_id") or "")), reverse=True)
     in_transit_rows = [r for r in slow_projected if r["in_transit"]]
     delivered_slow_rows = [r for r in slow_projected if r["delivered"]]
+
+    # Strict bilateral privacy: ONLY project the caller's own cooling drafts; never inspect or count the other side's.
+    own_drafts = [
+        _project_slow_letter_draft_row(item, now_dt=now_dt)
+        for item in drafts_raw
+        if str(item.get("author_side") or "") == viewer_side
+    ]
+    own_drafts.sort(
+        key=lambda r: (str(r.get("drafted_at") or ""), str(r.get("draft_id") or "")),
+        reverse=True,
+    )
 
     bounded_ordered = ordered[:MAX_LETTERS]
     inbox_items: list[dict[str, Any]] = list(delivered_slow_rows)
@@ -1128,6 +1870,8 @@ def letters_block(*, rows: list[Mapping[str, Any]], offset: str,
         "in_transit": in_transit_rows[:MAX_LETTERS],
         "in_transit_count": len(in_transit_rows),
         "slow_letters": slow_projected[:MAX_LETTERS],
+        "own_slow_letter_drafts": own_drafts,
+        "own_slow_letter_draft_count": len(own_drafts),
         "truncated": bool(truncated or len(ordered) > MAX_LETTERS),
         "scanned_shares": scanned,
         #: 时间戳缺失/版本不可界定的候选：不冒充成「不是信」，只如实说无法证明跨日。
@@ -1141,6 +1885,7 @@ def letters_block(*, rows: list[Mapping[str, Any]], offset: str,
         "private_text_included": (
             any(not row.get("text_withheld") for row in ordered)
             or any(not row.get("text_withheld") for row in slow_projected)
+            or bool(own_drafts and subject_view)
         ),
         "local_only": True,
         "note": "这是跨 >=2 个 owner 时间戳本地日的作品/分享投影，以及带在途邮戳延迟的慢信纯读派生；"
@@ -1149,27 +1894,39 @@ def letters_block(*, rows: list[Mapping[str, Any]], offset: str,
 
 
 __all__ = [
+    "ACTION_ALLOWED_FIELDS",
+    "DEFAULT_POSTED_DELAY_HOURS",
     "LETTERS_SCHEMA",
     "LETTER_SHARE_STATES",
     "LOCAL_CHANNEL",
     "LOCAL_DELIVERED",
     "LOCAL_AUDIENCE",
     "KEEPSAKES_SCHEMA",
+    "MAX_COMMITTED_OP_RING",
     "MAX_HISTORY",
     "MAX_LETTERS",
     "MAX_LETTER_TEXT",
     "MAX_PIN_TEXT",
+    "MAX_POSTED_DELAY_HOURS",
     "MAX_SHARE_SCAN",
+    "MAX_SLOW_LETTER_DRAFTS_PER_AUTHOR",
+    "MIN_POSTED_DELAY_HOURS",
     "NO_DECLARED_HOME_PLANT",
     "NO_PLANT_GROWTH_AUTHORITY",
     "NO_WEATHER_AUTHORITY",
     "NOT_AT_HOME",
+    "SLOW_LETTER_COOLING_PERIOD",
+    "SLOW_LETTER_COOLING_PERIOD_HOURS",
+    "SLOW_LETTER_COOLING_SECONDS",
+    "SLOW_LETTER_DRAFT_ACTIONS",
     "STATE_FILENAME",
     "STATE_SCHEMA_VERSION",
+    "SlowLetterCoolingError",
     "WINDOW_SCHEMA",
     "ack_slow_letter",
     "clear_lockscreen",
     "clock_offset",
+    "discard_slow_letter_draft",
     "empty_state",
     "keepsakes_block",
     "letter_row",
@@ -1177,9 +1934,12 @@ __all__ = [
     "local_day",
     "parse_instant",
     "pin_share",
+    "post_drafted_slow_letter",
     "post_slow_letter",
     "read_state",
     "read_v04_neighborhood_window_context",
+    "revise_slow_letter_draft",
+    "save_slow_letter_draft",
     "select_lockscreen",
     "soundscape_available",
     "soundscape_unavailable",

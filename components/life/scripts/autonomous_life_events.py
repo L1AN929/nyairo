@@ -254,11 +254,29 @@ def _build_default_wake_coalescer(
         return None
 
 
+def _resolve_runtime_migration_path(day_root: Optional[Path]) -> Optional[Path]:
+    if day_root is None:
+        return None
+    root_p = Path(day_root)
+    candidates = (
+        root_p / "phone" / "v02_runtime_migration.json",
+        root_p.parent / "phone" / "v02_runtime_migration.json",
+        root_p / "state" / "v02_runtime_migration.json",
+    )
+    for cand in candidates:
+        try:
+            if not cand.is_symlink() and cand.is_file():
+                return cand
+        except OSError:
+            continue
+    return None
+
+
 def _sync_coalescer_governance_mode(coalescer: Any, day_root: Optional[Path]) -> None:
     if coalescer is None or day_root is None:
         return
-    mig_path = Path(day_root) / "state" / "v02_runtime_migration.json"
-    if not mig_path.is_file():
+    mig_path = _resolve_runtime_migration_path(day_root)
+    if mig_path is None:
         return
     try:
         raw = json.loads(mig_path.read_text(encoding="utf-8"))
@@ -273,6 +291,69 @@ def _sync_coalescer_governance_mode(coalescer: Any, day_root: Optional[Path]) ->
             for key in ("mode", "budget_scale_pct", "reason_cn", "dormant_since"):
                 if key in mode_cfg:
                     target_cfg[key] = mode_cfg[key]
+
+
+def _persist_coalescer_counts_to_runtime_migration(
+    day_root: Optional[Path],
+    decisions: list[dict[str, Any]],
+) -> None:
+    if not decisions or day_root is None:
+        return
+    mig_path = _resolve_runtime_migration_path(day_root)
+    if mig_path is None:
+        return
+    try:
+        import state_tx_guard as _tx
+    except ImportError:
+        from components.life.scripts import state_tx_guard as _tx  # type: ignore[no-redef]
+
+    effective_delta = sum(1 for d in decisions if bool(d.get("effective_wake", True)))
+    control_delta = sum(
+        1 for d in decisions if bool(d.get("effective_wake", True)) and bool(d.get("is_control"))
+    )
+    control_bypass_delta = sum(
+        1
+        for d in decisions
+        if bool(d.get("effective_wake", True))
+        and (d.get("wake_disposition") == "CONTROL_IMMEDIATE_BYPASS" or bool(d.get("is_control")))
+    )
+    fg_bypass_delta = sum(
+        1
+        for d in decisions
+        if bool(d.get("effective_wake", True))
+        and d.get("wake_disposition") == "FOREGROUND_GUARANTEED"
+    )
+    coalesced_delta = sum(
+        1
+        for d in decisions
+        if bool(d.get("coalesced")) or d.get("wake_disposition") == "COALESCED_SAME_FAMILY"
+    )
+    quota_delta = sum(1 for d in decisions if bool(d.get("quota_blocked")))
+
+    try:
+        with _tx.state_file_lock(mig_path):
+            if mig_path.is_symlink() or not mig_path.is_file():
+                return
+            try:
+                doc = json.loads(mig_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return
+            if not isinstance(doc, dict):
+                return
+            router = doc.get("wake_router")
+            if not isinstance(router, dict):
+                router = {}
+                doc["wake_router"] = router
+            router["effective_wakes_total"] = int(router.get("effective_wakes_total") or 0) + effective_delta
+            router["control_wakes_total"] = int(router.get("control_wakes_total") or 0) + control_delta
+            router["control_lane_bypasses"] = int(router.get("control_lane_bypasses") or 0) + control_bypass_delta
+            router["foreground_chat_bypasses"] = int(router.get("foreground_chat_bypasses") or 0) + fg_bypass_delta
+            router["coalesced_saved_wakes"] = int(router.get("coalesced_saved_wakes") or 0) + coalesced_delta
+            router["quota_blocked_count"] = int(router.get("quota_blocked_count") or 0) + quota_delta
+            router["last_probe_result"] = dict(decisions[-1])
+            _tx.atomic_write_json(mig_path, doc, sort_keys=True)
+    except OSError:
+        return
 
 
 def _classify_event_for_coalescer(item: Mapping[str, Any]) -> tuple[str, str, bool, str]:
@@ -385,6 +466,9 @@ class EventFeedPoller:
                 suppressed["wake_disposition"] = decision.get("wake_disposition")
                 suppressed["wake_reason"] = decision.get("wake_reason")
                 self.last_coalesced_events.append(suppressed)
+        _persist_coalescer_counts_to_runtime_migration(
+            resolved_day_root, self.last_routing_decisions
+        )
         return admitted
 
     def poll(self, *, now_iso: Optional[str] = None) -> list[dict[str, Any]]:

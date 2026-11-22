@@ -382,7 +382,10 @@ def _provision_instance(root: Path, *, run_id: str,
                         request_total_limit: int = clockmod.HARD_CONFIG_MAX,
                         request_utc_day_max: Optional[int] = None,
                         max_cognition_calls_per_day: Optional[int] = None,
-                        memory_authority: Optional[Path] = None
+                        memory_authority: Optional[Path] = None,
+                        world_package: Optional[str | Path] = None,
+                        lived_needs: Optional[Mapping[str, Any]] = None,
+                        no_operator_reading: bool = False,
                         ) -> dict[str, Any]:
     """用一个全新根建**现成的**实例：真 Supply/World owner、自主开关、新 Memory、公版材料。
 
@@ -411,8 +414,9 @@ def _provision_instance(root: Path, *, run_id: str,
         # 不是事后补一个显示字段。专用开关同时禁掉 demo 的占位作品，房间里只有真实
         # 房间/物件与 operator 公版阅读材料，没有合成种子被冒充成她的历史。
         prepared = demo.prepare_demo(
-            root, with_world=True, reading_title=MATERIAL_TITLE,
-            reading_content=MATERIAL_EXCERPT,
+            root, with_world=True,
+            reading_title=("" if no_operator_reading else MATERIAL_TITLE),
+            reading_content=(None if no_operator_reading else MATERIAL_EXCERPT),
             run_id=expected_run_id,
             seed_work_artifact=False,
             # 显式额度只写进这个新实例：默认路径仍是 96/96/96。
@@ -421,7 +425,9 @@ def _provision_instance(root: Path, *, run_id: str,
             request_run_window_max=int(request_total_limit),
             max_cognition_calls_per_day=int(max_cognition_calls_per_day
                                             if max_cognition_calls_per_day is not None
-                                            else request_total_limit))
+                                            else request_total_limit),
+            world_package=world_package,
+            lived_needs=lived_needs)
     except Exception as exc:
         report.update({
             "reason_code": "PREPARE_FAILED",
@@ -437,6 +443,25 @@ def _provision_instance(root: Path, *, run_id: str,
                        "partial": ["demo_root_created"]})
         return report
     report["partial"].append("demo_instance")
+
+    if lived_needs:
+        try:
+            try:
+                from body_lived_needs_enable import enable_profile
+            except ImportError:
+                from scripts.body_lived_needs_enable import enable_profile
+            body_dir = Path(str(prepared["world_home"])) / "data" / "body"
+            report["lived_needs"] = enable_profile(
+                body_dir,
+                hunger=float(lived_needs.get("hunger", 0.0)),
+                thirst=float(lived_needs.get("thirst", 0.0)),
+                toilet=float(lived_needs.get("toilet", 0.0)),
+                note="fast_day explicit virtual profile; not a human measurement",
+            )
+        except Exception as exc:
+            report.update({"reason_code": "LIVED_NEEDS_ENABLE_FAILED",
+                           "detail": "%s: %s" % (type(exc).__name__, exc)})
+            return report
 
     try:
         phone = phone_life.load_phone_instance(root)
@@ -514,10 +539,11 @@ def _provision_instance(root: Path, *, run_id: str,
                 "CHIYO_AUTONOMOUS_MAX_COGNITION_CALLS_PER_DAY"),
             "configured_total_limit": int(request_total_limit),
         },
-        "material": {"title": MATERIAL_TITLE, "work": MATERIAL_WORK,
-                     "provided_by": "operator", "public_domain_excerpt": True,
-                     "content_in_instance": True,
-                     "characters": len(MATERIAL_EXCERPT)},
+        "material": (None if no_operator_reading else
+                     {"title": MATERIAL_TITLE, "work": MATERIAL_WORK,
+                      "provided_by": "operator", "public_domain_excerpt": True,
+                      "content_in_instance": True,
+                      "characters": len(MATERIAL_EXCERPT)}),
         "initialized": {
             "world": {
                 "rooms": len(world_extra.get("scene_locations") or []),
@@ -552,6 +578,9 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
             allow_night_start: bool = False,
             logical_anchor: Optional[datetime] = None,
             domain_id: Optional[str] = None,
+            world_package: Optional[str | Path] = None,
+            lived_needs: Optional[Mapping[str, Any]] = None,
+            no_operator_reading: bool = False,
             now: Optional[datetime] = None) -> dict[str, Any]:
     if not root.is_absolute():
         return {"ok": False, "reason_code": REASON_ROOT_REQUIRED,
@@ -640,7 +669,10 @@ def prepare(root: Path, *, run_id: str, real_seconds: float,
             root, run_id=run_id, request_total_limit=int(request_total_limit),
             request_utc_day_max=request_utc_day_max,
             max_cognition_calls_per_day=cognition_max,
-            memory_authority=authority_path)
+            memory_authority=authority_path,
+            world_package=world_package,
+            lived_needs=lived_needs,
+            no_operator_reading=bool(no_operator_reading))
         if provision.get("ok") is not True:
             return {"ok": False, **provision}
         state_root = Path(str(provision["state_root"]))
@@ -1217,6 +1249,11 @@ class FastDaySupervisor:
         if not gate.get("ok"):
             raise RuntimeError("%s: %s" % (gate["reason_code"], gate.get("detail") or ""))
         env[WORLD_GATE_ENV] = str(gate["value"])
+        explicit_tok_budget = str(
+            os.environ.get("CHIYO_AUTONOMOUS_DAILY_TOKEN_BUDGET") or ""
+        ).strip()
+        if explicit_tok_budget:
+            env["CHIYO_AUTONOMOUS_DAILY_TOKEN_BUDGET"] = explicit_tok_budget
         return env
 
     def _spawn_resident(self, state_root: Path, mode: Mapping[str, Any],
@@ -1614,7 +1651,32 @@ def cmd_prepare(argv: list[str]) -> int:
     parser.add_argument("--logical-anchor", default=None,
                         help=("这个逻辑日的起点，带时区的 ISO 8601（例如 "
                               "2026-11-05T08:00:00+08:00）；不传时仍锚在 prepare 的真实时刻"))
+    parser.add_argument("--world-package", default=None, dest="world_package",
+                        help="可选：显式指定街区包目录或名称（传给 demo.prepare_demo）")
+    parser.add_argument("--no-operator-reading", action="store_true",
+                        dest="no_operator_reading",
+                        help="可选：不预置公版阅读材料，仅按街区包自身材料初始化")
+    parser.add_argument("--lived-needs", action="store_true", dest="lived_needs",
+                        help="可选：启用虚拟饥饿/口渴/如厕曲线")
+    parser.add_argument("--lived-needs-hunger", type=float, default=None,
+                        dest="lived_needs_hunger")
+    parser.add_argument("--lived-needs-thirst", type=float, default=None,
+                        dest="lived_needs_thirst")
+    parser.add_argument("--lived-needs-toilet", type=float, default=None,
+                        dest="lived_needs_toilet")
     args = parser.parse_args(argv)
+    lived_needs_cfg: Optional[dict[str, Any]] = None
+    if args.lived_needs:
+        lived_needs_cfg = {"enabled": True}
+        for key, raw in (("hunger", args.lived_needs_hunger),
+                         ("thirst", args.lived_needs_thirst),
+                         ("toilet", args.lived_needs_toilet)):
+            val = float(raw) if raw is not None else 0.0
+            if not math.isfinite(val) or not (0.0 <= val <= 1.0):
+                return _emit({"ok": False, "reason_code": "LIVED_NEEDS_INVALID",
+                              "detail": "%s must be in [0.0, 1.0], got %r" % (key, raw)},
+                             code=EXIT_USAGE)
+            lived_needs_cfg[key] = val
     try:
         logical_anchor = parse_logical_anchor(args.logical_anchor)
     except ValueError as exc:
@@ -1646,7 +1708,10 @@ def cmd_prepare(argv: list[str]) -> int:
                                        if args.memory_authority else None),
                      provision_instance=not args.clock_only,
                      allow_night_start=bool(args.allow_night_start),
-                     logical_anchor=logical_anchor)
+                     logical_anchor=logical_anchor,
+                     world_package=args.world_package,
+                     lived_needs=lived_needs_cfg,
+                     no_operator_reading=bool(args.no_operator_reading))
     if rate is not None and result.get("ok"):
         result["rate"] = rate
         result["real_seconds_for_logical_day"] = real_seconds
@@ -1681,13 +1746,19 @@ def cmd_start(argv: list[str]) -> int:
     parser.add_argument("--offline-scripted", action="store_true",
                         dest="offline_scripted",
                         help="零模型冒烟：装配不发请求的既有确定性 writer 占位；必须与 --no-act 同用")
+    parser.add_argument("--room-living", action="store_true", dest="room_living",
+                        help="可选：开启房间陈设与灯具/开关")
+    parser.add_argument("--ambient-events", action="store_true", dest="ambient_events",
+                        help="可选：开启环境事件")
     args = parser.parse_args(argv)
     if args.offline_scripted and not args.no_act:
         return _emit({"ok": False, "reason_code": "OFFLINE_SCRIPTED_CANNOT_ACT",
                       "detail": "--offline-scripted 只能和 --no-act 一起用"}, code=EXIT_USAGE)
     supervisor = FastDaySupervisor(Path(args.root), poll_seconds=args.poll_seconds,
                                    clock_only=args.clock_only, no_act=args.no_act,
-                                   offline_scripted=args.offline_scripted)
+                                   offline_scripted=args.offline_scripted,
+                                   room_living=args.room_living,
+                                   ambient_events=args.ambient_events)
     result = supervisor.start(duration_seconds=args.duration_seconds)
     return _emit(result, code=EXIT_OK if result.get("ok") else EXIT_REFUSED)
 

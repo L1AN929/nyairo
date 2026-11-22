@@ -1,14 +1,14 @@
-# 一条命令，开始她的日常
+# 一条命令，开始 TA 的日常
 
-只在 **WSL / Linux** 里运行。先进入源码目录：
+只在 **WSL / Linux** 里运行（普通 Windows 10 / 11 用户也可以直接使用官网的原生桌面客户端图形化管理）。先进入源码或发行包目录：
 
 ```bash
-cd /path/to/nyairo-rc1-body-backend
+cd /path/to/nyairo
 ```
 
 实例目录必须是不存在的新目录（例如 `$HOME/nyairo-day`）；已有数据不会被覆盖，不是这个入口创建的已有实例也不会被接管。
 
-## 1. 准备模型配置（可选；不配也能启动，只是她不会自主活动）
+## 1. 准备模型配置（可选；不配也能启动，只是 TA 不会自主活动）
 
 ```bash
 cat > "$HOME/.nyairo-model.env" <<'EOF'
@@ -61,7 +61,7 @@ python3 scripts/nyairo_day.py start --root "$HOME/nyairo-day" \
   会明确要求换一个新目录；`--room-living` / `--world-actions` / `--ambient-events` 是运行开关，
   同根重开会沿用上次选择。
 
-## 3. 看她在做什么 / 给她一份材料
+## 3. 看 TA 在做什么 / 给 TA 一份材料
 
 ```bash
 python3 scripts/nyairo_day.py status --root "$HOME/nyairo-day"
@@ -69,12 +69,12 @@ python3 scripts/nyairo_day.py phone  --root "$HOME/nyairo-day"
 python3 scripts/nyairo_day.py import --root "$HOME/nyairo-day" --file ./演示材料.txt
 ```
 
-- `status`：中文状态、她此刻在哪、今天做了什么、今天的安排、作品、阅读、Memory、持久预算。
+- `status`：中文状态、TA 此刻在哪、今天做了什么、今天的安排、作品、阅读、Memory、持久预算。
 - `phone`：AI 手机的只读入口，同时打印并读取：手机页面 `http://127.0.0.1:3831/`、今天 `/api/phone/today`、安排 `/api/phone/today/arrangements`、作品 `/api/phone/projects`。
-- `import`：把 UTF-8 文本导入成她的阅读材料，由真实 owner 建件并回读。**给材料不等于强迫她读**；服务正在运行时，新绑定下次 `start` 后生效。
+- `import`：把 UTF-8 文本导入成阅读材料，由真实 owner 建件并回读。**给材料不等于强迫 TA 读**；服务正在运行时，新绑定下次 `start` 后生效。
 - 刚建好、还没跑过一天时，「今天」「安排」会明确返回 `CANONICAL_STATE_ABSENT`（读不到就说读不到，不假装成空白的一天）；「作品」与阅读材料读口正常。
 
-### 她今天的时间线（只读）
+### 今天的时间线（只读）
 
 `GET /api/phone/today/timeline`（`chiyo_phone` 的 `day_timeline` 动作）把**已经有记录**的
 几件事合成一条时间线：当天开始的 Activity、她自己排进今天的计划（只表示排定，不表示已执行）、
@@ -353,14 +353,14 @@ PYTHONDONTWRITEBYTECODE=1 /tmp/rc104-venv/bin/python -B scripts/living_entry_dem
 #    camera-translator（18190）、camera-sd（7860）
 
 # 2) 只准备、不调模型（0 产品、0 图）
-/root/shigure-venv/bin/python -B scripts/autonomous_camera_once.py prepare
+python3 -B scripts/autonomous_camera_once.py prepare
 
 # 3) 只读核对
-/root/shigure-venv/bin/python -B scripts/autonomous_camera_once.py status
-/root/shigure-venv/bin/python -B scripts/autonomous_camera_once.py readback
+python3 -B scripts/autonomous_camera_once.py status
+python3 -B scripts/autonomous_camera_once.py readback
 
 # 4) 唯一一次真实会话（发送前写 started，进程断后拒绝重跑）
-wsl -e bash -lc 'cd /mnt/d/nyairo-rc1-body-backend && { set -a; . /root/.nyairo-model.env; set +a; }; exec env PYTHONDONTWRITEBYTECODE=1 /root/shigure-venv/bin/python -B scripts/autonomous_camera_once.py run --live-model'
+bash -lc 'cd /path/to/nyairo && { set -a; . "$HOME/.nyairo-model.env"; set +a; }; exec env PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/autonomous_camera_once.py run --live-model'
 ```
 
 - 提示只中性告知手机能做什么与该隔离 World 自己报告的可见事实；不写 scene、不诱导、不强制。

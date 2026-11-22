@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.7.0"><img src="https://img.shields.io/badge/release-v0.7.0-1f2937.svg" alt="Release" /></a>
+  <a href="https://github.com/L1AN929/nyairo/releases/tag/v0.8.0"><img src="https://img.shields.io/badge/release-v0.8.0-1f2937.svg" alt="Release" /></a>
   <a href="https://nyairo.com/"><img src="https://img.shields.io/badge/website-nyairo.com-0284c7.svg" alt="Website" /></a>
   <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=jTRpypa4t5NVRLQ23fwB%2FWf%2Bv40vJIRUQRSp7NjrTlmY6LjYMJL0Yzp6ffOxAumj&busi_data=eyJncm91cENvZGUiOiIxMTI2OTQzODA1IiwidG9rZW4iOiJOeWtXdXZCYzc4UERlTE5iR2NCVG1lTWx5L2NQUnFQNXFUTnNiOGhnd3RJNERDQnhVanU0WGUrVXZDZnlnV1F6IiwidWluIjoiMjg1NTY4MDU5OSJ9&data=9V6FtP6tYYR5Mfpg2v7V9ML798haiganCXx7zcY-Corkhkofom2ie2_9CBGBnJO1JjOuSRJDu4-_SXgB6IihLQ&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ%20Group-1126943805-12b7f5.svg" alt="QQ Group" /></a>
   <a href="https://t.me/nyairoai"><img src="https://img.shields.io/badge/Telegram-nyairoai-229ed9.svg" alt="Telegram Channel" /></a>
@@ -17,9 +17,9 @@
 >
 > nyairo 是一个开源的数字个体框架，让 AI 拥有本地长期记忆、可自由生成与编辑的房间及生活街区，以及按真实时间流动的日常。你们的每一次对话，不再是一次性客套的问答，而是发生在一个看得见房间、走得出门的日常场景里（名字、称呼与性格完全由你定）。
 >
-> **当前版本：v0.7.0（GitHub prerelease 公开测试版）** — 提供免管理员权限的原生 Windows 桌面客户端，支持免选风貌的全随机专属世界一键生成与深浅双色离线地图编辑器、12 类街区店铺开放点单、去工具人化的自主拒绝边界与真实日程异步回信、随身包袋 3 层嵌套与冷热干湿物态、双层回忆灯原稿保护与无损搬家旅行箱 `.nyairo-suitcase.zip`、每日用量上限及双人共读批注。当前仍为公开测试版，升级前请先备份 `~/.nyairo` 目录。
+> **当前版本：v0.8.0（GitHub prerelease 公开测试版）** — 提供免管理员权限的原生 Windows 桌面客户端，在免选风貌全随机专属世界与深浅双色离线地图编辑器、12 类街区店铺开放点单、去工具人化自主拒绝边界与异步回信、随身包袋 3 层嵌套与冷热干湿物态、双层回忆灯原稿保护与无损搬家旅行箱 `.nyairo-suitcase.zip` 基础上，新增个人手艺本与换模型复验、长期性子细变与换模型偏好对照、查证改观与老承诺取舍、共同收藏保鲜及房间五项核实档案，并新增「先各自选 · 再揭晓」防偷看盲选与反奉承留痕、外接大模型「AI 脑洞上新」（兼离线免费模式）与零空转街坊引擎，以及旧物新用物理占用约束与空白起步自发明分类架。当前仍为公开测试版，升级前请先备份 `~/.nyairo` 目录。
 >
-> - **Windows 10 / 11 桌面端下载**：[https://nyairo.com/downloads/nyairo-0.7.0-setup.exe](https://nyairo.com/downloads/nyairo-0.7.0-setup.exe)（约 5.6 MB）
+> - **Windows 10 / 11 桌面端下载**：[https://nyairo.com/downloads/nyairo-0.8.0-setup.exe](https://nyairo.com/downloads/nyairo-0.8.0-setup.exe)（约 6.0 MB，SHA256：`36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8`）
 > - **Linux / WSL 一行命令安装**：`curl -fsSL https://nyairo.com/install.sh | bash`
 ---
 
@@ -65,7 +65,7 @@
 
 ### 方式一：Windows 10 / 11 原生桌面端（推荐）
 
-1. 下载免管理员权限的桌面安装包：[nyairo-0.7.0-setup.exe](https://nyairo.com/downloads/nyairo-0.7.0-setup.exe)（约 5.6 MB，首次打开若弹出「Windows 已保护你的电脑」提示，点击「更多信息」核对 SHA256 后点「仍要运行」即可，文档站内置两步矢量图解）。
+1. 下载免管理员权限的桌面安装包：[nyairo-0.8.0-setup.exe](https://nyairo.com/downloads/nyairo-0.8.0-setup.exe)（约 6.0 MB，SHA256：`36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8`，首次打开若弹出「Windows 已保护你的电脑」提示，点击「更多信息」核对 SHA256 后点「仍要运行」即可，文档站内置两步矢量图解）。
 2. 双击完成安装（桌面客户端安装在 `%LOCALAPPDATA%\Programs\nyairo`），启动后按界面向导配合系统自带的 WSL 2（Ubuntu）自动准备后台运行环境；新手可在 `platform.deepseek.com` 充值 5–10 元创建 `sk-...` 密钥填入「设置 -> 模型」，或直连本机免费的 Ollama（`http://127.0.0.1:11434`）。
 3. 个人设定 `SOUL.md`、对话与长期记忆保存在 WSL 2 内的 `~/.nyairo` 目录中，升级或重装桌面端不会覆盖个人数据，也可随时导出 `.nyairo-suitcase.zip` 无损搬家旅行箱。
 
@@ -80,11 +80,11 @@ curl -fsSL https://nyairo.com/install.sh | bash
 想先校验再运行：
 
 ```bash
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256
-python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0" && bash scripts/bootstrap.sh
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0" && bash scripts/bootstrap.sh
 ```
 
 - 脚本会自动配齐 Python 3.13 与必要工具，下载官方校验版本，建立本地隔离数据目录；
@@ -118,7 +118,7 @@ cd "$HOME/apps/nyairo-v0.7.0" && bash scripts/bootstrap.sh
 
 nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 
-- **程序核心**：`~/.local/share/nyairo/releases/v0.7.0`（只读程序包，更新时整体切换）
+- **程序核心**：`~/.local/share/nyairo/releases/v0.8.0`（只读程序包，更新时整体切换）
 - **个人数据**：`~/.nyairo`（完全独立的本地目录，包含人设、数据库、双层回忆灯记忆账本、密钥与配置）
 - **命令入口**：`~/.local/bin/nyairo`（系统 PATH 启动项）
 
@@ -133,7 +133,7 @@ nyairo 采用严格的“程序运行体与个人数据解耦”架构设计：
 - **Telegram 官方频道**：[https://t.me/nyairoai](https://t.me/nyairoai)
 - **快速起步上手指南**：[https://nyairo.com/#quickstart](https://nyairo.com/#quickstart)
 - **版本更新动态与说明**：[https://nyairo.com/#changelog](https://nyairo.com/#changelog)
-- **最新 Release 下载与校验包**：[GitHub Releases v0.7.0](https://github.com/L1AN929/nyairo/releases/tag/v0.7.0)（旧 `v0.6.0`、`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 仍在 Releases 页面）
+- **最新 Release 下载与校验包**：[GitHub Releases v0.8.0](https://github.com/L1AN929/nyairo/releases/tag/v0.8.0)（旧 `v0.7.0`、`v0.6.0`、`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3` 仍在 Releases 页面）
 
 ---
 

@@ -34,7 +34,7 @@
       "description": "アップデートではプログラム本体ディレクトリのみを置き換え、会話履歴やキャラクター設定には一切触れません。万一新バージョンが合わない場合でも、1行のコマンドで直前のバージョンへ戻せます。",
       "url": "https://nyairo.com/ja/docs/update/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -474,7 +474,7 @@
 
         <article class="markdown-body">
           <h2 id="update-section-0">アップデート前の確認とバックアップ</h2>
-<p>nyairo はプログラム本体を <code>~/.local/share/nyairo</code> に配置し、個人データ（<code>SOUL.md</code>、モデルキー、チャットデータベースおよび記憶）を別の <code>~/.nyairo</code> に分けて保存します。通常のアップデートで個人データが書き換えられることはありませんが、現在の <code>v0.7.0</code> はまだ急速に改善が進むパブリックベータ段階にあるため、<strong>アップデート前に実行中のチャットおよびゲートウェイのプロセスを終了し、念のためバックアップアーカイブを作成してください</strong>：</p>
+<p>nyairo はプログラム本体を <code>~/.local/share/nyairo</code> に配置し、個人データ（<code>SOUL.md</code>、モデルキー、チャットデータベースおよび記憶）を別の <code>~/.nyairo</code> に分けて保存します。通常のアップデートで個人データが書き換えられることはありませんが、現在の <code>v0.8.0</code> はまだ急速に改善が進むパブリックベータ段階にあるため、<strong>アップデート前に実行中のチャットおよびゲートウェイのプロセスを終了し、念のためバックアップアーカイブを作成してください</strong>：</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
 <pre><code>tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo</code></pre></div>
@@ -487,10 +487,10 @@
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
 <pre><code>nyairo update --check</code></pre></div>
-<p>アップデートを実行する際は（パブリックベータ版チャンネルでは <code>v0.7.0</code> のようにバージョン番号の指定が必要です）、次のコマンドを実行します：</p>
+<p>アップデートを実行する際は（パブリックベータ版チャンネルでは <code>v0.8.0</code> のようにバージョン番号の指定が必要です）、次のコマンドを実行します：</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
-<pre><code>nyairo update --version v0.7.0</code></pre></div>
+<pre><code>nyairo update --version v0.8.0</code></pre></div>
 <p>公式アーカイブのダウンロード、SHA256 とファイルマニフェストの照合、新バージョンの環境構築およびエントリポイントの切り替えまで自動的に行われます。</p>
 
 <h2 id="update-section-2">ロールバックと中断からの復旧</h2>

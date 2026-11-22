@@ -32,8 +32,10 @@ import argparse
 import json
 import math
 import os
+import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -41,7 +43,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -216,7 +218,11 @@ def _normalize_lived_needs(value: Optional[Mapping[str, Any]]) -> Optional[dict[
 
 
 def _lived_needs_from_args(args: argparse.Namespace) -> Optional[dict[str, Any]]:
-    if not getattr(args, "lived_needs", False):
+    explicit_enable = bool(getattr(args, "lived_needs", False))
+    explicit_disable = bool(getattr(args, "no_lived_needs", False))
+    if explicit_enable and explicit_disable:
+        raise RuntimeError("LIVED_NEEDS_INVALID:cannot combine --lived-needs and --no-lived-needs")
+    if not explicit_enable:
         if any(getattr(args, name, None) is not None for name in
                ("lived_needs_hunger", "lived_needs_thirst", "lived_needs_toilet")):
             # Explicit values without the enabling switch would be silently ignored.
@@ -390,6 +396,12 @@ def _default_authority(root: Path) -> Path:
     return root.parent / (root.name + "-memory-authority") / "authority.db"
 
 
+def _default_v02_control_root(root: Path) -> Path:
+    """v0.2 遗忘高水位与 V-C 水印独立放在业务存档根目录外，避免回滚业务快照时一并回退。"""
+
+    return root.parent / (root.name + "-memory-authority") / "v02-control"
+
+
 def _model_configured(environment: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
     """纯读配置，不发请求；把 ``NYA02_MODEL_ENV_FILE`` 读进一份临时 env 再判断。"""
 
@@ -459,10 +471,186 @@ def _is_instance(root: Path) -> bool:
     return True
 
 
+def bootstrap_living_foundation_state(
+    root: Path,
+    *,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Idempotently seed calm default living-foundation files ONLY when absent on disk.
+
+    Intended strictly for managed NyAiro instances inside ``_ensure_instance(...)``.
+    Never overwrites existing state files and never invokes any LLM (``llm_calls == 0``).
+    """
+
+    root_path = Path(root)
+    effective_iso = str(now_iso).strip() if isinstance(now_iso, str) and now_iso.strip() else _now_iso()
+    now_dt = _parse_any_iso_utc(effective_iso)
+    if now_dt is None:
+        effective_iso = _now_iso()
+        now_dt = _parse_any_iso_utc(effective_iso) or datetime.now(timezone.utc)
+
+    created: list[str] = []
+    skipped_existing: list[str] = []
+
+    def _seed_if_absent(rel_key: str, target_path: Path, builder: Any) -> None:
+        if target_path.is_symlink() or target_path.exists():
+            skipped_existing.append(rel_key)
+            return
+        parent = target_path.parent
+        if parent.exists() and parent.is_symlink():
+            skipped_existing.append(rel_key)
+            return
+        payload = builder()
+        if not isinstance(payload, Mapping):
+            return
+        parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json_0600(target_path, payload)
+        created.append(rel_key)
+
+    # 1. phone/v03_clock_state.json
+    def _build_v03_clock() -> dict[str, Any]:
+        try:
+            from components.life.scripts import v03_clock_evaporation as v03_clk
+        except Exception:  # pragma: no cover
+            import v03_clock_evaporation as v03_clk  # type: ignore[no-redef]
+        state = v03_clk.default_v03_clock_state()
+        clk_dt = v03_clk._parse_iso(effective_iso)
+        state["updated_at"] = effective_iso
+        state["world_clock"]["last_committed_at"] = effective_iso
+        state["world_clock"]["ambient_date"] = v03_clk._to_local_business(clk_dt).strftime("%Y-%m-%d")
+        return state
+
+    _seed_if_absent(
+        "phone/v03_clock_state.json",
+        root_path / "phone" / "v03_clock_state.json",
+        _build_v03_clock,
+    )
+
+    # 2. phone/v03_ecology.json
+    def _build_v03_ecology() -> dict[str, Any]:
+        try:
+            from components.world.scripts import v03_economy_illness_bridge as v03_eco
+        except Exception:  # pragma: no cover
+            import v03_economy_illness_bridge as v03_eco  # type: ignore[no-redef]
+        state = v03_eco.default_ecology_state()
+        state["updated_at"] = effective_iso
+        state["illness"]["phase"] = "healthy"
+        rb = state.setdefault("reality_bridge", {})
+        policy = rb.setdefault("outbound_policy", {})
+        policy["enabled"] = True
+        state["proactive_policy"] = {"enabled": True}
+        return state
+
+    _seed_if_absent(
+        "phone/v03_ecology.json",
+        root_path / "phone" / "v03_ecology.json",
+        _build_v03_ecology,
+    )
+
+    # 3. world/v04_neighborhood_state.json
+    def _build_v04_neighborhood() -> dict[str, Any]:
+        try:
+            from components.world.scripts import v04_neighborhood_living as v04_nb
+        except Exception:  # pragma: no cover
+            import v04_neighborhood_living as v04_nb  # type: ignore[no-redef]
+        state = v04_nb.default_state()
+        state["updated_at"] = effective_iso
+        env = state.setdefault("environment", {})
+        env["weather"] = "clear"
+        env.setdefault("airflow", "medium")
+        env["season"] = None
+        env["season_explicit"] = False
+        env.setdefault("weather_slot_key", None)
+        env.setdefault("manual_pin_until", None)
+        env["updated_at"] = None
+        return state
+
+    _seed_if_absent(
+        "world/v04_neighborhood_state.json",
+        root_path / "world" / "v04_neighborhood_state.json",
+        _build_v04_neighborhood,
+    )
+
+    # 4. phone/autonomy_rhythm.json
+    def _build_autonomy_rhythm() -> dict[str, Any]:
+        from components.phone import autonomy_rhythm_view as ar_view
+        state = ar_view.default_autonomy_rhythm_state()
+        state["updated_at"] = effective_iso
+        return state
+
+    _seed_if_absent(
+        "phone/autonomy_rhythm.json",
+        root_path / "phone" / "autonomy_rhythm.json",
+        _build_autonomy_rhythm,
+    )
+
+    # 5. life/everyday_desires.json
+    def _build_everyday_desires() -> dict[str, Any]:
+        try:
+            from components.life.scripts import everyday_desire_lifecycle as edl
+        except Exception:  # pragma: no cover
+            import everyday_desire_lifecycle as edl  # type: ignore[no-redef]
+        state = edl.default_everyday_desire_state()
+        state["updated_at"] = effective_iso
+        return state
+
+    _seed_if_absent(
+        "life/everyday_desires.json",
+        root_path / "life" / "everyday_desires.json",
+        _build_everyday_desires,
+    )
+
+    # 6. world/v05_living_town.json
+    def _build_v05_living_town() -> dict[str, Any]:
+        try:
+            from components.world.scripts import v05_living_town_engine as v05_town
+        except Exception:  # pragma: no cover
+            import v05_living_town_engine as v05_town  # type: ignore[no-redef]
+        town_dt = v05_town._parse_now(effective_iso)
+        ctx = v05_town._extract_world_context_zero_write(root_path, town_dt)
+        state = v05_town._default_state(ctx)
+        state["updated_at"] = effective_iso
+        state["last_pulse_at"] = effective_iso
+        return state
+
+    _seed_if_absent(
+        "world/v05_living_town.json",
+        root_path / "world" / "v05_living_town.json",
+        _build_v05_living_town,
+    )
+
+    # 7. life/v05_inner_spark.json
+    def _build_v05_inner_spark() -> dict[str, Any]:
+        try:
+            from components.life.scripts import v05_dreams_desires_foreshadow as v05_spark
+        except Exception:  # pragma: no cover
+            import v05_dreams_desires_foreshadow as v05_spark  # type: ignore[no-redef]
+        state = v05_spark._empty_state()
+        state["updated_at"] = effective_iso
+        return state
+
+    _seed_if_absent(
+        "life/v05_inner_spark.json",
+        root_path / "life" / "v05_inner_spark.json",
+        _build_v05_inner_spark,
+    )
+
+    return {
+        "ok": True,
+        "root": str(root_path),
+        "bootstrapped_at": effective_iso,
+        "created": created,
+        "skipped_existing": skipped_existing,
+        "created_count": len(created),
+        "llm_calls": 0,
+    }
+
+
 def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
                      run_id: Optional[str] = None,
                      world_package: Optional[str] = None,
                      lived_needs: Optional[Mapping[str, Any]] = None,
+                     no_lived_needs: bool = False,
                      starter_reading: bool = False) -> dict[str, Any]:
     """Prepare exactly one new instance, or reuse the one already at ``root``.
 
@@ -492,9 +680,11 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         memory = phone_life.enable_instance_memory(
             root, None, MEMORY_OPERATION_KEY,
             authority_path=authority or _default_authority(root))
+        foundation_bootstrap = bootstrap_living_foundation_state(root)
         return {"ok": str(memory.get("status")) == "READY",
                 "status": "ALREADY_PREPARED", "root": str(root),
                 "created": False, "phone": dict(reloaded), "memory": memory,
+                "living_foundation_bootstrap": foundation_bootstrap,
                 "config": marker}
 
     if not root.is_absolute():
@@ -506,6 +696,10 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
             raise RuntimeError("ROOT_NOT_EMPTY")
         # demo.prepare_demo 只接受“不存在”的新根；空目录也拒绝，避免悄悄占用别人的目录。
         raise RuntimeError("ROOT_EXISTS")
+
+    effective_lived_needs = lived_needs
+    if effective_lived_needs is None and not no_lived_needs:
+        effective_lived_needs = {"enabled": True, "hunger": 0.0, "thirst": 0.0, "toilet": 0.0}
 
     reading = _package_reading_material(world_package)
     # 包自带阅读材料优先；只有在明确 opt-in 且包没有声明时才用主题+seed 的本地分页读物。
@@ -519,17 +713,18 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         seed_work_artifact=False,
         run_id=run_id,
         world_package=world_package,
-        lived_needs=lived_needs)
+        lived_needs=effective_lived_needs)
     prepared["package_reading_material"] = reading
     package_identity = dict(prepared.get("world_package") or {})
     body_dir = Path(str(prepared["world_home"])) / "data" / "body"
     lived_report = None
-    if lived_needs:
+    if effective_lived_needs:
         from body_lived_needs_enable import enable_profile
 
         lived_report = enable_profile(
-            body_dir, hunger=float(lived_needs["hunger"]),
-            thirst=float(lived_needs["thirst"]), toilet=float(lived_needs["toilet"]),
+            body_dir, hunger=float(effective_lived_needs["hunger"]),
+            thirst=float(effective_lived_needs["thirst"]),
+            toilet=float(effective_lived_needs["toilet"]),
             note="nyairo_day explicit virtual profile; not a human measurement")
     target_authority = authority or _default_authority(root)
     # 先留归管标记：即使 Memory 这一步失败，重试 start 也只修 Memory，不会重建实例、不会接管别人的根。
@@ -537,16 +732,22 @@ def _ensure_instance(root: Path, *, authority: Optional[Path] = None,
         "schema": SCHEMA_MANAGED, "created_at": _now_iso(), "root": str(root),
         "memory_authority": str(target_authority),
         "world_package": package_identity,
-        "lived_needs": dict(lived_needs or {}),
+        "lived_needs": dict(effective_lived_needs or {}),
         "room_living": False, "world_gate": DEFAULT_WORLD_GATE,
         "world_actions": DEFAULT_WORLD_GATE != "off", "ambient_events": False,
         "note": "this instance was created by scripts/nyairo_day.py; foreign instances are never adopted",
     })
     memory = phone_life.enable_instance_memory(
         root, None, MEMORY_OPERATION_KEY, authority_path=target_authority)
+    foundation_bootstrap = (
+        bootstrap_living_foundation_state(root)
+        if _is_instance(root) and _is_managed(root)
+        else None
+    )
     return {"ok": str(memory.get("status")) == "READY", "status": "PREPARED", "root": str(root),
             "created": True, "prepared": prepared, "memory": memory,
             "lived_needs": lived_report,
+            "living_foundation_bootstrap": foundation_bootstrap,
             "config": _managed_config(root),
             "phone": phone_service.load_instance(root)}
 
@@ -614,6 +815,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             root, authority=authority, run_id=args.run_id,
             world_package=getattr(args, "world_package", None),
             lived_needs=lived_needs,
+            no_lived_needs=bool(getattr(args, "no_lived_needs", False)),
             starter_reading=bool(getattr(args, "starter_reading", False)))
     except Exception as exc:
         return _refuse(_reason_of(exc), str(exc), as_json=bool(getattr(args, "json", False)))
@@ -802,12 +1004,134 @@ def _resolve_v03_clock_interval(
     return val if val > 0.0 else 0.0
 
 
+def _read_rain_neglect_signals_zero_write(
+    root_path: Path,
+    target_dt: datetime,
+    upstream_som: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Read damp/wet outerwear ``wetted_at`` and body warmth/cold_tendency with 0 disk writes."""
+    croot = root_path
+    body_candidates: list[Path] = []
+    try:
+        from components.world.scripts import instance_paths as _instance_paths
+    except Exception:  # pragma: no cover
+        try:
+            import instance_paths as _instance_paths  # type: ignore[no-redef]
+        except Exception:
+            _instance_paths = None  # type: ignore[assignment]
+    if _instance_paths is not None:
+        try:
+            resolved = _instance_paths.resolve_instance_paths(root_path)
+            croot = resolved.day_root
+            body_candidates.append(resolved.body_runtime_json)
+            body_candidates.append(resolved.world_home / "data" / "body" / "runtime.json")
+        except Exception:
+            pass
+    body_candidates.extend([
+        croot / "one-day" / "world-home" / "data" / "body" / "runtime.json",
+        croot / "data" / "body" / "runtime.json",
+        croot / "world" / "data" / "body" / "runtime.json",
+    ])
+
+    upstream_garment = upstream_som.get("garment") if isinstance(upstream_som.get("garment"), Mapping) else {}
+    garment_state = upstream_garment.get("state")
+    garment_dryness = upstream_garment.get("dryness")
+    wetted_at_raw: Any = upstream_garment.get("wetted_at")
+
+    somatic_path = croot / "phone" / "somatic_comfort.json"
+    if not somatic_path.is_symlink() and somatic_path.is_file():
+        try:
+            sdoc = json.loads(somatic_path.read_text(encoding="utf-8"))
+            if isinstance(sdoc, Mapping) and isinstance(sdoc.get("garment"), Mapping):
+                gdoc = sdoc["garment"]
+                if gdoc.get("state") is not None:
+                    garment_state = gdoc.get("state")
+                if gdoc.get("dryness") is not None:
+                    garment_dryness = gdoc.get("dryness")
+                if gdoc.get("wetted_at") is not None:
+                    wetted_at_raw = gdoc.get("wetted_at")
+        except Exception:
+            pass
+
+    damp_outerwear_worn = (
+        upstream_som.get("damp_outerwear_worn") is True
+        or (garment_state == "wear" and garment_dryness in ("damp", "wet"))
+    )
+
+    wetted_dt = _parse_any_iso_utc(wetted_at_raw)
+    target_utc = target_dt.astimezone(timezone.utc)
+    wetted_elapsed_seconds: Optional[float] = None
+    if wetted_dt is not None:
+        wetted_elapsed_seconds = (target_utc - wetted_dt).total_seconds()
+
+    raw_fatigue = upstream_som.get("body_fatigue")
+    body_fatigue: Optional[float] = (
+        float(raw_fatigue)
+        if isinstance(raw_fatigue, (int, float)) and not isinstance(raw_fatigue, bool)
+        else None
+    )
+    body_warmth: Optional[float] = None
+    cold_tendency = False
+
+    seen_paths: set[str] = set()
+    for bpath in body_candidates:
+        bkey = str(bpath)
+        if bkey in seen_paths:
+            continue
+        seen_paths.add(bkey)
+        if bpath.is_symlink() or not bpath.is_file():
+            continue
+        try:
+            bdoc = json.loads(bpath.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(bdoc, Mapping):
+            continue
+        somatic_map = bdoc.get("somatic") if isinstance(bdoc.get("somatic"), Mapping) else {}
+        if body_fatigue is None:
+            cand_f = somatic_map.get("fatigue", bdoc.get("fatigue"))
+            if isinstance(cand_f, (int, float)) and not isinstance(cand_f, bool):
+                body_fatigue = float(cand_f)
+        cand_w = somatic_map.get("warmth", bdoc.get("warmth"))
+        if isinstance(cand_w, (int, float)) and not isinstance(cand_w, bool):
+            body_warmth = float(cand_w)
+            if body_warmth <= 0.35:
+                cold_tendency = True
+        latch = bdoc.get("signal_latch")
+        if isinstance(latch, Mapping) and latch.get("cold_tendency") is True:
+            cold_tendency = True
+        raw_signals = bdoc.get("signals")
+        if isinstance(raw_signals, list):
+            for sig in raw_signals:
+                if sig == "cold_tendency" or (
+                    isinstance(sig, Mapping)
+                    and str(sig.get("type") or sig.get("signal") or "") == "cold_tendency"
+                ):
+                    cold_tendency = True
+        break
+
+    return {
+        "damp_outerwear_worn": damp_outerwear_worn,
+        "garment_state": garment_state,
+        "garment_dryness": garment_dryness,
+        "wetted_at": wetted_at_raw if isinstance(wetted_at_raw, str) else None,
+        "wetted_elapsed_seconds": wetted_elapsed_seconds,
+        "body_fatigue": body_fatigue,
+        "body_warmth": body_warmth,
+        "cold_tendency": cold_tendency,
+    }
+
+
 def _maybe_tick_v03_ecology(root_path: Path, now_iso: Optional[str]) -> Optional[dict[str, Any]]:
     """Advance existing v03_ecology slow variables (illness recovery / expired DELIVERED notes).
 
     Never creates ``v03_ecology.json`` when absent, never touches ``UNKNOWN`` outbound records,
     and performs zero disk writes when healthy with no expired outbound notes.
     """
+
+    fast_eco_path = root_path / "phone" / "v03_ecology.json"
+    if fast_eco_path.is_symlink() or not fast_eco_path.exists() or not fast_eco_path.is_file():
+        return None
 
     try:
         from components.world.scripts import v03_economy_illness_bridge as v03_eco
@@ -845,16 +1169,38 @@ def _maybe_tick_v03_ecology(root_path: Path, now_iso: Optional[str]) -> Optional
     can_advance_illness = has_illness_or_strain and (last_eval_dt is None or target_dt > last_eval_dt)
 
     can_record_neglect_strain = False
-    if ill_phase == "healthy":
+    neglect_intensity = 0.40
+    if ill_phase in ("healthy", "prodrome"):
         upstream_som = v03_eco._read_upstream_somatic_and_body_zero_write(root_path, effective_iso)
-        raw_fatigue = upstream_som.get("body_fatigue")
-        neglect_active = (
-            upstream_som.get("damp_outerwear_worn") is True
-            and isinstance(raw_fatigue, (int, float))
-            and not isinstance(raw_fatigue, bool)
-            and float(raw_fatigue) >= 0.82
+        rain_sig = _read_rain_neglect_signals_zero_write(root_path, target_dt, upstream_som)
+        damp_worn = bool(rain_sig["damp_outerwear_worn"])
+        raw_fatigue = rain_sig["body_fatigue"]
+        wetted_elapsed = rain_sig["wetted_elapsed_seconds"]
+        garment_dryness = rain_sig["garment_dryness"]
+        cold_tendency = bool(rain_sig["cold_tendency"])
+
+        # Backward compatibility when wetted_at is absent: damp outerwear + high fatigue (>= 0.82)
+        legacy_neglect = (
+            damp_worn
+            and wetted_elapsed is None
+            and raw_fatigue is not None
+            and raw_fatigue >= 0.82
         )
+        # Realistic Stage 2 rain/chill neglect: damp/wet outerwear worn unchanged >= 45m (2700s)
+        # AND (fatigue >= 0.55 OR cold_tendency / warmth <= 0.35 OR dryness == "wet")
+        realistic_neglect = (
+            damp_worn
+            and wetted_elapsed is not None
+            and wetted_elapsed >= 2700.0
+            and (
+                (raw_fatigue is not None and raw_fatigue >= 0.55)
+                or cold_tendency
+                or garment_dryness == "wet"
+            )
+        )
+        neglect_active = legacy_neglect or realistic_neglect
         if neglect_active:
+            neglect_intensity = 0.65 if garment_dryness == "wet" else 0.40
             latest_strain_dt: Optional[datetime] = None
             for s_ev in ill.get("strain_events") or []:
                 if not isinstance(s_ev, Mapping):
@@ -870,7 +1216,7 @@ def _maybe_tick_v03_ecology(root_path: Path, now_iso: Optional[str]) -> Optional
             if latest_strain_dt is None or (target_dt - latest_strain_dt).total_seconds() >= 1800.0:
                 if last_eval_dt is None or target_dt > last_eval_dt:
                     can_record_neglect_strain = True
-            else:
+            elif ill_phase == "healthy":
                 # Cooldown active while neglect persists: avoid 60s disk-write spam.
                 can_advance_illness = False
 
@@ -899,7 +1245,7 @@ def _maybe_tick_v03_ecology(root_path: Path, now_iso: Optional[str]) -> Optional
             strain_proj = v03_eco.record_strain_or_rest(
                 root_path,
                 event_kind="caught_in_rain",
-                intensity=0.40,
+                intensity=neglect_intensity,
                 unchanged_damp_clothes=True,
                 now_iso=effective_iso,
             )
@@ -948,7 +1294,7 @@ def _maybe_tick_v04_neighborhood(
     root_path: Path,
     now_iso: Optional[str],
 ) -> Optional[dict[str, Any]]:
-    """Advance existing v0.4 neighborhood processes (cloth drying, journey, holds, notices) with 0 LLM calls.
+    """Advance existing v0.4 neighborhood weather & processes (cloth drying, journey, holds, notices) with 0 LLM calls.
 
     Strictly zero-write when ``world/v04_neighborhood_state.json`` is absent on disk.
     """
@@ -961,23 +1307,191 @@ def _maybe_tick_v04_neighborhood(
         return None
 
     try:
-        from components.world.scripts.v04_neighborhood_living import (
-            advance_v04_neighborhood_processes,
-        )
+        from components.world.scripts import v04_neighborhood_living as v04_nb
     except Exception:  # pragma: no cover
         try:
-            from v04_neighborhood_living import (  # type: ignore[no-redef]
-                advance_v04_neighborhood_processes,
-            )
+            import v04_neighborhood_living as v04_nb  # type: ignore[no-redef]
+        except Exception:
+            return None
+
+    effective_iso = now_iso or _now_iso()
+    weather_report: Optional[dict[str, Any]] = None
+    weather_changed = False
+    weather_fn = getattr(v04_nb, "advance_autonomous_weather_pulse", None)
+    if callable(weather_fn):
+        try:
+            raw_weather = weather_fn(root_path, now_iso=effective_iso)
+            if isinstance(raw_weather, Mapping):
+                weather_report = dict(raw_weather)
+                weather_changed = bool(weather_report.get("changed"))
+        except Exception:
+            weather_report = None
+
+    try:
+        report = v04_nb.advance_v04_neighborhood_processes(root_path, now_iso=effective_iso)
+    except Exception:
+        report = None
+
+    if not isinstance(report, Mapping):
+        if weather_report is None:
+            return None
+        out = {
+            "ok": True,
+            "advanced": weather_changed,
+            "changed": weather_changed,
+            "settled_count": 1 if weather_changed else 0,
+            "changes_count": 1 if weather_changed else 0,
+            "llm_calls": 0,
+        }
+    else:
+        out = dict(report)
+        if weather_changed:
+            out["changed"] = True
+            out["advanced"] = True
+            out["settled_count"] = int(out.get("settled_count") or 0) + 1
+            out["changes_count"] = int(out.get("changes_count") or 0) + 1
+    if weather_report is not None:
+        out["weather_pulse"] = weather_report
+    out["weather_changed"] = weather_changed
+    out.setdefault("llm_calls", 0)
+    return out
+
+
+def _maybe_tick_v05_living_town(
+    root_path: Path,
+    now_iso: Optional[str],
+    *,
+    weather_changed: bool = False,
+) -> Optional[dict[str, Any]]:
+    """Advance existing ``world/v05_living_town.json`` when >=900s elapsed or weather/day changed.
+
+    Strictly zero-write when ``world/v05_living_town.json`` is absent or not due.
+    """
+
+    town_path = root_path / "world" / "v05_living_town.json"
+    if town_path.is_symlink() or not town_path.exists() or not town_path.is_file():
+        return None
+
+    effective_iso = now_iso or _now_iso()
+    now_dt = _parse_any_iso_utc(effective_iso)
+    if now_dt is None:
+        return None
+
+    try:
+        raw_doc = json.loads(town_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(raw_doc, Mapping):
+        return None
+
+    anchor_raw = raw_doc.get("last_pulse_at") or raw_doc.get("updated_at")
+    anchor_dt = _parse_any_iso_utc(anchor_raw)
+    biz_tz = timezone(timedelta(hours=8))
+    day_changed = (
+        anchor_dt is not None
+        and anchor_dt.astimezone(biz_tz).date() != now_dt.astimezone(biz_tz).date()
+    )
+    elapsed_seconds = (
+        (now_dt - anchor_dt).total_seconds() if anchor_dt is not None else 900.0
+    )
+    if (
+        anchor_dt is not None
+        and elapsed_seconds < 900.0
+        and not weather_changed
+        and not day_changed
+    ):
+        return None
+
+    try:
+        from components.world.scripts import v05_living_town_engine as v05_town
+    except Exception:  # pragma: no cover
+        try:
+            import v05_living_town_engine as v05_town  # type: ignore[no-redef]
+        except Exception:
+            return None
+
+    elapsed_hours = max(1.0 / 60.0, min(48.0, max(0.0, elapsed_seconds) / 3600.0))
+    try:
+        report = v05_town.advance_town_pulse(
+            root_path,
+            elapsed_hours=elapsed_hours,
+            now_iso=effective_iso,
+        )
+    except Exception:
+        return None
+    if not isinstance(report, Mapping):
+        return None
+    out = dict(report)
+    out.setdefault("llm_calls", 0)
+    return out
+
+
+def _maybe_tick_v05_inner_spark(
+    root_path: Path,
+    now_iso: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Advance existing ``life/v05_inner_spark.json`` (daylight frost melt & real wake dream only).
+
+    Strictly zero-write when ``life/v05_inner_spark.json`` is absent or nothing changed.
+    """
+
+    spark_path = root_path / "life" / "v05_inner_spark.json"
+    if spark_path.is_symlink() or not spark_path.exists() or not spark_path.is_file():
+        return None
+
+    try:
+        from components.life.scripts import v05_dreams_desires_foreshadow as v05_spark
+    except Exception:  # pragma: no cover
+        try:
+            import v05_dreams_desires_foreshadow as v05_spark  # type: ignore[no-redef]
         except Exception:
             return None
 
     effective_iso = now_iso or _now_iso()
     try:
-        report = advance_v04_neighborhood_processes(root_path, now_iso=effective_iso)
+        report = v05_spark.advance_inner_spark_heartbeat(
+            root_path,
+            now_iso=effective_iso,
+            woke_from_sleep=False,
+        )
     except Exception:
         return None
-    if not isinstance(report, Mapping):
+    if not isinstance(report, Mapping) or not report.get("changed"):
+        return None
+    out = dict(report)
+    out.setdefault("llm_calls", 0)
+    return out
+
+
+def _maybe_compact_body_transitions(root_path: Path) -> Optional[dict[str, Any]]:
+    """Atomically compact ``body/transitions.jsonl`` when oversized, with 0 writes when absent or bounded."""
+
+    try:
+        from components.world.scripts import instance_paths as _instance_paths
+    except Exception:  # pragma: no cover
+        try:
+            import instance_paths as _instance_paths  # type: ignore[no-redef]
+        except Exception:
+            return None
+
+    paths = _instance_paths.resolve_instance_paths(root_path)
+    tr_path = paths.body_transitions_jsonl
+    if tr_path.is_symlink() or not tr_path.exists() or not tr_path.is_file():
+        return None
+
+    try:
+        from components.world.scripts import body_runtime as br
+    except Exception:  # pragma: no cover
+        try:
+            import body_runtime as br  # type: ignore[no-redef]
+        except Exception:
+            return None
+
+    try:
+        report = br.BodyStore(paths.body_dir).compact_transitions_if_needed()
+    except Exception:
+        return None
+    if not isinstance(report, Mapping) or not report.get("compacted"):
         return None
     out = dict(report)
     out.setdefault("llm_calls", 0)
@@ -988,9 +1502,12 @@ def _maybe_tick_autonomy_rhythm(
     root_path: Path,
     now_iso: Optional[str],
 ) -> Optional[dict[str, Any]]:
-    """Promote due ``QUEUED_ON_PHONE`` deferred replies to ``READY_TO_REPLY`` with 0 LLM calls.
+    """Promote due or live-released ``QUEUED_ON_PHONE`` deferred replies to ``READY_TO_REPLY`` with 0 LLM calls.
 
-    Strictly zero-write when ``phone/autonomy_rhythm.json`` is absent or has no due items.
+    Reads live zero-write World/Body/Desk/Somatic snapshots via
+    ``build_autonomy_live_snapshots_zero_write`` and passes them into
+    ``tick_autonomy_rhythm_readiness``. Strictly zero-write when
+    ``phone/autonomy_rhythm.json`` is absent or nothing needs promotion or sync.
     """
 
     rhythm_path = root_path / "phone" / "autonomy_rhythm.json"
@@ -998,14 +1515,69 @@ def _maybe_tick_autonomy_rhythm(
         return None
 
     try:
-        from components.phone.autonomy_rhythm_view import tick_autonomy_rhythm_readiness
+        from components.phone.autonomy_rhythm_view import (
+            build_autonomy_live_snapshots_zero_write,
+            tick_autonomy_rhythm_readiness,
+        )
     except Exception:  # pragma: no cover
         return None
 
     try:
-        return tick_autonomy_rhythm_readiness(root_path, now_iso=now_iso)
+        snapshots = build_autonomy_live_snapshots_zero_write(
+            root_path,
+            now_iso=now_iso,
+        )
+        return tick_autonomy_rhythm_readiness(
+            root_path,
+            now_iso=now_iso,
+            world_result=snapshots.get("world_result"),
+            body_view=snapshots.get("body_view"),
+            desk_result=snapshots.get("desk_result"),
+            somatic_state=snapshots.get("somatic_state"),
+        )
     except Exception:
         return None
+
+
+def _maybe_tick_proactive_outreach(
+    root_path: Path,
+    now_iso: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Evaluate high-threshold lived outreach triggers ONLY on initialized roots with 0 LLM calls.
+
+    Strictly zero-write when ``phone/v03_ecology.json`` is absent (preserving bare-dir
+    ``skipped_uninitialized``) or when no high-threshold trigger enqueues an item.
+    """
+
+    eco_path = root_path / "phone" / "v03_ecology.json"
+    if eco_path.is_symlink() or not eco_path.exists() or not eco_path.is_file():
+        return None
+    if eco_path.parent.exists() and eco_path.parent.is_symlink():
+        return None
+
+    try:
+        from components.life.scripts import proactive_outreach_producer as outreach_prod
+    except Exception:  # pragma: no cover
+        try:
+            import proactive_outreach_producer as outreach_prod  # type: ignore[no-redef]
+        except Exception:
+            return None
+
+    eval_fn = getattr(outreach_prod, "evaluate_heartbeat_outreach_triggers", None)
+    if not callable(eval_fn):
+        return None
+
+    try:
+        report = eval_fn(root_path, now_iso=now_iso)
+    except Exception:
+        return None
+    if not isinstance(report, Mapping):
+        return None
+    if int(report.get("enqueued_count") or 0) <= 0:
+        return None
+    out = dict(report)
+    out.setdefault("llm_calls", 0)
+    return out
 
 
 def _atomic_write_json_0600(path: Path, payload: Mapping[str, Any]) -> None:
@@ -1054,29 +1626,206 @@ def _parse_any_iso_utc(raw: Any) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+def _sweep_legacy_phone_everyday_desires(
+    cand: Path,
+    now_dt: datetime,
+    effective_iso: str,
+) -> tuple[int, int, int]:
+    """Sweep real ``created_at + ttl_seconds`` & optional ``expires_at`` on legacy ``phone/everyday_desires.json``."""
+    try:
+        raw_doc = json.loads(cand.read_text(encoding="utf-8"))
+    except Exception:
+        return 0, 0, 0
+    if not isinstance(raw_doc, dict):
+        return 0, 0, 0
+
+    doc = json.loads(json.dumps(raw_doc))
+    file_faded = 0
+    file_decayed = 0
+
+    if isinstance(doc.get("turn_only_buffer"), list):
+        kept_buf: list[dict[str, Any]] = []
+        buf_faded = 0
+        for item in doc["turn_only_buffer"]:
+            if not isinstance(item, Mapping):
+                buf_faded += 1
+                continue
+            expired = False
+            exp_dt = _parse_any_iso_utc(item.get("expires_at") or item.get("ttl_until"))
+            if exp_dt is not None and now_dt >= exp_dt:
+                expired = True
+            if not expired:
+                created_dt = _parse_any_iso_utc(item.get("created_at"))
+                raw_ttl = item.get("ttl_seconds")
+                ttl_sec = (
+                    int(raw_ttl)
+                    if isinstance(raw_ttl, int) and not isinstance(raw_ttl, bool) and raw_ttl > 0
+                    else 900
+                )
+                if created_dt is not None and (now_dt - created_dt).total_seconds() >= ttl_sec:
+                    expired = True
+            if expired:
+                buf_faded += 1
+            else:
+                kept_buf.append(dict(item))
+        if buf_faded > 0:
+            file_faded += buf_faded
+            doc["turn_only_buffer"] = kept_buf
+            doc["naturally_faded_count"] = int(doc.get("naturally_faded_count") or 0) + buf_faded
+
+    if isinstance(doc.get("retained_concerns"), list):
+        kept_ret: list[dict[str, Any]] = []
+        ret_faded = 0
+        for entry in doc["retained_concerns"]:
+            if not isinstance(entry, Mapping):
+                ret_faded += 1
+                continue
+            row = dict(entry)
+            exp_dt = _parse_any_iso_utc(row.get("expires_at") or row.get("ttl_until"))
+            if exp_dt is not None and now_dt >= exp_dt:
+                ret_faded += 1
+                continue
+            created_dt = _parse_any_iso_utc(row.get("created_at"))
+            raw_ttl = row.get("ttl_seconds")
+            if (
+                created_dt is not None
+                and isinstance(raw_ttl, int)
+                and not isinstance(raw_ttl, bool)
+                and raw_ttl > 0
+                and (now_dt - created_dt).total_seconds() >= raw_ttl
+            ):
+                ret_faded += 1
+                continue
+            decay_rate = row.get("decay_per_hour")
+            intensity = row.get("intensity")
+            if (
+                isinstance(decay_rate, (int, float))
+                and not isinstance(decay_rate, bool)
+                and float(decay_rate) > 0.0
+                and isinstance(intensity, (int, float))
+                and not isinstance(intensity, bool)
+            ):
+                anchor_dt = _parse_any_iso_utc(
+                    row.get("updated_at") or row.get("created_at") or doc.get("updated_at")
+                )
+                if anchor_dt is not None and now_dt > anchor_dt:
+                    elapsed_h = (now_dt - anchor_dt).total_seconds() / 3600.0
+                    if elapsed_h > 0.0:
+                        new_int = round(max(0.0, float(intensity) - float(decay_rate) * elapsed_h), 4)
+                        if new_int <= 0.08:
+                            ret_faded += 1
+                            continue
+                        if new_int != round(float(intensity), 4):
+                            row["intensity"] = new_int
+                            row["updated_at"] = effective_iso
+                            file_decayed += 1
+            kept_ret.append(row)
+        if ret_faded > 0:
+            file_faded += ret_faded
+            doc["retained_concerns"] = kept_ret
+            doc["naturally_faded_count"] = int(doc.get("naturally_faded_count") or 0) + ret_faded
+        elif file_decayed > 0:
+            doc["retained_concerns"] = kept_ret
+
+    if file_faded > 0 or file_decayed > 0:
+        next_rev = int(doc.get("revision") or 0) + 1
+        doc["revision"] = next_rev
+        doc["updated_at"] = effective_iso
+        try:
+            _atomic_write_json_0600(cand, doc)
+        except Exception:
+            return 0, 0, 0
+        return file_faded, file_decayed, next_rev
+    return 0, 0, 0
+
+
+def _is_spark_desire_tick_due_zero_write(
+    spark_path: Path,
+    now_dt: datetime,
+    *,
+    weather_changed: bool,
+) -> bool:
+    if weather_changed:
+        return True
+    try:
+        raw_doc = json.loads(spark_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(raw_doc, Mapping):
+        return False
+    anchor_raw = (
+        raw_doc.get("last_desire_tick_at")
+        or raw_doc.get("last_emerge_at")
+        or raw_doc.get("updated_at")
+    )
+    anchor_dt = _parse_any_iso_utc(anchor_raw)
+    if anchor_dt is None or (now_dt - anchor_dt).total_seconds() >= 900.0:
+        return True
+    for item in raw_doc.get("desires") or []:
+        if not isinstance(item, Mapping) or item.get("status") != "active":
+            continue
+        exp_dt = _parse_any_iso_utc(item.get("expires_at") or item.get("ttl_until"))
+        if exp_dt is not None and now_dt >= exp_dt:
+            return True
+        created_dt = _parse_any_iso_utc(item.get("created_at"))
+        raw_ttl = item.get("ttl_seconds")
+        if (
+            created_dt is not None
+            and isinstance(raw_ttl, int)
+            and not isinstance(raw_ttl, bool)
+            and raw_ttl > 0
+            and (now_dt - created_dt).total_seconds() >= raw_ttl
+        ):
+            return True
+        item_anchor = _parse_any_iso_utc(
+            item.get("updated_at") or item.get("created_at") or raw_doc.get("updated_at")
+        )
+        raw_int = item.get("intensity")
+        raw_rate = item.get("decay_per_hour")
+        if (
+            item_anchor is not None
+            and now_dt > item_anchor
+            and isinstance(raw_int, (int, float))
+            and not isinstance(raw_int, bool)
+            and isinstance(raw_rate, (int, float))
+            and not isinstance(raw_rate, bool)
+            and float(raw_rate) > 0.0
+        ):
+            elapsed_h = (now_dt - item_anchor).total_seconds() / 3600.0
+            if float(raw_int) - float(raw_rate) * elapsed_h <= 0.08:
+                return True
+    return False
+
+
 def _maybe_tick_everyday_desires(
     root_path: Path,
     now_iso: Optional[str],
+    *,
+    weather_changed: bool = False,
 ) -> Optional[dict[str, Any]]:
-    """Advance TTL/decay on existing ``everyday_desires.json`` ONLY when already present & due.
+    """Advance real desire TTL/decay & bounded autonomous emergence ONLY when state exists & due.
 
-    Never creates ``everyday_desires.json`` when absent and performs zero disk writes when
-    no item has due TTL expiration or decay.
+    Never creates ``everyday_desires.json`` or ``v05_inner_spark.json`` on bare unbootstrapped
+    directories and performs zero disk writes when nothing is due or changed.
     """
 
-    candidates = (
-        root_path / "phone" / "everyday_desires.json",
-        root_path / "life" / "everyday_desires.json",
-    )
-    existing_paths = [
-        p
-        for p in candidates
-        if not p.is_symlink()
-        and p.exists()
-        and p.is_file()
-        and not (p.parent.exists() and p.parent.is_symlink())
-    ]
-    if not existing_paths:
+    life_desires_path = root_path / "life" / "everyday_desires.json"
+    phone_desires_path = root_path / "phone" / "everyday_desires.json"
+    spark_path = root_path / "life" / "v05_inner_spark.json"
+
+    def _is_safe_file(p: Path) -> bool:
+        return (
+            not p.is_symlink()
+            and p.exists()
+            and p.is_file()
+            and not (p.parent.exists() and p.parent.is_symlink())
+        )
+
+    life_exists = _is_safe_file(life_desires_path)
+    phone_exists = _is_safe_file(phone_desires_path)
+    spark_exists = _is_safe_file(spark_path)
+
+    if not life_exists and not phone_exists and not spark_exists:
         return None
 
     effective_iso = now_iso or _now_iso()
@@ -1086,119 +1835,265 @@ def _maybe_tick_everyday_desires(
 
     total_faded = 0
     total_decayed = 0
+    total_emerged = 0
+    total_evicted = 0
     updated_paths: list[str] = []
     last_rev = 0
+    spark_tick_rep: Optional[dict[str, Any]] = None
+    spark_emerge_rep: Optional[dict[str, Any]] = None
+    everyday_rep: Optional[dict[str, Any]] = None
 
-    for cand in existing_paths:
+    spark_due = spark_exists and _is_spark_desire_tick_due_zero_write(
+        spark_path,
+        now_dt,
+        weather_changed=weather_changed,
+    )
+
+    if spark_due:
         try:
-            raw_doc = json.loads(cand.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(raw_doc, dict):
-            continue
-
-        doc = json.loads(json.dumps(raw_doc))
-        file_faded = 0
-        file_decayed = 0
-
-        # 1. Standard everyday_desire_lifecycle.v1 turn_only_buffer TTL sweep
-        if isinstance(doc.get("turn_only_buffer"), list):
-            kept_buf: list[dict[str, Any]] = []
-            for item in doc["turn_only_buffer"]:
-                if not isinstance(item, Mapping):
-                    file_faded += 1
-                    continue
-                exp_dt = _parse_any_iso_utc(item.get("expires_at") or item.get("ttl_until"))
-                if exp_dt is not None and now_dt >= exp_dt:
-                    file_faded += 1
-                else:
-                    kept_buf.append(dict(item))
-            if file_faded > 0:
-                doc["turn_only_buffer"] = kept_buf
-                doc["naturally_faded_count"] = int(doc.get("naturally_faded_count") or 0) + file_faded
-
-        # 2. Optional TTL / decay sweep on recurring_pool / desires / items lists
-        for list_key in ("recurring_pool", "desires", "items", "active_desires"):
-            raw_list = doc.get(list_key)
-            if not isinstance(raw_list, list):
-                continue
-            next_list: list[Any] = []
-            for entry in raw_list:
-                if not isinstance(entry, Mapping):
-                    next_list.append(entry)
-                    continue
-                row = dict(entry)
-                st = str(row.get("status") or "active").strip().lower()
-                if st in ("faded", "expired", "resolved", "settled", "dropped"):
-                    next_list.append(row)
-                    continue
-                exp_dt = _parse_any_iso_utc(row.get("expires_at") or row.get("ttl_until"))
-                if exp_dt is not None and now_dt >= exp_dt:
-                    if list_key == "recurring_pool":
-                        file_faded += 1
-                        continue
-                    row["status"] = "faded"
-                    row["faded_at"] = effective_iso
-                    file_faded += 1
-                    next_list.append(row)
-                    continue
-                decay_rate = row.get("decay_per_hour")
-                intensity = row.get("intensity")
-                if (
-                    isinstance(decay_rate, (int, float))
-                    and not isinstance(decay_rate, bool)
-                    and float(decay_rate) > 0.0
-                    and isinstance(intensity, (int, float))
-                    and not isinstance(intensity, bool)
-                    and float(intensity) > 0.0
-                ):
-                    anchor_dt = _parse_any_iso_utc(
-                        row.get("updated_at") or row.get("created_at") or doc.get("updated_at")
-                    )
-                    if anchor_dt is not None and now_dt > anchor_dt:
-                        elapsed_h = (now_dt - anchor_dt).total_seconds() / 3600.0
-                        if elapsed_h > 0.0:
-                            new_int = round(max(0.0, float(intensity) - float(decay_rate) * elapsed_h), 4)
-                            if new_int != round(float(intensity), 4):
-                                row["intensity"] = new_int
-                                row["updated_at"] = effective_iso
-                                if new_int <= 0.0:
-                                    row["status"] = "faded"
-                                    row["faded_at"] = effective_iso
-                                    file_faded += 1
-                                else:
-                                    file_decayed += 1
-                next_list.append(row)
-            doc[list_key] = next_list
-            if list_key == "recurring_pool" and file_faded > 0 and "turn_only_buffer" not in raw_doc:
-                doc["naturally_faded_count"] = int(doc.get("naturally_faded_count") or 0) + file_faded
-
-        if file_faded > 0 or file_decayed > 0:
-            next_rev = int(doc.get("revision") or 0) + 1
-            doc["revision"] = next_rev
-            doc["updated_at"] = effective_iso
+            from components.life.scripts import v05_dreams_desires_foreshadow as v05_spark
+        except Exception:  # pragma: no cover
             try:
-                _atomic_write_json_0600(cand, doc)
+                import v05_dreams_desires_foreshadow as v05_spark  # type: ignore[no-redef]
             except Exception:
-                continue
-            total_faded += file_faded
-            total_decayed += file_decayed
-            updated_paths.append(str(cand))
-            last_rev = next_rev
+                v05_spark = None  # type: ignore[assignment]
+        if v05_spark is not None:
+            try:
+                tick_res = v05_spark.tick_desire_lifecycle(root_path, now_iso=effective_iso)
+                if isinstance(tick_res, Mapping) and tick_res.get("changed"):
+                    spark_tick_rep = dict(tick_res)
+                    total_faded += int(tick_res.get("faded_count") or 0)
+                    total_decayed += int(tick_res.get("decayed_count") or 0)
+                    total_evicted += int(tick_res.get("evicted_count") or 0)
+                    if tick_res.get("spark_changed"):
+                        updated_paths.append(str(spark_path))
+                    if tick_res.get("everyday_changed") and life_exists:
+                        updated_paths.append(str(life_desires_path))
+                    if isinstance(tick_res.get("everyday_desires_receipt"), Mapping):
+                        everyday_rep = dict(tick_res["everyday_desires_receipt"])
+            except Exception:
+                pass
+            try:
+                emerge_res = v05_spark.emerge_autonomous_desires(root_path, now_iso=effective_iso)
+                if isinstance(emerge_res, Mapping) and emerge_res.get("changed"):
+                    spark_emerge_rep = dict(emerge_res)
+                    total_emerged += int(emerge_res.get("emerged_count") or 0)
+                    total_evicted += len(emerge_res.get("evicted_desires") or [])
+                    if str(spark_path) not in updated_paths:
+                        updated_paths.append(str(spark_path))
+                    if (
+                        life_exists
+                        and isinstance(emerge_res.get("everyday_sync"), Mapping)
+                        and emerge_res["everyday_sync"].get("changed")
+                        and str(life_desires_path) not in updated_paths
+                    ):
+                        updated_paths.append(str(life_desires_path))
+                    if isinstance(emerge_res.get("revision"), int):
+                        last_rev = max(last_rev, int(emerge_res["revision"]))
+            except Exception:
+                pass
+    elif life_exists:
+        try:
+            from components.life.scripts import everyday_desire_lifecycle as edl
+        except Exception:  # pragma: no cover
+            try:
+                import everyday_desire_lifecycle as edl  # type: ignore[no-redef]
+            except Exception:
+                edl = None  # type: ignore[assignment]
+        if edl is not None:
+            try:
+                # When spark decay/emergence isn't due (<900s), only sweep real expired TTLs &
+                # source-lost concerns without 60s continuous intensity float churn.
+                ed_res = edl.sweep_everyday_desires_ttl_and_decay(
+                    root_path,
+                    now_iso=effective_iso,
+                    decay_intensity=not spark_exists,
+                )
+                if isinstance(ed_res, Mapping) and ed_res.get("changed"):
+                    everyday_rep = dict(ed_res)
+                    total_faded += int(ed_res.get("faded_count") or 0)
+                    total_decayed += int(ed_res.get("decayed_count") or 0)
+                    updated_paths.append(str(life_desires_path))
+                    if isinstance(ed_res.get("revision"), int):
+                        last_rev = max(last_rev, int(ed_res["revision"]))
+            except Exception:
+                pass
+
+    if phone_exists:
+        pf, pd, prev = _sweep_legacy_phone_everyday_desires(
+            phone_desires_path,
+            now_dt,
+            effective_iso,
+        )
+        if pf > 0 or pd > 0:
+            total_faded += pf
+            total_decayed += pd
+            updated_paths.append(str(phone_desires_path))
+            last_rev = max(last_rev, prev)
 
     if not updated_paths:
         return None
 
-    return {
+    out: dict[str, Any] = {
         "ok": True,
         "changed": True,
         "faded_count": total_faded,
         "decayed_count": total_decayed,
+        "emerged_count": total_emerged,
+        "evicted_count": total_evicted,
         "updated_paths": updated_paths,
         "revision": last_rev,
         "updated_at": effective_iso,
+        "frustration_debt": 0,
         "llm_calls": 0,
     }
+    if everyday_rep is not None:
+        out["everyday_desires_receipt"] = everyday_rep
+    if spark_tick_rep is not None:
+        out["spark_tick_receipt"] = spark_tick_rep
+    if spark_emerge_rep is not None:
+        out["spark_emerge_receipt"] = spark_emerge_rep
+    return out
+
+
+def _extract_weather_from_nb_report(nb_report: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """Read the current weather string from a v0.4 neighborhood tick receipt (zero-write)."""
+    if not isinstance(nb_report, Mapping):
+        return None
+    wp = nb_report.get("weather_pulse")
+    if isinstance(wp, Mapping):
+        w = str(wp.get("weather") or "").strip().lower()
+        if w:
+            return w
+    env = nb_report.get("environment")
+    if isinstance(env, Mapping):
+        w = str(env.get("weather") or "").strip().lower()
+        if w:
+            return w
+    w = str(nb_report.get("weather") or "").strip().lower()
+    return w or None
+
+
+def _maybe_tick_v09_world_commitments(
+    root_path: Path,
+    now_iso: Optional[str],
+    *,
+    weather_changed: bool = False,
+    new_weather: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """O(1) zero-spin 60s heartbeat hook for v0.9 NPC & venue commitments (Blueprint §6.2).
+
+    Calls ``world_commitments_engine.check_heartbeat_needed_zero_write`` first and
+    returns ``None`` immediately (0 disk writes, 0 ``.lock`` files, 0 LLM calls) when
+    the state file is absent OR when ``now < min_next_due_at`` and weather has not
+    materially affected an open weather-sensitive commitment.
+    """
+    try:
+        from components.world.scripts import world_commitments_engine as _wce
+    except Exception:  # pragma: no cover
+        try:
+            import world_commitments_engine as _wce  # type: ignore[no-redef]
+        except Exception:
+            return None
+
+    effective_iso = now_iso or _now_iso()
+    clean_weather = (
+        str(new_weather).strip().lower()
+        if isinstance(new_weather, str) and new_weather.strip()
+        else None
+    )
+
+    try:
+        if not _wce.check_heartbeat_needed_zero_write(
+            root_path,
+            now_iso=effective_iso,
+            current_weather=clean_weather,
+        ):
+            return None
+    except Exception:
+        return None
+
+    transitions: list[dict[str, Any]] = []
+    affected_commitments: list[dict[str, Any]] = []
+    notices_posted: list[dict[str, Any]] = []
+    shelf_releases: list[dict[str, Any]] = []
+    disk_written = False
+    min_next_due_at: Optional[str] = None
+    weather_receipt: Optional[dict[str, Any]] = None
+    due_receipt: Optional[dict[str, Any]] = None
+
+    if weather_changed and clean_weather:
+        try:
+            w_res = _wce.notify_world_condition_changed(
+                root_path,
+                condition_kind="weather",
+                new_value=clean_weather,
+                now_iso=effective_iso,
+            )
+            if isinstance(w_res, Mapping):
+                weather_receipt = dict(w_res)
+                affected_commitments.extend(list(w_res.get("affected_commitments") or []))
+                notices_posted.extend(list(w_res.get("notices_posted") or []))
+                if w_res.get("disk_written"):
+                    disk_written = True
+                if w_res.get("min_next_due_at") is not None:
+                    min_next_due_at = str(w_res.get("min_next_due_at"))
+        except Exception:
+            weather_receipt = None
+
+    still_needed = False
+    try:
+        still_needed = _wce.check_heartbeat_needed_zero_write(
+            root_path,
+            now_iso=effective_iso,
+            current_weather=clean_weather,
+        )
+    except Exception:
+        still_needed = False
+
+    if still_needed:
+        try:
+            d_res = _wce.advance_due_commitments(
+                root_path,
+                now_iso=effective_iso,
+                current_weather=clean_weather,
+            )
+            if isinstance(d_res, Mapping):
+                due_receipt = dict(d_res)
+                transitions.extend(list(d_res.get("transitions") or []))
+                notices_posted.extend(list(d_res.get("notices_posted") or []))
+                shelf_releases.extend(list(d_res.get("shelf_releases") or []))
+                if d_res.get("disk_written"):
+                    disk_written = True
+                min_next_due_at = (
+                    str(d_res.get("min_next_due_at"))
+                    if d_res.get("min_next_due_at") is not None
+                    else None
+                )
+        except Exception:
+            due_receipt = None
+
+    if not disk_written and not transitions and not affected_commitments:
+        return None
+
+    out: dict[str, Any] = {
+        "ok": True,
+        "status": "advanced" if (transitions or affected_commitments) else "weather_synced",
+        "advanced_count": len(transitions),
+        "affected_count": len(affected_commitments),
+        "transitions": transitions,
+        "affected_commitments": affected_commitments,
+        "notices_posted": notices_posted,
+        "shelf_releases": shelf_releases,
+        "min_next_due_at": min_next_due_at,
+        "disk_written": bool(disk_written),
+        "llm_calls": 0,
+    }
+    if weather_receipt is not None:
+        out["weather_condition_receipt"] = weather_receipt
+    if due_receipt is not None:
+        out["due_advance_receipt"] = due_receipt
+    return out
 
 
 def run_v03_background_clock_tick(
@@ -1229,15 +2124,40 @@ def run_v03_background_clock_tick(
     clock_exists = clock_path.exists() or clock_path.is_symlink()
 
     if not force_init and not clock_exists:
-        eco_report = _maybe_tick_v03_ecology(root_path, now_iso)
         nb_report = _maybe_tick_v04_neighborhood(root_path, now_iso)
+        nb_weather_changed = bool((nb_report or {}).get("weather_changed"))
+        nb_new_weather = _extract_weather_from_nb_report(nb_report)
+        town_report = _maybe_tick_v05_living_town(
+            root_path,
+            now_iso,
+            weather_changed=nb_weather_changed,
+        )
+        spark_report = _maybe_tick_v05_inner_spark(root_path, now_iso)
+        eco_report = _maybe_tick_v03_ecology(root_path, now_iso)
         rhythm_report = _maybe_tick_autonomy_rhythm(root_path, now_iso)
-        desire_report = _maybe_tick_everyday_desires(root_path, now_iso)
+        desire_report = _maybe_tick_everyday_desires(
+            root_path,
+            now_iso,
+            weather_changed=nb_weather_changed,
+        )
+        outreach_report = _maybe_tick_proactive_outreach(root_path, now_iso)
+        v09_commitments_report = _maybe_tick_v09_world_commitments(
+            root_path,
+            now_iso,
+            weather_changed=nb_weather_changed,
+            new_weather=nb_new_weather,
+        )
+        compact_report = _maybe_compact_body_transitions(root_path)
         if (
-            eco_report is None
-            and nb_report is None
+            nb_report is None
+            and town_report is None
+            and spark_report is None
+            and eco_report is None
             and rhythm_report is None
             and desire_report is None
+            and outreach_report is None
+            and v09_commitments_report is None
+            and compact_report is None
         ):
             return {
                 "ok": True,
@@ -1254,25 +2174,45 @@ def run_v03_background_clock_tick(
             }
         ticked_only: list[str] = []
         settled_only = 0
+        if nb_report is not None:
+            ticked_only.append("v04_neighborhood")
+            settled_only += int(nb_report.get("settled_count") or nb_report.get("changes_count") or (1 if nb_report.get("changed") else 0))
+        if town_report is not None:
+            ticked_only.append("v05_living_town")
+            settled_only += 1
+        if spark_report is not None:
+            ticked_only.append("v05_inner_spark")
+            settled_only += (
+                (1 if spark_report.get("frost_updated") else 0)
+                + (1 if spark_report.get("morning_dream_settled") else 0)
+            )
         if eco_report is not None:
             ticked_only.append("v03_ecology")
             settled_only += (
                 (1 if (eco_report.get("phase_changed") or eco_report.get("neglect_strain_recorded")) else 0)
                 + len(eco_report.get("withdrawn_expired_outbound") or [])
             )
-        if nb_report is not None:
-            ticked_only.append("v04_neighborhood")
-            settled_only += int(nb_report.get("settled_count") or nb_report.get("changes_count") or (1 if nb_report.get("changed") else 0))
         if rhythm_report is not None:
             ticked_only.append("autonomy_rhythm")
             settled_only += int(rhythm_report.get("promoted_count") or 1)
         if desire_report is not None:
             ticked_only.append("everyday_desires")
             settled_only += int(
-                desire_report.get("faded_count")
-                or desire_report.get("decayed_count")
-                or 1
-            )
+                (desire_report.get("faded_count") or 0)
+                + (desire_report.get("decayed_count") or 0)
+                + (desire_report.get("emerged_count") or 0)
+            ) or 1
+        if outreach_report is not None:
+            ticked_only.append("proactive_outreach")
+            settled_only += int(outreach_report.get("enqueued_count") or 1)
+        if v09_commitments_report is not None:
+            ticked_only.append("v09_world_commitments")
+            settled_only += int(
+                (v09_commitments_report.get("advanced_count") or 0)
+                + (v09_commitments_report.get("affected_count") or 0)
+            ) or 1
+        if compact_report is not None:
+            ticked_only.append("body_transitions_compaction")
         partial_out: dict[str, Any] = {
             "ok": True,
             "status": "ticked",
@@ -1288,14 +2228,24 @@ def run_v03_background_clock_tick(
             "unknown_actions_guessed": 0,
             "cognitive_backfill_count": 0,
         }
-        if eco_report is not None:
-            partial_out["ecology_receipt"] = eco_report
         if nb_report is not None:
             partial_out["v04_neighborhood_receipt"] = nb_report
+        if town_report is not None:
+            partial_out["v05_living_town_receipt"] = town_report
+        if spark_report is not None:
+            partial_out["v05_inner_spark_receipt"] = spark_report
+        if eco_report is not None:
+            partial_out["ecology_receipt"] = eco_report
         if rhythm_report is not None:
             partial_out["autonomy_rhythm_receipt"] = rhythm_report
         if desire_report is not None:
             partial_out["everyday_desires_receipt"] = desire_report
+        if outreach_report is not None:
+            partial_out["proactive_outreach_receipt"] = outreach_report
+        if v09_commitments_report is not None:
+            partial_out["v09_world_commitments_receipt"] = v09_commitments_report
+        if compact_report is not None:
+            partial_out["body_transitions_compaction_receipt"] = compact_report
         return partial_out
 
     http_status, clock_envelope = mutate_v03_clock_view(
@@ -1334,14 +2284,6 @@ def run_v03_background_clock_tick(
     slices_ticked = ["v03_clock"]
     settled_slow_vars = int(action_receipt.get("settled_slow_vars") or 0)
 
-    eco_report = _maybe_tick_v03_ecology(root_path, committed_at)
-    if eco_report is not None:
-        slices_ticked.append("v03_ecology")
-        settled_slow_vars += (
-            (1 if (eco_report.get("phase_changed") or eco_report.get("neglect_strain_recorded")) else 0)
-            + len(eco_report.get("withdrawn_expired_outbound") or [])
-        )
-
     nb_report = _maybe_tick_v04_neighborhood(root_path, committed_at)
     if nb_report is not None:
         slices_ticked.append("v04_neighborhood")
@@ -1351,19 +2293,70 @@ def run_v03_background_clock_tick(
             or (1 if nb_report.get("changed") else 0)
         )
 
+    town_report = _maybe_tick_v05_living_town(
+        root_path,
+        committed_at,
+        weather_changed=bool((nb_report or {}).get("weather_changed")),
+    )
+    if town_report is not None:
+        slices_ticked.append("v05_living_town")
+        settled_slow_vars += 1
+
+    spark_report = _maybe_tick_v05_inner_spark(root_path, committed_at)
+    if spark_report is not None:
+        slices_ticked.append("v05_inner_spark")
+        settled_slow_vars += (
+            (1 if spark_report.get("frost_updated") else 0)
+            + (1 if spark_report.get("morning_dream_settled") else 0)
+        )
+
+    eco_report = _maybe_tick_v03_ecology(root_path, committed_at)
+    if eco_report is not None:
+        slices_ticked.append("v03_ecology")
+        settled_slow_vars += (
+            (1 if (eco_report.get("phase_changed") or eco_report.get("neglect_strain_recorded")) else 0)
+            + len(eco_report.get("withdrawn_expired_outbound") or [])
+        )
+
     rhythm_report = _maybe_tick_autonomy_rhythm(root_path, committed_at)
     if rhythm_report is not None:
         slices_ticked.append("autonomy_rhythm")
         settled_slow_vars += int(rhythm_report.get("promoted_count") or 1)
 
-    desire_report = _maybe_tick_everyday_desires(root_path, committed_at)
+    desire_report = _maybe_tick_everyday_desires(
+        root_path,
+        committed_at,
+        weather_changed=bool((nb_report or {}).get("weather_changed")),
+    )
     if desire_report is not None:
         slices_ticked.append("everyday_desires")
         settled_slow_vars += int(
-            desire_report.get("faded_count")
-            or desire_report.get("decayed_count")
-            or 1
-        )
+            (desire_report.get("faded_count") or 0)
+            + (desire_report.get("decayed_count") or 0)
+            + (desire_report.get("emerged_count") or 0)
+        ) or 1
+
+    outreach_report = _maybe_tick_proactive_outreach(root_path, committed_at)
+    if outreach_report is not None:
+        slices_ticked.append("proactive_outreach")
+        settled_slow_vars += int(outreach_report.get("enqueued_count") or 1)
+
+    v09_commitments_report = _maybe_tick_v09_world_commitments(
+        root_path,
+        committed_at,
+        weather_changed=bool((nb_report or {}).get("weather_changed")),
+        new_weather=_extract_weather_from_nb_report(nb_report),
+    )
+    if v09_commitments_report is not None:
+        slices_ticked.append("v09_world_commitments")
+        settled_slow_vars += int(
+            (v09_commitments_report.get("advanced_count") or 0)
+            + (v09_commitments_report.get("affected_count") or 0)
+        ) or 1
+
+    compact_report = _maybe_compact_body_transitions(root_path)
+    if compact_report is not None:
+        slices_ticked.append("body_transitions_compaction")
 
     out: dict[str, Any] = {
         "ok": True,
@@ -1391,14 +2384,24 @@ def run_v03_background_clock_tick(
         ),
         "clock_receipt": action_receipt,
     }
-    if eco_report is not None:
-        out["ecology_receipt"] = eco_report
     if nb_report is not None:
         out["v04_neighborhood_receipt"] = nb_report
+    if town_report is not None:
+        out["v05_living_town_receipt"] = town_report
+    if spark_report is not None:
+        out["v05_inner_spark_receipt"] = spark_report
+    if eco_report is not None:
+        out["ecology_receipt"] = eco_report
     if rhythm_report is not None:
         out["autonomy_rhythm_receipt"] = rhythm_report
     if desire_report is not None:
         out["everyday_desires_receipt"] = desire_report
+    if outreach_report is not None:
+        out["proactive_outreach_receipt"] = outreach_report
+    if v09_commitments_report is not None:
+        out["v09_world_commitments_receipt"] = v09_commitments_report
+    if compact_report is not None:
+        out["body_transitions_compaction_receipt"] = compact_report
     return out
 
 
@@ -1474,6 +2477,8 @@ def _serve_forever(root: Path, port: int, *, room_living: bool = False,
         sys.stdout.write("服务就绪，尚未开始自主活动。\n")
         sys.stdout.flush()
 
+    os.environ.setdefault("NYAIRO_V02_CONTROL_ROOT", str(_default_v02_control_root(root)))
+
     gate = str(world_gate or DEFAULT_WORLD_GATE).strip().lower()
     if gate not in WORLD_GATES:
         gate = DEFAULT_WORLD_GATE
@@ -1539,11 +2544,13 @@ def _spawn_background(root: Path, port: int, *, room_living: bool = False,
         command.append("--ambient-events")
     if v03_clock_interval is not None:
         command.extend(["--v03-clock-interval", str(float(v03_clock_interval))])
+    child_env = dict(os.environ)
+    child_env.setdefault("NYAIRO_V02_CONTROL_ROOT", str(_default_v02_control_root(root)))
     try:
         child = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT,
-            cwd=str(REPO_ROOT), start_new_session=True, close_fds=True)
+            cwd=str(REPO_ROOT), env=child_env, start_new_session=True, close_fds=True)
     finally:
         handle.close()
     _write_json(_record_path(root), {
@@ -1576,6 +2583,79 @@ def _log_tail(path: str, lines: int = 4) -> str:
     return "\n".join(text[-lines:])
 
 
+_SUPPLY_SERVE_SOCK_RE = re.compile(r"^supply-serve-(?:.*-)?(\d+)\.sock$")
+
+
+def _unix_socket_has_listener(sock_path: Path) -> bool:
+    """Return True if an active listener responds to connect() on this UNIX socket."""
+    if not hasattr(socket, "AF_UNIX"):
+        return False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            probe.settimeout(0.2)
+            probe.connect(str(sock_path))
+        return True
+    except OSError:
+        return False
+
+
+def _cleanup_stale_supply_sockets(root: Path) -> list[str]:
+    """Safely unlink orphan ``supply-serve-*.sock`` files under ``<root>/run/``.
+
+    Never unlinks a symlink, a non-socket file, the live recorded daemon's active
+    ``supply_socket``, a socket whose embedded PID is still alive, or a socket with
+    an active listener.
+    """
+    run_dir = Path(root) / "run"
+    if not run_dir.is_dir() or run_dir.is_symlink():
+        return []
+
+    protected_paths: set[str] = set()
+    record = _read_json(_record_path(Path(root)))
+    if _pid_alive(record.get("pid")):
+        inst = _read_json(Path(root) / "instance.json")
+        active_sock = str(inst.get("supply_socket") or "").strip()
+        if active_sock:
+            try:
+                protected_paths.add(str(Path(active_sock).resolve()))
+            except OSError:
+                protected_paths.add(active_sock)
+
+    removed: list[str] = []
+    try:
+        entries = list(run_dir.iterdir())
+    except OSError:
+        return removed
+
+    for entry in entries:
+        match = _SUPPLY_SERVE_SOCK_RE.match(entry.name)
+        if not match:
+            continue
+        try:
+            st = entry.lstat()
+        except OSError:
+            continue
+        if stat.S_ISLNK(st.st_mode) or not stat.S_ISSOCK(st.st_mode):
+            continue
+        try:
+            resolved_entry = str(entry.resolve())
+        except OSError:
+            resolved_entry = str(entry)
+        if resolved_entry in protected_paths or str(entry) in protected_paths:
+            continue
+        embedded_pid = int(match.group(1))
+        if embedded_pid <= 0 or _pid_alive(embedded_pid):
+            continue
+        if _unix_socket_has_listener(entry):
+            continue
+        try:
+            entry.unlink()
+            removed.append(entry.name)
+        except OSError:
+            pass
+    return removed
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     if os.name != "posix":
         return _refuse("PLATFORM_UNSUPPORTED",
@@ -1597,7 +2677,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         prepared = _ensure_instance(
             root, authority=authority,
             world_package=getattr(args, "world_package", None),
-            lived_needs=lived_needs)
+            lived_needs=lived_needs,
+            no_lived_needs=bool(getattr(args, "no_lived_needs", False)))
     except Exception as exc:
         return _refuse(_reason_of(exc), str(exc), as_json=json_output)
     if prepared.get("created"):
@@ -1635,6 +2716,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     # serving so a same-root restart (including foreground Ctrl-C) keeps them.
     _persist_run_switches(root, room_living=room_living, world_gate=world_gate,
                           ambient_events=ambient_events)
+    _cleanup_stale_supply_sockets(root)
 
     if getattr(args, "foreground", False):
         sys.stdout.write("正在启动（前台；Ctrl-C 停止）…\n")
@@ -1703,6 +2785,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     if not _pid_alive(pid):
         record.update({"status": "STOPPED", "stopped_at": _now_iso()})
         _write_json(_record_path(root), record)
+        _cleanup_stale_supply_sockets(root)
         _emit(record, as_json=json_output,
               text="服务已经不在了。下次继续：python3 scripts/nyairo_day.py start --root %s" % root)
         return EXIT_OK
@@ -1729,6 +2812,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return _refuse("STOP_TIMEOUT",
                        "已经发出停止信号，但进程 30 秒内还没退出；不要强行杀，过一会儿再看 status。",
                        as_json=json_output)
+    _cleanup_stale_supply_sockets(root)
     _emit(record, as_json=json_output,
           text="已停止。材料和记录都在，不会重置。\n"
                "下次继续：python3 scripts/nyairo_day.py start --root %s" % root)
@@ -2239,7 +3323,10 @@ def cmd_run_day(args: argparse.Namespace) -> int:
     try:
         # 显式 gate 值总传给真实的 serve/resident 环境：默认 canonical 让日常能出门，
         # 显式 off 也必须真的覆盖，而不是只改父进程后又被实例特征改回去。
-        _run_overrides = {"WORLD_BODY_INTENT_MUTATION_GATE": world_gate}
+        _run_overrides = {
+            "WORLD_BODY_INTENT_MUTATION_GATE": world_gate,
+            "NYAIRO_V02_CONTROL_ROOT": str(_default_v02_control_root(root)),
+        }
         report = live_day.run_segment(
             root, duration_seconds=int(duration), max_new_requests=int(requests),
             poll_seconds=2, act=True, start_services=live_day.SERVICE_AUTO,
@@ -2322,6 +3409,8 @@ def _add_creation_options(parser: argparse.ArgumentParser) -> None:
                              "(e.g. daily_neighborhood_v1) or a package directory")
     parser.add_argument("--lived-needs", action="store_true", dest="lived_needs",
                         help="enable the optional virtual hunger/thirst/toilet profile")
+    parser.add_argument("--no-lived-needs", action="store_true", dest="no_lived_needs",
+                        help="disable the default virtual hunger/thirst/toilet profile on a new instance")
     parser.add_argument("--lived-needs-hunger", type=float, default=None,
                         dest="lived_needs_hunger", help="explicit initial hunger 0..1 (default 0)")
     parser.add_argument("--lived-needs-thirst", type=float, default=None,

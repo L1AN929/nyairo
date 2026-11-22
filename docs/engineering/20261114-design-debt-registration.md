@@ -39,6 +39,11 @@
   版本且造成实际行为矛盾）时再评估。
 - **最小实现路径**：以既有记忆条目为源，加一个只读的"叙事视图"（按人物/主题聚合、带版本时间戳），
   不新建叙事 store。
+- **2026-11-15 Wave 7 更新**：**只读投影已落地**——`v02_recall_projection.project_p12_autobiographical_narrative`
+  聚合 recall / common_ground / agency_depth（含已收敛 Inquiry）/ workbench 既有实证文件，产出
+  chapters / turning_points / recurring_motifs / narrative_horizon / attested_source_refs；
+  零写盘、`llm_calls=0`，`has_subject_capability=False` 时过滤未共享与私密记忆。挂在
+  `read_v02_recall_projection_view` 与 `read_v02_agency_depth_view`。仍未建独立叙事 store。
 
 ### 3. Inquiry 生命周期（有界求知）
 - **v2 出处**：《15-产品记忆与自主机制完整设计》交付包 8："有界Inquiry：具体问题、候选解释、下份证据、
@@ -48,6 +53,11 @@
 - **处置**：暂缓。触发条件：出现真实的反复无结论好奇行为（同一问题反复提起、无证据积累）需要约束时。
 - **最小实现路径**：一张 inquiry 状态表（question / candidates / next_evidence / budget / stop_reason），
   挂在既有注意 owner 下，先只读投影后写权。
+- **2026-11-15 Wave 7 更新**：**有界状态机已落地**——`v02_agency_depth_engine` 新增 `inquiries`
+  集合、`OPEN/INVESTIGATING/CONCLUDED/STOPPED` 三函数（open / record_evidence / conclude_or_stop）、
+  `MAX_OPEN_INQUIRIES=5` 与 `MAX_EVIDENCE_NOTES_PER_INQUIRY=8` 显式拒止；daily-loop bridge 生成
+  `v02_inquiry:<id>` 候选（`advance_bounded_inquiry`），选中后经 `ADVANCE_BOUNDED_INQUIRY` 真正追加
+  一条轮次观察证据并写因果账本（同 decision/operation_key 幂等）。仍未实现候选解释列表与独立预算字段。
 
 ### 4. R0–R5 反傀儡实验 + Scorecard
 - **v2 出处**：《17-工程契约与证据完整设计》"R0–R5必须完整保存的实验路线"专节（R0 盘点动态人物脚本
@@ -65,6 +75,12 @@
 - **现状**：无监测矩阵实现；仅散见各 owner 的健康自检（如 v02 运行治理的 QUIET_HEALTHY 等健康态）。
 - **处置**：暂缓。触发条件：系统连续运行满一个季度且有真实漂移案例需要归档时。
 - **最小实现路径**：22 类各一行的人工季度巡检表（信号/是否观察到/防护副作用），先手工后自动化。
+- **2026-11-15 Wave 7 更新**：**只读监测矩阵已落地**——`v02_runtime_governance_migration`
+  新增 `DECAY_MONITOR_CATEGORIES_22`（memory_recall 6 / relationship_common_ground 5 /
+  agency_habits_projects 6 / world_rhythm_somatic 5）与 `project_annual_decay_matrix_22`，
+  按既有实证文件的存在性/新鲜度/条目数给出 `half_life_days` / `floor_weight` / `drift_band` /
+  `re_anchor_policy` / `status`（ACTIVE / DORMANT / NEEDS_REANCHOR / ABSENT_BASELINE），
+  零写盘、`llm_calls=0`，挂在 runtime-migration 读面。仍是单点快照，不是季度人工巡检归档。
 
 ---
 
@@ -225,3 +241,87 @@
   **已于 2026-11-15 收尾补丁单按协调者明示指令升起，并随用户裁定定版为 `v0.7.0`**
   （各文件内 `uv >= 0.6` 为 uv 工具版本提示，非产品版本串，不动），四处版本口径自此对齐。
 - 本节只是发布登记，不改 §一～§四任何一条的登记语义。
+
+---
+
+## 六、v0.8 Wave 7 补登记（2026-11-15：0.2/0.3 设计债四项最小实装收口）
+
+本批只做**最小、可机验**的生产实现，不追认任何更大的设计扩张；逐项边界如下。
+
+| 设计债条目 | 本批落地 | 关键位置 | 仍留的边界 |
+|---|---|---|---|
+| §一.2 P12 自传体叙事 | 只读投影 `project_p12_autobiographical_narrative`：聚合 recall / common_ground / agency_depth（含已收敛 Inquiry）/ workbench 实证文件，输出 chapters / turning_points / recurring_motifs / narrative_horizon / attested_source_refs；伴侣视角过滤未共享与私密项；零写盘、零大模型 | `components/life/scripts/v02_recall_projection.py`；挂载于 `read_v02_recall_projection_view` 与 `read_v02_agency_depth_view` | 未建独立叙事 store；未做版本化叙事快照或跨月一致性仲裁 |
+| §一.3 有界 Inquiry | `inquiries` 状态机（OPEN / INVESTIGATING / CONCLUDED / STOPPED）、`MAX_OPEN_INQUIRIES=5`、`MAX_EVIDENCE_NOTES_PER_INQUIRY=8`；daily-loop 候选 `v02_inquiry:<id>`（`advance_bounded_inquiry`）与 `ADVANCE_BOUNDED_INQUIRY` 结算 | `v02_agency_depth_engine.py`、`v02_agency_depth_view.py`、`v02_v03_daily_loop_bridge.py` | 未实现候选解释列表、独立 inquiry 预算计数；容量按活跃条数与单条证据数硬限 |
+| §一.5 22 类一年衰败监测 | `DECAY_MONITOR_CATEGORIES_22`（6+5+6+5）与只读 `project_annual_decay_matrix_22`：半衰期 / 底线权重 / 漂移区间 / 重锚定策略 / 观测状态；零写盘 | `v02_runtime_governance_migration.py`；挂载于 `annual_decay_matrix_22` 读面 | 仍是单点快照，不是季度人工巡检归档；状态阈值按文件新鲜度，不是真实行为漂移样本 |
+| §二 SlotQuota 四时段 | **最小 SlotQuota / DailyEnvelope**：`SLOT_QUOTAS={DAYTIME_ACTIVE:2,EVENING_WIND_DOWN:1,NIGHT_REST:0}`、`DAILY_ENVELOPE_CAPS={daily_hard_cap:8, per_category_cap:{INITIATION:3,CONTINUATION:5,REFLECTION:2}}`；`check/record/snapshot/can_spend(enforce_slot_envelope=...)` | `components/life/scripts/life_request_budget.py` | **未实现原设计的四时段 6/7/7/4 × 12500/14000/14000/9500 与 carry_ratio=0.5 结转**；本批采用任务书给定的三槽位闭集，仅显式 `enforce_slot_envelope=True` 时生效，默认路径逐字节兼容旧账本（`slot_envelope_days` 为可选字段） |
+
+**验证**：`tests/test_v08_v02_v03_design_debt_closure.py` 共 27 条断言覆盖四项及边界；
+WSL `/tmp/rc104-venv` 下指定 7 套件 `Ran 130 tests ... OK`，全部 `llm_calls == 0`。
+
+**有意不动的边界**：未改 `autonomous_life_assembly.py` / `life_sharing_service.py` /
+`readonly_recall_adapter.py`；未引入产品大模型调用；§二"暂缓裁定"表其余 5 项原样生效，
+本批只补 SlotQuota 维度的最小实现，不视为对四时段原设计或其余暂缓项的追认。
+
+---
+
+## 七、v0.8 0.2 收口补登记（2026-11-16：Inquiry 完整化 + R0–R5 五维自检）
+
+本批收口 §一.3 与 §一.4 的最后缺口，仍只做**最小、可机验**的落地，不追认更大的设计扩张。
+
+| 设计债条目 | 本批落地 | 关键位置 | 仍留的边界 |
+|---|---|---|---|
+| §一.3 有界 Inquiry 完整化 | 每条 inquiry 补齐 `candidate_explanations`（≤4，`plausible/supported/ruled_out`）、`next_evidence_needed`（≤160）、`step_budget`（1–12，缺省 6）、`steps_spent`、`partner_clues`（最近 4 条）；伴侣动作 `share_inquiry_clue` 仅对 `shared=True` 且未终态的问题可追加线索（私密/不存在统一 `404 INQUIRY_NOT_FOUND`，终态 `409 INQUIRY_ALREADY_CLOSED`）。 | `components/life/scripts/v02_agency_depth_engine.py`、`components/phone/v02_agency_depth_view.py` | **预算自动收口仅在开问时显式传 `step_budget` 时启用**：未显式传参的老调用方保持原有"最多 8 条证据"行为不变（否则会改写既有 `INQUIRY_EVIDENCE_CAPACITY_EXCEEDED` 语义）。旧 inquiry 缺新字段时读侧兜底为安全默认值。 |
+| §一.4 R0–R5 反傀儡实验 + Scorecard | 新增只读巡检模块 `evaluate_antipuppet_scorecard`：R0–R5 六阶段检查 + Ch.17 五维（事实/意愿/人设/措辞/成长来源）；`averaging_forbidden=True`、`hard_fail_triggers_high=True`，单维硬违例直接 `HIGH`；证据文件缺失时如实 `MEDIUM` 并注明未观测，绝不臆造通过。挂入 `GET /api/phone/v02/runtime-migration` 的 `antipuppet_scorecard`，双视角只读可见。 | `components/life/scripts/v02_antipuppet_scorecard.py`；挂载于 `components/phone/v02_runtime_migration_view.py` | **仍是运行实例的只读自检快照，不是裸模型 vs 同模型不同历史的受控对照实验**；R0–R5 的"实验路线"仍需有人力跑完整对照轮次时另行记录。模块 100% 零写盘、`llm_calls=0`、不回显私人正文。 |
+
+**验证**：新增 `tests/test_v08_v02_inquiry_and_scorecard.py`（9 条：候选解释/预算自动停与幂等、旧数据读侧兜底、
+`share_inquiry_clue` 的 200/404/409/403、scorecard 零写盘与硬违例升 HIGH、真实 loopback HTTP 挂载与 CSRF）。
+WSL `/tmp/rc104-venv` 下指定五套件 `Ran 104 tests ... OK`（含 `test_v02_phone_http_surfaces` 的真实 HTTP 往返），
+全部 `llm_calls == 0`。
+
+**有意不动的边界**：未改三份冻结锚点与 `v02_runtime_governance_migration.py` / `v02_v03_daily_loop_bridge.py` /
+`server.py` / `service.py`；未新增产品大模型调用；§一.4 的"受控对照实验"性质未被本批自检替代；§二其余暂缓项原样生效。
+
+---
+
+## 八、v0.8 Night Z 补登记（2026-11-18：§一.1 S07 持久无墓碑 Store + §三.3 慢信真 72h 草稿冷静期 + §四.3 36B 自动 Checkpoint）
+
+本批收口 §一.1、§三.3 与 §四.3 的最小可机验缺口，保持向后兼容与零大模型调用（`llm_calls == 0`），不追认任何超出本表的扩张。
+
+| 设计债条目 | 本批落地 | 关键位置 | 仍留的边界 |
+|---|---|---|---|
+| §一.1 S07 Affect 持久无墓碑辖区 Store | 新增 `S07AffectStore`、`record_durable_affect`、`read_affect_records_zero_write`、`project_durable_s07_affect_zero_write`（落盘 `s07_affect_records.json`，`state_file_lock` + 原子写）；写前校验并拒绝 `intimacy_score` / `mood_delta` 等走私字段；过期或衰减至 0 的记录在写路径静默剔除（不写墓碑），硬上限 `MAX_STORED_AFFECT_RECORDS=64`；`operation_key` 跨活跃表与淘汰环幂等重放；读与投影对空目录/缺失文件 100% 零写盘。 | `components/life/scripts/s07_affect_owner.py` | 原纯函数 `mint_affect_record` / `build_s07_affect_view` 原样保留兼容；仍受 AST 零随机数门禁约束（纯整数确定性衰减）。 |
+| §三.3 慢信真 72h 草稿冷静期生命周期 | 在既有即时投递动作外新增 `save_slow_letter_draft`、`revise_slow_letter_draft`、`discard_slow_letter_draft`、`post_drafted_slow_letter`（`state_file_lock` 串行化）；未满 72 小时投递返回 `409 SLOW_LETTER_COOLING_PERIOD`，满 72 小时后投递转为正式慢信并移出草稿箱；跨作者读写统一返回 `404 DRAFT_NOT_FOUND` 防探测；`GET /api/phone/home/letters` 仅向作者本人投影 `own_slow_letter_drafts`（双视角零串漏，零写盘）。 | `components/phone/window_keepsake_view.py`、`components/phone/service.py`、`components/phone/server.py` | 既有直接 `post_slow_letter` 老路径为兼容历史测试保留未删；桌面端抽屉已默认接入 72h 草稿冷静期生命周期。 |
+| §四.3 36B 场景进入自动捕获活跃前景活动 | 新增零写盘、防符号链接的 `_read_active_foreground_activity_zero_write`；`respond_scene`（`ACCEPT` → `ACTIVE`）未显式传 `checkpoint_activity_ref` 时自动从 `canonical_life_state.json` 捕获活跃前景活动（标记 `capture_source="canonical_life_state_auto"`），使 `AFTERCARE` / `STOPPED` 后单次 `consume_resumable_checkpoint` 可真实恢复原活动；无活跃活动时保持 `saved=False` 诚实空态。 | `components/phone/adult_intimacy_view.py` | 仅只读采样 `canonical_life_state.json`，不在 `adult_intimacy_view` 内反向改写 life 辖区账本；恢复消费仍维持单次幂等语义。 |
+
+**验证**：新增 `tests/test_v08_slow_letter_cooling_drafts.py` 与 `tests/test_v08_checkpoint_and_s07_store.py`；
+连同 `test_window_keepsake_view`、`test_adult_intimacy_view`、`test_adult_intimacy_fault_matrix`、`test_adult_intimacy_co_presence_wiring`、`test_s07_affect_owner`、`test_v03_slow_variable_incubation` 实跑全绿，全部 `llm_calls == 0`。
+
+**有意不动的边界**：未改三份冻结锚点与 `LIFE_UPDATE_SURFACES`（维持 37）及 `_PHONE_AND_WORLD_GUIDANCE`（维持 ≤1200）；§二其余暂缓裁定项继续原样生效。
+
+---
+
+## 九、v0.8 0.2 全纲终审收口补登记（2026-11-18）
+
+本批在严格保持三份字节保护文件、`LIFE_UPDATE_SURFACES == 37` 与零大模型调用的前提下，将 `0.2` 全纲《第 13 / 14 / 15 章》剩余机制与双端验收彻底收口：
+
+| 设计债/章节条目 | 本批落地 | 关键位置 | 仍留的边界 |
+|---|---|---|---|
+| D01 / D08 / D09 / D10 与 §10.C / §10.H | `placed_memory_cues`（遮挡/移走/删除立撤）、`info_environment_curations`（保留未过滤对照入口）、`future_self_capsules`（到期仅 `AVAILABLE` 零亏欠债）、`optional_next_gestures`（`peek` 不等于认领/恢复）、`legacy_tool_endings`（三结尾均保旧作可读）、`gentle_responsibility_reviews`（无伴侣交接拦 `409 EXTERNAL_COMMITMENT_REQUIRES_HANDOFF`） | `v02_agency_depth_engine.py`、`v02_agency_depth_view.py`、`v02_v03_daily_loop_bridge.py`、`lived_context_bridge.py` | 仍保持单实例 `day_root` JSON 原子落盘，不接入外部图数据库 |
+| §10.A / B / E / J 与 第13章 §3 通信录 | `unshown_work_box`（五桶策划、发前撤回不毁原作、伴侣零隐藏计数）、`dual_rationale_decisions`（双边各自修改 `403` 隔离）、`missed_moment_reconnections`（补见保留 `missed_originally=True`）、`async_coauthor_contributions`、`contact_directory`（`address_is_not_identity=True` vs `is_simulated=True`） | `v02_common_ground.py`、`v02_crossmodal_perception.py`、`v02_crossmodal_view.py` | 通信录为只读真实渠道登记与模拟联系人严格分表 |
+| G0 V-C 跨备份防复活高水位 + D05 设备代际锁 + §10.I 无聊审查 | `governance/v02_vc_authority_watermark.json`（仅存加盐 `sha256` 摘要与单调 `authority_generation`/`restore_epoch`），`reconcile_backup_restore_vc_barrier` 横扫五类恢复目录；`device_presence` 租约代际防陈旧重放；`project_chatless_life_review` 六域非语言盘点 | `v02_recall_projection.py`、`v02_runtime_governance_migration.py`、`v02_runtime_migration_view.py` | 跨机迁移须显式携带水印签章或触发 `reconcile_backup_restore` |
+| 第14章 §5 十二必备端到端场景 + V-D 受控反事实消融 + 桌面 0.2 总览页 | `run_v02_counterfactual_suite` 三组单变量对照（`exp1`/`exp2`/`exp3`，绝不删库造假），十二必备场景全链机验，桌面 `v02_closure.go` 与四个 `/api/v07/v02-*` 伴侣防窥接口 | `v02_causal_ablation_runner.py`、`test_v02_twelve_mandatory_scenarios_and_vd_ablation.py`、`nyairo-desktop/v02_closure.go` | V-D 套件为本地确定性受控消融基线，不代替人工实机长程审阅 |
+
+**验证**：WSL 下 `0.2` 全部九大核心套件（`test_v02_ch15_moments_and_digital_mechanisms`、`test_v02_box_reconnect_and_dual_rationale`、`test_v02_vc_barrier_and_silent_review`、`test_v02_twelve_mandatory_scenarios_and_vd_ablation`、`test_v02_agency_depth`、`test_v02_crossmodal_perception`、`test_v02_runtime_governance_migration`、`test_v08_v02_daily_loop_execution`、`test_v08_v02_inquiry_and_scorecard`）与桌面端 `go vet` / `go test ./...` 全部实跑通过，`llm_calls == 0`。
+
+---
+
+## 十、v0.8 0.2 全闭环 Phase A/B 收口补登记（2026-11-18：CP01–CP12 真实强杀 + Honest UX 双端联调 + Ch.13 24 切片 + 90 天虚拟长跑与 20 反假绿）
+
+本批在不追认 §二 暂缓项、保持既有冻结文件不变及 `llm_calls == 0` 前提下，完成 0.2 总体设计 Phase A/B 工程收口与总验证登记（详单见 `docs/engineering/v02-full-closure-verification-20261118.md`）：
+
+| 收口域 | 本批落地与验证 | 关键位置 | 仍留的边界 |
+|---|---|---|---|
+| CP01–CP12 真实强杀与部分 DAG 对账 | 修复 `BEGIN IMMEDIATE` 与 outbox/幂等恢复缺陷，实跑 18/18（真实子进程 `proc.kill()` / `os._exit(137)` + WAL/FULL + `PARTIAL` DAG + `QUIESCED_UNRESOLVED` + 负控） | `components/life/scripts/v02_crash_and_partial_reconciler.py`、`tests/test_v02_cp01_12_kill_and_partial_action.py` | 不涵盖真实硬件掉电或磁盘坏道物理损坏 |
+| 治理/自传/预算骤降全链扩充 | 28/28 实跑通过（`.md` 冲突/导入、Ch.14 场景 8 撤权、6 派生面 HMAC 墓碑、2x DEGRADED/3x SUSPENDED、90% 预算骤降与跨午夜 UNKNOWN 结转） | `tests/test_v02_representation_lease_and_forget.py`、`tests/test_v02_autobiography_skill_and_budget_drop.py` | 单实例原子 JSON/SQLite 状态根，不接外部云端账本 |
+| `/api/phone/v02/honest-ux` 双端实时联调 | Python 零写 GET + 4 伴侣/5 主体 403 POST + Daily Loop / `ChiyoContextEngine` 接缝（12/12 PASS）；桌面 Go 端实启 `PhoneHTTPServer` 零 mock 联调（6/6 PASS）及 Chrome 验收通过 | `components/phone/v02_honest_ux_view.py`、`tests/test_v02_wave2_end_to_end_closure.py`、`nyairo-desktop/v02_honest_ux_test.go` | 浏览器端动作失败提示已收口为中文映射 |
+| Ch.13 §7 二十四生活切片 + 90 天虚拟长跑 + 20 反假绿 | 24 个生活切片逐一贯通真实后端模块与 `PhoneService`（24/24 PASS，5.092s）；90 虚拟天有界存储、300/s 洪峰背压、90 午夜 UNKNOWN 结转、12h 零 LLM 静默窗与 20 条 Ch.17 Q51 反假绿（24/24 PASS，11.152s） | `tests/test_v02_ch13_twenty_four_slices_capstone.py`、`tests/test_v02_ninety_day_virtual_soak_and_20_antigreens.py` | 90 虚拟天明确标为 `simulated=True` / `SIMULATED_90D`，不替代真实 24h+ 生产挂钟观察 |

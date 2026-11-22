@@ -1026,6 +1026,7 @@ __all__ = [
     "TRAVEL_STATUS_IN_PROGRESS",
     "TravelDeliveryError",
     "WALKING_DURATIONS",
+    "companionship_stroll_path",
     "delivery_enabled",
     "direct_execution_id",
     "ensure_delivery_timeline_process",
@@ -1033,13 +1034,183 @@ __all__ = [
     "feature_enabled",
     "load_state",
     "observe_travel",
+    "pause_wait_two_minutes",
     "plan_travel",
+    "read_companionship_stroll_zero_write",
     "realize_due_travel",
     "route_duration_seconds",
     "route_id_for",
+    "start_loop_stroll",
     "start_travel",
+    "start_walking_together",
     "state_path",
     "timeline_path",
     "travel_enabled",
     "validate_state",
 ]
+
+
+# ---------------------------------------------------------------------------
+# 0.5 Step 3: Side-by-Side Stroll (WALKING_TOGETHER), Wait-2-Min & 10m Loop
+# ---------------------------------------------------------------------------
+
+
+def companionship_stroll_path(hermes_home: Optional[Path | str] = None) -> Path:
+    return _home(hermes_home) / "data" / "world" / "world_companionship_stroll.json"
+
+
+def _read_stroll_readonly(path: Path) -> dict[str, Any]:
+    if path.is_symlink():
+        raise TravelDeliveryError("companionship stroll symlink refused")
+    if not path.is_file():
+        return {"schema_version": "world.companionship_stroll.v1", "revision": 0, "active": None, "history": [], "ops": {}}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise TravelDeliveryError(f"companionship stroll corrupt: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise TravelDeliveryError("companionship stroll must be object")
+    doc.setdefault("history", [])
+    doc.setdefault("ops", {})
+    return doc
+
+
+def _save_stroll_atomic(path: Path, doc: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = (json.dumps(doc, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(prefix=".stroll_", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(raw)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def read_companionship_stroll_zero_write(hermes_home: Optional[Path | str] = None) -> dict[str, Any]:
+    """100% zero-write read of WALKING_TOGETHER / waiting / loop stroll state."""
+    path = companionship_stroll_path(hermes_home)
+    doc = _read_stroll_readonly(path)
+    return {
+        "schema_version": doc.get("schema_version"),
+        "revision": int(doc.get("revision") or 0),
+        "active": doc.get("active"),
+        "history_count": len(doc.get("history") or []),
+        "llm_calls": 0,
+    }
+
+
+def start_walking_together(
+    hermes_home: Optional[Path | str],
+    origin_location_id: str,
+    destination_location_id: str,
+    *,
+    now_iso: Optional[str] = None,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """第 70 章双人并肩散步边走边聊（零压力、随时停下、零大模型调用）。"""
+    origin = _id(origin_location_id, "origin_location_id")
+    dest = _id(destination_location_id, "destination_location_id")
+    started = _timestamp(now_iso, "started_at")
+    path = companionship_stroll_path(hermes_home)
+    op_k = _text(operation_key, "operation_key", 120) if operation_key else None
+    doc = _read_stroll_readonly(path)
+    if op_k and op_k in doc["ops"]:
+        return dict(doc["ops"][op_k])
+    session = {
+        "mode": "WALKING_TOGETHER",
+        "origin_location_id": origin,
+        "destination_location_id": dest,
+        "shared_conversation": True,
+        "impatience_penalty": 0,
+        "started_at": started,
+        "llm_calls": 0,
+    }
+    doc["active"] = session
+    doc["history"] = [*list(doc.get("history") or [])[-31:], session]
+    doc["revision"] = int(doc.get("revision") or 0) + 1
+    out = {"ok": True, "status": "applied", "stroll": dict(session), "llm_calls": 0}
+    if op_k:
+        doc["ops"][op_k] = out
+    _save_stroll_atomic(path, doc)
+    return out
+
+
+def pause_wait_two_minutes(
+    hermes_home: Optional[Path | str],
+    *,
+    spot_label: str = "便利店门口",
+    wait_seconds: int = 120,
+    now_iso: Optional[str] = None,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """第 70 章门口等两分钟温和驻足（不催促、零好感扣分、零大模型调用）。"""
+    spot = _text(spot_label, "spot_label", 80)
+    secs = max(30, min(600, int(wait_seconds)))
+    started_dt = _instant(now_iso, "now_iso")
+    until_iso = _timestamp(started_dt + timedelta(seconds=secs), "wait_until")
+    path = companionship_stroll_path(hermes_home)
+    op_k = _text(operation_key, "operation_key", 120) if operation_key else None
+    doc = _read_stroll_readonly(path)
+    if op_k and op_k in doc["ops"]:
+        return dict(doc["ops"][op_k])
+    session = {
+        "mode": "WAITING_OUTSIDE",
+        "spot_label": spot,
+        "wait_seconds": secs,
+        "wait_until": until_iso,
+        "impatience_penalty": 0,
+        "started_at": _timestamp(started_dt, "started_at"),
+        "llm_calls": 0,
+    }
+    doc["active"] = session
+    doc["history"] = [*list(doc.get("history") or [])[-31:], session]
+    doc["revision"] = int(doc.get("revision") or 0) + 1
+    out = {"ok": True, "status": "applied", "stroll": dict(session), "llm_calls": 0}
+    if op_k:
+        doc["ops"][op_k] = out
+    _save_stroll_atomic(path, doc)
+    return out
+
+
+def start_loop_stroll(
+    hermes_home: Optional[Path | str],
+    *,
+    center_location_id: str = "home",
+    duration_minutes: int = 10,
+    destination_required: bool = False,
+    now_iso: Optional[str] = None,
+    operation_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """第 70 章 10 分钟无目的环线吹风散步（不打卡不买东西、零大模型调用）。"""
+    center = _id(center_location_id, "center_location_id")
+    mins = max(5, min(60, int(duration_minutes)))
+    started = _timestamp(now_iso, "started_at")
+    path = companionship_stroll_path(hermes_home)
+    op_k = _text(operation_key, "operation_key", 120) if operation_key else None
+    doc = _read_stroll_readonly(path)
+    if op_k and op_k in doc["ops"]:
+        return dict(doc["ops"][op_k])
+    session = {
+        "mode": "LOOP_STROLL",
+        "center_location_id": center,
+        "return_to": center,
+        "duration_minutes": mins,
+        "destination_required": bool(destination_required),
+        "started_at": started,
+        "llm_calls": 0,
+    }
+    doc["active"] = session
+    doc["history"] = [*list(doc.get("history") or [])[-31:], session]
+    doc["revision"] = int(doc.get("revision") or 0) + 1
+    out = {"ok": True, "status": "applied", "stroll": dict(session), "llm_calls": 0}
+    if op_k:
+        doc["ops"][op_k] = out
+    _save_stroll_atomic(path, doc)
+    return out

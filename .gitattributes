@@ -65,6 +65,7 @@ MANIFEST.json                                                     -text
 components/.gitignore                                             -text
 components/alpha/tests/acceptance/e_safety.py                     -text
 vendor/hermes/contributors/emails/uperLu@users.noreply.github.com -text
+/NOW.md                                                           -text
 
 # Assets that must never be normalised.
 *.png      binary

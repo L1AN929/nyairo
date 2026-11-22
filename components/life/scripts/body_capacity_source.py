@@ -141,6 +141,7 @@ __all__ = [
     "REASON_FRESHNESS_UNVERIFIED",
     "SCHEMA_BODY_CAPACITY_VIEW",
     "SOURCE_WORLD_BODY_READ_PORT",
+    "THERMAL_SIGNAL_TYPES",
     "VALID_CAPACITY_STATES",
     "BodyCapacitySource",
     "BodyCapacitySourceError",
@@ -221,6 +222,10 @@ NON_BURDEN_SIGNAL_TYPES = frozenset(
     }
 )
 
+#: Subset of ``NON_BURDEN_SIGNAL_TYPES`` exposed separately as qualitative thermal
+#: context without ever altering ``body_capacity_state`` or burden ``evidence``.
+THERMAL_SIGNAL_TYPES = frozenset({"warmth_high", "cold_tendency"})
+
 # --------------------------------------------------------------------------
 # reason codes (closed set; every view carries exactly one)
 # --------------------------------------------------------------------------
@@ -248,6 +253,11 @@ REASON_OBSERVATION_TIME_AHEAD = "BODY_OBSERVATION_TIME_AHEAD"
 REASON_FRESHNESS_UNVERIFIED = "BODY_FRESHNESS_UNVERIFIED"
 REASON_VIEW_STALE = "BODY_VIEW_STALE"
 REASON_NO_BURDEN_EVIDENCE = "NO_BURDEN_EVIDENCE"
+
+#: The caller captures the round instant *before* it reads the owners, and the
+#: body observation is taken during those reads.  A lag up to one round's owner
+#: reads is not a clock rewind; anything older keeps the existing AHEAD refusal.
+OBSERVATION_READ_SKEW_SECONDS = 30.0
 
 #: Mirrors ``agency_decision_ag1.py:557`` so the reference this adapter emits is
 #: accepted by ``_validate_structured_ref``.  The test asserts the two patterns
@@ -421,9 +431,13 @@ def _view(
     observed_at: Optional[str] = None,
     observed_recovery_state: Optional[str] = None,
     evidence: Sequence[str] = (),
+    thermal_signals: Sequence[str] = (),
     identity_bound: bool = False,
     revision_bound: bool = False,
     observation_time_bound: bool = False,
+    candidate_cap: Optional[int] = None,
+    max_plan_steps: Optional[int] = None,
+    creative_block: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Every return path builds the same shape, so a caller never guesses."""
 
@@ -447,8 +461,14 @@ def _view(
         "observation_time_bound": bool(observation_time_bound),
         "body_capacity_state": state,
         "body_capacity_ref": capacity_ref,
+        # v0.8: how many candidates this body can still weigh right now.
+        # None means "no health opinion" and leaves the upstream count alone.
+        "body_candidate_cap": candidate_cap,
+        "body_max_plan_steps": max_plan_steps,
+        "body_creative_block": creative_block,
         "reason_code": reason,
         "evidence": list(evidence),
+        "thermal_signals": list(thermal_signals),
         "qualitative_only": True,
         "raw_values_exposed": False,
         # BODY-CAP-1 is a read surface: these are constants, not counters.
@@ -581,6 +601,43 @@ def read_body_capacity(
         if recovery_state is not None:
             recovery_state = str(recovery_state)
 
+    # v0.8: the S02 health envelope.  Parsed *before* the signal loop because a
+    # body with no runtime burden signal can still be in an acute course: the
+    # health block is the owner's own answer, and dropping it here is exactly
+    # how an illness stops narrowing capacity.  The identity/time it carries are
+    # the same owner facts the signal stream would otherwise provide.
+    health_state = None
+    health_status = None
+    health_cap = None
+    health_steps = None
+    health_creative = None
+    health_body_id = None
+    health_version = None
+    health_observed_at = None
+    health = payload.get("health")
+    if isinstance(health, Mapping):
+        raw_status = health.get("status")
+        if isinstance(raw_status, str) and raw_status.strip():
+            health_status = raw_status.strip()
+        health_state = health.get("capacity_state")
+        raw_cap = health.get("candidate_cap")
+        if isinstance(raw_cap, int) and not isinstance(raw_cap, bool) and raw_cap >= 0:
+            health_cap = raw_cap
+        raw_steps = health.get("max_plan_steps")
+        if isinstance(raw_steps, int) and not isinstance(raw_steps, bool) and raw_steps >= 0:
+            health_steps = raw_steps
+        if isinstance(health.get("creative_block"), bool):
+            health_creative = health["creative_block"]
+        raw_id = health.get("body_id")
+        if isinstance(raw_id, str) and raw_id.strip():
+            health_body_id = raw_id.strip()
+        raw_version = health.get("body_version")
+        if isinstance(raw_version, int) and not isinstance(raw_version, bool):
+            health_version = raw_version
+        raw_instant = health.get("observed_at")
+        if isinstance(raw_instant, str) and raw_instant.strip():
+            health_observed_at = raw_instant.strip()
+
     signals = payload.get("signals")
     if not isinstance(signals, list):
         return _view(
@@ -595,6 +652,7 @@ def read_body_capacity(
     versions: set = set()
     instants: set = set()
     burden: list[str] = []
+    thermal: list[str] = []
 
     for signal in signals:
         if not isinstance(signal, Mapping):
@@ -633,6 +691,8 @@ def read_body_capacity(
             )
         if signal_type in BURDEN_SIGNAL_TYPES:
             burden.append("%s:%s" % (signal_type, band))
+        elif signal_type in THERMAL_SIGNAL_TYPES:
+            thermal.append("%s:%s" % (signal_type, band))
         body_id = signal.get("body_id")
         if isinstance(body_id, str) and body_id.strip():
             body_ids.add(body_id.strip())
@@ -648,13 +708,29 @@ def read_body_capacity(
             instants.add(raw_instant.isoformat())
 
     evidence = sorted(set(burden))
+    thermal_signals = sorted(set(thermal))
 
     if not signals:
-        return _view(
-            subject_id=resolved_subject, home_ref=home_ref, source_outcome=str(outcome),
-            degraded=degraded, freshness=contract["unverified"], state=CAPACITY_UNKNOWN,
-            reason=REASON_NO_BURDEN_EVIDENCE, observed_recovery_state=recovery_state,
-        )
+        # A healthy/quiet runtime is not the only input: an acute course is a
+        # real owner fact even when no burden signal crossed its latch.  Bind
+        # the view to the health block's own body identity, version and instant
+        # (never to the read clock) so the freshness/identity checks below are
+        # still the ones that decide.
+        if (
+            health_state != CAPACITY_LIMITED
+            or health_status not in {"STRAINED", "ACUTE_ILLNESS", "CONVALESCENT"}
+            or not health_body_id
+            or health_version is None
+            or not health_observed_at
+        ):
+            return _view(
+                subject_id=resolved_subject, home_ref=home_ref, source_outcome=str(outcome),
+                degraded=degraded, freshness=contract["unverified"], state=CAPACITY_UNKNOWN,
+                reason=REASON_NO_BURDEN_EVIDENCE, observed_recovery_state=recovery_state,
+            )
+        body_ids.add(health_body_id)
+        versions.add(health_version)
+        instants.add(health_observed_at)
 
     if len(body_ids) != 1:
         return _view(
@@ -712,6 +788,7 @@ def read_body_capacity(
         degraded=degraded, observed_body_id=observed_body_id,
         observed_revision=observed_revision, observed_at=observed_at,
         observed_recovery_state=recovery_state, evidence=evidence,
+        thermal_signals=thermal_signals,
         identity_bound=True, revision_bound=True, observation_time_bound=True,
     )
 
@@ -722,17 +799,33 @@ def read_body_capacity(
     age_hours = (reference - observed_instant).total_seconds() / 3600.0
     if age_hours < 0:
         # A view observed "in the future" means the clock moved backwards; that
-        # is not freshness and it is not a body fact.
-        return _view(freshness=contract["unverified"], state=CAPACITY_UNKNOWN,
-                     reason=REASON_OBSERVATION_TIME_AHEAD, **bound)
+        # is not freshness and it is not a body fact.  The one exception is the
+        # observation taken during this very read: the caller's round instant
+        # predates it by transport latency, not by a clock rewind.
+        if age_hours * 3600.0 >= -OBSERVATION_READ_SKEW_SECONDS:
+            age_hours = 0.0
+        else:
+            return _view(freshness=contract["unverified"], state=CAPACITY_UNKNOWN,
+                         reason=REASON_OBSERVATION_TIME_AHEAD, **bound)
     if age_hours > contract["max_age_hours"]:
         return _view(freshness=contract["stale"], state=CAPACITY_UNKNOWN,
                      reason=REASON_VIEW_STALE, **bound)
+
+    # v0.8: the S02 health envelope.  An acute or convalescent course narrows
+    # capacity exactly like a burden band does -- it can only ever reach
+    # LIMITED, never UNAVAILABLE (a body is not a lock), and an unattested body
+    # is already UNKNOWN upstream.
+    if health_state == CAPACITY_LIMITED:
+        evidence = sorted(set(evidence) | {"health"})
+        bound["evidence"] = evidence  # bound was captured before the health gate
 
     if evidence:
         return _view(
             freshness=contract["fresh"], state=CAPACITY_LIMITED,
             reason=REASON_OK_LIMITED, capacity_ref=_capacity_ref(observed_body_id, observed_revision),
+            candidate_cap=health_cap,
+            max_plan_steps=health_steps,
+            creative_block=health_creative,
             **bound,
         )
 
@@ -747,6 +840,23 @@ def _capacity_ref(body_id: str, revision: str) -> str:
     """A stable, source-derived reference for one observed body revision."""
 
     return _require_structured_ref("bodycap:%s:%s" % (body_id, revision), "body_capacity_ref")
+
+
+def ag1_body_limit_kwargs(view: Mapping[str, Any]) -> dict[str, Any]:
+    """v0.8: the ``body_candidate_cap`` keyword for ``evaluate_opportunity``.
+
+    Kept apart from ``ag1_capacity_kwargs`` on purpose: the capacity evaluator
+    has its own, narrower contract and must not receive a key it does not know.
+    """
+
+    if not isinstance(view, Mapping):
+        raise BodyCapacitySourceError("view must be a body-capacity view")
+    cap = view.get("body_candidate_cap")
+    if cap is None:
+        return {}
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 0:
+        raise BodyCapacitySourceError(f"view carries an illegal candidate cap {cap!r}")
+    return {"body_candidate_cap": cap}
 
 
 def ag1_capacity_kwargs(

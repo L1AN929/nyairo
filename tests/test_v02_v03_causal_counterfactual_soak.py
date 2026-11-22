@@ -342,7 +342,7 @@ class TestV02V03CausalCounterfactualSoak(unittest.TestCase):
         self.assertEqual(report["llm_calls"], 0)
         self.assertEqual(
             report["files"]["components/life/scripts/autonomous_life_assembly.py"]["actual_sha256"],
-            "5f51c9e82a417d9354d08608841d3472fc5a869e6bd3c9d9a7ebed0b15397f7a",
+            "f14fe6291e1a604520318ebf69acedb583dfc876bfde42f538d6f91017f37434",
         )
         self.assertEqual(
             report["files"]["components/life/scripts/life_sharing_service.py"]["actual_sha256"],

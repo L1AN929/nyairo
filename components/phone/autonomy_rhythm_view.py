@@ -59,6 +59,26 @@ from typing import Any, Mapping, Optional
 from . import sensory_character_view as char_view
 from . import somatic_comfort_view as somatic_view
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
+try:  # package import
+    from ..world.scripts import instance_paths as _instance_paths  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback
+    import sys as _sys_world
+
+    _WORLD_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "world" / "scripts"
+    if str(_WORLD_SCRIPTS_DIR) not in _sys_world.path:
+        _sys_world.path.insert(0, str(_WORLD_SCRIPTS_DIR))
+    import instance_paths as _instance_paths  # type: ignore[no-redef]
+
 AUTONOMY_RHYTHM_SCHEMA = "phone.autonomy.rhythm.v1"
 
 STATE_DIRNAME = "phone"
@@ -89,6 +109,8 @@ MAX_ACTIVE_LOCKS = 6
 MAX_HELD_THREADS = 2
 MAX_PENDING_MESSAGES = 8
 MAX_RETURNED_HISTORY = 16
+MAX_DELIVERED_REPLIES = 64
+MAX_ACK_OPERATIONS = 256
 
 MAX_USER_TEXT = 4000
 MAX_FULL_TEXT = 4000
@@ -99,6 +121,37 @@ MAX_PUBLIC_NOTE = 120
 MAX_SESSION_ID = 120
 MAX_PREVIEW_TEXT = 120
 MAX_LOCAL_ID = 80
+MAX_OPERATION_KEY = 120
+MAX_TRANSPORT_RECEIPT_ID = 160
+
+DEFER_REASONS = (
+    "SLEEPING",
+    "OUT_ON_ERRAND",
+    "IN_TRANSIT",
+    "DEEP_FOCUS",
+    "PHONE_ASIDE",
+)
+
+DEFERRED_REPLY_ACK_ACTIONS = (
+    "claim",
+    "ack_delivered",
+    "ack_failed",
+    "ack_unknown",
+    "ack_read",
+)
+
+PENDING_MESSAGE_STATUSES = (
+    "QUEUED_ON_PHONE",
+    "READY_TO_REPLY",
+    "CLAIMED_BY_TRANSPORT",
+)
+
+DELIVERED_REPLY_STATUSES = (
+    "DELIVERED",
+    "READ",
+    "FAILED",
+    "UNKNOWN",
+)
 
 REFUSAL_CATEGORIES = (
     "errand_outsourcing",
@@ -558,6 +611,8 @@ def default_autonomy_rhythm_state() -> dict[str, Any]:
         "last_pivoted_at": None,
         "subject_override": None,
         "pending_messages": [],
+        "delivered_replies": [],
+        "ack_operations": {},
     }
 
 
@@ -748,6 +803,30 @@ def _validate_stored_override(raw: Any) -> Optional[dict[str, Any]]:
     return out
 
 
+def _infer_defer_reason(
+    *,
+    availability: Optional[str] = None,
+    reason_code: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> str:
+    rc = str(reason_code or "").strip().upper()
+    rs = str(reason or "").strip().upper()
+    av = str(availability or "").strip().upper()
+    if rc == "IN_TRANSIT" or rs == "IN_TRANSIT":
+        return "IN_TRANSIT"
+    if av == "DEFERRED_SLEEPING" or rc in ("ASLEEP_RESTING", "SLEEPING") or rs in ("ASLEEP_RESTING", "SLEEPING"):
+        return "SLEEPING"
+    if av == "DEFERRED_DEEP_FOCUS" or rc in ("DEEP_FOCUS_DO_NOT_KNOCK", "DEEP_FOCUS") or rs in ("DEEP_FOCUS_DO_NOT_KNOCK", "DEEP_FOCUS"):
+        return "DEEP_FOCUS"
+    if (
+        av == "DEFERRED_PHONE_ASIDE"
+        or rc in ("PHONE_SET_ASIDE", "HEADPHONES_AMBIENT_FILTER", "PHONE_ASIDE")
+        or rs in ("PHONE_SET_ASIDE", "HEADPHONES_AMBIENT_FILTER", "PHONE_ASIDE")
+    ):
+        return "PHONE_ASIDE"
+    return "OUT_ON_ERRAND"
+
+
 def _validate_stored_pending_msg(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise ValueError("invalid pending message")
@@ -792,7 +871,7 @@ def _validate_stored_pending_msg(raw: Any) -> dict[str, Any]:
         reason_code="DELAY_MINUTES_INVALID",
     )
     status = raw.get("status")
-    if status not in ("QUEUED_ON_PHONE", "READY_TO_REPLY"):
+    if status not in PENDING_MESSAGE_STATUSES:
         raise ValueError("invalid pending message status")
     urgent = raw.get("urgent", False)
     if not isinstance(urgent, bool):
@@ -813,7 +892,14 @@ def _validate_stored_pending_msg(raw: Any) -> dict[str, Any]:
         )
     else:
         reason = reason_code
-    return {
+    raw_defer = raw.get("defer_reason")
+    if isinstance(raw_defer, str) and raw_defer.strip() in DEFER_REASONS:
+        defer_reason = raw_defer.strip()
+    elif raw_defer is None:
+        defer_reason = _infer_defer_reason(reason_code=reason_code, reason=reason)
+    else:
+        raise ValueError("invalid defer_reason")
+    out: dict[str, Any] = {
         "msg_id": msg_id,
         "full_text": full_text,
         "preview_text": preview_text,
@@ -825,9 +911,95 @@ def _validate_stored_pending_msg(raw: Any) -> dict[str, Any]:
         "urgent": urgent,
         "reason": reason,
         "reason_code": reason_code,
+        "defer_reason": defer_reason,
         "is_service_error": False,
         "not_cold_war": True,
     }
+    ready_at = _iso_or_none(raw.get("ready_at"))
+    if ready_at is not None:
+        out["ready_at"] = ready_at
+    claimed_at = _iso_or_none(raw.get("claimed_at"))
+    if claimed_at is not None:
+        out["claimed_at"] = claimed_at
+    raw_promoted_reason = raw.get("promoted_reason")
+    if isinstance(raw_promoted_reason, str) and raw_promoted_reason.strip():
+        out["promoted_reason"] = _clean_single_line(
+            raw_promoted_reason,
+            min_len=1,
+            max_len=64,
+            reason_code="PROMOTED_REASON_INVALID",
+        )
+    raw_receipt_id = raw.get("transport_receipt_id")
+    if isinstance(raw_receipt_id, str) and raw_receipt_id.strip():
+        out["transport_receipt_id"] = _clean_single_line(
+            raw_receipt_id,
+            min_len=1,
+            max_len=MAX_TRANSPORT_RECEIPT_ID,
+            reason_code="TRANSPORT_RECEIPT_ID_INVALID",
+        )
+    return out
+
+
+def _validate_stored_delivered_reply(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        raise ValueError("invalid delivered reply")
+    msg_id = _require_local_id(raw.get("msg_id"), reason_code="MSG_ID_INVALID")
+    status = str(raw.get("status") or "").strip().upper()
+    if status not in DELIVERED_REPLY_STATUSES:
+        raise ValueError("invalid delivered reply status")
+    session_id = _clean_single_line(
+        raw.get("session_id") or "default",
+        min_len=1,
+        max_len=MAX_SESSION_ID,
+        reason_code="SESSION_ID_INVALID",
+    )
+    out: dict[str, Any] = {
+        "msg_id": msg_id,
+        "session_id": session_id,
+        "status": status,
+        "queued_at": _iso_or_none(raw.get("queued_at")),
+        "ready_at": _iso_or_none(raw.get("ready_at")),
+        "claimed_at": _iso_or_none(raw.get("claimed_at")),
+        "delivered_at": _iso_or_none(raw.get("delivered_at")),
+        "read_at": _iso_or_none(raw.get("read_at")),
+        "updated_at": _iso_or_none(raw.get("updated_at")),
+    }
+    raw_receipt_id = raw.get("transport_receipt_id")
+    if isinstance(raw_receipt_id, str) and raw_receipt_id.strip():
+        out["transport_receipt_id"] = _clean_single_line(
+            raw_receipt_id,
+            min_len=1,
+            max_len=MAX_TRANSPORT_RECEIPT_ID,
+            reason_code="TRANSPORT_RECEIPT_ID_INVALID",
+        )
+    return out
+
+
+def _validate_stored_ack_operations(raw: Any) -> dict[str, dict[str, Any]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping) or len(raw) > MAX_ACK_OPERATIONS:
+        raise ValueError("invalid ack_operations")
+    out: dict[str, dict[str, Any]] = {}
+    for key, val in raw.items():
+        if not isinstance(key, str) or not key.strip() or len(key.strip()) > MAX_OPERATION_KEY:
+            raise ValueError("invalid ack operation key")
+        if not isinstance(val, Mapping):
+            raise ValueError("invalid ack operation entry")
+        clean_key = key.strip()
+        entry: dict[str, Any] = {
+            "item_id": _require_local_id(val.get("item_id"), reason_code="MSG_ID_INVALID"),
+            "action": str(val.get("action") or "").strip(),
+            "status": str(val.get("status") or "").strip(),
+            "op_seq": int(val.get("op_seq") or 0),
+            "at": _iso_or_none(val.get("at")),
+        }
+        if entry["action"] not in DEFERRED_REPLY_ACK_ACTIONS:
+            raise ValueError("invalid ack operation action")
+        if isinstance(val.get("receipt"), Mapping):
+            entry["receipt"] = copy.deepcopy(dict(val["receipt"]))
+        out[clean_key] = entry
+    return out
 
 
 def _validate_stored_state(raw: Any) -> dict[str, Any]:
@@ -848,6 +1020,16 @@ def _validate_stored_state(raw: Any) -> dict[str, Any]:
     pending_raw = raw.get("pending_messages")
     if not isinstance(pending_raw, list) or len(pending_raw) > MAX_PENDING_MESSAGES:
         raise ValueError("invalid pending_messages")
+
+    delivered_raw = raw.get("delivered_replies")
+    if delivered_raw is None:
+        delivered_replies: list[dict[str, Any]] = []
+    elif isinstance(delivered_raw, list) and len(delivered_raw) <= MAX_DELIVERED_REPLIES:
+        delivered_replies = [_validate_stored_delivered_reply(item) for item in delivered_raw]
+    else:
+        raise ValueError("invalid delivered_replies")
+
+    ack_operations = _validate_stored_ack_operations(raw.get("ack_operations"))
 
     ret_ids_raw = raw.get("returned_thread_ids") or []
     if not isinstance(ret_ids_raw, list) or len(ret_ids_raw) > MAX_RETURNED_HISTORY:
@@ -922,6 +1104,8 @@ def _validate_stored_state(raw: Any) -> dict[str, Any]:
         "last_pivoted_at": _iso_or_none(raw.get("last_pivoted_at")),
         "subject_override": _validate_stored_override(raw.get("subject_override")),
         "pending_messages": [_validate_stored_pending_msg(item) for item in pending_raw],
+        "delivered_replies": delivered_replies,
+        "ack_operations": ack_operations,
     }
 
 
@@ -1163,6 +1347,344 @@ def _effective_thread_hold_min(
     return max(MIN_THREAD_HOLD_MIN, min(MAX_THREAD_HOLD_MIN, val))
 
 
+def _extract_world_place_zero_write(doc: Mapping[str, Any]) -> tuple[Optional[str], Optional[str], Optional[bool]]:
+    """Extract ``(place_id, area_id, explicit_home)`` from a raw ``world_state.json`` dict."""
+    loc = doc.get("location")
+    if isinstance(loc, Mapping):
+        pid = loc.get("place_id") or loc.get("location_id")
+        aid = loc.get("area_id")
+        explicit_home = loc.get("home") if isinstance(loc.get("home"), bool) else None
+        if isinstance(pid, str) and pid.strip():
+            return pid.strip(), (str(aid).strip() if isinstance(aid, str) and aid.strip() else None), explicit_home
+    elif isinstance(loc, str) and loc.strip():
+        return loc.strip(), None, None
+    cur = doc.get("current_location")
+    if isinstance(cur, Mapping):
+        pid = cur.get("place_id") or cur.get("location_id")
+        aid = cur.get("area_id")
+        explicit_home = cur.get("home") if isinstance(cur.get("home"), bool) else None
+        if isinstance(pid, str) and pid.strip():
+            return pid.strip(), (str(aid).strip() if isinstance(aid, str) and aid.strip() else None), explicit_home
+    elif isinstance(cur, str) and cur.strip():
+        return cur.strip(), None, None
+    for key in ("place_id", "location_id", "current_place_id", "current_location_id"):
+        val = doc.get(key)
+        if isinstance(val, str) and val.strip():
+            aid = doc.get("area_id")
+            return val.strip(), (str(aid).strip() if isinstance(aid, str) and aid.strip() else None), None
+    return None, None, None
+
+
+def _is_place_home(place_id: str, explicit_home: Optional[bool]) -> bool:
+    if isinstance(explicit_home, bool):
+        return explicit_home
+    base = str(place_id or "").split("/", 1)[0].strip().lower()
+    return base == "home"
+
+
+def build_autonomy_live_snapshots_zero_write(
+    day_root: Path | str,
+    *,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Pure zero-write reader returning ``{'world_result', 'body_view', 'desk_result', 'somatic_state'}``.
+
+    Reads canonical ``<world_home>/data/world/world_state.json`` (and optional
+    ``world_travel_delivery.json``), ``<world_home>/data/body/runtime.json``,
+    ``phone/somatic_comfort.json``, and ``phone/desk_presence.json`` (or canonical
+    ``canonical_life_state.json``) via ``resolve_instance_paths(day_root)`` with
+    100% zero disk writes.
+    """
+    effective_now_iso = now_iso or _format_iso(
+        datetime.now(tz=timezone(timedelta(hours=8)))
+    )
+    now_dt = _parse_now(effective_now_iso)
+    raw_root = Path(day_root)
+    paths = _instance_paths.resolve_instance_paths(raw_root)
+
+    # 1. World snapshot (<world_home>/data/world/world_state.json + optional travel state)
+    world_result: Optional[dict[str, Any]] = None
+    world_doc = _safe_read_json_mapping(paths.world_state_json)
+
+    travel_block: dict[str, Any] = {"status": "idle"}
+    travel_candidates: list[Path] = [
+        paths.world_state_json.parent / "world_travel_delivery.json",
+        paths.world_home / "data" / "world" / "world_travel_delivery.json",
+    ]
+    seen_tr: set[str] = set()
+    for tr_path in travel_candidates:
+        tr_key = str(tr_path)
+        if tr_key in seen_tr:
+            continue
+        seen_tr.add(tr_key)
+        tr_doc = _safe_read_json_mapping(tr_path)
+        if not isinstance(tr_doc, Mapping):
+            continue
+        travels = tr_doc.get("travels")
+        if isinstance(travels, list):
+            for entry in reversed(travels):
+                if not isinstance(entry, Mapping):
+                    continue
+                st = str(entry.get("status") or "").strip().upper()
+                if st in ("IN_PROGRESS", "IN_TRANSIT"):
+                    exp_dt = somatic_view.parse_instant(entry.get("expected_arrival_at"))
+                    if exp_dt is None or exp_dt > now_dt:
+                        travel_block = {
+                            "status": "in_progress",
+                            "origin_location_id": entry.get("origin_location_id"),
+                            "destination_location_id": entry.get("destination_location_id"),
+                            "expected_arrival_at": entry.get("expected_arrival_at"),
+                        }
+                    break
+        break
+
+    if travel_block.get("status") == "idle" and isinstance(world_doc, Mapping):
+        w_tr = world_doc.get("travel")
+        if isinstance(w_tr, Mapping):
+            w_tr_st = str(w_tr.get("status") or "").strip().lower()
+            if w_tr_st in ("in_progress", "in_transit"):
+                exp_dt = somatic_view.parse_instant(w_tr.get("expected_arrival_at"))
+                if exp_dt is None or exp_dt > now_dt:
+                    travel_block = {
+                        "status": "in_progress",
+                        "origin_location_id": w_tr.get("origin_location_id"),
+                        "destination_location_id": w_tr.get("destination_location_id"),
+                        "expected_arrival_at": w_tr.get("expected_arrival_at"),
+                    }
+
+    if isinstance(world_doc, Mapping):
+        place_id, area_id, explicit_home = _extract_world_place_zero_write(world_doc)
+        if place_id:
+            is_home = _is_place_home(place_id, explicit_home)
+            world_result = {
+                "ok": True,
+                "status": "applied",
+                "data": {
+                    "location": {
+                        "status": "available",
+                        "place_id": place_id,
+                        "area_id": area_id,
+                        "home": is_home,
+                    },
+                    "world": {
+                        "world_id": world_doc.get("world_id"),
+                        "local_time": effective_now_iso,
+                        "local_date": effective_now_iso[:10],
+                        "revision": world_doc.get("revision"),
+                    },
+                    "travel": travel_block,
+                },
+            }
+    elif travel_block.get("status") == "in_progress":
+        world_result = {
+            "ok": True,
+            "status": "applied",
+            "data": {
+                "location": {
+                    "status": "available",
+                    "place_id": str(travel_block.get("origin_location_id") or "nearby_street"),
+                    "area_id": None,
+                    "home": False,
+                },
+                "world": {
+                    "world_id": None,
+                    "local_time": effective_now_iso,
+                    "local_date": effective_now_iso[:10],
+                    "revision": None,
+                },
+                "travel": travel_block,
+            },
+        }
+
+    # 2. Body snapshot (<world_home>/data/body/runtime.json)
+    body_view: Optional[dict[str, Any]] = None
+    body_doc = _safe_read_json_mapping(paths.body_runtime_json)
+    if isinstance(body_doc, Mapping):
+        body_inner = (
+            body_doc["data"]
+            if isinstance(body_doc.get("data"), Mapping) and "recovery" not in body_doc
+            else body_doc
+        )
+        rec_raw = body_inner.get("recovery")
+        recovery_blk = (
+            copy.deepcopy(dict(rec_raw))
+            if isinstance(rec_raw, Mapping)
+            else {"state": "inactive", "mode": None}
+        )
+        som_raw = body_inner.get("somatic")
+        sig_raw = body_inner.get("signals")
+        body_view = {
+            "ok": True,
+            "status": "available",
+            "data": {
+                "pose": body_inner.get("pose"),
+                "recovery": recovery_blk,
+                "somatic": copy.deepcopy(dict(som_raw)) if isinstance(som_raw, Mapping) else {},
+                "signals": copy.deepcopy(list(sig_raw)) if isinstance(sig_raw, list) else [],
+            },
+        }
+
+    # 3. Somatic comfort snapshot (<day_root>/phone/somatic_comfort.json)
+    somatic_state: Optional[dict[str, Any]] = None
+    for som_path in (
+        paths.day_root / STATE_DIRNAME / "somatic_comfort.json",
+        raw_root / STATE_DIRNAME / "somatic_comfort.json",
+    ):
+        somatic_state = _safe_read_json_mapping(som_path)
+        if somatic_state is not None:
+            break
+
+    # 4. Desk presence snapshot (<day_root>/phone/desk_presence.json or canonical_life_state.json)
+    desk_result: Optional[dict[str, Any]] = None
+    desk_doc: Optional[dict[str, Any]] = None
+    for desk_path in (
+        paths.day_root / STATE_DIRNAME / "desk_presence.json",
+        raw_root / STATE_DIRNAME / "desk_presence.json",
+    ):
+        desk_doc = _safe_read_json_mapping(desk_path)
+        if desk_doc is not None:
+            break
+
+    if isinstance(desk_doc, Mapping):
+        if isinstance(desk_doc.get("data"), Mapping):
+            desk_result = copy.deepcopy(dict(desk_doc))
+            desk_result.setdefault("ok", True)
+            desk_result.setdefault("status", "ok")
+        else:
+            desk_result = {
+                "ok": True,
+                "status": "ok",
+                "data": copy.deepcopy(dict(desk_doc)),
+            }
+    else:
+        for can_path in (
+            paths.life_state_root / "canonical_life_state.json",
+            paths.day_root / "life" / "state" / "canonical_life_state.json",
+            raw_root / "life" / "state" / "canonical_life_state.json",
+        ):
+            can_doc = _safe_read_json_mapping(can_path)
+            if not isinstance(can_doc, Mapping) or not isinstance(can_doc.get("activities"), Mapping):
+                continue
+            ref = can_doc.get("foreground_activity_ref")
+            act = (can_doc.get("activities") or {}).get(str(ref)) if ref else None
+            if isinstance(act, Mapping) and str(act.get("status") or "").strip().upper() == "ACTIVE":
+                inter_val = str(act.get("interruptibility") or "").strip().upper() or "FOCUSED"
+                desk_result = {
+                    "ok": True,
+                    "status": "ok",
+                    "data": {
+                        "door_sign": "FOCUSED_WORK",
+                        "interruptibility": {"value": inter_val},
+                        "desk": {
+                            "reading": {"available": False},
+                            "current_work": {"available": True},
+                            "bound_work": {"available": False},
+                        },
+                    },
+                }
+            else:
+                desk_result = {
+                    "ok": True,
+                    "status": "ok",
+                    "data": {
+                        "door_sign": "AT_HOME_OPEN",
+                        "interruptibility": {"value": "OPEN"},
+                        "desk": {
+                            "reading": {"available": False},
+                            "current_work": {"available": False},
+                            "bound_work": {"available": False},
+                        },
+                    },
+                }
+            break
+
+    return {
+        "world_result": world_result,
+        "body_view": body_view,
+        "desk_result": desk_result,
+        "somatic_state": somatic_state,
+    }
+
+
+def _is_defer_reason_cleared_by_live_evidence(
+    *,
+    defer_reason: str,
+    item_reason_code: Optional[str],
+    state: Mapping[str, Any],
+    live_avail: str,
+    world_result: Optional[Mapping[str, Any]],
+    body_view: Optional[Mapping[str, Any]],
+    desk_result: Optional[Mapping[str, Any]],
+    now_dt: datetime,
+) -> bool:
+    """Return True iff live availability is ``AVAILABLE_NOW`` and concrete evidence clears ``defer_reason``."""
+    if live_avail != "AVAILABLE_NOW":
+        return False
+
+    # Explicit back_online resets stored availability to AVAILABLE_NOW with no override.
+    if state.get("availability") == "AVAILABLE_NOW" and state.get("subject_override") is None:
+        return True
+
+    override = state.get("subject_override")
+    override_expired_mode: Optional[str] = None
+    if isinstance(override, Mapping):
+        until_dt = somatic_view.parse_instant(override.get("until"))
+        if until_dt is not None and until_dt <= now_dt:
+            override_expired_mode = str(override.get("mode") or "").strip()
+
+    w_data = (
+        world_result.get("data")
+        if isinstance(world_result, Mapping) and isinstance(world_result.get("data"), Mapping)
+        else {}
+    )
+    loc = w_data.get("location") if isinstance(w_data.get("location"), Mapping) else {}
+    world_available = bool(
+        isinstance(world_result, Mapping)
+        and world_result.get("ok")
+        and loc.get("status") == "available"
+    )
+
+    b_data = (
+        body_view.get("data")
+        if isinstance(body_view, Mapping) and isinstance(body_view.get("data"), Mapping)
+        else (body_view if isinstance(body_view, Mapping) else {})
+    )
+    if not b_data and isinstance(w_data.get("body"), Mapping):
+        b_data = w_data["body"]
+    body_available = isinstance(b_data, Mapping) and bool(b_data)
+
+    d_data = (
+        desk_result.get("data")
+        if isinstance(desk_result, Mapping) and isinstance(desk_result.get("data"), Mapping)
+        else (desk_result if isinstance(desk_result, Mapping) else {})
+    )
+    door_sign = str(d_data.get("door_sign") or "").strip().upper()
+    desk_has_sign = bool(door_sign)
+
+    if defer_reason == "SLEEPING":
+        return bool(
+            body_available
+            or (desk_has_sign and door_sign != "RESTING")
+            or override_expired_mode == "sleeping"
+        )
+    if defer_reason == "OUT_ON_ERRAND":
+        return bool(
+            world_available
+            or (desk_has_sign and door_sign != "OUT_IN_TOWN")
+            or override_expired_mode == "outside"
+        )
+    if defer_reason == "IN_TRANSIT":
+        return bool(world_available or override_expired_mode == "outside")
+    if defer_reason == "DEEP_FOCUS":
+        return bool(desk_has_sign or override_expired_mode == "deep_focus")
+    if defer_reason == "PHONE_ASIDE":
+        return bool(
+            override_expired_mode == "aside"
+            or str(item_reason_code or "").strip().upper() == "HEADPHONES_AMBIENT_FILTER"
+        )
+    return False
+
+
 def _derive_live_availability(
     *,
     state: Mapping[str, Any],
@@ -1194,6 +1716,7 @@ def _derive_live_availability(
                 return {
                     "availability": "DEFERRED_OUTSIDE",
                     "reason_code": "OUT_ON_SCHEDULE_OR_ERRAND",
+                    "defer_reason": "OUT_ON_ERRAND",
                     "estimated_delay_minutes": rem_min,
                     "status_line": f"{name}这会儿出门在外忙自己的事，手机揣在包里，大概要隔一阵子回来再回。",
                     "active_override_mode": mode,
@@ -1206,6 +1729,7 @@ def _derive_live_availability(
                 return {
                     "availability": "DEFERRED_SLEEPING",
                     "reason_code": "ASLEEP_RESTING",
+                    "defer_reason": "SLEEPING",
                     "estimated_delay_minutes": rem_min,
                     "status_line": f"{name}已经睡下了，消息安静留在手机上，等{pron}睡醒再看。",
                     "active_override_mode": mode,
@@ -1218,6 +1742,7 @@ def _derive_live_availability(
                 return {
                     "availability": "DEFERRED_DEEP_FOCUS",
                     "reason_code": "DEEP_FOCUS_DO_NOT_KNOCK",
+                    "defer_reason": "DEEP_FOCUS",
                     "estimated_delay_minutes": rem_min,
                     "status_line": f"{name}正埋头专注手头的事，暂时不看手机，忙完这一段再回。",
                     "active_override_mode": mode,
@@ -1229,6 +1754,7 @@ def _derive_live_availability(
             return {
                 "availability": "DEFERRED_PHONE_ASIDE",
                 "reason_code": "PHONE_SET_ASIDE",
+                "defer_reason": "PHONE_ASIDE",
                 "estimated_delay_minutes": rem_min,
                 "status_line": f"{name}把手机搁在一边没带在手头，过会儿拿起手机再回。",
                 "active_override_mode": mode,
@@ -1238,12 +1764,40 @@ def _derive_live_availability(
                 "engaged_activity": False,
             }
 
-    # Live World location check
+    # Live World travel & location check
     w_data = (
         world_result.get("data")
         if isinstance(world_result, Mapping) and isinstance(world_result.get("data"), Mapping)
         else {}
     )
+    travel_blk = w_data.get("travel") if isinstance(w_data.get("travel"), Mapping) else {}
+    travel_status = str(travel_blk.get("status") or "").strip().lower()
+    if travel_status in ("in_progress", "in_transit"):
+        exp_dt = somatic_view.parse_instant(travel_blk.get("expected_arrival_at"))
+        if exp_dt is None or exp_dt > now_dt:
+            if exp_dt is not None:
+                tr_delay = max(
+                    MIN_DELAY_MIN,
+                    min(
+                        away_delay,
+                        int(math.ceil((exp_dt - now_dt).total_seconds() / 60.0)),
+                    ),
+                )
+            else:
+                tr_delay = max(MIN_DELAY_MIN, min(60, away_delay))
+            return {
+                "availability": "DEFERRED_OUTSIDE",
+                "reason_code": "IN_TRANSIT",
+                "defer_reason": "IN_TRANSIT",
+                "estimated_delay_minutes": tr_delay,
+                "status_line": f"{name}正在路上移动中，等到达安定下来再看手机回信。",
+                "active_override_mode": None,
+                "active_override_until": None,
+                "active_override_note": None,
+                "active_override_private_note": None,
+                "engaged_activity": True,
+            }
+
     loc = w_data.get("location") if isinstance(w_data.get("location"), Mapping) else {}
     world_ok = bool(
         isinstance(world_result, Mapping)
@@ -1257,6 +1811,7 @@ def _derive_live_availability(
             return {
                 "availability": "DEFERRED_OUTSIDE",
                 "reason_code": "OUT_ON_SCHEDULE_OR_ERRAND",
+                "defer_reason": "OUT_ON_ERRAND",
                 "estimated_delay_minutes": away_delay,
                 "status_line": f"{name}此刻出门在外，不在书桌前，消息已留在手机上，忙完回来再回。",
                 "active_override_mode": None,
@@ -1281,6 +1836,7 @@ def _derive_live_availability(
         return {
             "availability": "DEFERRED_SLEEPING",
             "reason_code": "ASLEEP_RESTING",
+            "defer_reason": "SLEEPING",
             "estimated_delay_minutes": 240,
             "status_line": f"{name}正在熟睡休息，手机静音搁在床头，等睡醒后再回信息。",
             "active_override_mode": None,
@@ -1307,6 +1863,7 @@ def _derive_live_availability(
         return {
             "availability": "DEFERRED_SLEEPING",
             "reason_code": "ASLEEP_RESTING",
+            "defer_reason": "SLEEPING",
             "estimated_delay_minutes": 240,
             "status_line": f"{name}正在休息，消息先留在手机上，醒来再回。",
             "active_override_mode": None,
@@ -1319,6 +1876,7 @@ def _derive_live_availability(
         return {
             "availability": "DEFERRED_OUTSIDE",
             "reason_code": "OUT_ON_SCHEDULE_OR_ERRAND",
+            "defer_reason": "OUT_ON_ERRAND",
             "estimated_delay_minutes": away_delay,
             "status_line": f"{name}此刻在镇上外出，等回到住处再看手机回信。",
             "active_override_mode": None,
@@ -1334,6 +1892,7 @@ def _derive_live_availability(
         return {
             "availability": "DEFERRED_DEEP_FOCUS",
             "reason_code": "DEEP_FOCUS_DO_NOT_KNOCK",
+            "defer_reason": "DEEP_FOCUS",
             "estimated_delay_minutes": 120,
             "status_line": f"{name}门口挂着专注牌，正投入做自己的事，告一段落后才会看手机。",
             "active_override_mode": None,
@@ -1355,6 +1914,7 @@ def _derive_live_availability(
         return {
             "availability": "DEFERRED_PHONE_ASIDE",
             "reason_code": "HEADPHONES_AMBIENT_FILTER",
+            "defer_reason": "PHONE_ASIDE",
             "estimated_delay_minutes": 90,
             "status_line": f"{name}正戴着滤噪耳机沉浸在自己的节奏里，手机放在一旁，摘下耳机后再回。",
             "active_override_mode": None,
@@ -1395,6 +1955,7 @@ def _derive_live_availability(
     return {
         "availability": "AVAILABLE_NOW",
         "reason_code": "AT_HOME_FREE",
+        "defer_reason": None,
         "estimated_delay_minutes": 0,
         "status_line": f"{name}此刻在家且手头空着，可以正常聊。",
         "active_override_mode": None,
@@ -1836,6 +2397,7 @@ def project_autonomy_rhythm(
         pivot_block["ready_now"] = False
 
     pending_projected: list[dict[str, Any]] = []
+    live_avail_now = str(avail_info.get("availability") or "AVAILABLE_NOW")
     for raw_msg in state.get("pending_messages") or []:
         msg = copy.deepcopy(dict(raw_msg))
         prev = str(msg.get("preview_text") or msg.get("full_text") or "")[:MAX_PREVIEW_TEXT]
@@ -1845,13 +2407,34 @@ def project_autonomy_rhythm(
         rc = str(msg.get("reason_code") or msg.get("reason") or "OUT_ON_SCHEDULE_OR_ERRAND")
         msg.setdefault("reason_code", rc)
         msg.setdefault("reason", str(msg.get("reason") or rc))
+        defer_reason = str(
+            msg.get("defer_reason")
+            or _infer_defer_reason(reason_code=rc, reason=msg.get("reason"))
+        )
+        msg["defer_reason"] = defer_reason
         due_dt = somatic_view.parse_instant(msg.get("deliver_after"))
-        if msg.get("status") != "READY_TO_REPLY" and due_dt is not None and due_dt <= now_dt:
-            msg["status"] = "READY_TO_REPLY"
+        if msg.get("status") == "QUEUED_ON_PHONE":
+            if due_dt is not None and due_dt <= now_dt:
+                msg["status"] = "READY_TO_REPLY"
+                msg.setdefault("ready_at", msg.get("deliver_after") or effective_now_iso)
+            elif _is_defer_reason_cleared_by_live_evidence(
+                defer_reason=defer_reason,
+                item_reason_code=rc,
+                state=state,
+                live_avail=live_avail_now,
+                world_result=world_result,
+                body_view=body_view,
+                desk_result=desk_result,
+                now_dt=now_dt,
+            ):
+                msg["status"] = "READY_TO_REPLY"
+                msg.setdefault("ready_at", effective_now_iso)
         pending_projected.append(msg)
 
     ready_count = sum(
-        1 for item in pending_projected if item.get("status") == "READY_TO_REPLY"
+        1
+        for item in pending_projected
+        if item.get("status") in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT")
     )
     proj_availability = avail_info["availability"]
     if (
@@ -1865,6 +2448,7 @@ def project_autonomy_rhythm(
         "pace_mode": prefs["pace_mode"],
         "availability": proj_availability,
         "reason_code": avail_info["reason_code"],
+        "defer_reason": avail_info.get("defer_reason"),
         "status_line": avail_info["status_line"],
         "estimated_delay_minutes": avail_info["estimated_delay_minutes"],
         "away_delay_minutes": prefs["away_delay_minutes"],
@@ -2007,6 +2591,55 @@ def _upsert_held_thread(
     while len(threads) > MAX_HELD_THREADS:
         threads.pop(0)
     return new_thread
+
+
+def _best_effort_ingest_turn_source(
+    root: Optional[Path],
+    *,
+    topic_label: str,
+    turn_id: Any = None,
+    session_id: Any = None,
+    now_iso: Optional[str] = None,
+) -> None:
+    """Record a shared conversation turn into RLF source ledger for forget-hold."""
+    if root is None or not str(topic_label or "").strip():
+        return
+    try:
+        root_path = Path(root)
+        if not root_path.is_dir():
+            return
+        try:
+            from components.life.scripts import v02_representation_lease_forget as _rlf
+        except ImportError:
+            import v02_representation_lease_forget as _rlf  # type: ignore[no-redef]
+
+        clean_sess = (
+            str(session_id).strip()[:MAX_SESSION_ID]
+            if isinstance(session_id, str) and session_id.strip()
+            else "desktop"
+        )
+        raw_tid = str(turn_id).strip()[:80] if isinstance(turn_id, str) and turn_id.strip() else ""
+        if raw_tid:
+            safe_tid = re.sub(r"[^A-Za-z0-9._:\-]", "_", raw_tid)
+            src_id = safe_tid if safe_tid.startswith("chat_turn_") else f"chat_turn_{safe_tid}"
+        else:
+            dig = hashlib.sha256(
+                f"{clean_sess}|{topic_label}|{now_iso or ''}".encode("utf-8")
+            ).hexdigest()[:16]
+            src_id = f"chat_turn_{dig}"
+        topic_slug = _extract_topic_label(topic_label) or "conversation"
+        _rlf.ingest_source(
+            root_path,
+            source_id=src_id[:96],
+            text=str(topic_label).strip()[:MAX_USER_TEXT],
+            visibility="shared",
+            topic=topic_slug[:80],
+            session_id=clean_sess,
+            operation_id=f"op_{src_id}"[:96],
+            now_iso=now_iso,
+        )
+    except Exception:
+        return
 
 
 def apply_autonomy_action(
@@ -2227,9 +2860,17 @@ def apply_autonomy_action(
             max_len=MAX_TOPIC_LABEL,
             reason_code="TOPIC_LABEL_INVALID",
         )
+        hold_thread = payload.get("hold_thread", True)
+        if not isinstance(hold_thread, bool):
+            raise AutonomyRhythmValidationError("INVALID_HOLD_THREAD")
         default_reason = "SUBJECT_ENGAGED" if action == "hold_subject_topic" else None
         raw_reason = payload.get("reason", default_reason)
-        if not isinstance(raw_reason, str) or raw_reason not in THREAD_REASONS:
+        allowed_reasons = (
+            THREAD_REASONS + ("COMPLETED_TURN",)
+            if (action == "record_turn_context" and not hold_thread)
+            else THREAD_REASONS
+        )
+        if not isinstance(raw_reason, str) or raw_reason not in allowed_reasons:
             raise AutonomyRhythmValidationError("THREAD_REASON_INVALID")
         if action == "hold_subject_topic" and raw_reason == "USER_RETRACTED":
             raise AutonomyRhythmValidationError("THREAD_REASON_INVALID")
@@ -2248,6 +2889,28 @@ def apply_autonomy_action(
             max_len=MAX_PRIVATE_NOTE,
             reason_code="PRIVATE_NOTE_INVALID",
         )
+        session_val = _optional_single_line(
+            payload,
+            "session_id",
+            max_len=MAX_SESSION_ID,
+            reason_code="SESSION_ID_INVALID",
+        )
+        turn_id_val = _optional_single_line(
+            payload,
+            "turn_id",
+            max_len=MAX_LOCAL_ID,
+            reason_code="TURN_ID_INVALID",
+        )
+        if action == "record_turn_context" and not hold_thread:
+            _best_effort_ingest_turn_source(
+                root,
+                topic_label=topic_label,
+                turn_id=turn_id_val,
+                session_id=session_val,
+                now_iso=now_iso,
+            )
+            return _bump({"turn_recorded": True})
+
         tkey = _normalize_topic_key(topic_label)
         if tkey in state["returned_topics"]:
             raise AutonomyRhythmConflictError("ALREADY_RETURNED")
@@ -2261,6 +2924,14 @@ def apply_autonomy_action(
             hold_min=hold_min,
             private_note=private_note,
         )
+        if action == "record_turn_context":
+            _best_effort_ingest_turn_source(
+                root,
+                topic_label=topic_label,
+                turn_id=turn_id_val,
+                session_id=session_val,
+                now_iso=now_iso,
+            )
         return _bump({"thread": _project_thread(thread, subject_view=subject_view)})
 
     # -- 5. return_to_thread (subject capability, max once!) ------------------------------
@@ -2475,11 +3146,13 @@ def apply_autonomy_action(
         for item in state["pending_messages"]:
             due_dt = somatic_view.parse_instant(item.get("deliver_after"))
             if (
-                item["status"] == "READY_TO_REPLY"
+                item["status"] in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT")
                 or is_free_now
                 or (due_dt is not None and due_dt <= now_dt)
             ):
-                item["status"] = "READY_TO_REPLY"
+                if item["status"] == "QUEUED_ON_PHONE":
+                    item["status"] = "READY_TO_REPLY"
+                    item.setdefault("ready_at", now_iso)
                 item.setdefault("full_text", item.get("preview_text", ""))
                 item.setdefault("session_id", "default")
                 item.setdefault(
@@ -2510,7 +3183,10 @@ def apply_autonomy_action(
                 else:
                     kept_msgs.append(item)
             state["pending_messages"] = kept_msgs
-            if not any(m.get("status") == "READY_TO_REPLY" for m in kept_msgs):
+            if not any(
+                m.get("status") in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT")
+                for m in kept_msgs
+            ):
                 state["readiness_promoted"] = False
                 state["availability"] = avail_info["availability"]
             return _bump(
@@ -2521,7 +3197,7 @@ def apply_autonomy_action(
         cleared_ready_ids: list[str] = []
         for item in state["pending_messages"]:
             due_dt = somatic_view.parse_instant(item.get("deliver_after"))
-            is_ready = item["status"] == "READY_TO_REPLY" or (
+            is_ready = item["status"] in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT") or (
                 due_dt is not None and due_dt <= now_dt
             )
             if is_ready:
@@ -2586,6 +3262,13 @@ def apply_autonomy_action(
             delay_min = int(avail_info["estimated_delay_minutes"])
             deliver_after_iso = _format_iso(now_dt + timedelta(minutes=delay_min))
             preview = " ".join(user_text.split())[:MAX_PREVIEW_TEXT]
+            defer_reason = str(
+                avail_info.get("defer_reason")
+                or _infer_defer_reason(
+                    availability=avail_info.get("availability"),
+                    reason_code=avail_info.get("reason_code"),
+                )
+            )
             msg_doc = {
                 "msg_id": _stable_id(
                     "pmsg", session_id, preview, now_iso, len(state["pending_messages"])
@@ -2600,6 +3283,7 @@ def apply_autonomy_action(
                 "urgent": False,
                 "reason": avail_info["reason_code"],
                 "reason_code": avail_info["reason_code"],
+                "defer_reason": defer_reason,
                 "is_service_error": False,
                 "not_cold_war": True,
             }
@@ -2618,6 +3302,7 @@ def apply_autonomy_action(
                 "availability": avail_info["availability"],
                 "reason": avail_info["reason_code"],
                 "reason_code": avail_info["reason_code"],
+                "defer_reason": defer_reason,
                 "status_line": avail_info["status_line"],
                 "is_service_error": False,
                 "not_cold_war": True,
@@ -2965,13 +3650,25 @@ def read_autonomy_rhythm(
     """Convenience zero-write reader from ``root``."""
 
     st, st_reason = read_autonomy_rhythm_state(root)
+    call_kwargs = dict(kwargs)
+    if (
+        call_kwargs.get("world_result") is None
+        and call_kwargs.get("body_view") is None
+        and call_kwargs.get("desk_result") is None
+    ):
+        snaps = build_autonomy_live_snapshots_zero_write(root, now_iso=now_iso)
+        call_kwargs["world_result"] = snaps["world_result"]
+        call_kwargs["body_view"] = snaps["body_view"]
+        call_kwargs["desk_result"] = snaps["desk_result"]
+        if call_kwargs.get("somatic_state") is None:
+            call_kwargs["somatic_state"] = snaps["somatic_state"]
     return project_autonomy_rhythm(
         st,
         state_reason=st_reason,
         subject_view=subject_view,
         root=root,
         now_iso=now_iso,
-        **kwargs,
+        **call_kwargs,
     )
 
 
@@ -2983,7 +3680,14 @@ def apply_autonomy_rhythm_action(
     now_iso: Optional[str] = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Convenience action applier on ``<root>/phone/autonomy_rhythm.json``."""
+    """Convenience action applier on ``<root>/phone/autonomy_rhythm.json``.
+
+    The whole read-check-mutate-write cycle runs inside ``state_file_lock`` so the
+    background ``tick_autonomy_rhythm_readiness`` heartbeat can never read a stale
+    snapshot and overwrite a freshly committed foreground stance or queued message.
+    An optional ``expected_revision`` payload key is re-checked against the freshly
+    re-read state; a stale value raises ``AutonomyRhythmConflictError``.
+    """
 
     if not isinstance(payload, Mapping):
         raise AutonomyRhythmValidationError("PAYLOAD_NOT_OBJECT")
@@ -2992,45 +3696,258 @@ def apply_autonomy_rhythm_action(
         raise AutonomyRhythmValidationError("AUTONOMY_RHYTHM_ACTION_REQUIRED")
     action = raw_action.strip()
     effective_now = now_iso or _format_iso(datetime.now(tz=timezone(timedelta(hours=8))))
-    st, st_reason = read_autonomy_rhythm_state(root)
-    if st_reason is not None:
-        raise AutonomyRhythmConflictError(st_reason)
-    body = {k: v for k, v in payload.items() if k != "action"}
-    new_st, extra = apply_autonomy_action(
-        st,
-        action=action,
-        payload=body,
-        subject_view=subject_view,
-        root=root,
-        now_iso=effective_now,
-        **kwargs,
-    )
-    written = write_autonomy_rhythm_state(root, new_st)
-    proj = project_autonomy_rhythm(
-        written,
-        state_reason=None,
-        subject_view=subject_view,
-        root=root,
-        now_iso=effective_now,
-        **kwargs,
-    )
+    expected_revision = payload.get("expected_revision")
+    if expected_revision is not None and (
+        isinstance(expected_revision, bool) or not isinstance(expected_revision, int)
+    ):
+        raise AutonomyRhythmValidationError("EXPECTED_REVISION_INVALID")
+    body = {
+        key: value
+        for key, value in payload.items()
+        if key not in ("action", "expected_revision")
+    }
+    call_kwargs = dict(kwargs)
+    if (
+        call_kwargs.get("world_result") is None
+        and call_kwargs.get("body_view") is None
+        and call_kwargs.get("desk_result") is None
+    ):
+        snaps = build_autonomy_live_snapshots_zero_write(root, now_iso=effective_now)
+        call_kwargs["world_result"] = snaps["world_result"]
+        call_kwargs["body_view"] = snaps["body_view"]
+        call_kwargs["desk_result"] = snaps["desk_result"]
+        if call_kwargs.get("somatic_state") is None:
+            call_kwargs["somatic_state"] = snaps["somatic_state"]
+    with _tx.state_file_lock(autonomy_rhythm_state_path(root)):
+        st, st_reason = read_autonomy_rhythm_state(root)
+        if st_reason is not None:
+            raise AutonomyRhythmConflictError(st_reason)
+        if expected_revision is not None and int(st.get("revision") or 0) != int(
+            expected_revision
+        ):
+            raise AutonomyRhythmConflictError("REVISION_CONFLICT")
+        new_st, extra = apply_autonomy_action(
+            st,
+            action=action,
+            payload=body,
+            subject_view=subject_view,
+            root=root,
+            now_iso=effective_now,
+            **call_kwargs,
+        )
+        written = write_autonomy_rhythm_state(root, new_st)
+        proj = project_autonomy_rhythm(
+            written,
+            state_reason=None,
+            subject_view=subject_view,
+            root=root,
+            now_iso=effective_now,
+            **call_kwargs,
+        )
     out = dict(proj)
     out.update({"ok": True, "action": action, "changed": True})
     out.update(extra)
     return out
 
 
+def _evaluate_tick_plan(
+    *,
+    root: Path,
+    state: Mapping[str, Any],
+    now_dt: datetime,
+    world_result: Optional[Mapping[str, Any]],
+    body_view: Optional[Mapping[str, Any]],
+    desk_result: Optional[Mapping[str, Any]],
+    somatic_state: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Pure zero-write planner for ``tick_autonomy_rhythm_readiness``."""
+    char_state, _ = char_view.read_character_pack_state(root)
+    som_state = (
+        somatic_state
+        if somatic_state is not None
+        else _safe_read_json_mapping(root / STATE_DIRNAME / "somatic_comfort.json")
+    )
+    avail_info = _derive_live_availability(
+        state=state,
+        char_info=_character_identity(char_state),
+        world_result=world_result,
+        body_view=body_view,
+        desk_result=desk_result,
+        somatic_state=som_state,
+        now_dt=now_dt,
+    )
+    live_avail = str(avail_info.get("availability") or "AVAILABLE_NOW")
+    has_live_snapshot = bool(
+        world_result is not None or body_view is not None or desk_result is not None
+    )
+
+    due_ids: list[str] = []
+    early_ids: list[str] = []
+    for item in state.get("pending_messages") or []:
+        if item.get("status") != "QUEUED_ON_PHONE":
+            continue
+        mid = str(item.get("msg_id") or "")
+        due_dt = somatic_view.parse_instant(item.get("deliver_after"))
+        if due_dt is not None and due_dt <= now_dt:
+            due_ids.append(mid)
+            continue
+        defer_reason = str(
+            item.get("defer_reason")
+            or _infer_defer_reason(
+                reason_code=item.get("reason_code"),
+                reason=item.get("reason"),
+            )
+        )
+        if _is_defer_reason_cleared_by_live_evidence(
+            defer_reason=defer_reason,
+            item_reason_code=item.get("reason_code"),
+            state=state,
+            live_avail=live_avail,
+            world_result=world_result,
+            body_view=body_view,
+            desk_result=desk_result,
+            now_dt=now_dt,
+        ):
+            early_ids.append(mid)
+
+    promoted_ids = due_ids + early_ids
+
+    effective_avail = live_avail
+    stored_avail = state.get("availability")
+    if (
+        effective_avail == "AVAILABLE_NOW"
+        and state.get("subject_override") is None
+        and not has_live_snapshot
+        and not early_ids
+        and isinstance(stored_avail, str)
+        and stored_avail not in ("AVAILABLE_NOW", "READY_TO_REPLY")
+    ):
+        effective_avail = stored_avail
+
+    has_ready_after = bool(promoted_ids) or any(
+        m.get("status") in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT")
+        for m in (state.get("pending_messages") or [])
+    )
+    if effective_avail == "AVAILABLE_NOW":
+        target_avail = "AVAILABLE_NOW"
+        target_promoted_flag = False
+    elif promoted_ids or (state.get("readiness_promoted") is True and has_ready_after):
+        target_avail = "READY_TO_REPLY"
+        target_promoted_flag = True
+    else:
+        target_avail = effective_avail
+        target_promoted_flag = False
+
+    availability_changed = bool(
+        has_live_snapshot
+        and (
+            stored_avail != target_avail
+            or bool(state.get("readiness_promoted")) != target_promoted_flag
+        )
+    )
+    return {
+        "avail_info": avail_info,
+        "live_avail": live_avail,
+        "has_live_snapshot": has_live_snapshot,
+        "due_ids": due_ids,
+        "early_ids": early_ids,
+        "promoted_ids": promoted_ids,
+        "target_avail": target_avail,
+        "target_promoted_flag": target_promoted_flag,
+        "availability_changed": availability_changed,
+        "needs_write": bool(promoted_ids) or availability_changed,
+    }
+
+
 def tick_autonomy_rhythm_readiness(
     root_path: Path | str,
     now_iso: Optional[str] = None,
+    *,
+    world_result: Optional[Mapping[str, Any]] = None,
+    body_view: Optional[Mapping[str, Any]] = None,
+    desk_result: Optional[Mapping[str, Any]] = None,
+    somatic_state: Optional[Mapping[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
-    """Advance due ``QUEUED_ON_PHONE`` messages to ``READY_TO_REPLY`` with zero LLM calls.
+    """Advance due or live-released ``QUEUED_ON_PHONE`` messages to ``READY_TO_REPLY`` with 0 LLM calls.
 
-    Returns ``None`` with 100% zero disk writes when ``phone/autonomy_rhythm.json`` is
-    absent, unreadable/corrupt, or has no ``QUEUED_ON_PHONE`` item with ``deliver_after <= now``.
+    When ``world_result``, ``body_view``, and ``desk_result`` are all ``None``, live zero-write
+    snapshots are loaded via ``build_autonomy_live_snapshots_zero_write(root_path, now_iso=now_iso)``.
+
+    Promotes ``QUEUED_ON_PHONE -> READY_TO_REPLY`` when either:
+    1. ``deliver_after <= now`` (wall-clock fallback timer expired), OR
+    2. Live availability is ``AVAILABLE_NOW`` and concrete live evidence confirms the item's
+       ``defer_reason`` (``SLEEPING``, ``OUT_ON_ERRAND``, ``IN_TRANSIT``, ``DEEP_FOCUS``,
+       ``PHONE_ASIDE``) is no longer active.
+
+    Returns ``None`` with 100% zero disk writes (and zero ``.lock`` creation) when
+    ``phone/autonomy_rhythm.json`` is absent, unreadable/corrupt, or nothing needs promotion or sync.
     """
 
     root = Path(root_path)
+    state_path = autonomy_rhythm_state_path(root)
+    if state_path.is_symlink() or not state_path.exists() or not state_path.is_file():
+        return None
+    if state_path.parent.exists() and state_path.parent.is_symlink():
+        return None
+
+    effective_now_iso = now_iso or _format_iso(
+        datetime.now(tz=timezone(timedelta(hours=8)))
+    )
+    try:
+        now_dt = _parse_now(effective_now_iso)
+    except AutonomyRhythmValidationError:
+        return None
+
+    eff_world = world_result
+    eff_body = body_view
+    eff_desk = desk_result
+    eff_somatic = somatic_state
+    if eff_world is None and eff_body is None and eff_desk is None:
+        snaps = build_autonomy_live_snapshots_zero_write(root, now_iso=effective_now_iso)
+        eff_world = snaps["world_result"]
+        eff_body = snaps["body_view"]
+        eff_desk = snaps["desk_result"]
+        if eff_somatic is None:
+            eff_somatic = snaps["somatic_state"]
+
+    # Zero-write pre-check avoids even creating a .lock file on quiet ticks.
+    pre_state, pre_reason = read_autonomy_rhythm_state(root)
+    if pre_reason is not None:
+        return None
+    pre_plan = _evaluate_tick_plan(
+        root=root,
+        state=pre_state,
+        now_dt=now_dt,
+        world_result=eff_world,
+        body_view=eff_body,
+        desk_result=eff_desk,
+        somatic_state=eff_somatic,
+    )
+    if not pre_plan["needs_write"]:
+        return None
+
+    with _tx.state_file_lock(state_path):
+        return _tick_autonomy_rhythm_readiness_locked(
+            root,
+            now_iso=effective_now_iso,
+            world_result=eff_world,
+            body_view=eff_body,
+            desk_result=eff_desk,
+            somatic_state=eff_somatic,
+        )
+
+
+def _tick_autonomy_rhythm_readiness_locked(
+    root: Path,
+    *,
+    now_iso: Optional[str] = None,
+    world_result: Optional[Mapping[str, Any]] = None,
+    body_view: Optional[Mapping[str, Any]] = None,
+    desk_result: Optional[Mapping[str, Any]] = None,
+    somatic_state: Optional[Mapping[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
+    """Inner write body; callers must already hold ``state_file_lock``."""
+
     state_path = autonomy_rhythm_state_path(root)
     if state_path.is_symlink() or not state_path.exists() or not state_path.is_file():
         return None
@@ -3049,63 +3966,505 @@ def tick_autonomy_rhythm_readiness(
     except AutonomyRhythmValidationError:
         return None
 
+    plan = _evaluate_tick_plan(
+        root=root,
+        state=state,
+        now_dt=now_dt,
+        world_result=world_result,
+        body_view=body_view,
+        desk_result=desk_result,
+        somatic_state=somatic_state,
+    )
+    if not plan["needs_write"]:
+        return None
+
+    due_set = set(plan["due_ids"])
+    early_set = set(plan["early_ids"])
     promoted_ids: list[str] = []
+    early_released_ids: list[str] = []
     for item in state.get("pending_messages") or []:
         if item.get("status") != "QUEUED_ON_PHONE":
             continue
-        due_dt = somatic_view.parse_instant(item.get("deliver_after"))
-        if due_dt is not None and due_dt <= now_dt:
+        mid = str(item.get("msg_id") or "")
+        if mid in due_set:
             item["status"] = "READY_TO_REPLY"
-            promoted_ids.append(str(item["msg_id"]))
+            item["ready_at"] = effective_now_iso
+            item["promoted_reason"] = "wall_clock_due"
+            promoted_ids.append(mid)
+        elif mid in early_set:
+            item["status"] = "READY_TO_REPLY"
+            item["ready_at"] = effective_now_iso
+            item["promoted_reason"] = "early_live_context_release"
+            promoted_ids.append(mid)
+            early_released_ids.append(mid)
 
-    if not promoted_ids:
-        return None
-
-    char_state, _ = char_view.read_character_pack_state(root)
-    som_state = _safe_read_json_mapping(root / STATE_DIRNAME / "somatic_comfort.json")
-    avail_info = _derive_live_availability(
-        state=state,
-        char_info=_character_identity(char_state),
-        world_result=None,
-        body_view=None,
-        desk_result=None,
-        somatic_state=som_state,
-        now_dt=now_dt,
-    )
-    live_avail = str(avail_info.get("availability") or "AVAILABLE_NOW")
-    stored_avail = state.get("availability")
-    if (
-        live_avail == "AVAILABLE_NOW"
-        and state.get("subject_override") is None
-        and isinstance(stored_avail, str)
-        and stored_avail not in ("AVAILABLE_NOW", "READY_TO_REPLY")
-    ):
-        live_avail = stored_avail
-
-    new_avail = "AVAILABLE_NOW" if live_avail == "AVAILABLE_NOW" else "READY_TO_REPLY"
+    new_avail = str(plan["target_avail"])
     state["availability"] = new_avail
-    state["readiness_promoted"] = new_avail == "READY_TO_REPLY"
+    state["readiness_promoted"] = bool(plan["target_promoted_flag"])
     state["revision"] = int(state.get("revision") or 0) + 1
     state["updated_at"] = effective_now_iso
     written = write_autonomy_rhythm_state(root, state)
     ready_count = sum(
         1
         for m in (written.get("pending_messages") or [])
-        if m.get("status") == "READY_TO_REPLY"
+        if m.get("status") in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT")
     )
     return {
         "ok": True,
-        "status": "ready_promoted",
+        "status": "ready_promoted" if promoted_ids else "availability_synced",
         "changed": True,
         "promoted_count": len(promoted_ids),
         "promoted_msg_ids": promoted_ids,
+        "early_released_count": len(early_released_ids),
+        "early_released_msg_ids": early_released_ids,
         "ready_count": ready_count,
         "pending_count": len(written.get("pending_messages") or []),
         "availability": new_avail,
+        "live_availability": str(plan["live_avail"]),
         "revision": int(written["revision"]),
         "updated_at": effective_now_iso,
         "llm_calls": 0,
     }
+
+
+def read_ready_deferred_replies_zero_write(
+    root: Path | str,
+    *,
+    now_iso: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Pure 100% zero-write reader returning ready/claimed deferred replies for pollable outbox.
+
+    Never creates directories, files, locks, or WAL sidecars. Returns clean public/transport
+    items sorted ascending by ``(ready_at, item_id)`` with zero private notes or internal tokens.
+    """
+
+    root_path = Path(root)
+    state_path = autonomy_rhythm_state_path(root_path)
+    if state_path.is_symlink() or not state_path.exists() or not state_path.is_file():
+        return []
+    if state_path.parent.exists() and state_path.parent.is_symlink():
+        return []
+
+    state, st_reason = read_autonomy_rhythm_state(root_path)
+    if st_reason is not None:
+        return []
+
+    effective_now_iso = now_iso or _format_iso(
+        datetime.now(tz=timezone(timedelta(hours=8)))
+    )
+    now_dt = _parse_now(effective_now_iso)
+    snaps = build_autonomy_live_snapshots_zero_write(root_path, now_iso=effective_now_iso)
+    char_state, _ = char_view.read_character_pack_state(root_path)
+    avail_info = _derive_live_availability(
+        state=state,
+        char_info=_character_identity(char_state),
+        world_result=snaps["world_result"],
+        body_view=snaps["body_view"],
+        desk_result=snaps["desk_result"],
+        somatic_state=snaps["somatic_state"],
+        now_dt=now_dt,
+    )
+    live_avail = str(avail_info.get("availability") or "AVAILABLE_NOW")
+
+    ready_items: list[dict[str, Any]] = []
+    for item in state.get("pending_messages") or []:
+        if not isinstance(item, Mapping):
+            continue
+        mid = str(item.get("msg_id") or "").strip()
+        if not mid:
+            continue
+        status = str(item.get("status") or "")
+        rc = str(item.get("reason_code") or item.get("reason") or "OUT_ON_SCHEDULE_OR_ERRAND")
+        defer_reason = str(
+            item.get("defer_reason")
+            or _infer_defer_reason(reason_code=rc, reason=item.get("reason"))
+        )
+        due_dt = somatic_view.parse_instant(item.get("deliver_after"))
+        projected_status: Optional[str] = None
+        ready_at: Optional[str] = item.get("ready_at")
+
+        if status in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT"):
+            projected_status = status
+            ready_at = ready_at or item.get("deliver_after") or item.get("queued_at") or effective_now_iso
+        elif status == "QUEUED_ON_PHONE":
+            if due_dt is not None and due_dt <= now_dt:
+                projected_status = "READY_TO_REPLY"
+                ready_at = ready_at or item.get("deliver_after") or effective_now_iso
+            elif _is_defer_reason_cleared_by_live_evidence(
+                defer_reason=defer_reason,
+                item_reason_code=rc,
+                state=state,
+                live_avail=live_avail,
+                world_result=snaps["world_result"],
+                body_view=snaps["body_view"],
+                desk_result=snaps["desk_result"],
+                now_dt=now_dt,
+            ):
+                projected_status = "READY_TO_REPLY"
+                ready_at = ready_at or effective_now_iso
+
+        if projected_status is None:
+            continue
+
+        full_text = str(item.get("full_text") or item.get("preview_text") or "")[:MAX_FULL_TEXT]
+        preview_text = str(item.get("preview_text") or full_text)[:MAX_PREVIEW_TEXT]
+        row: dict[str, Any] = {
+            "item_id": mid,
+            "msg_id": mid,
+            "item_kind": "deferred_reply_ready",
+            "channel": "session_reply",
+            "session_id": str(item.get("session_id") or "default")[:MAX_SESSION_ID],
+            "status": projected_status,
+            "user_full_text": full_text,
+            "preview_text": preview_text,
+            "defer_reason": defer_reason,
+            "reason_code": rc,
+            "urgent": bool(item.get("urgent", False)),
+            "queued_at": item.get("queued_at"),
+            "created_at": item.get("queued_at") or ready_at,
+            "deliver_after": item.get("deliver_after"),
+            "ready_at": ready_at,
+            "is_service_error": False,
+            "not_cold_war": True,
+        }
+        if item.get("claimed_at") is not None:
+            row["claimed_at"] = item.get("claimed_at")
+        if item.get("transport_receipt_id") is not None:
+            row["transport_receipt_id"] = item.get("transport_receipt_id")
+        ready_items.append(row)
+
+    ready_items.sort(key=lambda r: (str(r.get("ready_at") or r.get("created_at") or ""), str(r.get("item_id") or "")))
+    return ready_items
+
+
+def _trim_ack_operations(ops: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    if len(ops) <= MAX_ACK_OPERATIONS:
+        return ops
+    ordered = sorted(
+        ops.items(),
+        key=lambda kv: (int((kv[1] or {}).get("op_seq") or 0), kv[0]),
+    )
+    return dict(ordered[-MAX_ACK_OPERATIONS:])
+
+
+def ack_deferred_reply_delivery(
+    root: Path | str,
+    *,
+    item_id: str,
+    action: str,
+    operation_key: str,
+    transport_receipt_id: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Acknowledge transport lifecycle for a ready deferred reply (idempotent on ``operation_key``).
+
+    Supports ``claim | ack_delivered | ack_failed | ack_unknown | ack_read``.
+    - ``claim`` transitions ``READY_TO_REPLY -> CLAIMED_BY_TRANSPORT``.
+    - ``ack_delivered`` transitions to ``DELIVERED``, removes the item from ``pending_messages``,
+      and archives a bounded delivery record so a subsequent ``ack_read`` resolves cleanly.
+    - ``ack_failed`` transitions to ``FAILED`` and removes the item from ``pending_messages``.
+    - ``ack_unknown`` transitions to ``UNKNOWN`` and removes the item from ``pending_messages``
+      (anti-blind-retry: never guesses ``DELIVERED`` and never re-polls blindly).
+    - ``ack_read`` transitions a delivered (or pending) item to ``READ`` with ``read_at``.
+    """
+
+    clean_item_id = _require_local_id(item_id, reason_code="MSG_ID_INVALID")
+    if not isinstance(action, str) or action.strip() not in DEFERRED_REPLY_ACK_ACTIONS:
+        raise AutonomyRhythmValidationError("ACK_ACTION_INVALID")
+    clean_action = action.strip()
+    if not isinstance(operation_key, str) or not operation_key.strip():
+        raise AutonomyRhythmValidationError("OPERATION_KEY_REQUIRED")
+    clean_op_key = _clean_single_line(
+        operation_key,
+        min_len=1,
+        max_len=MAX_OPERATION_KEY,
+        reason_code="OPERATION_KEY_INVALID",
+    )
+    clean_receipt_id: Optional[str] = None
+    if transport_receipt_id is not None:
+        clean_receipt_id = _clean_single_line(
+            transport_receipt_id,
+            min_len=1,
+            max_len=MAX_TRANSPORT_RECEIPT_ID,
+            reason_code="TRANSPORT_RECEIPT_ID_INVALID",
+        )
+
+    root_path = Path(root)
+    effective_now_iso = now_iso or _format_iso(
+        datetime.now(tz=timezone(timedelta(hours=8)))
+    )
+    now_dt = _parse_now(effective_now_iso)
+    snaps = build_autonomy_live_snapshots_zero_write(root_path, now_iso=effective_now_iso)
+    char_state, _ = char_view.read_character_pack_state(root_path)
+
+    with _tx.state_file_lock(autonomy_rhythm_state_path(root_path)):
+        state, st_reason = read_autonomy_rhythm_state(root_path)
+        if st_reason is not None:
+            raise AutonomyRhythmConflictError(st_reason)
+
+        ack_ops: dict[str, dict[str, Any]] = dict(state.get("ack_operations") or {})
+        existing_op = ack_ops.get(clean_op_key)
+        if isinstance(existing_op, Mapping):
+            if (
+                str(existing_op.get("item_id") or "") != clean_item_id
+                or str(existing_op.get("action") or "") != clean_action
+            ):
+                raise AutonomyRhythmConflictError("OPERATION_KEY_CONFLICT")
+            prior_receipt = existing_op.get("receipt")
+            if isinstance(prior_receipt, Mapping):
+                replayed_out = copy.deepcopy(dict(prior_receipt))
+            else:
+                replayed_out = {
+                    "ok": True,
+                    "item_id": clean_item_id,
+                    "msg_id": clean_item_id,
+                    "item_kind": "deferred_reply_ready",
+                    "action": clean_action,
+                    "operation_key": clean_op_key,
+                    "status": str(existing_op.get("status") or ""),
+                    "item_status": str(existing_op.get("status") or ""),
+                    "revision": int(state.get("revision") or 0),
+                    "updated_at": state.get("updated_at") or effective_now_iso,
+                }
+            replayed_out["replayed"] = True
+            replayed_out["idempotent_replay"] = True
+            replayed_out["changed"] = False
+            replayed_out["llm_calls"] = 0
+            return replayed_out
+
+        avail_info = _derive_live_availability(
+            state=state,
+            char_info=_character_identity(char_state),
+            world_result=snaps["world_result"],
+            body_view=snaps["body_view"],
+            desk_result=snaps["desk_result"],
+            somatic_state=snaps["somatic_state"],
+            now_dt=now_dt,
+        )
+        live_avail = str(avail_info.get("availability") or "AVAILABLE_NOW")
+
+        pending_list: list[dict[str, Any]] = list(state.get("pending_messages") or [])
+        delivered_list: list[dict[str, Any]] = list(state.get("delivered_replies") or [])
+
+        pending_idx: Optional[int] = None
+        for idx, entry in enumerate(pending_list):
+            if entry.get("msg_id") == clean_item_id:
+                pending_idx = idx
+                break
+
+        delivered_idx: Optional[int] = None
+        for idx, entry in enumerate(delivered_list):
+            if entry.get("msg_id") == clean_item_id:
+                delivered_idx = idx
+                break
+
+        if pending_idx is None and delivered_idx is None:
+            raise AutonomyRhythmNotFoundError("PENDING_MESSAGE_NOT_FOUND")
+
+        def _is_pending_item_ready(item: Mapping[str, Any]) -> bool:
+            st_val = str(item.get("status") or "")
+            if st_val in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT"):
+                return True
+            due_dt = somatic_view.parse_instant(item.get("deliver_after"))
+            if due_dt is not None and due_dt <= now_dt:
+                return True
+            defer_reason = str(
+                item.get("defer_reason")
+                or _infer_defer_reason(
+                    reason_code=item.get("reason_code"),
+                    reason=item.get("reason"),
+                )
+            )
+            return _is_defer_reason_cleared_by_live_evidence(
+                defer_reason=defer_reason,
+                item_reason_code=item.get("reason_code"),
+                state=state,
+                live_avail=live_avail,
+                world_result=snaps["world_result"],
+                body_view=snaps["body_view"],
+                desk_result=snaps["desk_result"],
+                now_dt=now_dt,
+            )
+
+        def _upsert_delivered_record(rec: dict[str, Any]) -> None:
+            for j, existing_rec in enumerate(delivered_list):
+                if existing_rec.get("msg_id") == rec["msg_id"]:
+                    delivered_list[j] = rec
+                    return
+            delivered_list.append(rec)
+            if len(delivered_list) > MAX_DELIVERED_REPLIES:
+                del delivered_list[:-MAX_DELIVERED_REPLIES]
+
+        final_status = ""
+        final_claimed_at: Optional[str] = None
+        final_delivered_at: Optional[str] = None
+        final_read_at: Optional[str] = None
+        final_receipt_id: Optional[str] = clean_receipt_id
+
+        if clean_action == "claim":
+            if pending_idx is None:
+                raise AutonomyRhythmConflictError("DEFERRED_REPLY_ALREADY_SETTLED")
+            item = pending_list[pending_idx]
+            if not _is_pending_item_ready(item):
+                raise AutonomyRhythmConflictError("DEFERRED_REPLY_NOT_READY")
+            item["status"] = "CLAIMED_BY_TRANSPORT"
+            item["ready_at"] = item.get("ready_at") or effective_now_iso
+            item["claimed_at"] = item.get("claimed_at") or effective_now_iso
+            if clean_receipt_id is not None:
+                item["transport_receipt_id"] = clean_receipt_id
+            final_status = "CLAIMED_BY_TRANSPORT"
+            final_claimed_at = item.get("claimed_at")
+            final_receipt_id = item.get("transport_receipt_id")
+
+        elif clean_action in ("ack_delivered", "ack_failed", "ack_unknown"):
+            target_status = {
+                "ack_delivered": "DELIVERED",
+                "ack_failed": "FAILED",
+                "ack_unknown": "UNKNOWN",
+            }[clean_action]
+            if pending_idx is not None:
+                if not _is_pending_item_ready(pending_list[pending_idx]):
+                    raise AutonomyRhythmConflictError("DEFERRED_REPLY_NOT_READY")
+                item = pending_list.pop(pending_idx)
+                final_claimed_at = item.get("claimed_at")
+                final_delivered_at = effective_now_iso if target_status == "DELIVERED" else None
+                final_receipt_id = clean_receipt_id or item.get("transport_receipt_id")
+                rec: dict[str, Any] = {
+                    "msg_id": clean_item_id,
+                    "session_id": str(item.get("session_id") or "default"),
+                    "status": target_status,
+                    "queued_at": item.get("queued_at"),
+                    "ready_at": item.get("ready_at") or item.get("deliver_after") or effective_now_iso,
+                    "claimed_at": final_claimed_at,
+                    "delivered_at": final_delivered_at,
+                    "read_at": None,
+                    "updated_at": effective_now_iso,
+                }
+                if final_receipt_id is not None:
+                    rec["transport_receipt_id"] = final_receipt_id
+                _upsert_delivered_record(rec)
+                final_status = target_status
+            else:
+                assert delivered_idx is not None
+                rec = delivered_list[delivered_idx]
+                cur_st = str(rec.get("status") or "").strip().upper()
+                if clean_action == "ack_delivered" and cur_st in ("UNKNOWN", "FAILED"):
+                    rec["status"] = "DELIVERED"
+                    rec["delivered_at"] = rec.get("delivered_at") or effective_now_iso
+                    rec["updated_at"] = effective_now_iso
+                    if clean_receipt_id is not None:
+                        rec["transport_receipt_id"] = clean_receipt_id
+                elif clean_action == "ack_failed" and cur_st == "UNKNOWN":
+                    rec["status"] = "FAILED"
+                    rec["updated_at"] = effective_now_iso
+                    if clean_receipt_id is not None:
+                        rec["transport_receipt_id"] = clean_receipt_id
+                else:
+                    raise AutonomyRhythmConflictError("DEFERRED_REPLY_ALREADY_SETTLED")
+                final_status = str(rec.get("status") or target_status)
+                final_claimed_at = rec.get("claimed_at")
+                final_delivered_at = rec.get("delivered_at")
+                final_read_at = rec.get("read_at")
+                final_receipt_id = rec.get("transport_receipt_id") or clean_receipt_id
+
+        elif clean_action == "ack_read":
+            if delivered_idx is not None:
+                rec = delivered_list[delivered_idx]
+                cur_st = str(rec.get("status") or "").strip().upper()
+                if cur_st in ("FAILED", "UNKNOWN"):
+                    raise AutonomyRhythmConflictError("DEFERRED_REPLY_NOT_DELIVERED")
+                if cur_st != "DELIVERED":
+                    raise AutonomyRhythmConflictError("DEFERRED_REPLY_ALREADY_SETTLED")
+                rec["status"] = "READ"
+                rec["delivered_at"] = rec.get("delivered_at") or effective_now_iso
+                rec["read_at"] = rec.get("read_at") or effective_now_iso
+                rec["updated_at"] = effective_now_iso
+                if clean_receipt_id is not None:
+                    rec["transport_receipt_id"] = clean_receipt_id
+                final_status = "READ"
+                final_claimed_at = rec.get("claimed_at")
+                final_delivered_at = rec.get("delivered_at")
+                final_read_at = rec.get("read_at")
+                final_receipt_id = rec.get("transport_receipt_id")
+            else:
+                assert pending_idx is not None
+                if not _is_pending_item_ready(pending_list[pending_idx]):
+                    raise AutonomyRhythmConflictError("DEFERRED_REPLY_NOT_READY")
+                item = pending_list.pop(pending_idx)
+                final_claimed_at = item.get("claimed_at")
+                final_delivered_at = effective_now_iso
+                final_read_at = effective_now_iso
+                final_receipt_id = clean_receipt_id or item.get("transport_receipt_id")
+                rec = {
+                    "msg_id": clean_item_id,
+                    "session_id": str(item.get("session_id") or "default"),
+                    "status": "READ",
+                    "queued_at": item.get("queued_at"),
+                    "ready_at": item.get("ready_at") or item.get("deliver_after") or effective_now_iso,
+                    "claimed_at": final_claimed_at,
+                    "delivered_at": final_delivered_at,
+                    "read_at": final_read_at,
+                    "updated_at": effective_now_iso,
+                }
+                if final_receipt_id is not None:
+                    rec["transport_receipt_id"] = final_receipt_id
+                _upsert_delivered_record(rec)
+                final_status = "READ"
+
+        state["pending_messages"] = pending_list
+        state["delivered_replies"] = delivered_list
+        if not any(
+            m.get("status") in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT")
+            for m in pending_list
+        ):
+            state["readiness_promoted"] = False
+            state["availability"] = avail_info["availability"]
+
+        next_rev = int(state.get("revision") or 0) + 1
+        state["revision"] = next_rev
+        state["updated_at"] = effective_now_iso
+        ready_after = sum(
+            1
+            for m in pending_list
+            if m.get("status") in ("READY_TO_REPLY", "CLAIMED_BY_TRANSPORT")
+        )
+        receipt_out: dict[str, Any] = {
+            "ok": True,
+            "item_id": clean_item_id,
+            "msg_id": clean_item_id,
+            "item_kind": "deferred_reply_ready",
+            "action": clean_action,
+            "operation_key": clean_op_key,
+            "status": final_status,
+            "item_status": final_status,
+            "transport_receipt_id": final_receipt_id,
+            "claimed_at": final_claimed_at,
+            "delivered_at": final_delivered_at,
+            "read_at": final_read_at,
+            "replayed": False,
+            "idempotent_replay": False,
+            "changed": True,
+            "revision": next_rev,
+            "updated_at": effective_now_iso,
+            "pending_count": len(pending_list),
+            "ready_count": ready_after,
+            "llm_calls": 0,
+        }
+        next_op_seq = max(
+            (int((v or {}).get("op_seq") or 0) for v in ack_ops.values()),
+            default=0,
+        ) + 1
+        ack_ops[clean_op_key] = {
+            "item_id": clean_item_id,
+            "action": clean_action,
+            "status": final_status,
+            "op_seq": next_op_seq,
+            "at": effective_now_iso,
+            "receipt": copy.deepcopy(receipt_out),
+        }
+        state["ack_operations"] = _trim_ack_operations(ack_ops)
+        write_autonomy_rhythm_state(root_path, state)
+        return receipt_out
 
 
 def _build_shift_guidance(

@@ -266,6 +266,34 @@ def declaration_of(
         return dict(found)
     if economy is None:
         return {}
+    # Dynamic open-storefront items carry their validated category/price_tier on the
+    # owned economy entry; consumption still requires purchase_voucher proof.
+    raw_items = economy.get("items")
+    if isinstance(raw_items, list):
+        for entry in raw_items:
+            if not isinstance(entry, Mapping):
+                continue
+            if _text(entry.get("item_instance_id")) != name:
+                continue
+            meta = entry.get("item_meta")
+            if str(entry.get("disposition")) == "OWNED" and isinstance(meta, Mapping):
+                try:
+                    import sys
+
+                    scripts_dir = str(Path(__file__).resolve().parent)
+                    if scripts_dir not in sys.path:
+                        sys.path.insert(0, scripts_dir)
+                    import world_open_storefront as open_storefront
+
+                    decl = open_storefront.consumable_declaration_for(
+                        str(meta.get("category") or ""),
+                        str(meta.get("price_tier") or "standard"),
+                    )
+                    if decl:
+                        return decl
+                except ImportError:  # pragma: no cover
+                    pass
+            break
     catalog_item_id = economy_instances(economy).get(name)
     if not catalog_item_id:
         return {}

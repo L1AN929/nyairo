@@ -20,14 +20,33 @@ import json
 import random
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from . import GENERATOR_VERSION
 from . import schema
 from .names import compose_description, compose_name, compose_world_name, pick_weighted
+from .procedural import (
+    PROCEDURAL_THEME,
+    PROCEDURAL_THEME_ALIASES,
+    STREET_LAYOUT_STYLES,
+    is_procedural_theme,
+    synthesize_procedural_template,
+)
+
+def _open_storefront():
+    import sys
+
+    scripts_dir = Path(__file__).resolve().parents[1] / "world" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import world_open_storefront
+
+    return world_open_storefront
+
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 AVAILABLE_THEMES = ("coastal_town", "residential_town", "mountain_town", "rural_farming")
+ALL_TEMPLATE_THEMES = AVAILABLE_THEMES + ("urban_apartment",)
 
 #: The everyday-life places every theme must be able to reach from ``home``.  The normal
 #: weighted draw is kept exactly as before; only when it leaves one of these out is the
@@ -51,11 +70,275 @@ _STREET_ANCHORS = [
     (0.25, 0.28),
 ]
 
+#: 程序化自由生成模式的四种连通道路拓扑骨架（锚点序列 + 无向边索引对）。
+_PROCEDURAL_STREET_LAYOUTS: dict[str, tuple[list[tuple[float, float]], list[tuple[int, int]]]] = {
+    "star_hub": (
+        [(0.50, 0.50), (0.24, 0.28), (0.76, 0.30), (0.48, 0.78)],
+        [(0, 1), (0, 2), (0, 3)],
+    ),
+    "ring_loop": (
+        [(0.32, 0.30), (0.68, 0.30), (0.68, 0.70), (0.32, 0.70)],
+        [(0, 1), (1, 2), (2, 3), (3, 0)],
+    ),
+    "linear_promenade": (
+        [(0.18, 0.52), (0.40, 0.46), (0.62, 0.54), (0.82, 0.48)],
+        [(0, 1), (1, 2), (2, 3)],
+    ),
+    "forked_avenue": (
+        [(0.22, 0.50), (0.46, 0.50), (0.68, 0.30), (0.84, 0.24), (0.70, 0.72)],
+        [(0, 1), (1, 2), (2, 3), (1, 4)],
+    ),
+}
 
-def load_theme(theme_id: str) -> dict[str, Any]:
-    if theme_id not in AVAILABLE_THEMES:
-        raise ValueError(f"未知主题 {theme_id!r}，可用主题: {list(AVAILABLE_THEMES)}")
-    return json.loads((TEMPLATES_DIR / f"{theme_id}.json").read_text(encoding="utf-8"))
+
+def normalize_theme(theme_id: Optional[str]) -> str:
+    """将主题别名（含 None/空串/procedural/freeform/auto）归一化为规范主题 ID。"""
+    if is_procedural_theme(theme_id):
+        return PROCEDURAL_THEME
+    if isinstance(theme_id, str):
+        if theme_id in AVAILABLE_THEMES:
+            return theme_id
+        cleaned = theme_id.strip().lower()
+        if cleaned in AVAILABLE_THEMES:
+            return cleaned
+    raise ValueError(
+        f"未知主题 {theme_id!r}，可用主题: {list(AVAILABLE_THEMES) + list(PROCEDURAL_THEME_ALIASES)}"
+    )
+
+
+def load_theme(theme_id: Optional[str] = PROCEDURAL_THEME, *, seed: int = 0) -> dict[str, Any]:
+    resolved = normalize_theme(theme_id)
+    if resolved == PROCEDURAL_THEME:
+        return synthesize_procedural_template(seed)
+    return json.loads((TEMPLATES_DIR / f"{resolved}.json").read_text(encoding="utf-8"))
+
+
+#: 物件品类关键字 → 标准交互属性（按顺序匹配，先命中者生效）。
+#: 同时覆盖英文 kind 与中文名称（模板里的 kind 只是 furniture/item，
+#: 真正的品类来自 name），保证四套主题的现有物件都能落到合理品类。
+_AFFORDANCE_KEYWORD_RULES = (
+    # 书桌/板书/留言板：既是承载面也能书写。
+    (
+        ("desk", "书桌", "写字台", "黑板", "留言板", "blackboard", "board"),
+        ("container", "combinable", "inscribable"),
+    ),
+    # 桌柜架盒篮箱：收纳与组合。
+    (
+        ("cabinet", "shelf", "table", "box", "basket", "tray", "bag",
+         "桌", "柜", "架", "盒", "篮", "箱", "抽屉"),
+        ("container", "combinable"),
+    ),
+    # 灯具/开关/炉灶/风扇/门窗/留声机/饮水机：可开关、可使用。
+    (
+        ("lamp", "light", "dispenser", "window", "fan", "switch", "radio",
+         "灯", "窗", "风扇", "开关", "留声机", "饮水机", "炉灶"),
+        ("switchable", "usable"),
+    ),
+    # 书本纸卡笔记：可书写、可夹入、可移动。
+    (
+        ("book", "note", "paper", "notebook", "card", "bookmark", "sign",
+         "书", "纸", "笔记", "卡", "明信片", "书签", "牌"),
+        ("inscribable", "insertable", "movable"),
+    ),
+    # 杯壶餐具茶水毛巾毯衣：可用、可受热受潮、可移动。
+    (
+        ("cup", "kettle", "mug", "tea", "towel", "blanket", "cloth",
+         "杯", "壶", "餐具", "茶", "毛巾", "毯", "衣"),
+        ("usable", "thermal_or_damp", "movable"),
+    ),
+    # 盆栽/小摆件/椅凳/垫/床：可移动、可使用。
+    (
+        ("plant", "chair", "cushion", "curio", "bed",
+         "盆栽", "摆件", "椅", "凳", "垫", "床"),
+        ("movable", "usable"),
+    ),
+)
+
+#: 会额外带上 thermal_or_damp 的字样（靠窗、湿热器具、取暖物件）。
+_THERMAL_HINTS = (
+    "暖炉", "取暖", "热", "炉", "湿", "水", "茶", "热饮", "kettle",
+    "thermal", "heat", "steam", "fire",
+)
+
+
+def infer_affordance_traits(
+    kind: str,
+    *,
+    name: str = "",
+    portable: bool = False,
+    note: str = "",
+) -> list[str]:
+    """按品类/名称推断一件物件的标准交互属性（确定性，纯函数）。
+
+    返回值始终是 :data:`schema.CANONICAL_AFFORDANCE_TRAITS` 的非空子集；
+    未知品类回退为 ``["usable"]``，可携带物件再补 ``movable``。
+    """
+    haystack = f"{kind or ''} {name or ''}".strip().lower()
+    traits: list[str] = []
+    for keywords, mapped in _AFFORDANCE_KEYWORD_RULES:
+        if any(keyword in haystack for keyword in keywords):
+            traits = list(mapped)
+            break
+    if not traits:
+        traits = ["usable"]
+    thermal_haystack = f"{haystack} {note or ''}".lower()
+    if "thermal_or_damp" not in traits and any(
+        hint in thermal_haystack for hint in _THERMAL_HINTS
+    ):
+        traits.append("thermal_or_damp")
+    if portable and "movable" not in traits:
+        traits.append("movable")
+    return [trait for trait in traits if trait in schema.CANONICAL_AFFORDANCE_TRAITS]
+
+
+#: v0.8 物质档推断关键字（按顺序匹配，先命中者生效）。同时覆盖英文 kind 与
+#: 中文名称/备注，保证模板与室内家具都能落到合理的 ambient_zone / item_kind。
+_MATTER_COLD_KEYWORDS = (
+    "fridge", "refrigerator", "freezer", "icebox", "cooler",
+    "冰箱", "冷藏", "冷柜", "冰柜",
+)
+_MATTER_HEATING_KEYWORDS = (
+    "stove", "oven", "kettle", "burner", "toaster", "heater", "warmer",
+    "炉", "灶", "烤箱", "热水壶", "煮水壶", "电陶炉", "锅",
+)
+_MATTER_WATER_KEYWORDS = (
+    "sink", "faucet", "washbasin", "dispenser", "well", "tap",
+    "水池", "洗手池", "水槽", "水龙头", "饮水机",
+)
+_MATTER_PAPER_KEYWORDS = (
+    "book", "notebook", "letter", "postcard", "journal", "sketchbook",
+    "newspaper", "书", "本", "日记", "信", "卡片", "报纸", "便利贴",
+)
+_MATTER_VESSEL_KEYWORDS = (
+    "cup", "mug", "bowl", "plate", "pot", "teapot", "pitcher", "glass",
+    "bottle", "杯", "碗", "盘", "壶", "瓶",
+)
+_MATTER_DRINK_KEYWORDS = ("tea", "coffee", "milk", "茶", "咖啡", "奶")
+_MATTER_PREPARED_KEYWORDS = ("bread", "cake", "soup", "noodle", "烘焙", "面", "汤")
+_MATTER_INGREDIENT_KEYWORDS = ("fish", "fruit", "lemon", "egg", "鱼", "果", "蛋", "菜")
+_MATTER_CONTAINER_KEYWORDS = (
+    "cabinet", "table", "desk", "shelf", "counter", "drawer",
+    "柜", "桌", "架", "台", "屉",
+)
+#: 天然是一叠、可按张/份拆用的纸质物件（v0.4 第 40 章）。
+_MATTER_STACK_KEYWORDS = ("newspaper", "card", "paper", "报纸", "卡片", "便利贴")
+
+
+def infer_matter_profile(
+    kind: str,
+    *,
+    name: str = "",
+    portable: bool = False,
+    capacity: int = 0,
+    note: str = "",
+    affordance_traits: Optional[Sequence[str]] = None,
+) -> dict[str, Any]:
+    """按品类/名称/备注推断一件物件的物质档（确定性，纯函数）。
+
+    返回的字典只含存在的字段；``ambient_zone`` / ``water_source`` /
+    ``capacity_slots`` / ``item_kind`` / ``paper_like`` 总是给出，食品饮料
+    另带 ``shelf_life_hours`` 与 ``portions``；柜架类容器带
+    ``assembly_role="host_frame"``，成叠纸品带 ``material_units``。
+    调用方应再经 :func:`schema.normalize_matter_profile` 校验后落盘。
+    """
+    haystack = f"{kind or ''} {name or ''} {note or ''}".strip().lower()
+    capacity_value = int(capacity or 0)
+
+    def _hit(keywords: Sequence[str]) -> bool:
+        return any(keyword in haystack for keyword in keywords)
+
+    if _hit(_MATTER_COLD_KEYWORDS):
+        return {
+            "ambient_zone": "cold",
+            "water_source": False,
+            "capacity_slots": max(capacity_value or 8, 6),
+            "item_kind": "everyday",
+            "paper_like": False,
+        }
+    if _hit(_MATTER_HEATING_KEYWORDS):
+        return {
+            "ambient_zone": "heating",
+            "water_source": False,
+            "capacity_slots": max(capacity_value or 3, 2),
+            "item_kind": "everyday",
+            "paper_like": False,
+        }
+    if _hit(_MATTER_WATER_KEYWORDS):
+        return {
+            "ambient_zone": "room",
+            "water_source": True,
+            "capacity_slots": max(capacity_value or 4, 2),
+            "item_kind": "everyday",
+            "paper_like": False,
+        }
+    if _hit(_MATTER_PAPER_KEYWORDS):
+        profile = {
+            "ambient_zone": "room",
+            "water_source": False,
+            "capacity_slots": 0,
+            "item_kind": "paper",
+            "paper_like": True,
+        }
+        # 一叠纸/一沓卡片天然可按张拆用；单本日记、信件不标份数。
+        if _hit(_MATTER_STACK_KEYWORDS):
+            profile["material_units"] = 4
+        return profile
+    if _hit(_MATTER_VESSEL_KEYWORDS):
+        return {
+            "ambient_zone": "room",
+            "water_source": False,
+            "capacity_slots": max(capacity_value or 2, 1),
+            "item_kind": "vessel",
+            "paper_like": False,
+            "portions": 1,
+        }
+    if _hit(_MATTER_DRINK_KEYWORDS):
+        return {
+            "ambient_zone": "room",
+            "water_source": False,
+            "capacity_slots": 0,
+            "item_kind": "drink",
+            "paper_like": False,
+            "shelf_life_hours": 48,
+            "portions": 2,
+        }
+    if _hit(_MATTER_PREPARED_KEYWORDS):
+        return {
+            "ambient_zone": "room",
+            "water_source": False,
+            "capacity_slots": 0,
+            "item_kind": "prepared_food",
+            "paper_like": False,
+            "shelf_life_hours": 24,
+            "portions": 1,
+        }
+    if _hit(_MATTER_INGREDIENT_KEYWORDS):
+        return {
+            "ambient_zone": "room",
+            "water_source": False,
+            "capacity_slots": 0,
+            "item_kind": "ingredient",
+            "paper_like": False,
+            "shelf_life_hours": 48,
+            "portions": 2,
+        }
+    if _hit(_MATTER_CONTAINER_KEYWORDS):
+        # 有盛放格位的柜/架/桌天然是"可装入隔板/配件的容器"。
+        return {
+            "ambient_zone": "room",
+            "water_source": False,
+            "capacity_slots": max(capacity_value or 6, 3),
+            "item_kind": "everyday",
+            "paper_like": False,
+            "assembly_role": "host_frame",
+        }
+    return {
+        "ambient_zone": "room",
+        "water_source": False,
+        "capacity_slots": max(capacity_value, 0),
+        "item_kind": "everyday",
+        "paper_like": False,
+    }
 
 
 #: The only optional affordance keys a template may carry, beside the legacy pair.
@@ -135,8 +418,9 @@ def _ensure_core_slots(
     topology rule: the appended slot goes through the same location/edge/rule assembly.
     """
 
+    required_cores = tuple(template.get("core_location_ids", CORE_LOCATION_IDS))
     present = {str(slot.get("id") or slot.get("slot")) for slot in venue_slots}
-    missing = [core for core in CORE_LOCATION_IDS if core not in present]
+    missing = [core for core in required_cores if core not in present]
     if not missing:
         return venue_slots
     catalogue: dict[str, dict[str, Any]] = {}
@@ -161,15 +445,39 @@ def generate_topology(
     proposal: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """生成地点、区域、连接与步行耗时。"""
-    street_count = rng.randint(2, 3)
+    procedural_mode = bool(template.get("procedural_mode"))
+    if procedural_mode:
+        layout_style = str(template.get("street_layout_style") or rng.choice(STREET_LAYOUT_STYLES))
+        if layout_style not in _PROCEDURAL_STREET_LAYOUTS:
+            layout_style = "star_hub"
+        anchors, street_edge_pairs = _PROCEDURAL_STREET_LAYOUTS[layout_style]
+        street_count = len(anchors)
+    else:
+        layout_style = "star_hub"
+        anchors = _STREET_ANCHORS
+        street_count = rng.randint(2, 3)
+        street_edge_pairs = [(0, idx) for idx in range(1, street_count)]
+
     zone_defs = list(template["zones"])
     rng.shuffle(zone_defs)
     streets = _slugify_streets(rng, template, street_count)
 
-    # 街道锚点：主街固定镇中心，支街依次取周围锚点，保证连线不交叉感。
+    # 街道锚点：经典模式固定镇中心星形锚点；程序化模式按所选路网骨架展开并施加轻微坐标微扰。
     street_nodes: dict[str, dict[str, Any]] = {}
     for index, street in enumerate(streets):
-        anchor = _STREET_ANCHORS[index]
+        anchor = anchors[index]
+        if procedural_mode:
+            base_x = anchor[0] * CANVAS_WIDTH + rng.uniform(-18.0, 18.0)
+            base_y = anchor[1] * CANVAS_HEIGHT + rng.uniform(-18.0, 18.0)
+            map_xy = {
+                "x": round(min(CANVAS_WIDTH - 50, max(50, base_x)), 1),
+                "y": round(min(CANVAS_HEIGHT - 50, max(50, base_y)), 1),
+            }
+        else:
+            map_xy = {
+                "x": round(anchor[0] * CANVAS_WIDTH, 1),
+                "y": round(anchor[1] * CANVAS_HEIGHT, 1),
+            }
         node = {
             "location_id": street["location_id"],
             "name": street["name"],
@@ -177,10 +485,7 @@ def generate_topology(
             "area_id": street["location_id"],
             "description": f"{street['name']}，镇上的主要街道之一。",
             "zone_id": "streets",
-            "map": {
-                "x": round(anchor[0] * CANVAS_WIDTH, 1),
-                "y": round(anchor[1] * CANVAS_HEIGHT, 1),
-            },
+            "map": map_xy,
         }
         street_nodes[street["location_id"]] = node
 
@@ -199,7 +504,11 @@ def generate_topology(
                 slot["weight"] = max(1, int(slot.get("weight", 1)) * int(weight))
     budget = target_venue_count
     if budget is None:
-        budget = rng.randint(9, 16)
+        budget_range = template.get("venue_budget_range")
+        if isinstance(budget_range, (list, tuple)) and len(budget_range) == 2:
+            budget = rng.randint(int(budget_range[0]), int(budget_range[1]))
+        else:
+            budget = rng.randint(9, 16)
     budget = max(1, min(budget, len(pool)))
     picked = pick_weighted(rng, pool, budget)
     venue_slots.extend(picked)
@@ -244,13 +553,16 @@ def generate_topology(
             "zone_id": zone_id,
         }
         if location_id == "home":
-            location["rooms"] = [
-                {
-                    "room_id": "bedroom",
-                    "name": "自己的房间",
-                    "description": "自己的房间，有一张床和一张书桌。",
-                }
-            ]
+            if slot.get("rooms"):
+                location["rooms"] = [dict(room) for room in slot["rooms"]]
+            else:
+                location["rooms"] = [
+                    {
+                        "room_id": "bedroom",
+                        "name": "自己的房间",
+                        "description": "自己的房间，有一张床和一张书桌。",
+                    }
+                ]
         locations.append(location)
 
         open_raw, close_raw = slot.get("open_hour"), slot.get("close_hour")
@@ -265,20 +577,26 @@ def generate_topology(
             "weekdays_only": bool(slot.get("weekdays_only", False)),
             "affordances": affordances,
         }
-    # 连接：街道星形互联 + 各区地点挂街道 + 住宅挂街道。
+    # 连接：街道按拓扑骨架连通 + 各区地点挂街道 + 住宅挂街道。
     main_street = streets[0]["location_id"]
-    for street in streets[1:]:
+    for idx_a, idx_b in street_edge_pairs:
+        street_a = streets[idx_a]["location_id"]
+        street_b = streets[idx_b]["location_id"]
         edges.append(
             {
-                "from": main_street,
-                "to": street["location_id"],
-                "walk_seconds": _walk_seconds(street_nodes[main_street], street_nodes[street["location_id"]]),
+                "from": street_a,
+                "to": street_b,
+                "walk_seconds": _walk_seconds(street_nodes[street_a], street_nodes[street_b]),
             }
         )
     street_ids = [street["location_id"] for street in streets]
-    for location in locations:
+    for index, location in enumerate(locations):
         zone_id = location["zone_id"]
-        home_street_id = zone_street.get(zone_id, main_street)
+        if procedural_mode and location["location_id"] not in ("home", "school"):
+            preferred = zone_street.get(zone_id, main_street)
+            home_street_id = preferred if index % 2 == 0 else street_ids[(index + street_ids.index(preferred)) % len(street_ids)]
+        else:
+            home_street_id = zone_street.get(zone_id, main_street)
         if home_street_id not in street_ids:  # pragma: no cover - 模板错误防护
             home_street_id = main_street
         edges.append(
@@ -334,6 +652,7 @@ def generate_topology(
         "location_rules": rules,
         "zone_names": {zone["zone_id"]: zone["name"] for zone in template["zones"]},
         "zone_street": zone_street,
+        "street_layout_style": layout_style,
     }
 
 
@@ -344,7 +663,7 @@ def build_seed_material(seed: int, theme: str) -> str:
 def generate_world(
     *,
     seed: int,
-    theme: str,
+    theme: Optional[str] = PROCEDURAL_THEME,
     world_name: Optional[str] = None,
     timezone_name: str = "Asia/Tokyo",
     target_venue_count: Optional[int] = None,
@@ -356,7 +675,13 @@ def generate_world(
     程序据此调整槽位权重、世界描述、环境事件候选与 NPC 作息——提案不承担
     拓扑权威，未知槽位建议被丢弃，几何与合法性仍完全由程序决定。
     """
-    template = load_theme(theme)
+    resolved_theme = normalize_theme(theme)
+    template = (
+        load_theme(resolved_theme, seed=seed)
+        if resolved_theme == PROCEDURAL_THEME
+        else load_theme(resolved_theme)
+    )
+    theme = resolved_theme
     rng = random.Random(build_seed_material(seed, theme))
     name = world_name or compose_world_name(rng, template["world_name_fragments"])
     # 防御性去重：world_id 只允许 ASCII slug。
@@ -511,16 +836,54 @@ def generate_world(
     # ---- 对象目录 ----------------------------------------------------------
     objects = []
     for item in template["object_pool"]:
+        if item.get("location_only") and item["location"] not in location_ids:
+            continue
+        obj_index = len(objects)
         location_id = item["location"] if item["location"] in location_ids else "home"
-        objects.append(
-            {
-                "object_id": item["object_id"],
-                "name": item["name"],
-                "kind": item["kind"],
-                "location_id": location_id,
-                "note": item["note"],
-            }
+        portable = bool(item.get("portable", False))
+        capacity = int(item.get("capacity", 0) or 0)
+        if "affordance_traits" in item:
+            traits = schema.normalize_affordance_traits(
+                list(item["affordance_traits"]),
+                f"objects.objects[{obj_index}].affordance_traits",
+            )
+        else:
+            traits = infer_affordance_traits(
+                item["kind"],
+                name=item["name"],
+                portable=portable,
+                note=item["note"],
+            )
+        raw_profile = (
+            dict(item["matter_profile"])
+            if "matter_profile" in item
+            else infer_matter_profile(
+                item["kind"],
+                name=item["name"],
+                portable=portable,
+                capacity=capacity,
+                note=item["note"],
+                affordance_traits=traits,
+            )
         )
+        obj_entry: dict[str, Any] = {
+            "object_id": item["object_id"],
+            "name": item["name"],
+            "kind": item["kind"],
+            "location_id": location_id,
+            "note": item["note"],
+            "affordance_traits": traits,
+            "matter_profile": schema.normalize_matter_profile(
+                raw_profile,
+                f"objects.objects[{obj_index}].matter_profile",
+            ),
+        }
+        if "sale_spec" in item and item["sale_spec"] is not None:
+            obj_entry["sale_spec"] = schema.normalize_sale_spec(
+                item["sale_spec"],
+                f"objects.objects[{obj_index}].sale_spec",
+            )
+        objects.append(obj_entry)
 
     # ---- 本地内容（无 LLM 时的完整可运行内容） -----------------------------
     flavor = template["flavor_pool"]
@@ -533,6 +896,18 @@ def generate_world(
             "festivals": rng.sample(flavor["festival_candidates"], k=min(2, len(flavor["festival_candidates"]))),
         }
     }
+    if template.get("procedural_mode"):
+        entries["world"]["street_layout_style"] = topology["street_layout_style"]
+        if template.get("biome_mix"):
+            entries["world"]["biome_mix"] = list(template["biome_mix"])
+        home_loc = next(
+            (loc for loc in topology["locations"] if loc["location_id"] == "home"),
+            None,
+        )
+        if home_loc and home_loc.get("rooms"):
+            entries["world"]["home_layout"] = [
+                room["room_id"] for room in home_loc["rooms"]
+            ]
     if proposal and proposal.get("area_life"):
         for zone_name, life in proposal["area_life"].items():
             entries.setdefault("world", {}).setdefault("zone_life", []).append(f"{zone_name}：{life}")
@@ -580,7 +955,30 @@ def generate_world(
     for npc in npcs:
         entries[npc["npc_id"]] = {"public_note": f"{npc['display_name']}是这里的{npc['public_role']}。"}
 
-    description = f"{name}——{template['theme_name']}主题的生成世界。"
+    # 为商业地点写入随世界主题/种子生成的日常商品表；独立随机流，不扰动已有地形与对象。
+    shop_rng = random.Random(f"{build_seed_material(seed, theme)}:shop_goods")
+    storefront = _open_storefront()
+    for location in topology["locations"]:
+        if location["kind"] not in storefront.COMMERCIAL_LOCATION_KINDS:
+            continue
+        loc_id = location["location_id"]
+        loc_objects = [o for o in objects if o.get("location_id") == loc_id]
+        goods = storefront.generate_package_goods_for_location(
+            loc_id=loc_id,
+            loc_name=location["name"],
+            loc_kind=location["kind"],
+            intro=str(entries[loc_id].get("intro") or ""),
+            object_rows=loc_objects,
+            theme=theme,
+            rng=shop_rng,
+        )
+        if goods:
+            entries[loc_id]["goods"] = goods
+
+    if template.get("procedural_mode"):
+        description = f"{name}——融合{template['theme_name']}风貌的程序化生成小镇。"
+    else:
+        description = f"{name}——{template['theme_name']}主题的生成世界。"
     if proposal and proposal.get("style"):
         description = f"{name}——{proposal['style']}"
         if proposal.get("culture"):
@@ -630,10 +1028,160 @@ def generate_world(
     return docs
 
 
+_base_normalize_theme = normalize_theme
+
+
+def normalize_theme(theme_id: Optional[str]) -> str:
+    """规范化主题名；保持经典四主题 AVAILABLE_THEMES 不变的同时支持 ALL_TEMPLATE_THEMES（含 urban_apartment）。"""
+    if isinstance(theme_id, str):
+        cleaned = theme_id.strip().lower()
+        if cleaned in ALL_TEMPLATE_THEMES:
+            return cleaned
+    return _base_normalize_theme(theme_id)
+
+
+class TownPlace:
+    """三句话开荒生成的单个镇域地点（含圈层 1/2/3 与渐进解锁状态）。"""
+
+    def __init__(
+        self,
+        place_id: str,
+        name_cn: str,
+        ring_tier: int,
+        unlocked: bool,
+        edge_hint_cn: str = "",
+    ) -> None:
+        self.place_id = place_id
+        self.name_cn = name_cn
+        self.ring_tier = int(ring_tier)
+        self.unlocked = bool(unlocked)
+        self.edge_hint_cn = edge_hint_cn
+
+
+class GeneratedWorldState:
+    """三句话开荒世界状态：首轮立开第一圈，二/三圈随踩出脚步或天数自然渐进解锁。"""
+
+    def __init__(
+        self,
+        *,
+        terrain_base: str,
+        climate_bias: str,
+        outdoor_drying_zone: str,
+        starter_objects: list[str],
+        places: dict[str, TownPlace],
+    ) -> None:
+        self.terrain_base = terrain_base
+        self.climate_bias = climate_bias
+        self.outdoor_drying_zone = outdoor_drying_zone
+        self.starter_objects = starter_objects
+        self.places = places
+
+    def visible_unlocked_places(self) -> list[str]:
+        return [pid for pid, place in self.places.items() if place.unlocked]
+
+    def step_toward_edge(self, target_place_id: str) -> TownPlace:
+        place = self.places[target_place_id]
+        place.unlocked = True
+        place.edge_hint_cn = ""
+        return place
+
+    def advance_days_lived(self, days_lived: int) -> None:
+        for place in self.places.values():
+            if place.ring_tier == 2 and days_lived >= 2:
+                place.unlocked = True
+                place.edge_hint_cn = ""
+            elif place.ring_tier == 3 and days_lived >= 7:
+                place.unlocked = True
+                place.edge_hint_cn = ""
+
+
+def parse_opening_sentence(sentence_cn: str) -> tuple[str, str]:
+    """第 57 / 69 / 89 章：从一句话描述里零 LLM 解析落脚地貌与气候底色。"""
+    s = sentence_cn or ""
+    if any(k in s for k in ("公寓", "高楼", "电梯", "高架")):
+        terrain = "urban_apartment"
+    elif any(k in s for k in ("海", "港", "礁石", "潮")):
+        terrain = "coastal_town"
+    elif any(k in s for k in ("山", "雾", "温泉", "汤", "石阶")):
+        terrain = "mountain_town"
+    elif any(k in s for k in ("稻", "田", "村", "水渠")):
+        terrain = "rural_farming"
+    else:
+        terrain = "residential_town"
+
+    if any(k in s for k in ("雨", "潮", "梅雨")):
+        climate = "humid_breezy"
+    elif any(k in s for k in ("雾", "凉", "雪")):
+        climate = "misty_cool"
+    else:
+        climate = "mild_clear"
+    return terrain, climate
+
+
+def hatch_world_from_three_inputs(
+    *,
+    opening_sentence_cn: str,
+    starter_objects: list[str] | tuple[str, ...],
+    is_legacy_upgrade: bool = False,
+) -> GeneratedWorldState:
+    """三步 1 秒生成落脚世界；都市公寓自动启用封窗阳台，老存档全三圈初始解锁。"""
+    terrain, climate = parse_opening_sentence(opening_sentence_cn)
+    drying_zone = "balcony" if terrain == "urban_apartment" else "courtyard"
+    chosen_objs = list(starter_objects[:2]) if starter_objects else ["暖黄旧台灯", "空白速写本"]
+    ring23_open = bool(is_legacy_upgrade)
+
+    places = {
+        "home": TownPlace("home", "自己的小家", 1, True),
+        drying_zone: TownPlace(drying_zone, "封窗小阳台" if drying_zone == "balcony" else "门外小院", 1, True),
+        "convenience_store": TownPlace("convenience_store", "街角便利店", 1, True),
+        "old_bookstore": TownPlace("old_bookstore", "温井旧书店", 1, True),
+        "promenade": TownPlace(
+            "promenade",
+            "海堤散步道" if terrain == "coastal_town" else "河堤散步道",
+            2,
+            ring23_open,
+            "" if ring23_open else "往西延伸的石板路（还没去逛过）",
+        ),
+        "flower_craft_shop": TownPlace(
+            "flower_craft_shop",
+            "巷口花店与手作铺",
+            2,
+            ring23_open,
+            "" if ring23_open else "拐角飘来花草味的小巷（还没去逛过）",
+        ),
+        "far_lookout": TownPlace(
+            "far_lookout",
+            "退潮灯塔礁石滩" if terrain == "coastal_town" else "山坡展望台",
+            3,
+            ring23_open,
+            "" if ring23_open else "更远处的坡道尽头（留待周末去走走）",
+        ),
+    }
+
+    return GeneratedWorldState(
+        terrain_base=terrain,
+        climate_bias=climate,
+        outdoor_drying_zone=drying_zone,
+        starter_objects=chosen_objs,
+        places=places,
+    )
+
+
 __all__ = [
+    "ALL_TEMPLATE_THEMES",
     "AVAILABLE_THEMES",
+    "GeneratedWorldState",
+    "PROCEDURAL_THEME",
+    "PROCEDURAL_THEME_ALIASES",
+    "STREET_LAYOUT_STYLES",
+    "TownPlace",
     "build_seed_material",
     "generate_topology",
     "generate_world",
+    "hatch_world_from_three_inputs",
+    "infer_affordance_traits",
+    "infer_matter_profile",
     "load_theme",
+    "normalize_theme",
+    "parse_opening_sentence",
 ]

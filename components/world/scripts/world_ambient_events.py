@@ -21,9 +21,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
+from pathlib import Path
 from typing import Any, Optional
 
 import world_runtime_data as wrd
@@ -129,7 +131,7 @@ class _Template:
 _TEMPLATES = (
     # -- 日常小事（8 条，含既有两条） -------------------------------------
     _Template("school_notice", "school", "今天公告栏贴了文化祭筹备通知", 0, 24),
-    _Template("home_window_sound", "home", "窗外雨声变大", 0, 24),
+    _Template("home_window_sound", "home", "窗外风声清缓，远处偶有街巷轻响", 0, 24),
     _Template(
         "convenience_store_morning_delivery",
         "convenience_store",
@@ -705,17 +707,236 @@ def _active_templates(
     return tuple(_template_from_mapping(item) for item in world.ambient_templates)
 
 
+_RAIN_SOUND_TOKENS: tuple[str, ...] = (
+    "雨声",
+    "雨点",
+    "雨帘",
+    "积水",
+    "细雨",
+    "暴雨",
+    "落雨",
+)
+_RAINY_WEATHERS: frozenset[str] = frozenset(
+    {
+        "drizzle",
+        "rain",
+        "shower",
+        "heavy_rain",
+        "humid_plum_rain",
+        "storm",
+        "thunder_blackout",
+        "sea_gale",
+    }
+)
+_CLEAR_WINDOW_SOUNDS: tuple[str, ...] = (
+    "窗外风声清缓，远处偶有街巷轻响",
+    "窗外日光清亮，微风拂过檐角和树梢",
+    "窗外天色晴朗，巷口传来几声轻缓鸟鸣",
+)
+_CLOUDY_WINDOW_SOUNDS: tuple[str, ...] = (
+    "窗外云色平缓，微风贴着屋檐轻轻拂过",
+    "窗外安静偏阴，偶有远处巷口的轻缓脚步声",
+)
+_WINDY_WINDOW_SOUNDS: tuple[str, ...] = (
+    "窗外风声一阵阵掠过屋檐，树叶沙沙作响",
+    "窗外起了些风，玻璃窗框轻轻响了一声",
+)
+_SNOW_WINDOW_SOUNDS: tuple[str, ...] = (
+    "窗外安静沉实，远处杂音都被寒意压低了些",
+)
+_RAIN_WINDOW_SOUNDS: tuple[str, ...] = (
+    "窗外雨声变大",
+)
+
+
+def _has_rain_sound(summary: str) -> bool:
+    return any(tok in summary for tok in _RAIN_SOUND_TOKENS)
+
+
+def _weather_appropriate_window_sound(day: date, weather: str) -> str:
+    low = str(weather or "").strip().lower()
+    if low in _RAINY_WEATHERS:
+        return _RAIN_WINDOW_SOUNDS[day.toordinal() % len(_RAIN_WINDOW_SOUNDS)]
+    if low in {"windy", "breezy_cool"}:
+        return _WINDY_WINDOW_SOUNDS[day.toordinal() % len(_WINDY_WINDOW_SOUNDS)]
+    if low in {"cloudy", "overcast", "fog", "coastal_mist"}:
+        return _CLOUDY_WINDOW_SOUNDS[day.toordinal() % len(_CLOUDY_WINDOW_SOUNDS)]
+    if low == "snow":
+        return _SNOW_WINDOW_SOUNDS[day.toordinal() % len(_SNOW_WINDOW_SOUNDS)]
+    return _CLEAR_WINDOW_SOUNDS[day.toordinal() % len(_CLEAR_WINDOW_SOUNDS)]
+
+
+def _candidate_day_roots_zero_write(
+    day_root: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> list[Path]:
+    """Discover candidate instance roots strictly read-only without touching disk."""
+    candidates: list[Path] = []
+    if day_root is not None and str(day_root).strip():
+        candidates.append(Path(day_root))
+
+    env_map = environment if environment is not None else os.environ
+    for env_key in ("CHIYO_DAY_ROOT", "CHIYO_INSTANCE_ROOT", "NYAIRO_DAY_ROOT"):
+        env_val = str(env_map.get(env_key) or "").strip()
+        if env_val:
+            candidates.append(Path(env_val))
+
+    try:
+        frame = sys._getframe(2)
+        depth = 0
+        while frame is not None and depth < 8:
+            loc = frame.f_locals
+            for key in ("day_root", "hermes_home"):
+                val = loc.get(key)
+                if isinstance(val, (str, Path)) and str(val).strip():
+                    candidates.append(Path(val))
+            caller_self = loc.get("self")
+            if caller_self is not None and (
+                hasattr(caller_self, "world_home") or hasattr(caller_self, "environment")
+            ):
+                for attr in ("root", "world_home"):
+                    val = getattr(caller_self, attr, None)
+                    if isinstance(val, (str, Path)) and str(val).strip():
+                        candidates.append(Path(val))
+            frame = frame.f_back
+            depth += 1
+    except Exception:
+        pass
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for base in candidates:
+        for probe in (base, base.parent, base.parent.parent):
+            key = str(probe)
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(probe)
+    return deduped
+
+
+def _resolve_live_weather_zero_write(
+    *,
+    weather: Optional[str] = None,
+    day_root: Optional[Path | str] = None,
+    environment: Optional[Mapping[str, str]] = None,
+) -> Optional[str]:
+    """Read live weather explicitly or zero-write from ``v04_neighborhood_state.json``."""
+    if isinstance(weather, str) and weather.strip():
+        return weather.strip().lower()
+    for root in _candidate_day_roots_zero_write(day_root=day_root, environment=environment):
+        state_file = root / "world" / "v04_neighborhood_state.json"
+        try:
+            if state_file.is_symlink() or not state_file.is_file():
+                continue
+            doc = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(doc, Mapping):
+            continue
+        env_blk = doc.get("environment")
+        if isinstance(env_blk, Mapping):
+            raw_w = env_blk.get("weather")
+            if isinstance(raw_w, str) and raw_w.strip():
+                return raw_w.strip().lower()
+    return None
+
+
+def _apply_weather_to_templates(
+    day: date,
+    templates: tuple[_Template, ...],
+    live_weather: Optional[str],
+) -> tuple[_Template, ...]:
+    """Filter or adapt rain-sound templates to stay coherent with live weather."""
+    if not live_weather:
+        return templates
+    is_rainy = live_weather in _RAINY_WEATHERS
+    adapted: list[_Template] = []
+    for template in templates:
+        if template.finite is not None:
+            adapted.append(template)
+            continue
+        if template.event_type == "home_window_sound":
+            if is_rainy:
+                summary = (
+                    template.summary
+                    if _has_rain_sound(template.summary)
+                    else _weather_appropriate_window_sound(day, live_weather)
+                )
+            else:
+                summary = (
+                    _weather_appropriate_window_sound(day, live_weather)
+                    if _has_rain_sound(template.summary) or template.summary == _CLEAR_WINDOW_SOUNDS[0]
+                    else template.summary
+                )
+            adapted.append(
+                _Template(
+                    event_type=template.event_type,
+                    location_id=template.location_id,
+                    summary=summary,
+                    start_hour=template.start_hour,
+                    end_hour=template.end_hour,
+                    category=template.category,
+                    finite=template.finite,
+                )
+            )
+            continue
+        if not is_rainy and _has_rain_sound(template.summary):
+            continue
+        adapted.append(template)
+    return tuple(adapted) if adapted else templates
+
+
+def _resolve_zone_for_call(
+    timezone_name: str,
+    *,
+    environment: Optional[Mapping[str, str]] = None,
+    day_root: Optional[Path | str] = None,
+) -> tzinfo:
+    """Resolve explicit timezone or default instance +08:00 business timezone."""
+    if timezone_name != WORLD_TIMEZONE:
+        return _zone(timezone_name)
+    if isinstance(environment, Mapping):
+        for env_key in _bdk.ENV_KEYS:
+            raw_tz = environment.get(env_key)
+            if isinstance(raw_tz, str) and raw_tz.strip():
+                parsed = _bdk.resolve_zone(raw_tz.strip())
+                if parsed is not None:
+                    return parsed
+    if day_root is not None:
+        policy_tz = _bdk.resolve_default_business_tz(Path(day_root))
+        if policy_tz is not None:
+            return policy_tz
+    return _zone(WORLD_TIMEZONE)
+
+
+def align_local_time(
+    now: datetime,
+    *,
+    timezone_name: str = WORLD_TIMEZONE,
+    environment: Optional[Mapping[str, str]] = None,
+    day_root: Optional[Path | str] = None,
+) -> str:
+    """Format an aware timestamp in the resolved world/instance timezone (default ``+08:00``)."""
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        raise AmbientWorldEventError("now must be timezone-aware")
+    zone = _resolve_zone_for_call(timezone_name, environment=environment, day_root=day_root)
+    return now.astimezone(zone).isoformat(timespec="seconds")
+
+
 def _select_events(
     day: date,
     templates: tuple[_Template, ...],
     zone: tzinfo,
     environment: Optional[Mapping[str, str]] = None,
+    *,
+    live_weather: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """按既有每日上限选事件：跨天阶段优先占位，其余给单日轮转。"""
 
+    coherent_templates = _apply_weather_to_templates(day, templates, live_weather)
     cross_events: list[dict[str, Any]] = []
     daily_templates: list[_Template] = []
-    for template in templates:
+    for template in coherent_templates:
         if template.finite is None:
             daily_templates.append(template)
             continue
@@ -745,17 +966,24 @@ def materialize_ambient_events(
     timezone_name: str = WORLD_TIMEZONE,
     allowed_location_ids: Optional[Iterable[str]] = None,
     environment: Optional[Mapping[str, str]] = None,
+    weather: Optional[str] = None,
+    day_root: Optional[Path | str] = None,
 ) -> list[dict[str, Any]]:
     """Derive the stable bounded event set for one World-local calendar day."""
 
     day = _require_date(local_date)
-    zone = _zone(timezone_name)
+    zone = _resolve_zone_for_call(timezone_name, environment=environment, day_root=day_root)
     templates = _active_templates(environment)
     known = wrd.active_world(environment).known_location_ids
     allowed = known if allowed_location_ids is None else set(allowed_location_ids)
     if not known.issubset(allowed):
         raise AmbientWorldEventError("ambient template location catalog is incomplete")
-    events = _select_events(day, templates, zone, environment)
+    live_weather = _resolve_live_weather_zero_write(
+        weather=weather, day_root=day_root, environment=environment
+    )
+    events = _select_events(
+        day, templates, zone, environment, live_weather=live_weather
+    )
     if len(events) > MAX_EVENTS_PER_DAY:
         raise AmbientWorldEventError("daily ambient event bound exceeded")
     return _copy_json(events)
@@ -769,13 +997,15 @@ def active_ambient_events(
     allowed_location_ids: Optional[Iterable[str]] = None,
     relevant_location_ids: Optional[Iterable[str]] = None,
     environment: Optional[Mapping[str, str]] = None,
+    weather: Optional[str] = None,
+    day_root: Optional[Path | str] = None,
 ) -> list[dict[str, Any]]:
     """Return only current, location-relevant facts for one local day."""
 
     day = _require_date(local_date)
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
         raise AmbientWorldEventError("now must be timezone-aware")
-    zone = _zone(timezone_name)
+    zone = _resolve_zone_for_call(timezone_name, environment=environment, day_root=day_root)
     local_now = now.astimezone(zone)
     if local_now.date() != day:
         return []
@@ -793,6 +1023,8 @@ def active_ambient_events(
         timezone_name=timezone_name,
         allowed_location_ids=allowed_location_ids,
         environment=environment,
+        weather=weather,
+        day_root=day_root,
     ):
         if relevant is not None and event["location_id"] not in relevant:
             continue
@@ -873,6 +1105,7 @@ __all__ = [
     "WORLD_ID",
     "WORLD_TIMEZONE",
     "active_ambient_events",
+    "align_local_time",
     "ambient_template_catalog",
     "feature_enabled",
     "materialize_ambient_events",

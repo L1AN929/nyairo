@@ -1,4 +1,4 @@
-# NyAiro WorldGen v0.1 交付报告
+# nyairo WorldGen v0.1 交付报告
 
 > 注：本文记录的内部网关地址已脱敏为 `gw.example.invalid`；历史观察、失败与结论保持原样，不表示当时实际使用占位地址。
 

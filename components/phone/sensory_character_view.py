@@ -49,6 +49,16 @@ from typing import Any, Mapping, Optional
 
 from . import somatic_comfort_view as somatic_view
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 CHARACTER_PACK_SCHEMA = "phone.character.pack.v1"
 SENSORY_FIELD_SCHEMA = "phone.body.sensory_field.v1"
 
@@ -1654,8 +1664,9 @@ def read_character_pack_state(root: Path | str) -> tuple[dict[str, Any], Optiona
 
 
 def write_character_pack_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    validated = _validate_stored_character_state(state)
-    return _atomic_write_json(character_pack_state_path(root), validated)
+    with _tx.state_file_lock(character_pack_state_path(root)):
+        validated = _validate_stored_character_state(state)
+        return _atomic_write_json(character_pack_state_path(root), validated)
 
 
 def _public_accessories(
@@ -2406,7 +2417,13 @@ def apply_character_pack_action(
     subject_view: bool = False,
     seed_siblings: bool = False,
 ) -> dict[str, Any]:
-    """Unified action entry supporting ``export_pack`` and ``attest_character_pack`` alongside presets/custom/identity."""
+    """Unified action entry supporting ``export_pack`` and ``attest_character_pack`` alongside presets/custom/identity.
+
+    Every state-mutating action runs its full re-read -> validate -> mutate -> atomic
+    write cycle inside :func:`state_tx_guard.state_file_lock` on
+    ``phone/character_pack_state.json``, so two concurrent writers can never lose an
+    update. ``export_pack`` is a pure read and stays lock-free / 100% zero-write.
+    """
     body = dict(payload or {})
     resolved_action = str(action or body.get("action") or "").strip().lower()
     if not resolved_action:
@@ -2416,6 +2433,40 @@ def apply_character_pack_action(
         timespec="seconds"
     )
     is_root = isinstance(root_or_state, (Path, str))
+    if is_root and resolved_action != "export_pack":
+        with _tx.state_file_lock(character_pack_state_path(root_or_state)):
+            return _apply_character_pack_action_locked(
+                root_or_state,
+                body,
+                resolved_action=resolved_action,
+                effective_now=effective_now,
+                subject_view=subject_view,
+                seed_siblings=seed_siblings,
+                is_root=True,
+            )
+    return _apply_character_pack_action_locked(
+        root_or_state,
+        body,
+        resolved_action=resolved_action,
+        effective_now=effective_now,
+        subject_view=subject_view,
+        seed_siblings=seed_siblings,
+        is_root=is_root,
+    )
+
+
+def _apply_character_pack_action_locked(
+    root_or_state: Path | str | Mapping[str, Any],
+    body: Mapping[str, Any],
+    *,
+    resolved_action: str,
+    effective_now: str,
+    subject_view: bool,
+    seed_siblings: bool,
+    is_root: bool,
+) -> dict[str, Any]:
+    """Inner write body; callers must already hold ``state_file_lock`` for root writes."""
+
     if is_root:
         state, state_reason = read_character_pack_state(root_or_state)
         if state_reason and resolved_action != "export_pack":
@@ -2737,8 +2788,9 @@ def read_sensory_cards_state(root: Path | str) -> tuple[dict[str, Any], Optional
 
 
 def write_sensory_cards_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    validated = _validate_sensory_cards_state(state)
-    return _atomic_write_json(sensory_cards_state_path(root), validated)
+    with _tx.state_file_lock(sensory_cards_state_path(root)):
+        validated = _validate_sensory_cards_state(state)
+        return _atomic_write_json(sensory_cards_state_path(root), validated)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -3810,6 +3862,142 @@ def apply_clear_sensory_notes(
     return new_state, len(notes), True
 
 
+def apply_sensory_action(
+    root: Path | str,
+    payload: Optional[Mapping[str, Any]] = None,
+    *,
+    action: Optional[str] = None,
+    sensory_projection: Optional[Mapping[str, Any]] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Concurrency-safe unified RMW entry for ``phone/sensory_cards.json``.
+
+    The whole re-read -> validate -> mutate -> atomic write cycle runs inside
+    :func:`state_tx_guard.state_file_lock`, so concurrent sound-card and
+    partner-sensory-note appends serialize and never lose a revision.  The pure
+    ``apply_*_sound_card`` / ``apply_*_sensory_note`` helpers keep their existing
+    contracts and side-effect-free shape; they are only invoked here while the
+    per-path lock is held, so the nested ``write_sensory_cards_state`` lock simply
+    re-enters the same ``RLock``.
+    """
+
+    body = dict(payload or {})
+    resolved_action = str(action or body.get("action") or "").strip().lower()
+    effective_now = _iso_or_none(now_iso) or datetime.now().astimezone().isoformat(
+        timespec="seconds"
+    )
+
+    def _reject(
+        reason_code: str, http_status: int = 409, status: str = "rejected"
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status": status,
+            "data": {},
+            "reason_code": reason_code,
+            "http_status": http_status,
+        }
+
+    if not resolved_action:
+        return _reject("BODY_SENSORY_ACTION_REQUIRED", 400, "bad_request")
+
+    with _tx.state_file_lock(sensory_cards_state_path(root)):
+        state, state_reason = read_sensory_cards_state(root)
+        if state_reason is not None:
+            return _reject(state_reason, 409)
+
+        new_state: Optional[dict[str, Any]] = None
+        changed = False
+        extra: dict[str, Any] = {}
+        try:
+            if resolved_action == "capture_sound_card":
+                if sensory_projection is None:
+                    return _reject("SENSORY_PROJECTION_REQUIRED", 400, "bad_request")
+                if "shared" in body and not isinstance(body.get("shared"), bool):
+                    return _reject("SHARED_FLAG_INVALID", 400, "bad_request")
+                new_state, card, already_applied, conflict = apply_capture_sound_card(
+                    state,
+                    sensory_projection=sensory_projection,
+                    title=body.get("title") if "title" in body else None,
+                    impression_note=(
+                        body.get("impression_note")
+                        if "impression_note" in body
+                        else None
+                    ),
+                    shared=body.get("shared", False),
+                    operation_key=(
+                        body.get("operation_key") if "operation_key" in body else None
+                    ),
+                    now_iso=effective_now,
+                )
+                if conflict:
+                    return _reject(conflict, 409)
+                changed = not already_applied
+                extra = {"replayed": bool(already_applied), "sound_card": card}
+            elif resolved_action == "set_sound_card_share":
+                new_state, card, share_changed = apply_set_sound_card_share(
+                    state,
+                    card_id=body.get("card_id"),
+                    shared=body.get("shared"),
+                    now_iso=effective_now,
+                )
+                if card is None:
+                    return _reject("SOUND_CARD_NOT_FOUND", 404, "not_found")
+                changed = bool(share_changed)
+                extra = {"sound_card": card}
+            elif resolved_action == "remove_sound_card":
+                new_state, removed = apply_remove_sound_card(
+                    state, card_id=body.get("card_id"), now_iso=effective_now
+                )
+                if removed is None:
+                    return _reject("SOUND_CARD_NOT_FOUND", 404, "not_found")
+                changed = True
+                extra = {"removed_card_id": removed.get("card_id")}
+            elif resolved_action == "leave_sensory_note":
+                new_state, note, conflict = apply_leave_sensory_note(
+                    state, text=body.get("text"), now_iso=effective_now
+                )
+                if conflict:
+                    return _reject(conflict, 409)
+                changed = True
+                extra = {"note": note}
+            elif resolved_action == "remove_sensory_note":
+                new_state, removed_note = apply_remove_sensory_note(
+                    state, note_id=body.get("note_id"), now_iso=effective_now
+                )
+                if removed_note is None:
+                    return _reject("SENSORY_NOTE_NOT_FOUND", 404, "not_found")
+                changed = True
+                extra = {"removed_note_id": removed_note.get("note_id")}
+            elif resolved_action == "clear_sensory_notes":
+                new_state, cleared_count, notes_changed = apply_clear_sensory_notes(
+                    state, now_iso=effective_now
+                )
+                changed = bool(notes_changed)
+                extra = {"cleared_count": cleared_count}
+            else:
+                return _reject("BODY_SENSORY_ACTION_INVALID", 400, "bad_request")
+        except CharacterPackValidationError as exc:
+            return _reject(exc.reason_code, 400, "bad_request")
+
+        if changed and new_state is not None:
+            try:
+                written = write_sensory_cards_state(root, new_state)
+            except ValueError as exc:
+                return _reject(str(exc) or "SENSORY_CARDS_WRITE_FAILED", 409)
+        else:
+            written = state
+
+        data: dict[str, Any] = {
+            "action": resolved_action,
+            "changed": bool(changed),
+            "revision": written.get("revision"),
+            "updated_at": written.get("updated_at"),
+        }
+        data.update(extra)
+        return {"ok": True, "status": "ok", "data": data}
+
+
 __all__ = [
     "ACCESSORY_KINDS",
     "ACCESSORY_MODES",
@@ -3844,6 +4032,7 @@ __all__ = [
     "apply_remove_sensory_note",
     "apply_remove_sound_card",
     "apply_select_preset",
+    "apply_sensory_action",
     "apply_set_optional_physiology",
     "apply_set_sound_card_share",
     "apply_update_identity",

@@ -48,6 +48,16 @@ import re
 import tempfile
 from typing import Any, Iterable, Mapping, Optional
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 BENCH_BOOKSTORE_SCHEMA = "phone.outing.bench_bookstore.v1"
 ROUTES_MARKET_SCHEMA = "phone.outing.routes_market.v1"
 GALLERY_BLUEPRINT_SCHEMA = "phone.outing.gallery_blueprint.v1"
@@ -666,9 +676,10 @@ def read_bench_bookstore_state(root: Path | str) -> tuple[dict[str, Any], Option
 
 
 def write_bench_bookstore_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_bench_bookstore_state(dict(state))
-    _write_json(bench_bookstore_state_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(bench_bookstore_state_path(root)):
+        normalized = _validate_bench_bookstore_state(dict(state))
+        _write_json(bench_bookstore_state_path(root), normalized)
+        return normalized
 
 
 def _bump_bench_bookstore(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:
@@ -1084,9 +1095,10 @@ def read_routes_market_state(root: Path | str) -> tuple[dict[str, Any], Optional
 
 
 def write_routes_market_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_routes_market_state(dict(state))
-    _write_json(routes_market_state_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(routes_market_state_path(root)):
+        normalized = _validate_routes_market_state(dict(state))
+        _write_json(routes_market_state_path(root), normalized)
+        return normalized
 
 
 def _bump_routes_market(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:
@@ -1546,9 +1558,10 @@ def read_gallery_blueprint_state(root: Path | str) -> tuple[dict[str, Any], Opti
 
 
 def write_gallery_blueprint_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_gallery_blueprint_state(dict(state))
-    _write_json(gallery_blueprint_state_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(gallery_blueprint_state_path(root)):
+        normalized = _validate_gallery_blueprint_state(dict(state))
+        _write_json(gallery_blueprint_state_path(root), normalized)
+        return normalized
 
 
 def _bump_gallery_blueprint(state: Mapping[str, Any], now_iso: str) -> dict[str, Any]:

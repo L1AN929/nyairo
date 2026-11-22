@@ -37,6 +37,36 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
+try:  # package import
+    from ..world.scripts import v05_season_solar_pulse as _season_pulse  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback
+    import sys as _sys_world
+
+    _WORLD_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "world" / "scripts"
+    if str(_WORLD_SCRIPTS_DIR) not in _sys_world.path:
+        _sys_world.path.insert(0, str(_WORLD_SCRIPTS_DIR))
+    import v05_season_solar_pulse as _season_pulse  # type: ignore[no-redef]
+
+try:  # package import
+    from ..world.scripts import instance_paths as _instance_paths  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback
+    import sys as _sys_world_paths
+
+    _WORLD_PATHS_DIR = Path(__file__).resolve().parents[1] / "world" / "scripts"
+    if str(_WORLD_PATHS_DIR) not in _sys_world_paths.path:
+        _sys_world_paths.path.insert(0, str(_WORLD_PATHS_DIR))
+    import instance_paths as _instance_paths  # type: ignore[no-redef]
+
 STATE_SCHEMA_VERSION = 1
 STATE_DIRNAME = "phone"
 STATE_FILENAME = "somatic_comfort.json"
@@ -47,15 +77,24 @@ CARE_SCHEMA = "phone.body.care_offering.v1"
 
 SIMULATION_SOURCE = "phone_slice_simulation"
 SELF_DECLARED_SOURCE = "self_declared_simulation"
+VERIFIED_OUTDOOR_EXPOSURE_SOURCE = "verified_outdoor_rain_exposure"
 WORLD_READ_SOURCE = "world_phone_world.snapshot"
 BODY_SIGNAL_SOURCE = "world_phone_world.snapshot.body"
+
+RAIN_EXPOSURE_WEATHERS = frozenset({"drizzle", "rain", "shower", "storm", "heavy_rain"})
+HEAVY_RAIN_EXPOSURE_WEATHERS = frozenset({"rain", "storm", "heavy_rain"})
+OUTDOOR_EXPOSURE_MIN_SECONDS = 180.0
+OUTDOOR_EXPOSURE_WET_SECONDS = 600.0
+DEFAULT_OUTERWEAR_GARMENT_ID = "daily_coat"
+DEFAULT_OUTERWEAR_LABEL = "日常外套"
+MAX_EXPOSURE_OPERATION_KEYS = 64
 
 MODALITIES = ("thermal", "moisture", "posture", "tactile")
 SALIENCE = ("none", "low", "medium", "high")
 WINDOW_STATES = ("open", "ajar", "closed")
 LOCAL_ZONES = ("window_side", "desk_side", "elsewhere", "unknown")
 GARMENT_STATES = ("wear", "hang")
-DRYNESS_STATES = ("dry", "damp", "unknown")
+DRYNESS_STATES = ("dry", "damp", "wet", "unknown")
 CARE_SLOTS = ("drink", "cushion")
 DRINK_KINDS = ("warm_water", "hot_tea")
 CUSHION_KINDS = ("floor_cushion",)
@@ -154,6 +193,7 @@ def empty_state() -> dict[str, Any]:
                            "bound_area_id": None, "declared_at": None},
         "garment": {"garment_id": None, "label": None, "state": None,
                     "dryness": None, "dampness_source": None,
+                    "wetted_at": None, "exposure_operation_keys": [],
                     "hang_position": None, "drying": None},
         "care": {"drink": None, "cushion": None},
     }
@@ -261,7 +301,15 @@ def _validate_state(raw: Any) -> dict[str, Any]:
             "label": _optional_text(garment_raw.get("label"), MAX_LABEL),
             "state": garment_state,
             "dryness": dryness,
-            "dampness_source": _optional_text(garment_raw.get("dampness_source"), 40),
+            "dampness_source": _optional_text(garment_raw.get("dampness_source"), 64),
+            "wetted_at": _iso(garment_raw.get("wetted_at")),
+            "exposure_operation_keys": [
+                str(item).strip()[:160]
+                for item in (garment_raw.get("exposure_operation_keys") or [])
+                if isinstance(item, str) and item.strip()
+            ][-MAX_EXPOSURE_OPERATION_KEYS:]
+            if isinstance(garment_raw.get("exposure_operation_keys"), list)
+            else [],
             "hang_position": _optional_text(garment_raw.get("hang_position"),
                                             MAX_HANG_POSITION),
             "drying": _validate_drying(garment_raw.get("drying")),
@@ -388,13 +436,24 @@ def wear_outerwear(state: Mapping[str, Any], *, garment_id: Any, label: Any,
     if (existing["state"] == "wear" and existing["garment_id"] == garment
             and existing["label"] == clean_label and existing["dryness"] == chosen):
         return current, False, None
+    wetted_at: Optional[str] = None
+    if chosen in ("damp", "wet"):
+        if (existing["garment_id"] == garment
+                and existing["dryness"] in ("damp", "wet")
+                and existing.get("wetted_at")):
+            wetted_at = existing["wetted_at"]
+        else:
+            wetted_at = _iso(now_iso)
     current["garment"] = {
         "garment_id": garment,
         "label": clean_label,
         "state": "wear",
         "dryness": chosen,
-        # There is no World garment owner: the only honest source is her explicit declaration.
+        # Manual declaration stays SELF_DECLARED_SOURCE; real outdoor rain exposure
+        # enters exclusively via record_outdoor_weather_exposure.
         "dampness_source": SELF_DECLARED_SOURCE,
+        "wetted_at": wetted_at,
+        "exposure_operation_keys": list(existing.get("exposure_operation_keys") or []),
         "hang_position": None,
         # Wearing it ends any hanging/drying observation; it is never both.
         "drying": None,
@@ -423,22 +482,48 @@ def hang_outerwear(state: Mapping[str, Any], *, garment_id: Any, hang_position: 
             return current, False, "GARMENT_DRYNESS_INVALID"
         if chosen == existing["dryness"]:
             return current, False, None
-    chosen = _normalized_dryness(dryness, default="unknown")
+    default_dryness = (
+        existing["dryness"]
+        if (
+            dryness is None
+            and existing["state"] == "wear"
+            and existing["garment_id"] == garment
+            and existing["dryness"] in ("damp", "wet")
+        )
+        else "unknown"
+    )
+    chosen = _normalized_dryness(dryness, default=default_dryness)
     if chosen is None:
         return current, False, "GARMENT_DRYNESS_INVALID"
     drying = existing["drying"] if (existing["state"] == "hang"
                                     and existing["garment_id"] == garment
-                                    and existing["dryness"] == "damp"
-                                    and chosen == "damp"
+                                    and existing["dryness"] in ("damp", "wet")
+                                    and chosen in ("damp", "wet")
                                     and existing["drying"] is not None) else None
-    if chosen == "damp" and drying is None:
+    if chosen in ("damp", "wet") and drying is None:
         drying = {"started_at": _iso(now_iso), "total_seconds": DRYING_SECONDS}
+    preserved_source = (
+        VERIFIED_OUTDOOR_EXPOSURE_SOURCE
+        if (
+            existing["garment_id"] == garment
+            and existing.get("dampness_source") == VERIFIED_OUTDOOR_EXPOSURE_SOURCE
+            and chosen in ("damp", "wet")
+        )
+        else SELF_DECLARED_SOURCE
+    )
+    wetted_at = (
+        existing.get("wetted_at")
+        if (existing["garment_id"] == garment and chosen in ("damp", "wet"))
+        else None
+    )
     current["garment"] = {
         "garment_id": garment,
         "label": existing["label"] if existing["garment_id"] == garment else None,
         "state": "hang",
         "dryness": chosen,
-        "dampness_source": SELF_DECLARED_SOURCE,
+        "dampness_source": preserved_source,
+        "wetted_at": wetted_at,
+        "exposure_operation_keys": list(existing.get("exposure_operation_keys") or []),
         "hang_position": position,
         "drying": drying,
     }
@@ -452,9 +537,11 @@ def derive_garment(state: Mapping[str, Any], now_iso: Any) -> dict[str, Any]:
     if not garment.get("state"):
         return {"status": "unknown", "reason_code": "OUTERWEAR_NOT_DECLARED",
                 "state": None, "dryness": "unknown", "garment_id": None,
-                "label": None, "hang_position": None, "drying": None,
+                "label": None, "hang_position": None, "dampness_source": None,
+                "wetted_at": None, "drying": None,
                 "source": SIMULATION_SOURCE, "simulation": True,
                 "rewrites_body": False}
+    damp_src = garment.get("dampness_source")
     row: dict[str, Any] = {
         "status": "available",
         "reason_code": None,
@@ -463,9 +550,14 @@ def derive_garment(state: Mapping[str, Any], now_iso: Any) -> dict[str, Any]:
         "garment_id": garment.get("garment_id"),
         "label": garment.get("label"),
         "hang_position": garment.get("hang_position"),
-        "dampness_source": garment.get("dampness_source"),
-        "source": SIMULATION_SOURCE,
-        "simulation": True,
+        "dampness_source": damp_src,
+        "wetted_at": garment.get("wetted_at"),
+        "source": (
+            VERIFIED_OUTDOOR_EXPOSURE_SOURCE
+            if damp_src == VERIFIED_OUTDOOR_EXPOSURE_SOURCE
+            else SIMULATION_SOURCE
+        ),
+        "simulation": damp_src != VERIFIED_OUTDOOR_EXPOSURE_SOURCE,
         "rewrites_body": False,
         "drying": None,
     }
@@ -487,7 +579,12 @@ def derive_garment(state: Mapping[str, Any], now_iso: Any) -> dict[str, Any]:
                              "total_seconds": total, "elapsed_seconds": elapsed,
                              "derived": True, "source": SIMULATION_SOURCE}
         else:
-            derived = "dry" if elapsed >= total else "damp"
+            if elapsed >= total:
+                derived = "dry"
+            elif garment.get("dryness") == "wet" and elapsed < (total / 2.0):
+                derived = "wet"
+            else:
+                derived = "damp"
             row["dryness"] = derived
             row["drying"] = {"status": "derived", "reason_code": None,
                              "started_at": drying.get("started_at"),
@@ -496,6 +593,167 @@ def derive_garment(state: Mapping[str, Any], now_iso: Any) -> dict[str, Any]:
                              "remaining_seconds": max(0, int(total - elapsed)),
                              "derived": True, "source": SIMULATION_SOURCE}
     return row
+
+
+def record_outdoor_weather_exposure(
+    root: Path | str,
+    *,
+    place_id: str,
+    weather: str,
+    duration_seconds: float,
+    has_umbrella: bool = False,
+    operation_key: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Record verified outdoor rain exposure onto worn outerwear (idempotent, zero-LLM).
+
+    Passive indoor ambient sound templates never enter here and remain governed by
+    ``AMBIENT_IS_TEMPLATE_NOT_WETNESS_EVIDENCE``.  Indoor/sheltered places, non-rain
+    weather, umbrella protection, or brief exposures (< 180s) are 100% zero-write no-ops.
+    """
+
+    paths = _instance_paths.resolve_instance_paths(root)
+    day_root = paths.day_root
+    slice_info = _instance_paths.map_world_place_to_slices(str(place_id or ""))
+    is_outdoor = bool(slice_info.get("is_outdoor"))
+    norm_weather = str(weather or "").strip().lower()
+    if isinstance(duration_seconds, bool) or not isinstance(duration_seconds, (int, float)):
+        dur = 0.0
+    else:
+        import math as _math
+
+        dur = float(duration_seconds) if _math.isfinite(float(duration_seconds)) else 0.0
+    umbrella = bool(has_umbrella)
+    eff_now = _iso(now_iso) or datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+    base_meta = {
+        "ok": True,
+        "place_id": slice_info.get("world_place_id"),
+        "v04_place_id": slice_info.get("v04_place_id"),
+        "is_outdoor": is_outdoor,
+        "weather": norm_weather,
+        "duration_seconds": round(max(0.0, dur), 3),
+        "has_umbrella": umbrella,
+        "llm_calls": 0,
+    }
+    if not is_outdoor:
+        return {
+            **base_meta,
+            "exposed": False,
+            "changed": False,
+            "replayed": False,
+            "reason_code": "INDOOR_OR_SHELTERED",
+        }
+    if norm_weather not in RAIN_EXPOSURE_WEATHERS:
+        return {
+            **base_meta,
+            "exposed": False,
+            "changed": False,
+            "replayed": False,
+            "reason_code": "WEATHER_NOT_RAIN",
+        }
+    if umbrella:
+        return {
+            **base_meta,
+            "exposed": False,
+            "changed": False,
+            "replayed": False,
+            "reason_code": "PROTECTED_BY_UMBRELLA",
+        }
+    if dur < OUTDOOR_EXPOSURE_MIN_SECONDS:
+        return {
+            **base_meta,
+            "exposed": False,
+            "changed": False,
+            "replayed": False,
+            "reason_code": "EXPOSURE_TOO_BRIEF",
+        }
+
+    clean_op_key = _optional_text(operation_key, 160)
+    target_dryness = (
+        "wet"
+        if (norm_weather in HEAVY_RAIN_EXPOSURE_WEATHERS and dur >= OUTDOOR_EXPOSURE_WET_SECONDS)
+        else "damp"
+    )
+
+    with _tx.state_file_lock(state_path(day_root)):
+        current, state_reason = read_state(day_root)
+        if state_reason is not None:
+            return {
+                **base_meta,
+                "ok": False,
+                "exposed": False,
+                "changed": False,
+                "replayed": False,
+                "reason_code": state_reason,
+            }
+        existing = current["garment"]
+        existing_ops = list(existing.get("exposure_operation_keys") or [])
+        if clean_op_key is not None and clean_op_key in existing_ops:
+            return {
+                **base_meta,
+                "exposed": True,
+                "changed": False,
+                "replayed": True,
+                "reason_code": "ALREADY_APPLIED",
+                "garment_id": existing.get("garment_id"),
+                "dryness": existing.get("dryness"),
+                "dampness_source": existing.get("dampness_source"),
+                "wetted_at": existing.get("wetted_at"),
+                "revision": current.get("revision"),
+                "garment": derive_garment(current, eff_now),
+            }
+
+        garment_id = existing.get("garment_id") or DEFAULT_OUTERWEAR_GARMENT_ID
+        label = existing.get("label") or (
+            DEFAULT_OUTERWEAR_LABEL if garment_id == DEFAULT_OUTERWEAR_GARMENT_ID else None
+        )
+        effective_dryness = (
+            "wet"
+            if (existing.get("state") == "wear" and existing.get("dryness") == "wet")
+            else target_dryness
+        )
+        wetted_at = (
+            existing.get("wetted_at")
+            if (
+                existing.get("state") == "wear"
+                and existing.get("dryness") in ("damp", "wet")
+                and existing.get("wetted_at")
+            )
+            else eff_now
+        )
+        next_ops = list(existing_ops)
+        if clean_op_key is not None:
+            next_ops.append(clean_op_key)
+            next_ops = next_ops[-MAX_EXPOSURE_OPERATION_KEYS:]
+
+        next_state = _validate_state(dict(current))
+        next_state["garment"] = {
+            "garment_id": garment_id,
+            "label": label,
+            "state": "wear",
+            "dryness": effective_dryness,
+            "dampness_source": VERIFIED_OUTDOOR_EXPOSURE_SOURCE,
+            "wetted_at": wetted_at,
+            "exposure_operation_keys": next_ops,
+            "hang_position": None,
+            "drying": None,
+        }
+        bumped = _bump(next_state, eff_now)
+        written = write_state(day_root, bumped)
+        return {
+            **base_meta,
+            "exposed": True,
+            "changed": True,
+            "replayed": False,
+            "reason_code": None,
+            "garment_id": garment_id,
+            "dryness": effective_dryness,
+            "dampness_source": VERIFIED_OUTDOOR_EXPOSURE_SOURCE,
+            "wetted_at": wetted_at,
+            "revision": written.get("revision"),
+            "garment": derive_garment(written, eff_now),
+        }
 
 
 # ---------------------------------------------------------------------------------------------
@@ -905,6 +1163,47 @@ def _local_position_match(state: Mapping[str, Any], world: Mapping[str, Any]
             and position.get("bound_area_id") == world.get("area_id"))
 
 
+def _seasonal_context_readonly(
+    world_result: Mapping[str, Any],
+    world: Mapping[str, Any],
+    now_iso: Any,
+) -> dict[str, Any]:
+    """Pure zero-write seasonal/solar-term context for somatic and care views."""
+    moment = parse_instant(now_iso) or parse_instant(world.get("local_time"))
+    if moment is None:
+        local_date = world.get("local_date")
+        if isinstance(local_date, str) and local_date.strip():
+            moment = parse_instant(local_date.strip() + "T12:00:00+08:00")
+    if moment is None:
+        return {
+            "status": "unavailable",
+            "reason_code": "CLOCK_UNAVAILABLE",
+            "season": None,
+            "solar_term_name_cn": None,
+            "sunlight_window": None,
+            "tea_cooling_multiplier": None,
+            "seasonal_thermal_note_cn": None,
+        }
+    raw_data = world_result.get("data") if isinstance(world_result.get("data"), Mapping) else {}
+    world_block = raw_data.get("world") if isinstance(raw_data.get("world"), Mapping) else {}
+    explicit_season = _season_pulse.normalize_season(world_block.get("season"))
+    pulse = _season_pulse.project_season_solar_pulse(
+        now_iso=moment,
+        explicit_season=explicit_season,
+    )
+    micro = pulse["microclimate"]
+    solar_term = pulse["solar_term"]
+    return {
+        "season": str(pulse["season"]),
+        "season_label_cn": str(pulse["season_label_cn"]),
+        "solar_term_name_cn": str(solar_term["term_name_cn"]),
+        "solar_term_idx": int(solar_term["solar_term_idx"]),
+        "sunlight_window": str(micro["sunlight_window"]),
+        "tea_cooling_multiplier": float(micro["tea_cooling_multiplier"]),
+        "seasonal_thermal_note_cn": str(micro["seasonal_thermal_note_cn"]),
+    }
+
+
 def somatic_block(*, world_result: Mapping[str, Any], body_view: Mapping[str, Any],
                   state: Mapping[str, Any], state_reason: Optional[str],
                   now_iso: Any, soundscape: Optional[Mapping[str, Any]] = None
@@ -947,7 +1246,9 @@ def somatic_block(*, world_result: Mapping[str, Any], body_view: Mapping[str, An
     else:
         thermal = _modality(
             "thermal", status="available", quality="cool",
-            salience="mild" if window_state == "ajar" else "medium",
+            # SALIENCE is the module's own closed vocabulary; "mild" was never in
+            # it and an ajar window raised ValueError instead of projecting.
+            salience="low" if window_state == "ajar" else "medium",
             region=region,
             source_refs=["local:window:%s" % window_state,
                          "local:position:window_side",
@@ -966,20 +1267,31 @@ def somatic_block(*, world_result: Mapping[str, Any], body_view: Mapping[str, An
                              simulation=True, reason_code="OUTERWEAR_NOT_WORN")
     else:
         dryness = garment.get("dryness")
-        if dryness == "damp":
+        damp_src = garment.get("dampness_source")
+        is_sim = damp_src != VERIFIED_OUTDOOR_EXPOSURE_SOURCE
+        if dryness == "wet":
+            moisture = _modality("moisture", status="available", quality="wet",
+                                 salience="high", region=region,
+                                 source_refs=["local:garment:%s:wet"
+                                              % garment.get("garment_id")],
+                                 simulation=is_sim,
+                                 dampness_source=damp_src,
+                                 wetted_at=garment.get("wetted_at"))
+        elif dryness == "damp":
             moisture = _modality("moisture", status="available", quality="damp",
                                  salience="medium", region=region,
                                  source_refs=["local:garment:%s:damp"
                                               % garment.get("garment_id")],
-                                 simulation=True,
-                                 dampness_source=garment.get("dampness_source"))
+                                 simulation=is_sim,
+                                 dampness_source=damp_src,
+                                 wetted_at=garment.get("wetted_at"))
         elif dryness == "dry":
             moisture = _modality("moisture", status="available", quality="dry",
                                  salience="low", region=region,
                                  source_refs=["local:garment:%s:dry"
                                               % garment.get("garment_id")],
                                  simulation=True,
-                                 dampness_source=garment.get("dampness_source"))
+                                 dampness_source=damp_src)
         else:
             moisture = _modality("moisture", status="unknown", quality=None,
                                  salience="none", region=region,
@@ -1096,6 +1408,7 @@ def somatic_block(*, world_result: Mapping[str, Any], body_view: Mapping[str, An
         "ambient": ambient,
         "weather": {"value": None, "status": "unavailable",
                     "reason_code": NO_WEATHER_AUTHORITY, "is_weather_authority": False},
+        "seasonal_context": _seasonal_context_readonly(world_result, world, now_iso),
         "modalities": modalities,
         "modality_count": len(MODALITIES),
         "available_modalities": [name for name in MODALITIES
@@ -1195,6 +1508,7 @@ def care_offering_block(*, world_result: Mapping[str, Any], body_view: Mapping[s
         "drink": care["drink"],
         "cushion": care["cushion"],
         "slots": care["slots"],
+        "seasonal_context": _seasonal_context_readonly(world_result, world, now_iso),
         "offer_source": SIMULATION_SOURCE,
         "temperature_source": SIMULATION_SOURCE,
         "support_source": SIMULATION_SOURCE,
@@ -1256,6 +1570,20 @@ def _load_bln_module() -> Any:
         return bln
 
 
+def _load_br_module() -> Optional[Any]:
+    try:
+        from components.world.scripts import body_runtime as br
+
+        return br
+    except Exception:
+        try:
+            import body_runtime as br  # type: ignore[no-redef]
+
+            return br
+        except Exception:
+            return None
+
+
 def _lived_needs_file_path(root: Path) -> Path:
     return root / "body" / "lived_needs.json"
 
@@ -1265,20 +1593,37 @@ def _lived_needs_acks_path(root: Path) -> Path:
 
 
 def _candidate_runtime_paths(root: Path) -> list[Path]:
-    candidates = [
+    paths = _instance_paths.resolve_instance_paths(root)
+    raw_candidates: list[Path] = [
+        paths.body_runtime_json,
+        paths.world_home / "data" / "body" / "runtime.json",
+        paths.day_root / "one-day" / "world-home" / "data" / "body" / "runtime.json",
+        paths.day_root / "data" / "body" / "runtime.json",
+        paths.day_root / "world" / "data" / "body" / "runtime.json",
         root / "data" / "body" / "runtime.json",
         root / "world" / "data" / "body" / "runtime.json",
     ]
-    inst_file = root / "phone_instance.json"
-    if inst_file.exists() and not inst_file.is_symlink():
-        try:
-            inst = json.loads(inst_file.read_text(encoding="utf-8"))
-            wh = str(inst.get("world_home") or "").strip()
-            if wh:
-                candidates.append(Path(wh) / "data" / "body" / "runtime.json")
-        except Exception:
-            pass
-    return candidates
+    for inst_name in ("instance.json", "phone/instance.json", "phone_instance.json"):
+        inst_file = root / inst_name
+        if inst_file.exists() and not inst_file.is_symlink():
+            try:
+                inst = json.loads(inst_file.read_text(encoding="utf-8"))
+                wh = str(inst.get("world_home") or "").strip() if isinstance(inst, Mapping) else ""
+                if wh:
+                    wh_path = Path(wh).expanduser()
+                    if not wh_path.is_absolute():
+                        wh_path = paths.day_root / wh_path
+                    raw_candidates.append(wh_path / "data" / "body" / "runtime.json")
+            except Exception:
+                pass
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for cand in raw_candidates:
+        key = str(cand)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(cand)
+    return deduped
 
 
 def _atomic_write_json_doc(path: Path, doc: Mapping[str, Any]) -> None:
@@ -1303,10 +1648,11 @@ def _atomic_write_json_doc(path: Path, doc: Mapping[str, Any]) -> None:
 def read_lived_needs_snapshot(root: Path | str) -> dict[str, Any]:
     """100% zero-write read of current ``body_lived_needs`` state & qualitative bands."""
     rpath = Path(root)
+    paths = _instance_paths.resolve_instance_paths(rpath)
     bln = _load_bln_module()
 
     for rt_path in _candidate_runtime_paths(rpath):
-        if rt_path.exists() and not rt_path.is_symlink():
+        if rt_path.is_file() and not rt_path.is_symlink():
             try:
                 rt = json.loads(rt_path.read_text(encoding="utf-8"))
                 if isinstance(rt, Mapping) and isinstance(rt.get("lived_needs"), Mapping):
@@ -1320,21 +1666,34 @@ def read_lived_needs_snapshot(root: Path | str) -> dict[str, Any]:
             except Exception:
                 continue
 
-    ln_path = _lived_needs_file_path(rpath)
-    if ln_path.exists() and not ln_path.is_symlink():
-        try:
-            raw_ln = json.loads(ln_path.read_text(encoding="utf-8"))
-            validated = bln.validate_state(raw_ln)
-            return {
-                "status": "available",
-                "source_path": str(ln_path),
-                "levels": dict(validated["levels"]),
-                "bands": bln.bands({"lived_needs": validated}),
-            }
-        except Exception:
-            return {"status": "corrupt", "source_path": str(ln_path), "levels": None, "bands": None}
+    for ln_path in (_lived_needs_file_path(paths.day_root), _lived_needs_file_path(rpath)):
+        if ln_path.is_file() and not ln_path.is_symlink():
+            try:
+                raw_ln = json.loads(ln_path.read_text(encoding="utf-8"))
+                validated = bln.validate_state(raw_ln)
+                return {
+                    "status": "available",
+                    "source_path": str(ln_path),
+                    "levels": dict(validated["levels"]),
+                    "bands": bln.bands({"lived_needs": validated}),
+                }
+            except Exception:
+                return {"status": "corrupt", "source_path": str(ln_path), "levels": None, "bands": None}
 
-    for prof_dir in (rpath / "data" / "body", rpath / "body", rpath / "world" / "data" / "body"):
+    profile_dirs: list[Path] = [
+        paths.body_dir,
+        paths.world_home / "data" / "body",
+        rpath / "data" / "body",
+        paths.day_root / "body",
+        rpath / "body",
+        rpath / "world" / "data" / "body",
+    ]
+    seen_dirs: set[str] = set()
+    for prof_dir in profile_dirs:
+        key = str(prof_dir)
+        if key in seen_dirs:
+            continue
+        seen_dirs.add(key)
         prof = bln.load_profile(prof_dir) if prof_dir.exists() else None
         if prof is not None:
             init_st = bln.initial_state(prof)
@@ -1348,6 +1707,33 @@ def read_lived_needs_snapshot(root: Path | str) -> dict[str, Any]:
     return {"status": "unconfigured", "source_path": None, "levels": None, "bands": None}
 
 
+def _resolve_runtime_authority(rpath: Path, paths: Any) -> tuple[Optional[Path], Optional[Path]]:
+    """Return ``(body_dir, runtime_path)`` when a real World/Body runtime authority exists."""
+    if paths.body_runtime_json.is_file() and not paths.body_runtime_json.is_symlink():
+        return paths.body_runtime_json.parent, paths.body_runtime_json
+    for marker_name in ("profile.json", "lived_needs_profile.json"):
+        marker_file = paths.body_dir / marker_name
+        if marker_file.is_file() and not marker_file.is_symlink():
+            return paths.body_dir, paths.body_dir / "runtime.json"
+    for cand in _candidate_runtime_paths(rpath):
+        if cand.is_file() and not cand.is_symlink():
+            return cand.parent, cand
+        for marker_name in ("profile.json", "lived_needs_profile.json"):
+            cand_marker = cand.parent / marker_name
+            if cand_marker.is_file() and not cand_marker.is_symlink():
+                return cand.parent, cand
+    if bool(getattr(paths, "is_managed_instance", False)):
+        if paths.body_dir.is_dir() and not paths.body_dir.is_symlink():
+            return paths.body_dir, paths.body_dir / "runtime.json"
+        if (
+            paths.world_home != paths.day_root
+            and paths.world_home.is_dir()
+            and not paths.world_home.is_symlink()
+        ):
+            return paths.body_dir, paths.body_dir / "runtime.json"
+    return None, None
+
+
 def apply_lived_needs_relief(
     root: Path | str,
     *,
@@ -1358,107 +1744,218 @@ def apply_lived_needs_relief(
     now_iso: str,
     auto_initialize: bool = True,
 ) -> dict[str, Any]:
-    """Idempotently apply real hunger/thirst relief to ``body_lived_needs`` by ``receipt_id`` (GAP-08)."""
+    """Idempotently apply real hunger/thirst relief to ``body_lived_needs`` by ``receipt_id`` (GAP-08).
+
+    When the canonical World/Body runtime authority (``runtime.json``,
+    ``<body_dir>/profile.json``, ``<body_dir>/lived_needs_profile.json``, or a
+    managed instance ``world_home``) exists, this mutates ``runtime.json``
+    exclusively under the ``BodyStore`` lock, appends a ``CAUSE_LIVED_NEEDS``
+    transition to ``transitions.jsonl``, and NEVER creates the legacy shadow
+    ``body/lived_needs.json``. The shadow file is retained ONLY as a fallback
+    for standalone unit-test roots lacking ``world_home/data/body``.
+    """
     rpath = Path(root)
+    paths = _instance_paths.resolve_instance_paths(rpath)
+    day_root = paths.day_root
     bln = _load_bln_module()
+    eff_now = _iso(now_iso) or now_iso
 
-    acks_path = _lived_needs_acks_path(rpath)
-    acks_doc: dict[str, Any] = {"revision": 0, "acks": {}}
-    if acks_path.exists() and not acks_path.is_symlink():
-        try:
-            loaded_acks = json.loads(acks_path.read_text(encoding="utf-8"))
-            if isinstance(loaded_acks, Mapping) and isinstance(loaded_acks.get("acks"), Mapping):
-                acks_doc = {
-                    "revision": int(loaded_acks.get("revision") or 0),
-                    "acks": dict(loaded_acks["acks"]),
-                }
-        except Exception:
-            pass
-
-    if receipt_id in acks_doc["acks"]:
-        prev_ack = dict(acks_doc["acks"][receipt_id])
-        prev_ack["replayed"] = True
-        return prev_ack
-
-    relief_inputs: list[dict[str, Any]] = []
-    if hunger_relief > 0.0:
-        relief_inputs.append({"class": "LIVED_NEED_RELIEF", "need": "hunger", "amount": float(hunger_relief), "source_ref": receipt_id})
-    if thirst_relief > 0.0:
-        relief_inputs.append({"class": "LIVED_NEED_RELIEF", "need": "thirst", "amount": float(thirst_relief), "source_ref": receipt_id})
-    if toilet_relief > 0.0:
-        relief_inputs.append({"class": "LIVED_NEED_RELIEF", "need": "toilet", "amount": float(toilet_relief), "source_ref": receipt_id})
-
-    # Locate existing runtime.json or lived_needs.json, or initialize from profile / baseline
-    target_runtime_path: Optional[Path] = None
-    runtime_doc: Optional[dict[str, Any]] = None
-    ln_state: Optional[dict[str, Any]] = None
-
-    for rt_path in _candidate_runtime_paths(rpath):
-        if rt_path.exists() and not rt_path.is_symlink():
+    acks_path = _lived_needs_acks_path(day_root)
+    with _tx.state_file_lock(acks_path):
+        acks_doc: dict[str, Any] = {"revision": 0, "acks": {}}
+        if acks_path.is_file() and not acks_path.is_symlink():
             try:
-                parsed_rt = json.loads(rt_path.read_text(encoding="utf-8"))
-                if isinstance(parsed_rt, Mapping) and isinstance(parsed_rt.get("lived_needs"), Mapping):
-                    ln_state = bln.validate_state(parsed_rt["lived_needs"])
-                    runtime_doc = dict(parsed_rt)
-                    target_runtime_path = rt_path
-                    break
+                loaded_acks = json.loads(acks_path.read_text(encoding="utf-8"))
+                if isinstance(loaded_acks, Mapping) and isinstance(loaded_acks.get("acks"), Mapping):
+                    acks_doc = {
+                        "revision": int(loaded_acks.get("revision") or 0),
+                        "acks": dict(loaded_acks["acks"]),
+                    }
             except Exception:
-                continue
+                pass
 
-    ln_path = _lived_needs_file_path(rpath)
-    if ln_state is None and ln_path.exists() and not ln_path.is_symlink():
-        try:
-            ln_state = bln.validate_state(json.loads(ln_path.read_text(encoding="utf-8")))
-        except Exception:
-            ln_state = None
+        if receipt_id in acks_doc["acks"]:
+            prev_ack = dict(acks_doc["acks"][receipt_id])
+            prev_ack["replayed"] = True
+            return prev_ack
 
-    if ln_state is None:
-        for prof_dir in (rpath / "data" / "body", rpath / "body", rpath / "world" / "data" / "body"):
-            prof = bln.load_profile(prof_dir) if prof_dir.exists() else None
-            if prof is not None:
-                ln_state = bln.initial_state(prof)
-                break
+        relief_inputs: list[dict[str, Any]] = []
+        if hunger_relief > 0.0:
+            relief_inputs.append({"class": "LIVED_NEED_RELIEF", "need": "hunger", "amount": float(hunger_relief), "source_ref": receipt_id})
+        if thirst_relief > 0.0:
+            relief_inputs.append({"class": "LIVED_NEED_RELIEF", "need": "thirst", "amount": float(thirst_relief), "source_ref": receipt_id})
+        if toilet_relief > 0.0:
+            relief_inputs.append({"class": "LIVED_NEED_RELIEF", "need": "toilet", "amount": float(toilet_relief), "source_ref": receipt_id})
 
-    if ln_state is None:
-        if not auto_initialize:
-            return {
-                "applied": False,
+        authority_body_dir, authority_runtime_path = _resolve_runtime_authority(rpath, paths)
+
+        if authority_body_dir is not None and authority_runtime_path is not None:
+            br = _load_br_module()
+            transition_id: Optional[str] = None
+            body_version: Optional[int] = None
+
+            if br is not None:
+                store = br.BodyStore(authority_body_dir)
+                with br._locked(store.runtime_path):
+                    if store.runtime_path.is_file() and not store.runtime_path.is_symlink():
+                        loaded_rt, _migrated = store.load_runtime_with_migration()
+                        if loaded_rt is None:
+                            loaded_rt = br.initial_runtime(at=eff_now)
+                    else:
+                        loaded_rt = br.initial_runtime(at=eff_now)
+
+                    if loaded_rt.get("lived_needs") is None:
+                        prof = bln.load_profile(authority_body_dir)
+                        if prof is not None:
+                            init_ln = bln.initial_state(prof)
+                        elif auto_initialize:
+                            default_prof = bln.build_profile(hunger=0.62, thirst=0.75, toilet=0.18)
+                            init_ln = bln.initial_state(default_prof)
+                        else:
+                            return {
+                                "applied": False,
+                                "receipt_id": receipt_id,
+                                "reason_code": "LIVED_NEEDS_NOT_ENABLED",
+                                "authority": "body_runtime",
+                            }
+                        before_rt = br.upgrade_to_v2(loaded_rt, init_ln)
+                    else:
+                        before_rt = br.validate_runtime(loaded_rt)
+
+                    ln_state = bln.validate_state(before_rt["lived_needs"])
+                    before_levels = dict(ln_state["levels"])
+                    before_bands = bln.bands({"lived_needs": ln_state})
+                    updated_ln, deltas = bln.apply_advance(ln_state, hours=0.0, relief=relief_inputs)
+                    after_levels = dict(updated_ln["levels"])
+                    after_bands = bln.bands({"lived_needs": updated_ln})
+
+                    after_rt = dict(before_rt)
+                    after_rt["lived_needs"] = updated_ln
+                    after_rt["version"] = int(before_rt["version"]) + 1
+                    after_rt = br.validate_runtime(after_rt)
+                    br._atomic_write(store.runtime_path, after_rt)
+                    body_version = int(after_rt["version"])
+
+                transition = br.build_transition(
+                    before_rt,
+                    after_rt,
+                    at=eff_now,
+                    cause_class=br.CAUSE_LIVED_NEEDS,
+                    input_summary={
+                        "receipt_id": receipt_id,
+                        "relief": relief_inputs,
+                        "deltas": {k: round(v, 4) for k, v in deltas.items()},
+                    },
+                )
+                store.append_transition(transition)
+                transition_id = str(transition["transition_id"])
+            else:
+                with _tx.state_file_lock(authority_runtime_path):
+                    parsed_rt: dict[str, Any] = {}
+                    if authority_runtime_path.is_file() and not authority_runtime_path.is_symlink():
+                        parsed_rt = dict(json.loads(authority_runtime_path.read_text(encoding="utf-8")))
+                    if isinstance(parsed_rt.get("lived_needs"), Mapping):
+                        ln_state = bln.validate_state(parsed_rt["lived_needs"])
+                    else:
+                        prof = bln.load_profile(authority_body_dir)
+                        if prof is not None:
+                            ln_state = bln.initial_state(prof)
+                        elif auto_initialize:
+                            default_prof = bln.build_profile(hunger=0.62, thirst=0.75, toilet=0.18)
+                            ln_state = bln.initial_state(default_prof)
+                        else:
+                            return {
+                                "applied": False,
+                                "receipt_id": receipt_id,
+                                "reason_code": "LIVED_NEEDS_NOT_ENABLED",
+                                "authority": "body_runtime",
+                            }
+                    before_levels = dict(ln_state["levels"])
+                    before_bands = bln.bands({"lived_needs": ln_state})
+                    updated_ln, deltas = bln.apply_advance(ln_state, hours=0.0, relief=relief_inputs)
+                    after_levels = dict(updated_ln["levels"])
+                    after_bands = bln.bands({"lived_needs": updated_ln})
+                    parsed_rt["schema_version"] = "body.runtime.v2"
+                    parsed_rt["lived_needs"] = updated_ln
+                    parsed_rt["version"] = int(parsed_rt.get("version") or 0) + 1
+                    _atomic_write_json_doc(authority_runtime_path, parsed_rt)
+                    body_version = int(parsed_rt["version"])
+
+            body_rev = int(acks_doc["revision"]) + 1
+            ack_record: dict[str, Any] = {
+                "applied": True,
+                "replayed": False,
                 "receipt_id": receipt_id,
-                "reason_code": "LIVED_NEEDS_NOT_ENABLED",
+                "authority": "body_runtime",
+                "runtime_path": str(authority_runtime_path),
+                "body_revision": body_rev,
+                "body_version": body_version,
+                "transition_id": transition_id,
+                "occurred_at": eff_now,
+                "before_levels": {k: round(v, 4) for k, v in before_levels.items()},
+                "after_levels": {k: round(v, 4) for k, v in after_levels.items()},
+                "before_bands": before_bands,
+                "after_bands": after_bands,
+                "deltas": {k: round(v, 4) for k, v in deltas.items()},
             }
-        default_prof = bln.build_profile(hunger=0.62, thirst=0.75, toilet=0.18)
-        ln_state = bln.initial_state(default_prof)
+            acks_doc["revision"] = body_rev
+            acks_doc["acks"][receipt_id] = ack_record
+            _atomic_write_json_doc(acks_path, acks_doc)
+            return ack_record
 
-    before_levels = dict(ln_state["levels"])
-    before_bands = bln.bands({"lived_needs": ln_state})
-    updated_ln, deltas = bln.apply_advance(ln_state, hours=0.0, relief=relief_inputs)
-    after_levels = dict(updated_ln["levels"])
-    after_bands = bln.bands({"lived_needs": updated_ln})
+        # Legacy fallback ONLY for standalone unit tests lacking world_home/data/body
+        ln_state: Optional[dict[str, Any]] = None
+        ln_path = _lived_needs_file_path(day_root)
+        if ln_path.is_file() and not ln_path.is_symlink():
+            try:
+                ln_state = bln.validate_state(json.loads(ln_path.read_text(encoding="utf-8")))
+            except Exception:
+                ln_state = None
 
-    if target_runtime_path is not None and runtime_doc is not None:
-        runtime_doc["lived_needs"] = updated_ln
-        runtime_doc["version"] = int(runtime_doc.get("version") or 0) + 1
-        _atomic_write_json_doc(target_runtime_path, runtime_doc)
+        if ln_state is None:
+            for prof_dir in (paths.body_dir, rpath / "data" / "body", day_root / "body", rpath / "body"):
+                prof = bln.load_profile(prof_dir) if prof_dir.exists() else None
+                if prof is not None:
+                    ln_state = bln.initial_state(prof)
+                    break
 
-    _atomic_write_json_doc(ln_path, updated_ln)
+        if ln_state is None:
+            if not auto_initialize:
+                return {
+                    "applied": False,
+                    "receipt_id": receipt_id,
+                    "reason_code": "LIVED_NEEDS_NOT_ENABLED",
+                    "authority": "legacy_lived_needs_file",
+                }
+            default_prof = bln.build_profile(hunger=0.62, thirst=0.75, toilet=0.18)
+            ln_state = bln.initial_state(default_prof)
 
-    body_rev = int(acks_doc["revision"]) + 1
-    ack_record = {
-        "applied": True,
-        "replayed": False,
-        "receipt_id": receipt_id,
-        "body_revision": body_rev,
-        "occurred_at": _iso(now_iso) or now_iso,
-        "before_levels": {k: round(v, 4) for k, v in before_levels.items()},
-        "after_levels": {k: round(v, 4) for k, v in after_levels.items()},
-        "before_bands": before_bands,
-        "after_bands": after_bands,
-        "deltas": {k: round(v, 4) for k, v in deltas.items()},
-    }
-    acks_doc["revision"] = body_rev
-    acks_doc["acks"][receipt_id] = ack_record
-    _atomic_write_json_doc(acks_path, acks_doc)
-    return ack_record
+        before_levels = dict(ln_state["levels"])
+        before_bands = bln.bands({"lived_needs": ln_state})
+        updated_ln, deltas = bln.apply_advance(ln_state, hours=0.0, relief=relief_inputs)
+        after_levels = dict(updated_ln["levels"])
+        after_bands = bln.bands({"lived_needs": updated_ln})
+
+        _atomic_write_json_doc(ln_path, updated_ln)
+
+        body_rev = int(acks_doc["revision"]) + 1
+        ack_record = {
+            "applied": True,
+            "replayed": False,
+            "receipt_id": receipt_id,
+            "authority": "legacy_lived_needs_file",
+            "body_revision": body_rev,
+            "occurred_at": eff_now,
+            "before_levels": {k: round(v, 4) for k, v in before_levels.items()},
+            "after_levels": {k: round(v, 4) for k, v in after_levels.items()},
+            "before_bands": before_bands,
+            "after_bands": after_bands,
+            "deltas": {k: round(v, 4) for k, v in deltas.items()},
+        }
+        acks_doc["revision"] = body_rev
+        acks_doc["acks"][receipt_id] = ack_record
+        _atomic_write_json_doc(acks_path, acks_doc)
+        return ack_record
 
 
 def is_cup_occupied_by_stationery(root: Path | str, container_id: str = "ceramic_mug") -> bool:
@@ -1494,6 +1991,17 @@ def is_cup_occupied_by_stationery(root: Path | str, container_id: str = "ceramic
                 iid = str(it.get("item_id") or "").lower()
                 if iclass in stationery_classes or "pen" in iid or "pencil" in iid:
                     return True
+    try:
+        from components.world.scripts import personal_objects_taxonomy as _pot
+    except ImportError:
+        try:
+            import personal_objects_taxonomy as _pot  # type: ignore[no-redef]
+        except ImportError:
+            _pot = None  # type: ignore[assignment]
+    if _pot is not None:
+        ready, reason, _ = _pot.check_vessel_ready_for_drink_zero_write(rpath, container_id)
+        if not ready and reason == "VESSEL_OCCUPIED_BY_STORED_ITEMS":
+            return True
     return False
 
 
@@ -1507,7 +2015,38 @@ def drink_care(
     operation_key: Optional[str] = None,
     now_iso: Optional[str] = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Consume the taken drink in ``somatic_comfort.json`` and genuinely relieve ``body_lived_needs.thirst``."""
+    """Consume the taken drink and genuinely relieve ``body_lived_needs.thirst``.
+
+    The whole read-check-mutate-write cycle (state read, idempotency check, slot
+    consumption, lived-needs relief, receipt ack) runs inside ``state_file_lock``.
+    Replay or a concurrent ``offer`` / ``set_window`` therefore never double-deducts
+    thirst nor writes a duplicate consume receipt. The lock is reentrant, so the
+    nested call from ``mutate_somatic_comfort_view`` is safe.
+    """
+    rpath = Path(root)
+    with _tx.state_file_lock(state_path(rpath)):
+        return _drink_care_locked(
+            rpath,
+            actor_side=actor_side,
+            place_id=place_id,
+            area_id=area_id,
+            container_id=container_id,
+            operation_key=operation_key,
+            now_iso=now_iso,
+        )
+
+
+def _drink_care_locked(
+    root: Path | str,
+    *,
+    actor_side: str = "her",
+    place_id: str = "home",
+    area_id: str = "bedroom",
+    container_id: Optional[str] = None,
+    operation_key: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> tuple[int, dict[str, Any]]:
+    """Inner write body; callers must already hold ``state_file_lock``."""
     rpath = Path(root)
     eff_now = _iso(now_iso) or datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -1632,7 +2171,38 @@ def mutate_somatic_comfort_view(
     pose: str = "seated",
     now_iso: Optional[str] = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Unified validated action handler for somatic comfort (window/garment + care/drink with real thirst relief)."""
+    """Unified validated action handler for somatic comfort (window/garment + care/drink with real thirst relief).
+
+    Runs the whole read-check-mutate-write cycle inside ``state_file_lock`` so
+    concurrent ``offer`` / ``set_window`` / ``drink`` writers serialize on one fresh
+    snapshot. The ``drink`` branch re-enters ``drink_care`` on the same reentrant lock.
+    """
+    if not isinstance(payload, Mapping):
+        return 400, {"ok": False, "reason_code": "INVALID_JSON_OBJECT"}
+    rpath = Path(root)
+    with _tx.state_file_lock(state_path(rpath)):
+        return _mutate_somatic_comfort_view_locked(
+            rpath,
+            payload,
+            actor_side=actor_side,
+            place_id=place_id,
+            area_id=area_id,
+            pose=pose,
+            now_iso=now_iso,
+        )
+
+
+def _mutate_somatic_comfort_view_locked(
+    root: Path | str,
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str = "her",
+    place_id: str = "home",
+    area_id: str = "bedroom",
+    pose: str = "seated",
+    now_iso: Optional[str] = None,
+) -> tuple[int, dict[str, Any]]:
+    """Inner write body; callers must already hold ``state_file_lock``."""
     if not isinstance(payload, Mapping):
         return 400, {"ok": False, "reason_code": "INVALID_JSON_OBJECT"}
     for k in payload:
@@ -1808,6 +2378,7 @@ __all__ = [
     "STATE_FILENAME",
     "STATE_SCHEMA_VERSION",
     "TEMPERATURE_BANDS",
+    "VERIFIED_OUTDOOR_EXPOSURE_SOURCE",
     "WINDOW_STATES",
     "WORLD_READ_SOURCE",
     "apply_lived_needs_relief",
@@ -1826,6 +2397,7 @@ __all__ = [
     "parse_instant",
     "read_lived_needs_snapshot",
     "read_state",
+    "record_outdoor_weather_exposure",
     "set_local_position",
     "set_window",
     "somatic_block",

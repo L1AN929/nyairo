@@ -3553,6 +3553,90 @@ def apply_v04_builder_trylive_command(
     }
 
 
+FORBIDDEN_WORLD_PACK_KEYS: frozenset[str] = frozenset({
+    "api_key",
+    "private_memories",
+    "chat_history",
+    "exec_script",
+    "adult_confirmed",
+})
+FORBIDDEN_CHAR_PACK_KEYS: frozenset[str] = frozenset({
+    "adult_confirmed",
+    "attested_by",
+    "intimacy_score",
+    "fake_past_memories",
+    "api_key",
+})
+FORBIDDEN_SUITCASE_KEYS: frozenset[str] = frozenset({"plaintext_api_key", "host_abs_path"})
+
+_WIN_OR_UNIX_ABS_PATH_RE = re.compile(r"(?:[A-Za-z]:\\|/mnt/[a-z]/|/Users/|/home/)")
+
+
+def validate_three_bundle_boundary(bundle_kind: str, payload: Mapping[str, Any]) -> None:
+    """第 64 章三包分权硬校验：发现越界夹带字段立即整包拒收。"""
+    keys = set(payload.keys())
+    if bundle_kind == "nyairo-world":
+        bad = keys & FORBIDDEN_WORLD_PACK_KEYS
+    elif bundle_kind == "nyairo-pack":
+        bad = keys & FORBIDDEN_CHAR_PACK_KEYS
+    elif bundle_kind == "nyairo-suitcase":
+        bad = keys & FORBIDDEN_SUITCASE_KEYS
+    else:
+        raise ValueError(f"UNKNOWN_BUNDLE_KIND:{bundle_kind}")
+    if bad:
+        raise ValueError(f"BUNDLE_FORBIDDEN_FIELDS:{sorted(bad)}")
+
+
+def migrate_cross_town_suitcase(
+    suitcase_bundle: Mapping[str, Any],
+    target_town_id: str,
+) -> dict[str, Any]:
+    """三层分流搬家（第 106 章）：同镇原位恢复，跨镇把珍藏旧物装进新家玄关搬家纸箱。"""
+    raw_dump = str(dict(suitcase_bundle))
+    if "api_key" in suitcase_bundle or "secret_token" in suitcase_bundle:
+        raise ValueError("行李箱内严禁夹带接口密钥")
+    if _WIN_OR_UNIX_ABS_PATH_RE.search(raw_dump):
+        raise ValueError("行李箱内严禁夹带旧电脑盘符绝对路径")
+
+    source_town_id = str(suitcase_bundle.get("town_id", ""))
+    same_town = source_town_id == target_town_id
+
+    human_layer = {
+        "shared_memories": list(suitcase_bundle.get("shared_memories", [])),
+        "memory_tombstones": list(suitcase_bundle.get("memory_tombstones", [])),
+        "refused_firm_locks": list(suitcase_bundle.get("refused_firm_locks", [])),
+        "dietary_boundaries": dict(suitcase_bundle.get("dietary_boundaries", {})),
+        "manuscripts": list(suitcase_bundle.get("manuscripts", [])),
+    }
+
+    treasured_items = list(suitcase_bundle.get("treasured_keepsakes", []))
+    local_terrain_state = dict(suitcase_bundle.get("town_terrain_state", {}))
+
+    if same_town:
+        return {
+            "mode": "SAME_TOWN_RESTORE",
+            "town_id": target_town_id,
+            "human_layer": human_layer,
+            "room_placed_items": treasured_items,
+            "moving_carton_entryway": [],
+            "town_terrain_state": local_terrain_state,
+            "archived_old_town_snapshot": None,
+        }
+
+    return {
+        "mode": "CROSS_TOWN_RELOCATION",
+        "town_id": target_town_id,
+        "human_layer": human_layer,
+        "room_placed_items": [],
+        "moving_carton_entryway": treasured_items,
+        "town_terrain_state": {},
+        "archived_old_town_snapshot": {
+            "town_id": source_town_id,
+            "town_terrain_state": local_terrain_state,
+        },
+    }
+
+
 __all__ = [
     "ALLOWED_COMPARE_LIGHTING",
     "ALLOWED_FAULTS",
@@ -3562,7 +3646,10 @@ __all__ = [
     "DEFAULT_PRONOUN",
     "ENGINE_SCHEMA",
     "FAULT_ALIAS_MAP",
+    "FORBIDDEN_CHAR_PACK_KEYS",
     "FORBIDDEN_FOREIGN_KEYS",
+    "FORBIDDEN_SUITCASE_KEYS",
+    "FORBIDDEN_WORLD_PACK_KEYS",
     "FRONTEND_PRESETS",
     "INSPECTABLE_OBJECTS",
     "PRESET_SCENARIOS",
@@ -3583,8 +3670,10 @@ __all__ = [
     "inspect_why_changed",
     "load_sandbox_state_readonly",
     "load_world_snapshot_readonly",
+    "migrate_cross_town_suitcase",
     "neighborhood_state_path",
     "preview_world_modification",
     "project_v04_builder_trylive",
     "run_trylive_hour",
+    "validate_three_bundle_boundary",
 ]

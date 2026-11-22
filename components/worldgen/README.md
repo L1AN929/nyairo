@@ -1,6 +1,6 @@
-# NyAiro WorldGen v0.1
+# nyairo WorldGen
 
-把一个随机种子变成一座**可被 rc9 World/Body 运行时真实加载、行走、观察、持久化**的小镇。
+把一个随机种子变成一座**可被 World/Body 运行时真实加载、行走、观察、持久化**的小镇。
 
 本组件基于 `v0.1.0-rc9` 的 `feature/worldgen-rc9` 分支开发。生成器只依赖 Python 标准库，
 可以独立于 Hermes 使用；运行时接线层复用 rc9 既有的全部状态权威，不引入第二套状态。
@@ -29,7 +29,7 @@ python -m components.worldgen demo full \
   --package ./worlds/nagiura --home ~/.nyairo-worlds/nagiura-inst
 ```
 
-主题：`coastal_town`（海滨小镇）、`residential_town`（普通生活小镇）。
+主题：`coastal_town`（海滨小镇）、`residential_town`（普通生活街区）、`mountain_onsen`（山间温泉镇）、`countryside_village`（内陆田园村落）。
 
 > **平台提示**：生成 / 校验 / 预览在原生 Windows 也能运行（纯标准库）；
 > `instance` 与 `demo` 需要 POSIX 文件锁（`fcntl`），请在 WSL 或 Linux 上执行。

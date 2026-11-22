@@ -571,6 +571,26 @@ class _NarrowPort:
         return f"<NarrowPort {sorted(port_allow_list(self))}>"
 
 
+def cap_step_spec(spec: Mapping[str, Any], cap: Optional[int]) -> dict[str, Any]:
+    """v0.8: a narrowed body may not carry a long plan.
+
+    Only a spec that really carries a list of steps is truncated; the single
+    step specs this codebase builds today pass through untouched.  ``None``
+    means the body has no opinion.
+    """
+
+    resolved = dict(spec)
+    if cap is None:
+        return resolved
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 0:
+        raise ValueError(f"invalid plan step cap: {cap!r}")
+    steps = resolved.get("steps")
+    if isinstance(steps, (list, tuple)) and cap < len(steps):
+        resolved["steps"] = list(steps)[:cap]
+        resolved["steps_capped_by_body"] = True
+    return resolved
+
+
 def port_allow_list(port: Any) -> frozenset[str]:
     """Public read accessor for a narrow port's declared allow-list (audit / tests)."""
     return frozenset(getattr(type(port), "_allowed", frozenset()))
@@ -5535,11 +5555,17 @@ class LifeIntegrationCoordinator:
             # autonomous cycle passes -- is untouched: a Mapping is not callable.
             spec_source = (step_spec_override(decision_record)
                            if callable(step_spec_override) else step_spec_override)
-            resolved_step_dict = dict(spec_source)
+            resolved_step_dict = cap_step_spec(
+                dict(spec_source),
+                decision_eval_kwargs.get("body_max_plan_steps"),
+            )
         elif decision_record.selected_candidate_ref:
             spec_obj = self.adoption_coordinator.get_adoption_spec(decision_record.selected_candidate_ref)
             if spec_obj and spec_obj.initial_executable_step_spec:
-                resolved_step_dict = dict(spec_obj.initial_executable_step_spec)
+                resolved_step_dict = cap_step_spec(
+                    dict(spec_obj.initial_executable_step_spec),
+                    decision_eval_kwargs.get("body_max_plan_steps"),
+                )
 
         step_exec_result = None
         if execute_initial_step and resolved_step_dict is not None and int_rec.activity_ref:

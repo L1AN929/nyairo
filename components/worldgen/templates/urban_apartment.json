@@ -1,0 +1,607 @@
+{
+  "ambient_pool": [
+    {
+      "end_hour": 24,
+      "event_type": "school_notice",
+      "slot": "school",
+      "start_hour": 0,
+      "summaries": [
+        "学院门口灯箱换上了新的开放讲座海报",
+        "晚自习后走廊亮着整排白色日光灯"
+      ]
+    },
+    {
+      "end_hour": 20,
+      "event_type": "park_maintenance",
+      "slot": "park",
+      "start_hour": 8,
+      "summaries": [
+        "街心口袋公园刚修剪过樟树枝",
+        "长椅旁多了一个给流浪猫留水的小碟"
+      ]
+    },
+    {
+      "end_hour": 23,
+      "event_type": "store_evening_sale",
+      "slot": "convenience_store",
+      "start_hour": 18,
+      "summaries": [
+        "二十四小时便利店晚间饭团半价标签刚贴出来",
+        "收银台旁的关东煮锅冒着温和的白气"
+      ]
+    },
+    {
+      "end_hour": 22,
+      "event_type": "street_construction",
+      "slot": "street",
+      "start_hour": 6,
+      "summaries": [
+        "高架桥下的斑马线刚刚重新刷过白漆",
+        "地铁站口有人推着现烤面包香气走过"
+      ]
+    },
+    {
+      "end_hour": 18,
+      "event_type": "market_closing",
+      "slot": "market",
+      "start_hour": 14,
+      "summaries": [
+        "生鲜市集下午开始给绿叶菜喷水保鲜",
+        "门口摊主正把木箱里最后几盒草莓摆到亮处"
+      ]
+    },
+    {
+      "end_hour": 20,
+      "event_type": "library_new_shelf",
+      "slot": "library",
+      "start_hour": 10,
+      "summaries": [
+        "城市阅读室窗边那排自习灯都亮着",
+        "还书车上摆着几本建筑摄影集"
+      ]
+    },
+    {
+      "end_hour": 24,
+      "event_type": "home_window_sound",
+      "slot": "home",
+      "start_hour": 0,
+      "summaries": [
+        "双层窗隔开了高架车流的嗡鸣，只剩阳台玻璃微轻的雨声",
+        "封窗向阳小阳台里的绿植叶片吸饱了水气"
+      ]
+    },
+    {
+      "end_hour": 22,
+      "event_type": "station_rush",
+      "slot": "station",
+      "start_hour": 17,
+      "summaries": [
+        "轻轨高架车站的末班提示灯准时闪了两下",
+        "天桥玻璃栏杆外亮起一片晚高峰的车灯长河"
+      ]
+    }
+  ],
+  "fixed_slots": [
+    {
+      "affordances": [
+        [
+          "REST",
+          "在屋里歇一会儿"
+        ],
+        [
+          "READ",
+          "坐在桌边或阳台读会儿书"
+        ],
+        [
+          "USE_PHONE",
+          "拿起手机看看"
+        ],
+        [
+          "DAZE",
+          "隔着高楼窗户发会儿呆"
+        ],
+        [
+          "POTTER",
+          "在客厅、玄关和封窗小阳台随便走走"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "十楼的高楼都市公寓，室内干燥安静，客厅外连着一面封窗向阳小阳台，夜里能看见远处高架电车的灯带。"
+      ],
+      "id": "home",
+      "kind": "home",
+      "names": [
+        "十楼转角公寓"
+      ],
+      "open_hour": null,
+      "slot": "home",
+      "weekdays_only": false,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "ATTEND_CLASS",
+          "在城市学院听课"
+        ],
+        [
+          "SELF_STUDY",
+          "在自习室查资料"
+        ],
+        [
+          "STAY_AT_SCHOOL",
+          "留在阶梯教室旁听"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "紧邻高架轻轨站的城市设计学院，晚上玻璃幕墙里仍亮着几排画图灯。"
+      ],
+      "id": "school",
+      "kind": "school",
+      "names": [
+        "都市设计学院",
+        "南环校区"
+      ],
+      "open_hour": 8,
+      "slot": "school",
+      "weekdays_only": true,
+      "zone": "education"
+    }
+  ],
+  "flavor_pool": {
+    "festival_candidates": [
+      "天台夏夜独立书市",
+      "秋日高架下旧唱片市集",
+      "冬夜咖啡街灯季"
+    ],
+    "street_flavor": [
+      "高架轻轨每八分钟从玻璃窗外安静滑过一次",
+      "公寓楼下玄关信报箱整齐排在暖黄灯带下面",
+      "转角二十四小时便利店的招牌夜里始终亮着"
+    ],
+    "world_intro": [
+      "节奏利落又带着生活烟火气的都市公寓街区，楼上自成一方安静天地，下楼拐角就是便利店与独立书店。"
+    ],
+    "zone_flavor": [
+      "高楼电梯大堂换了新的一盆散尾葵",
+      "玻璃连廊外能俯瞰半条闪烁灯影的街道",
+      "地下车库出口墙角贴着附近手作市集的海报",
+      "天桥扶手边总是风比地面略大一些"
+    ]
+  },
+  "npc_name_pool": {
+    "family": [
+      "林",
+      "沈",
+      "陆",
+      "周",
+      "徐",
+      "高",
+      "顾",
+      "宋"
+    ],
+    "given_adult": [
+      "远",
+      "宁",
+      "安",
+      "晴",
+      "舟",
+      "清",
+      "然",
+      "禾"
+    ],
+    "given_minor": [
+      "夏",
+      "知",
+      "小言",
+      "一凡",
+      "米"
+    ]
+  },
+  "npc_role_pool": [
+    {
+      "age": "adult",
+      "end_hour": 21,
+      "role": "独立书店店主",
+      "slot": "bookstore",
+      "start_hour": 11,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 22,
+      "role": "楼下咖啡师",
+      "slot": "cafe",
+      "start_hour": 8,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 23,
+      "role": "便利店夜班店员",
+      "slot": "convenience_store",
+      "start_hour": 14,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 19,
+      "role": "面包房烘焙师",
+      "slot": "bakery",
+      "start_hour": 7,
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "age": "adult",
+      "end_hour": 20,
+      "role": "城市阅读室管理员",
+      "slot": "library",
+      "start_hour": 10,
+      "weekdays": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    }
+  ],
+  "object_pool": [
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "靠窗双人书桌",
+      "note": "摆在十楼落地窗侧面的长木桌，放得下两台电脑与一盏台灯。",
+      "object_id": "desk_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "单人软榻",
+      "note": "靠内墙一角，铺着浅灰棉麻毯。",
+      "object_id": "bed_home"
+    },
+    {
+      "kind": "furniture",
+      "location": "home",
+      "name": "阳台置物架",
+      "note": "摆在封窗向阳小阳台里，可以晒衣物与养护绿植盆栽。",
+      "object_id": "balcony_rack_home"
+    }
+  ],
+  "slot_pool": [
+    {
+      "affordances": [
+        [
+          "REST",
+          "在封窗向阳小阳台晒太阳"
+        ],
+        [
+          "LOOK_AROUND",
+          "从十楼阳台眺望高架灯带"
+        ]
+      ],
+      "close_hour": 23,
+      "descriptions": [
+        "都市高楼公寓独有的封窗向阳小阳台，没有露天地砖院子，晴天风暖适合晾晒与养薄荷。"
+      ],
+      "id": "balcony",
+      "kind": "public",
+      "names": [
+        "十楼封窗小阳台"
+      ],
+      "open_hour": 6,
+      "slot": "balcony",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在书店看看独立出版与旧画册"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "地铁口拐角二十步内的二楼独立书店，专卖城市地图集与画册。"
+      ],
+      "id": "bookstore",
+      "kind": "store",
+      "names": [
+        "{world_name}二楼书房",
+        "高架角独立书店"
+      ],
+      "open_hour": 11,
+      "slot": "bookstore",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "SIT",
+          "在手冲吧台高脚凳坐下"
+        ],
+        [
+          "READ",
+          "带本书在这儿安静读会儿"
+        ]
+      ],
+      "close_hour": 22,
+      "descriptions": [
+        "公寓大堂斜对面的极简手冲咖啡店，菜单写在白瓷砖墙面上。"
+      ],
+      "id": "cafe",
+      "kind": "cafe",
+      "names": [
+        "{prefix}咖啡",
+        "南桥冰萃店"
+      ],
+      "open_hour": 8,
+      "slot": "cafe",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "去楼下便利店捎牛奶和饭团"
+        ]
+      ],
+      "close_hour": 23,
+      "descriptions": [
+        "整夜亮灯的公寓底商便利店，冷柜一直摆着鲜奶与苏打。"
+      ],
+      "id": "convenience_store",
+      "kind": "store",
+      "names": [
+        "{world_name}底商便利店",
+        "转角二十四小时便利店"
+      ],
+      "open_hour": 6,
+      "slot": "convenience_store",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "在面包房挑刚出炉的面包"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "玻璃柜贴着手写纸条的面包店，傍晚会推出打折袋。"
+      ],
+      "id": "bakery",
+      "kind": "store",
+      "names": [
+        "{world_name}酵母面包房"
+      ],
+      "open_hour": 7,
+      "slot": "bakery",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "shopping"
+    },
+    {
+      "affordances": [
+        [
+          "WALK",
+          "在口袋公园散步透气"
+        ],
+        [
+          "SIT",
+          "坐在梧桐树下长椅休息"
+        ]
+      ],
+      "close_hour": 22,
+      "descriptions": [
+        "夹在几栋写字楼与公寓中间的口袋公园，有花坛与水泥长椅。"
+      ],
+      "id": "park",
+      "kind": "park",
+      "names": [
+        "{world_name}街心口袋公园"
+      ],
+      "open_hour": 6,
+      "slot": "park",
+      "weekdays_only": false,
+      "weight": 3,
+      "zone": "residential"
+    },
+    {
+      "affordances": [
+        [
+          "READ",
+          "在阅读室翻看杂志与图书"
+        ],
+        [
+          "SELF_STUDY",
+          "用插座桌安静工作一小时"
+        ]
+      ],
+      "close_hour": 21,
+      "descriptions": [
+        "二十四小时社区阅读室的日间开放区，整排桌面配有暖色小台灯。"
+      ],
+      "id": "library",
+      "kind": "library",
+      "names": [
+        "{world_name}城市阅读室"
+      ],
+      "open_hour": 9,
+      "slot": "library",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "civic"
+    },
+    {
+      "affordances": [
+        [
+          "LOOK_AROUND",
+          "看看高架轻轨与天桥人流"
+        ],
+        [
+          "WALK",
+          "沿着高架站连廊走一段"
+        ]
+      ],
+      "close_hour": null,
+      "descriptions": [
+        "高架轻轨换乘站，早晚通勤匆忙，夜里只剩零星几节亮灯的车厢。"
+      ],
+      "id": "station",
+      "kind": "station",
+      "names": [
+        "{world_name}高架站"
+      ],
+      "open_hour": null,
+      "slot": "station",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "civic"
+    },
+    {
+      "affordances": [
+        [
+          "BROWSE_STORE",
+          "逛逛下班时段城市生鲜市集"
+        ]
+      ],
+      "close_hour": 20,
+      "descriptions": [
+        "写字楼背面小巷里的半露天城市生鲜摊，水产与应季水果装在干净竹筐里。"
+      ],
+      "id": "market",
+      "kind": "market",
+      "names": [
+        "{world_name}生鲜市集"
+      ],
+      "open_hour": 8,
+      "slot": "market",
+      "weekdays_only": false,
+      "weight": 2,
+      "zone": "shopping"
+    }
+  ],
+  "street_names": [
+    "高架东路",
+    "银杏天桥下",
+    "南桥西弄",
+    "玻璃连廊通",
+    "云杉公寓前路"
+  ],
+  "street_slot": {
+    "affordances": [
+      [
+        "WALK",
+        "沿着城市人行道散步"
+      ],
+      [
+        "LOOK_AROUND",
+        "站在天桥下看看晚高峰与橱窗"
+      ]
+    ],
+    "kind": "street",
+    "slot": "street"
+  },
+  "theme_id": "urban_apartment",
+  "theme_name": "都市高楼公寓",
+  "weather": [
+    {
+      "condition": "clear",
+      "description": "晴朗通透"
+    },
+    {
+      "condition": "cloudy",
+      "description": "高楼多云"
+    },
+    {
+      "condition": "rain",
+      "description": "城市夜雨"
+    },
+    {
+      "condition": "breezy_cool",
+      "description": "楼间清风"
+    }
+  ],
+  "world_name_fragments": {
+    "prefix": [
+      "南",
+      "云",
+      "星",
+      "晴",
+      "银",
+      "浅"
+    ],
+    "suffix": [
+      "桥",
+      "里",
+      "坊",
+      "城",
+      "轩",
+      "陌"
+    ]
+  },
+  "zones": [
+    {
+      "color": "#8fb98f",
+      "name": "公寓住区",
+      "zone_id": "residential"
+    },
+    {
+      "color": "#c79f6f",
+      "name": "底商与书市",
+      "zone_id": "shopping"
+    },
+    {
+      "color": "#a98fc7",
+      "name": "学院区",
+      "zone_id": "education"
+    },
+    {
+      "color": "#7f9fc7",
+      "name": "高架与阅读区",
+      "zone_id": "civic"
+    }
+  ]
+}

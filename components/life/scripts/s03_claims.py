@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS belief_current (
     source_revision   TEXT,
     source_generation TEXT,
     operation_key     TEXT,
+    perception_ref    TEXT,
     FOREIGN KEY (slot_id) REFERENCES proposition_slot(slot_id)
 );
 
@@ -268,6 +269,16 @@ PREDICATES: dict[str, PredicateSpec] = {
         temporal_kind="ongoing",
         description="one item a place is reported or observed to offer",
     ),
+    "inquiry_conclusion": PredicateSpec(
+        predicate_id="inquiry_conclusion",
+        version=1,
+        value_type="text",
+        cardinality="single",
+        requires_context=False,
+        revalidate_after_seconds=30 * 24 * 3600,
+        temporal_kind="ongoing",
+        description="a sourced belief revised from a concluded bounded inquiry",
+    ),
 }
 
 MAX_CONTEXT_CHARS = 400
@@ -403,6 +414,15 @@ def _normalize_value(spec: PredicateSpec, value: Any) -> dict[str, Any]:
         else:
             raw = value
         return {"item_ref": _structured_ref(raw, "item_ref", maximum=120)}
+    if spec.value_type == "text":
+        if isinstance(value, Mapping):
+            raw = value.get("text")
+        else:
+            raw = value
+        text = str(raw or "").strip()
+        if not text or len(text) > MAX_VALUE_CHARS:
+            raise S03ClaimsRefused("S03_VALUE_TEXT_INVALID", text[:80])
+        return {"text": text}
     raise S03ClaimsRefused("S03_PREDICATE_VALUE_TYPE_UNSUPPORTED", spec.value_type)
 
 
@@ -466,6 +486,9 @@ class S03ClaimService:
                 if "revalidate_after_seconds" not in columns:
                     conn.execute("ALTER TABLE belief_current ADD COLUMN "
                                  "revalidate_after_seconds INTEGER NOT NULL DEFAULT 86400")
+                if "perception_ref" not in columns:
+                    conn.execute("ALTER TABLE belief_current ADD COLUMN "
+                                 "perception_ref TEXT")
                 conn.commit()
             finally:
                 conn.close()
@@ -601,6 +624,11 @@ class S03ClaimService:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _has_perception_ref_column(conn: sqlite3.Connection) -> bool:
+        cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(belief_current)").fetchall()}
+        return "perception_ref" in cols
+
     def _insert_claim(self, conn: sqlite3.Connection, *, slot_id: str, object_value: Mapping[str, Any],
                       valid_from: Optional[str], valid_to: Optional[str],
                       observed_at: Optional[str], now: str, status: str,
@@ -609,21 +637,41 @@ class S03ClaimService:
                       source_kind: str, source_ref: str, source_revision: Optional[str],
                       source_generation: Optional[str], operation_key: Optional[str],
                       superseded_by: Optional[str] = None,
-                      payload_withheld: bool = False) -> str:
+                      payload_withheld: bool = False,
+                      perception_ref: Optional[str] = None) -> str:
         claim_id = "claim:" + uuid.uuid4().hex[:20]
-        conn.execute(
-            """INSERT INTO belief_current
-               (claim_id, slot_id, object_json, object_digest, valid_from, valid_to,
-                observed_at, recorded_at, last_checked_at, revalidate_after_seconds,
-                status, status_reason, revision, meaning_version, superseded_by,
-                payload_withheld, source_kind, source_ref, source_revision,
-                source_generation, operation_key)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (claim_id, slot_id, _canonical(dict(object_value)), _digest(dict(object_value)),
-             valid_from, valid_to, observed_at, now, now, int(revalidate_after_seconds),
-             status, status_reason, 1, meaning_version, superseded_by,
-             1 if payload_withheld else 0, source_kind, source_ref, source_revision,
-             source_generation, operation_key))
+        has_pref = self._has_perception_ref_column(conn)
+        if not has_pref and perception_ref is not None:
+            conn.execute("ALTER TABLE belief_current ADD COLUMN perception_ref TEXT")
+            has_pref = True
+        if has_pref:
+            conn.execute(
+                """INSERT INTO belief_current
+                   (claim_id, slot_id, object_json, object_digest, valid_from, valid_to,
+                    observed_at, recorded_at, last_checked_at, revalidate_after_seconds,
+                    status, status_reason, revision, meaning_version, superseded_by,
+                    payload_withheld, source_kind, source_ref, source_revision,
+                    source_generation, operation_key, perception_ref)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (claim_id, slot_id, _canonical(dict(object_value)), _digest(dict(object_value)),
+                 valid_from, valid_to, observed_at, now, now, int(revalidate_after_seconds),
+                 status, status_reason, 1, meaning_version, superseded_by,
+                 1 if payload_withheld else 0, source_kind, source_ref, source_revision,
+                 source_generation, operation_key, perception_ref))
+        else:
+            conn.execute(
+                """INSERT INTO belief_current
+                   (claim_id, slot_id, object_json, object_digest, valid_from, valid_to,
+                    observed_at, recorded_at, last_checked_at, revalidate_after_seconds,
+                    status, status_reason, revision, meaning_version, superseded_by,
+                    payload_withheld, source_kind, source_ref, source_revision,
+                    source_generation, operation_key)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (claim_id, slot_id, _canonical(dict(object_value)), _digest(dict(object_value)),
+                 valid_from, valid_to, observed_at, now, now, int(revalidate_after_seconds),
+                 status, status_reason, 1, meaning_version, superseded_by,
+                 1 if payload_withheld else 0, source_kind, source_ref, source_revision,
+                 source_generation, operation_key))
         return claim_id
 
     def _insert_edge(self, conn: sqlite3.Connection, *, claim_id: str, evidence_ref: str,
@@ -726,6 +774,7 @@ class S03ClaimService:
                 "source_ref": str(row["source_ref"]),
                 "source_revision": row["source_revision"],
                 "source_generation": row["source_generation"],
+                "perception_ref": row["perception_ref"] if "perception_ref" in row.keys() else None,
                 "superseded_by": row["superseded_by"],
                 "withheld": bool(int(row["payload_withheld"] or 0)),
             })
@@ -790,7 +839,8 @@ class S03ClaimService:
                       receipt_ref: Optional[str], operation_key: Optional[str],
                       revalidate_after_seconds: Optional[int] = None,
                       relation: str = RELATION_SUPPORT,
-                      supersede_previous: bool = True) -> tuple[str, str]:
+                      supersede_previous: bool = True,
+                      perception_ref: Optional[str] = None) -> tuple[str, str]:
         """Assert one candidate answer.  Returns ``(claim_id, CREATED|UPDATED)``."""
 
         revalidate = (spec.revalidate_after_seconds if revalidate_after_seconds is None
@@ -814,12 +864,25 @@ class S03ClaimService:
                 # Same source, same answer: a refresh, not a second claim.  A newer
                 # source revision is still evidence for the same answer.
                 old_revision = int(row["revision"])
-                cursor = conn.execute(
-                    """UPDATE belief_current
-                       SET last_checked_at = ?, observed_at = COALESCE(?, observed_at),
-                           revision = revision + 1
-                       WHERE claim_id = ? AND revision = ?""",
-                    (now, observed_at, row["claim_id"], old_revision))
+                has_pref = self._has_perception_ref_column(conn)
+                if not has_pref and perception_ref is not None:
+                    conn.execute("ALTER TABLE belief_current ADD COLUMN perception_ref TEXT")
+                    has_pref = True
+                if has_pref and perception_ref is not None:
+                    cursor = conn.execute(
+                        """UPDATE belief_current
+                           SET last_checked_at = ?, observed_at = COALESCE(?, observed_at),
+                               perception_ref = COALESCE(?, perception_ref),
+                               revision = revision + 1
+                           WHERE claim_id = ? AND revision = ?""",
+                        (now, observed_at, perception_ref, row["claim_id"], old_revision))
+                else:
+                    cursor = conn.execute(
+                        """UPDATE belief_current
+                           SET last_checked_at = ?, observed_at = COALESCE(?, observed_at),
+                               revision = revision + 1
+                           WHERE claim_id = ? AND revision = ?""",
+                        (now, observed_at, row["claim_id"], old_revision))
                 if cursor.rowcount != 1:
                     raise S03ClaimsRefused("S03_CLAIM_REVISION_CONFLICT")
                 edge_id = self._insert_edge(
@@ -828,13 +891,19 @@ class S03ClaimService:
                     evidence_generation=source_generation, relation=relation,
                     source_kind=source_kind, source_id=source_ref,
                     receipt_ref=receipt_ref, observed_at=observed_at, now=now)
+                refresh_payload: dict[str, Any] = {
+                    "claim_id": str(row["claim_id"]),
+                    "last_checked_at": now,
+                    "observed_at": observed_at,
+                    "edge": self._edge_payload(conn, edge_id),
+                }
+                if perception_ref is not None:
+                    refresh_payload["perception_ref"] = perception_ref
                 self._append_event(
                     conn, kind=EVENT_CLAIM_REFRESHED, claim_id=str(row["claim_id"]),
                     slot_id=slot_id, old_revision=old_revision, new_revision=old_revision + 1,
                     evidence_refs=[evidence_ref],
-                    payload={"claim_id": str(row["claim_id"]), "last_checked_at": now,
-                             "observed_at": observed_at,
-                             "edge": self._edge_payload(conn, edge_id)},
+                    payload=refresh_payload,
                     now=now, operation_key=operation_key)
                 return str(row["claim_id"]), "UPDATED"
 
@@ -858,7 +927,8 @@ class S03ClaimService:
             status_reason=None, meaning_version=spec.ref,
             revalidate_after_seconds=revalidate, source_kind=source_kind,
             source_ref=source_ref, source_revision=source_revision,
-            source_generation=source_generation, operation_key=operation_key)
+            source_generation=source_generation, operation_key=operation_key,
+            perception_ref=perception_ref)
         edge_id = self._insert_edge(
             conn, claim_id=claim_id, evidence_ref=evidence_ref,
             evidence_revision=source_revision, evidence_generation=source_generation,
@@ -887,7 +957,7 @@ class S03ClaimService:
         row = self._claim_row(conn, claim_id)
         if row is None:
             raise S03ClaimsRefused("S03_CLAIM_MISSING")
-        return {
+        out: dict[str, Any] = {
             "claim_id": str(row["claim_id"]), "slot_id": str(row["slot_id"]),
             "object_json": row["object_json"], "object_digest": row["object_digest"],
             "valid_from": row["valid_from"], "valid_to": row["valid_to"],
@@ -904,6 +974,9 @@ class S03ClaimService:
             "source_generation": row["source_generation"],
             "operation_key": row["operation_key"],
         }
+        if "perception_ref" in row.keys():
+            out["perception_ref"] = row["perception_ref"]
+        return out
 
     def _supersede(self, conn: sqlite3.Connection, row: sqlite3.Row, *, at: str,
                    superseded_by: Optional[str], now: str,
@@ -1068,6 +1141,81 @@ class S03ClaimService:
         return {"ok": True, "status": outcome, "operation_key": key, "claim_id": claim_id,
                 "slot_id": slot_id, "source_kind": SOURCE_REPORTED,
                 "source_ref": source, "recorded_at": now_iso}
+
+    def assert_claim(
+        self,
+        *,
+        predicate_id: str,
+        scope_id: str,
+        value: Any,
+        source_kind: str = SOURCE_OBSERVED,
+        source_ref: str,
+        evidence_ref: str,
+        context: Any = None,
+        source_revision: Any = None,
+        source_generation: Any = "1",
+        valid_from: Any = None,
+        valid_to: Any = None,
+        observed_at: Any = None,
+        now: Any = None,
+        operation_key: Any,
+        receipt_ref: Optional[str] = None,
+        revalidate_after_seconds: Any = None,
+        supersede_previous: bool = True,
+        perception_ref: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Assert one sourced claim atomically with evidence edge and outbox event."""
+
+        key = _operation_key(operation_key)
+        now_iso = self._now(now)
+        kind = str(source_kind or "").strip().upper()
+        if kind not in VALID_SOURCE_KINDS:
+            raise S03ClaimsRefused("S03_SOURCE_KIND_INVALID", kind[:40])
+        spec = predicate(predicate_id)
+        if spec.inference_only:
+            raise S03ClaimsRefused(REASON_INFERENCE_ONLY, spec.predicate_id)
+        scope = _structured_ref(scope_id, "scope_id", maximum=120)
+        source = _structured_ref(source_ref, "source_ref", maximum=MAX_SOURCE_REF)
+        ev_ref = str(evidence_ref or "").strip()[:220]
+        if not ev_ref:
+            raise S03ClaimsRefused("S03_EVIDENCE_REF_MISSING")
+        clean_perception_ref: Optional[str] = None
+        if perception_ref is not None:
+            raw_pref = str(perception_ref).strip()
+            if raw_pref:
+                clean_perception_ref = _structured_ref(
+                    raw_pref, "perception_ref", maximum=MAX_SOURCE_REF
+                )
+        context_json = _context(context, spec)
+        object_value = _normalize_value(spec, value)
+        start, end = _valid_window(valid_from, valid_to)
+        observed = _instant(observed_at, "observed_at") or now_iso
+        revalidate = _revalidate(spec, revalidate_after_seconds)
+        revision = None if source_revision is None else str(source_revision)[:80]
+        generation = str(source_generation)[:80]
+        with self._connection(write=True) as conn:
+            existing = self._event_for_operation(conn, key)
+            if existing is not None:
+                res = self._already(existing, key)
+                res["claim_id"] = existing["claim_id"]
+                res["slot_id"] = existing["slot_id"]
+                return res
+            slot_id = self._ensure_slot(conn, spec=spec, scope_id=scope,
+                                        context_json=context_json, now=now_iso)
+            claim_id, outcome = self._assert_claim(
+                conn, spec=spec, scope_id=scope, context_json=context_json,
+                object_value=object_value, valid_from=start, valid_to=end,
+                observed_at=observed, now=now_iso, source_kind=kind,
+                source_ref=source, source_revision=revision,
+                source_generation=generation, evidence_ref=ev_ref,
+                receipt_ref=receipt_ref, operation_key=key,
+                revalidate_after_seconds=revalidate,
+                supersede_previous=supersede_previous,
+                perception_ref=clean_perception_ref)
+        return {"ok": True, "status": outcome, "operation_key": key, "claim_id": claim_id,
+                "slot_id": slot_id, "source_kind": kind, "source_ref": source,
+                "evidence_ref": ev_ref, "perception_ref": clean_perception_ref,
+                "recorded_at": now_iso}
 
     def infer(self, *, predicate_id: str, scope_id: str, value: Any,
               basis_claim_ids: Sequence[str], context: Any = None,
@@ -1435,6 +1583,7 @@ class S03ClaimService:
                     "superseded_by": row["superseded_by"],
                     "source_kind": str(row["source_kind"]),
                     "source_ref": str(row["source_ref"]),
+                    "perception_ref": row["perception_ref"] if "perception_ref" in row.keys() else None,
                     "revision_history": [
                         {"kind": str(event["kind"]),
                          "old_revision": event["old_revision"],
@@ -1502,6 +1651,8 @@ class S03ClaimService:
                     claim["last_checked_at"] = payload["last_checked_at"]
                     if payload.get("observed_at"):
                         claim["observed_at"] = payload["observed_at"]
+                    if payload.get("perception_ref"):
+                        claim["perception_ref"] = payload["perception_ref"]
                     claim["revision"] = int(event["new_revision"])
                 edge = payload.get("edge")
                 if edge is not None:
@@ -1562,6 +1713,8 @@ class S03ClaimService:
                     value = bool(obj.get("open"))
                 elif "item_ref" in obj:
                     value = str(obj.get("item_ref"))[:60]
+                elif "text" in obj:
+                    value = str(obj.get("text"))[:120]
             claims.append({
                 "predicate": row.get("predicate"),
                 "scope": str(row.get("scope_id") or "")[:60],
@@ -1597,9 +1750,50 @@ def edge_claim_slot(conn: sqlite3.Connection, edge: Mapping[str, Any]) -> str:
     return "" if row is None else str(row["slot_id"])
 
 
+def inspect_s03_owner_readonly(day_root: Path | str) -> dict[str, Any]:
+    """Strictly zero-write S03 SQLite owner probe (``mode=ro&immutable=1``, zero -wal/-shm)."""
+    try:
+        db_path = Path(day_root) / "s03" / "claims.sqlite3"
+        if db_path.is_symlink() or not db_path.is_file():
+            return {"s03_owner_connected": False, "s03_claim_count": 0, "s03_slot_count": 0}
+        uri = db_path.resolve().as_uri() + "?mode=ro&immutable=1"
+    except (OSError, ValueError, TypeError):
+        return {"s03_owner_connected": False, "s03_claim_count": 0, "s03_slot_count": 0}
+
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=1.0)
+        tables = {
+            str(r[0])
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "belief_current" not in tables:
+            return {"s03_owner_connected": False, "s03_claim_count": 0, "s03_slot_count": 0}
+        claim_count = int(conn.execute("SELECT COUNT(*) FROM belief_current").fetchone()[0])
+        slot_count = (
+            int(conn.execute("SELECT COUNT(*) FROM proposition_slot").fetchone()[0])
+            if "proposition_slot" in tables
+            else 0
+        )
+        return {
+            "s03_owner_connected": True,
+            "s03_claim_count": claim_count,
+            "s03_slot_count": slot_count,
+        }
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return {"s03_owner_connected": False, "s03_claim_count": 0, "s03_slot_count": 0}
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 __all__ = [
     "KIND", "PREDICATES", "PredicateSpec", "SCHEMA_VERSION", "STATUS_DISPUTED",
     "STATUS_STALE", "STATUS_SUPERSEDED", "STATUS_SUPPORTED", "STATUS_UNKNOWN",
     "S03ClaimService", "S03ClaimsError", "S03ClaimsRefused", "S03ClaimsUnavailable",
-    "SOURCE_INFERRED", "SOURCE_OBSERVED", "SOURCE_REPORTED", "predicate",
+    "SOURCE_INFERRED", "SOURCE_OBSERVED", "SOURCE_REPORTED", "inspect_s03_owner_readonly",
+    "predicate",
 ]

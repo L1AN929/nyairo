@@ -34,7 +34,7 @@
       "description": "通过 Telegram 机器人或 QQ 官方机器人连接本机的 TA；重点注意会话白名单授权，避免配好凭证却收不到回复。",
       "url": "https://nyairo.com/docs/telegram/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -485,7 +485,7 @@
 <h2 id="telegram-section-1">Telegram · 绑定私聊记忆权限</h2>
 <p>为了防止陌生人误触机器人读到你的私人记忆，nyairo 要求明确指定「哪一个私聊会话拥有读写长期记忆的权限」。</p>
 <p>如果你用的是一行命令默认安装（数据在 <code>~/.nyairo</code>），运行下面这段脚本，按提示输入你的纯数字私聊 User ID，它会算出对应的会话标识：</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.8.0"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" -c '
 from gateway.config import Platform
 from gateway.session import SessionSource, build_session_key

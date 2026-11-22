@@ -720,8 +720,9 @@ class StanceContainmentViewTest(unittest.TestCase):
             self.assertEqual(moved["moved_child_item_ids"], ["fountain_pen"])
             self.assertFalse(moved["subject_impression_updated"])
 
-            # Check subject view BEFORE observing room: physical place is window_sill,
-            # but subject_last_seen_place is still study_desk & impression_stale is True!
+            # Check subject view BEFORE observing room: the moved destination must
+            # not leak. She still believes the pen cup is on study_desk and the
+            # God-view staleness flag is withheld from her projection.
             before_obs = view.read_stance_containment(root, now=T_WARM, subject_view=True)
             cup_before = next(
                 c
@@ -733,12 +734,35 @@ class StanceContainmentViewTest(unittest.TestCase):
                 for i in before_obs["object_containment"]["items"]
                 if i["item_id"] == "fountain_pen"
             )
-            self.assertEqual(cup_before["effective_place_id"], "window_sill")
-            self.assertEqual(pen_before["effective_place_id"], "window_sill")
+            self.assertEqual(cup_before["place_id"], "study_desk")
+            self.assertEqual(pen_before["place_id"], "study_desk")
+            self.assertEqual(cup_before["effective_place_id"], "study_desk")
+            self.assertEqual(pen_before["effective_place_id"], "study_desk")
             self.assertEqual(cup_before["subject_last_seen_place"], "study_desk")
             self.assertEqual(pen_before["subject_last_seen_place"], "study_desk")
-            self.assertTrue(cup_before["impression_stale"])
-            self.assertTrue(pen_before["impression_stale"])
+            self.assertNotIn("impression_stale", cup_before)
+            self.assertNotIn("impression_stale", pen_before)
+
+            # Partner (God) view is not masked: the physical move is visible cleanly.
+            before_obs_partner = view.read_stance_containment(
+                root, now=T_WARM, subject_view=False
+            )
+            cup_partner = next(
+                c
+                for c in before_obs_partner["object_containment"]["containers"]
+                if c["container_id"] == "pen_cup"
+            )
+            pen_partner = next(
+                i
+                for i in before_obs_partner["object_containment"]["items"]
+                if i["item_id"] == "fountain_pen"
+            )
+            self.assertEqual(cup_partner["place_id"], "window_sill")
+            self.assertEqual(pen_partner["place_id"], "window_sill")
+            self.assertEqual(cup_partner["effective_place_id"], "window_sill")
+            self.assertEqual(pen_partner["effective_place_id"], "window_sill")
+            self.assertTrue(cup_partner["impression_stale"])
+            self.assertTrue(pen_partner["impression_stale"])
             pen_cue = [
                 c
                 for c in before_obs["object_containment"]["subject_cognitive_cues"]
@@ -766,8 +790,13 @@ class StanceContainmentViewTest(unittest.TestCase):
             )
             self.assertEqual(cup_after["subject_last_seen_place"], "window_sill")
             self.assertEqual(pen_after["subject_last_seen_place"], "window_sill")
-            self.assertFalse(cup_after["impression_stale"])
-            self.assertFalse(pen_after["impression_stale"])
+            self.assertEqual(cup_after["effective_place_id"], "window_sill")
+            self.assertEqual(pen_after["effective_place_id"], "window_sill")
+            self.assertFalse(cup_after["not_at_last_seen_place"])
+            self.assertFalse(pen_after["not_at_last_seen_place"])
+            # impression_stale is a God-view fact and stays withheld from her view.
+            self.assertNotIn("impression_stale", cup_after)
+            self.assertNotIn("impression_stale", pen_after)
 
     def test_16_cross_room_move_marks_missing_from_old_spot_without_guessing_destination(
         self,
@@ -799,8 +828,10 @@ class StanceContainmentViewTest(unittest.TestCase):
                 if c["container_id"] == "ceramic_mug"
             )
             self.assertTrue(mug_mid["not_at_last_seen_place"])
-            self.assertTrue(mug_mid["impression_stale"])
+            # She knows it is gone from study_desk but must not learn the destination.
+            self.assertEqual(mug_mid["effective_place_id"], "study_desk")
             self.assertEqual(mug_mid["subject_last_seen_place"], "study_desk")
+            self.assertNotIn("impression_stale", mug_mid)
 
             # Once subject walks to dining_table and observes kitchen_dining, impression updates
             obs_kitchen = view.apply_stance_containment_action(
@@ -815,8 +846,8 @@ class StanceContainmentViewTest(unittest.TestCase):
                 if c["container_id"] == "ceramic_mug"
             )
             self.assertEqual(mug_final["subject_last_seen_place"], "dining_table")
-            self.assertFalse(mug_final["impression_stale"])
             self.assertFalse(mug_final["not_at_last_seen_place"])
+            self.assertNotIn("impression_stale", mug_final)
 
     def test_17_non_empty_container_removal_refused_and_nested_container_forbidden(
         self,
@@ -1374,7 +1405,8 @@ class StanceContainmentViewTest(unittest.TestCase):
             )
             self.assertEqual(pen_row["effective_place_id"], "desk_right")
             self.assertEqual(pen_row["subject_last_seen_place"], "desk_right")
-            self.assertFalse(pen_row["impression_stale"])
+            # impression_stale is a God-view fact and stays withheld from her view.
+            self.assertNotIn("impression_stale", pen_row)
 
     def test_30_hand_slot_full_rejects_third_pickup_atomically_zero_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

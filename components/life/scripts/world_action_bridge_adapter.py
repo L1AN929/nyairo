@@ -127,6 +127,23 @@ def discover_bridge_dir(start: Optional[pathlib.Path] = None) -> Optional[pathli
     return None
 
 
+def ensure_bridge_on_sys_path(directory: os.PathLike[str] | str) -> str:
+    """Keep the target World bridge ahead of ``components/world/service`` on ``sys.path``."""
+
+    text = str(directory)
+    bridge_root = pathlib.Path(text).resolve()
+    if sys.path[:1] != [text]:
+        if text in sys.path:
+            sys.path.remove(text)
+        sys.path.insert(0, text)
+    for mod_name in ("action_intent", "intent_executor", "world_body_client"):
+        cached = sys.modules.get(mod_name)
+        cached_file = getattr(cached, "__file__", None) if cached is not None else None
+        if cached_file and pathlib.Path(cached_file).resolve().parent != bridge_root:
+            del sys.modules[mod_name]
+    return text
+
+
 class WorldBridgeResolver:
     """A real World Resolver, in the shape AR-0's adapter already speaks.
 
@@ -163,9 +180,7 @@ class WorldBridgeResolver:
                 "the World bridge modules are not reachable from this tree; set "
                 "%s to <repo>/components/world/service/bridge" % WORLD_BRIDGE_DIR_ENV
             )
-        text = str(directory)
-        if text not in sys.path:
-            sys.path.insert(0, text)
+        ensure_bridge_on_sys_path(directory)
         import action_intent as world_action_intent  # noqa: E402
         import intent_executor as world_intent_executor  # noqa: E402
         import world_body_client as world_body_client  # noqa: E402

@@ -66,8 +66,11 @@ selector-facing projection stays the one ``action_intent`` defines.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
-from datetime import timedelta
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Mapping, Optional
 from urllib.parse import unquote
 
@@ -1002,13 +1005,18 @@ def _bound_world_opportunities(groups: list[list[dict[str, Any]]]) -> list[list[
     excess = total - MAX_WORLD_OPPORTUNITIES
     if excess <= 0:
         return groups
-    for index in (2, 3, 0, 6, 7):  # stay, body, move, arrange, toggle
+    for index in (2, 3, 5, 0, 6, 7, 8, 1):  # stay, body, daily, move, arrange, toggle, purchase, consume
         if excess <= 0:
             break
         group = groups[index]
-        if len(group) <= 1:
+        min_keep = (
+            min(len(group), 4)
+            if index == 8
+            else (min(len(group), 2) if index == 1 else 1)
+        )
+        if len(group) <= min_keep:
             continue
-        keep = max(1, len(group) - excess)
+        keep = max(min_keep, len(group) - excess)
         excess -= len(group) - keep
         groups[index] = group[:keep]
     return groups
@@ -1482,6 +1490,7 @@ def opportunity_view(
     catalog: Optional[Mapping[str, Any]] = None,
     available_actions: Optional[Mapping[str, Any]] = None,
     purchase_facts: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    reason_hints: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, Any]]:
     """A richer, non-AG-0 view of the same opportunities, for reports and steps.
 
@@ -1678,6 +1687,14 @@ def opportunity_view(
             "purchase": purchase,
             "owner_blocked_reason": blocked_reason,
         })
+        hint_lookup = reason_hints if isinstance(reason_hints, Mapping) else {}
+        hint_raw = (
+            item.get("reason_hint_cn")
+            or hint_lookup.get(str(item.get("opportunity_id") or ""))
+            or hint_lookup.get(target)
+        )
+        if isinstance(hint_raw, str) and hint_raw.strip():
+            view[-1]["reason_hint_cn"] = " ".join(hint_raw.split())[:96]
     return view
 
 
@@ -1739,8 +1756,8 @@ HANDS_USABLE_POSES = ("standing", "seated")
 #: payload as ``order_basis: kind_group_presentation``; it is not a ranking, not a score
 #: and not a default pick, and within a group the observation's own emission order holds.
 CONTEXT_KIND_ORDER = (
-    PICK_UP_VERB, PLACE_VERB, ARRANGE_VERB, TOGGLE_FIXTURE_VERB, STAY_VERB,
-    CONSUME_VERB, TOILET_VERB, PURCHASE_VERB, MOVE_VERB, POSE_VERB, REST_VERB,
+    CONSUME_VERB, TOILET_VERB, PICK_UP_VERB, PLACE_VERB, ARRANGE_VERB,
+    TOGGLE_FIXTURE_VERB, STAY_VERB, PURCHASE_VERB, MOVE_VERB, POSE_VERB, REST_VERB,
 )
 #: How many unknowns one context may name (a bounded list, not a log).
 MAX_CONTEXT_UNKNOWNS = 8
@@ -2247,25 +2264,42 @@ def _context_opportunity(
     elif verb == PURCHASE_VERB:
         item_name = (purchase.get("name") or object_label or object_id or "一件东西")
         price = purchase.get("price")
+        p_min = purchase.get("price_min")
+        p_max = purchase.get("price_max")
+        open_order = bool(purchase.get("open_order"))
         currency = purchase.get("currency") or ""
-        price_text = ("%s %s" % (price, currency)).strip() if price is not None else "价格待定"
+        if open_order and p_min is not None and p_max is not None:
+            price_text = "%s-%s %s 自选点单" % (p_min, p_max, currency)
+        else:
+            price_text = ("%s %s" % (price, currency)).strip() if price is not None else "价格待定"
         store = store_name or entry.get("location_id") or "店里"
         label = "在%s买「%s」（%s）" % (store, item_name, price_text)
         balance = purchase.get("balance")
         balance_text = ("她现在的余额是 %s %s。" % (balance, currency)) if balance is not None else ""
         delivery = purchase.get("delivery_status")
         delivery_text = ("成交后交付状态：%s。" % delivery) if delivery else ""
-        description = ("「%s」是%s现在真的在卖的商品，价格由经济 owner 给出；"
-                       "买下后产权归她。%s%s" % (item_name, store, balance_text, delivery_text))
+        if open_order:
+            description = (
+                "在%s按%s档位自选具体商品（在 purchase_choice 写明 item_name 与估计价格）；"
+                "买下后产权归她。%s%s" % (store, item_name, balance_text, delivery_text)
+            )
+        else:
+            description = ("「%s」是%s现在真的在卖的商品，价格由经济 owner 给出；"
+                           "买下后产权归她。%s%s" % (item_name, store, balance_text, delivery_text))
     elif verb == MOVE_VERB:
         label = "去%s" % (target_place_name or entry.get("location_id") or "另一个地方")
         walk = entry.get("walk_seconds")
-        description = ("从这里走过去大约%s秒。" % int(walk)
-                       if isinstance(walk, (int, float)) and not isinstance(walk, bool)
-                       else "路程秒数这一轮没有读到。")
+        walk_desc = ("从这里走过去大约%s秒。" % int(walk)
+                     if isinstance(walk, (int, float)) and not isinstance(walk, bool)
+                     else "路程秒数这一轮没有读到。")
+        reason_hint = str(entry.get("reason_hint_cn") or "").strip()
+        if reason_hint:
+            description = ("%s（%s）" % (reason_hint, walk_desc))[:120]
+        else:
+            description = walk_desc
     elif verb == CONSUME_VERB:
-        label = "用掉「%s」" % (object_label or object_id or "这一份")
-        description = "用掉这一份（一次一份）；这里不做营养或饱足的判断。"
+        label = "吃掉/喝掉「%s」（缓解饥饿或口渴）" % (object_label or object_id or "这一份")
+        description = "吃掉或喝掉这一份已经属于她的食物或饮品（一次一份）；可缓解对应的虚拟饥饿或口渴需求。"
     elif verb == TOILET_VERB:
         label = "用一下这里的设施"
         description = ("使用这个世界包在此处声明过的设施；只改变虚拟身体需求，"
@@ -2294,7 +2328,7 @@ def _context_opportunity(
 
     duration, duration_source = _duration_seconds(entry)
     facts = _preparation(entry, body, destination)
-    return {
+    out = {
         "target_ref": entry.get("target_ref"),
         "verb": verb,
         "label": label,
@@ -2326,6 +2360,10 @@ def _context_opportunity(
         "valid_until": entry.get("valid_until"),
         "action_grant": False,
     }
+    reason_hint_cn = str(entry.get("reason_hint_cn") or "").strip()
+    if reason_hint_cn:
+        out["reason_hint_cn"] = reason_hint_cn[:96]
+    return out
 
 
 def _context_unknowns(
@@ -2485,6 +2523,8 @@ class WorldMoveOpportunityProvider:
         #: 定义层状态：available / environment_only / absent / closed / unavailable /
         #: error。显式执行定义不成立时 ``reason_code`` 是固定错误码，不是空列表。
         self.last_stay_definition_status: Optional[dict[str, Any]] = None
+        #: Stage 1: zero-write life reason hints keyed by opportunity_id & target_ref.
+        self.last_move_reason_hints: dict[str, str] = {}
 
     def __call__(self) -> list[dict[str, Any]]:
         return self.observe()
@@ -2509,9 +2549,17 @@ class WorldMoveOpportunityProvider:
             if available.outcome == wbc.OK and isinstance(available.data, dict)
             else None
         )
-        space = self.action_intent.build_action_space(
-            snapshot.data, available_actions=available_actions
+        import inspect as _inspect
+
+        _bas_params = _inspect.signature(self.action_intent.build_action_space).parameters
+        _accepts_env = (
+            "environment" in _bas_params
+            or any(p.kind == _inspect.Parameter.VAR_KEYWORD for p in _bas_params.values())
         )
+        _bas_kwargs: dict[str, Any] = {"available_actions": available_actions}
+        if _accepts_env:
+            _bas_kwargs["environment"] = self.environment
+        space = self.action_intent.build_action_space(snapshot.data, **_bas_kwargs)
         visible = self.action_intent.redact_action_space_for_selector(space)
         self.last_observation = dict(snapshot.data)
         self.last_action_space = visible
@@ -2627,11 +2675,54 @@ class WorldMoveOpportunityProvider:
         groups = _bound_world_opportunities(
             [move, consume, stay, body, toilet, daily, arrange, toggle, purchase])
         flat = [item for group in groups for item in group]
+        reason_hints: dict[str, str] = {}
+        try:
+            day_root = self._resolve_day_root_zero_write()
+            if groups and groups[0]:
+                enriched_moves = enrich_move_opportunities_with_life_reasons(
+                    groups[0],
+                    day_root=day_root,
+                    observation=snapshot.data,
+                    now_iso=moment,
+                )
+                for row in enriched_moves:
+                    hint = str(row.get("reason_hint_cn") or "").strip()
+                    if not hint:
+                        continue
+                    oid = str(row.get("opportunity_id") or "").strip()
+                    if oid:
+                        reason_hints[oid] = hint
+                    targets = row.get("target_refs") or ()
+                    if targets:
+                        reason_hints[str(targets[0])] = hint
+        except Exception:  # noqa: BLE001 - enrichment is best-effort and never blocks observe()
+            reason_hints = {}
+        self.last_move_reason_hints = dict(reason_hints)
         self.last_opportunity_view = opportunity_view(
             flat, self.last_catalog, available_actions,
-            purchase_facts=self._purchase_facts())
+            purchase_facts=self._purchase_facts(),
+            reason_hints=reason_hints)
         self.last_reason = None
         return flat
+
+    def _resolve_day_root_zero_write(self) -> Optional[Path]:
+        """Resolve enclosing instance day_root purely zero-write, or None for bare doubles."""
+        raw_root = str(self.world_home or "").strip()
+        if not raw_root and isinstance(self.environment, Mapping):
+            raw_root = str(
+                self.environment.get("CHIYO_WORLD_HOME")
+                or self.environment.get("HERMES_HOME")
+                or ""
+            ).strip()
+        if not raw_root:
+            return None
+        ip = _import_instance_paths()
+        if ip is not None:
+            try:
+                return ip.resolve_instance_paths(raw_root, environment=self.environment).day_root
+            except Exception:  # noqa: BLE001
+                return Path(raw_root)
+        return Path(raw_root)
 
     # -- plumbing ----------------------------------------------------------
 
@@ -2731,6 +2822,12 @@ class WorldMoveOpportunityProvider:
         if (store_id and isinstance(availability, Mapping)
                 and str(availability.get("status") or "") == "OPEN"):
             reserved.append(store_id)
+        open_stores = projection.get("open_store_ids")
+        if isinstance(open_stores, list):
+            for sid in open_stores[:3]:
+                sid_text = str(sid or "").strip()
+                if sid_text and sid_text not in reserved:
+                    reserved.append(sid_text)
         # v0.4 room-living: when she is away but really owns furniture placed at home, the
         # owner offers ARRANGE there.  Home must not be squeezed out of the move bound by
         # the street/store reservation, or the whole "walk back and use what you bought"
@@ -2768,6 +2865,11 @@ class WorldMoveOpportunityProvider:
                 "name": item.get("name"),
                 "description": item.get("description"),
                 "price": item.get("price"),
+                "price_min": item.get("price_min"),
+                "price_max": item.get("price_max"),
+                "open_order": bool(item.get("open_order")),
+                "category": item.get("category"),
+                "price_tier": item.get("price_tier"),
                 "currency": item.get("currency") or projection.get("currency"),
                 "affordable": item.get("affordable"),
                 "balance": balance,
@@ -2980,12 +3082,18 @@ class WorldMoveOpportunityProvider:
                 if isinstance(entry, Mapping)]
         ordered = sorted(view, key=_context_order_key)
         selected = ordered[:limit_value]
-        opportunities = [
+        all_opportunities = [
             _context_opportunity(entry, labels=labels, place_names=place_names,
                                  place_id=place_id, area_name=area_name,
                                  surface_labels=surface_labels, body=body)
-            for entry in selected
+            for entry in ordered
         ]
+        opportunities = all_opportunities[:len(selected)]
+        candidate_labels = {
+            str(item["target_ref"]): str(item["label"])
+            for item in all_opportunities
+            if item.get("target_ref") and item.get("label")
+        }
         unknown_codes, unknown_details = _context_unknowns(
             observation, catalog=catalog, place_id=place_id, area_id=area_id, body=body,
             surfaces=surfaces, surface_reason=self.last_destination_reason,
@@ -3022,6 +3130,7 @@ class WorldMoveOpportunityProvider:
             "nearby": nearby,
             "nearby_objects": nearby_objects,
             "opportunities": opportunities,
+            "candidate_labels": candidate_labels,
             "unknowns": unknown_codes,
             "unknown_details": unknown_details,
             "action_grant": False,
@@ -3040,9 +3149,573 @@ class WorldMoveOpportunityProvider:
         return context
 
 
+def _import_instance_paths() -> Any:
+    try:
+        from components.world.scripts import instance_paths as ip
+        return ip
+    except ImportError:
+        repo_root = str(Path(__file__).resolve().parents[3])
+        world_dir = str(Path(__file__).resolve().parents[2] / "world" / "scripts")
+        for p in (repo_root, world_dir):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        try:
+            from components.world.scripts import instance_paths as ip
+            return ip
+        except ImportError:
+            try:
+                import instance_paths as ip  # type: ignore[no-redef]
+                return ip
+            except ImportError:
+                return None
+
+
+def _read_optional_json_zero_write(path: Path) -> Optional[dict[str, Any]]:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return dict(raw) if isinstance(raw, Mapping) else None
+
+
+def _extract_local_hour(
+    now_iso: Optional[str],
+    observation: Optional[Mapping[str, Any]] = None,
+) -> Optional[int]:
+    candidates: list[Any] = [now_iso]
+    if isinstance(observation, Mapping):
+        candidates.append(observation.get("local_time"))
+        candidates.append(observation.get("observed_at"))
+    for raw in candidates:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        text = raw.strip()
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return int(dt.hour)
+        except ValueError:
+            match = re.search(r"(\d{1,2}):(\d{2})", text)
+            if match:
+                hr = int(match.group(1))
+                if 0 <= hr <= 23:
+                    return hr
+    return None
+
+
+def _build_outing_reason_helper(
+    *,
+    milk_empty: bool = False,
+    low_tide_open: bool = False,
+    passing_cart_title: Optional[str] = None,
+    stuffy: bool = False,
+    rain_heavy: bool = False,
+) -> Optional[dict[str, Any]]:
+    try:
+        import v02_v03_daily_loop_bridge as _vbridge
+        fn = getattr(_vbridge, "build_outing_reason", None)
+        if callable(fn):
+            return fn(
+                milk_empty=milk_empty,
+                low_tide_open=low_tide_open,
+                passing_cart_title=passing_cart_title,
+                stuffy=stuffy,
+                rain_heavy=rain_heavy,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return attach_v05_outing_reason(
+        milk_empty=milk_empty,
+        low_tide_open=low_tide_open,
+        passing_cart_title=passing_cart_title,
+        stuffy=stuffy,
+        rain_heavy=rain_heavy,
+    )
+
+
+_RAIN_SUPPRESS_WEATHERS = frozenset({
+    "rain",
+    "storm",
+    "heavy_rain",
+    "thunder_blackout",
+    "sea_gale",
+})
+
+
+def _collect_move_life_signals_zero_write(
+    *,
+    day_root: Optional[Path | str] = None,
+    observation: Optional[Mapping[str, Any]] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Read v04_neighborhood, v05_living_town, v03_economy and observation cues with 0 writes."""
+    signals: dict[str, Any] = {
+        "has_any_source": False,
+        "weather": "clear",
+        "rain_heavy": False,
+        "illness_acute": False,
+        "hour": _extract_local_hour(now_iso, observation),
+        "milk_empty": False,
+        "budget_tight": False,
+        "low_tide_open": False,
+        "passing_cart_title": None,
+        "v04_weather_present": False,
+        "v04_courtyard_care": False,
+        "v04_street_notice": False,
+        "v04_bookstore_cue": False,
+        "v05_theme": "",
+        "v05_spectacle_title": "",
+        "v05_rainy_surplus_bag": False,
+        "v05_bakery_cue": "",
+        "v05_drifting_book_spots": set(),
+        "v05_present_regular_spots": set(),
+        "v05_ferry_running": False,
+        "v05_telescope_clear": False,
+        "v05_grove_stage": "",
+        "current_place_id": _place_of(observation) if isinstance(observation, Mapping) else None,
+    }
+
+    ip = _import_instance_paths()
+    paths = None
+    resolved_day_root: Optional[Path] = None
+    if day_root is not None:
+        if ip is not None:
+            try:
+                paths = ip.resolve_instance_paths(day_root)
+                resolved_day_root = paths.day_root
+            except Exception:  # noqa: BLE001
+                resolved_day_root = Path(day_root)
+        else:
+            resolved_day_root = Path(day_root)
+
+    # 1. Observation cues (weather, lived_needs)
+    if isinstance(observation, Mapping):
+        obs_weather = observation.get("weather")
+        if isinstance(obs_weather, Mapping):
+            w_str = str(obs_weather.get("condition") or obs_weather.get("weather") or "").strip().lower()
+            if w_str:
+                signals["weather"] = w_str
+                signals["has_any_source"] = True
+        elif isinstance(obs_weather, str) and obs_weather.strip():
+            signals["weather"] = obs_weather.strip().lower()
+            signals["has_any_source"] = True
+        lived_needs = observation.get("lived_needs")
+        if isinstance(lived_needs, Mapping):
+            for key in ("thirst", "hunger"):
+                band = str(lived_needs.get(key) or "").strip().lower()
+                if band in ("noticeable", "strong", "urgent", "high"):
+                    signals["milk_empty"] = True
+                    signals["has_any_source"] = True
+
+    if resolved_day_root is not None:
+        # 2. v04_neighborhood_state.json (zero-write)
+        v04_doc = _read_optional_json_zero_write(
+            resolved_day_root / "world" / "v04_neighborhood_state.json"
+        )
+        if isinstance(v04_doc, Mapping):
+            signals["has_any_source"] = True
+            env_block = v04_doc.get("environment")
+            if not isinstance(env_block, Mapping):
+                env_block = v04_doc.get("weather_and_ground") if isinstance(v04_doc.get("weather_and_ground"), Mapping) else {}
+            w_val = str((env_block or {}).get("weather") or (env_block or {}).get("condition") or "").strip().lower()
+            if w_val:
+                signals["weather"] = w_val
+                signals["v04_weather_present"] = True
+            laundry = v04_doc.get("laundry") or v04_doc.get("drying_cloths")
+            if isinstance(laundry, Mapping) and laundry:
+                signals["v04_courtyard_care"] = True
+            elif isinstance(laundry, list) and laundry:
+                signals["v04_courtyard_care"] = True
+            plants = v04_doc.get("plants") or v04_doc.get("garden")
+            if isinstance(plants, Mapping) and plants:
+                signals["v04_courtyard_care"] = True
+            elif isinstance(plants, list) and plants:
+                signals["v04_courtyard_care"] = True
+            for key in ("notices", "street_notices", "board_notices", "notice_board", "street_corner"):
+                val = v04_doc.get(key)
+                if val:
+                    signals["v04_street_notice"] = True
+                    break
+            for key in ("bookstore", "bookmarks", "booklets", "borrowed_books"):
+                val = v04_doc.get(key)
+                if val:
+                    signals["v04_bookstore_cue"] = True
+                    break
+
+        # 3. v05_living_town.json (zero-write)
+        town_file = resolved_day_root / "world" / "v05_living_town.json"
+        town_doc = _read_optional_json_zero_write(town_file)
+        if isinstance(town_doc, Mapping):
+            signals["has_any_source"] = True
+            cart_raw = town_doc.get("passing_cart_title") or town_doc.get("passing_cart")
+            if isinstance(cart_raw, Mapping):
+                cart_title = str(cart_raw.get("title_cn") or cart_raw.get("title") or "").strip()
+            else:
+                cart_title = str(cart_raw or "").strip()
+            if cart_title:
+                signals["passing_cart_title"] = cart_title[:32]
+            if town_doc.get("low_tide_open") is True:
+                signals["low_tide_open"] = True
+            try:
+                from components.world.scripts import v05_living_town_engine as _v05_town
+            except ImportError:
+                _v05_town = None
+                try:
+                    import v05_living_town_engine as _v05_town  # type: ignore[no-redef]
+                except ImportError:
+                    _v05_town = None
+            if _v05_town is not None:
+                try:
+                    snap = _v05_town.read_living_town_snapshot(resolved_day_root, now_iso=now_iso)
+                    wctx = snap.get("world_context") if isinstance(snap.get("world_context"), Mapping) else {}
+                    theme = str(wctx.get("theme") or "").strip().lower()
+                    signals["v05_theme"] = theme
+                    if not signals["v04_weather_present"]:
+                        tw = str(wctx.get("weather") or "").strip().lower()
+                        if tw:
+                            signals["weather"] = tw
+                    if signals["hour"] is None and isinstance(wctx.get("hour"), int):
+                        signals["hour"] = int(wctx["hour"])
+                    spec = snap.get("rare_spectacle")
+                    if isinstance(spec, Mapping) and spec.get("active"):
+                        title = str(spec.get("title_cn") or spec.get("label_cn") or "").strip()
+                        if title:
+                            signals["v05_spectacle_title"] = title[:36]
+                    chalk = snap.get("chalkboard_and_favors")
+                    if isinstance(chalk, Mapping):
+                        if chalk.get("rainy_half_price_bag_available"):
+                            signals["v05_rainy_surplus_bag"] = True
+                        b_extra = str(chalk.get("bakery_extra") or chalk.get("diner_special") or "").strip()
+                        if b_extra:
+                            signals["v05_bakery_cue"] = b_extra[:36]
+                    ts = snap.get("third_spaces")
+                    if isinstance(ts, Mapping):
+                        pier = ts.get("river_pier")
+                        if isinstance(pier, Mapping) and pier.get("ferry_running"):
+                            signals["v05_ferry_running"] = True
+                        overlook = ts.get("hillside_overlook")
+                        if isinstance(overlook, Mapping) and overlook.get("telescope_clear"):
+                            signals["v05_telescope_clear"] = True
+                        grove = ts.get("blank_grove")
+                        if isinstance(grove, Mapping) and grove.get("grove_stage"):
+                            signals["v05_grove_stage"] = str(grove.get("grove_stage") or "").strip()[:24]
+                    for bk in snap.get("drifting_bookbox") or ():
+                        if isinstance(bk, Mapping):
+                            sp = str(bk.get("spot_id") or "old_bookshop").strip()
+                            if sp:
+                                signals["v05_drifting_book_spots"].add(sp)
+                    regs = snap.get("regulars")
+                    reg_rows = regs.values() if isinstance(regs, Mapping) else (regs if isinstance(regs, list) else ())
+                    for reg in reg_rows:
+                        if isinstance(reg, Mapping) and reg.get("present_now"):
+                            sp = str(reg.get("spot_id") or "").strip()
+                            if sp:
+                                signals["v05_present_regular_spots"].add(sp)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # 4. v03_economy & phone/v03_ecology.json (zero-write)
+        eco_path = (
+            paths.economy_state_json
+            if paths is not None
+            else (resolved_day_root / "one-day" / "world-home" / "state" / "world_property_economy.json")
+        )
+        eco_doc = _read_optional_json_zero_write(eco_path)
+        if eco_doc is None:
+            for rel in (
+                "one-day/world-home/state/world_property_economy.json",
+                "world/state/world_property_economy.json",
+                "world-home/state/world_property_economy.json",
+            ):
+                eco_doc = _read_optional_json_zero_write(resolved_day_root / rel)
+                if eco_doc is not None:
+                    break
+        if isinstance(eco_doc, Mapping):
+            signals["has_any_source"] = True
+            if eco_doc.get("milk_empty") is True:
+                signals["milk_empty"] = True
+            supplies = eco_doc.get("supplies") or eco_doc.get("pantry")
+            if isinstance(supplies, Mapping):
+                for drink_key in ("milk", "drinks", "drink", "beverage"):
+                    if drink_key in supplies:
+                        try:
+                            if float(supplies[drink_key]) <= 0:
+                                signals["milk_empty"] = True
+                        except (TypeError, ValueError):
+                            if str(supplies[drink_key]).strip().lower() in ("empty", "none", "low"):
+                                signals["milk_empty"] = True
+            bal = eco_doc.get("available_balance_cents")
+            if bal is None:
+                bal = eco_doc.get("balance_cents")
+            if isinstance(bal, (int, float)) and not isinstance(bal, bool):
+                floor = eco_doc.get("living_floor_cents", 50000)
+                try:
+                    if float(bal) <= float(floor):
+                        signals["budget_tight"] = True
+                except (TypeError, ValueError):
+                    pass
+
+        v03_phone_eco = _read_optional_json_zero_write(
+            resolved_day_root / "phone" / "v03_ecology.json"
+        )
+        if isinstance(v03_phone_eco, Mapping):
+            signals["has_any_source"] = True
+            ill = v03_phone_eco.get("illness")
+            if isinstance(ill, Mapping):
+                phase = str(ill.get("phase") or "").strip().lower()
+                if phase in ("acute", "acute_illness"):
+                    signals["illness_acute"] = True
+            eco_block = v03_phone_eco.get("economy")
+            if isinstance(eco_block, Mapping) and eco_block.get("budget_tight") is True:
+                signals["budget_tight"] = True
+
+    weather_norm = str(signals["weather"] or "clear").strip().lower()
+    signals["weather"] = weather_norm
+    signals["rain_heavy"] = weather_norm in _RAIN_SUPPRESS_WEATHERS
+    hour_val = signals["hour"]
+    if (
+        not signals["low_tide_open"]
+        and not signals["rain_heavy"]
+        and signals["v05_theme"] == "coastal"
+        and isinstance(hour_val, int)
+        and 13 <= hour_val <= 17
+    ):
+        signals["low_tide_open"] = True
+    return signals
+
+
+def _map_place_for_reason(dest: str) -> dict[str, Any]:
+    ip = _import_instance_paths()
+    if ip is not None:
+        try:
+            return dict(ip.map_world_place_to_slices(dest))
+        except Exception:  # noqa: BLE001
+            pass
+    low = str(dest or "").strip().lower()
+    is_outdoor = any(
+        tok in low for tok in ("street", "river", "sea", "pier", "park", "hill", "yard", "grove", "overlook")
+    ) and not any(tok in low for tok in ("store", "shop", "book", "bakery", "cafe", "laund", "home"))
+    v05_spot = "home"
+    if any(tok in low for tok in ("book", "stationery", "home_goods")):
+        v05_spot = "old_bookshop"
+    elif any(tok in low for tok in ("laund",)):
+        v05_spot = "coin_laundromat"
+    elif any(tok in low for tok in ("grove",)):
+        v05_spot = "blank_grove"
+    elif any(tok in low for tok in ("park", "hill", "overlook")):
+        v05_spot = "hillside_overlook"
+    elif any(tok in low for tok in ("river", "sea", "pier", "seawall", "street_3")):
+        v05_spot = "river_pier"
+    elif any(tok in low for tok in ("street", "store", "bakery", "cafe", "corner")):
+        v05_spot = "bakery_corner"
+    return {
+        "world_place_id": low or "home",
+        "v04_place_id": "home",
+        "v05_spot_id": v05_spot,
+        "is_outdoor": is_outdoor,
+    }
+
+
+def enrich_move_opportunities_with_life_reasons(
+    opportunities: list[dict[str, Any]],
+    *,
+    day_root: Optional[Path | str] = None,
+    observation: Optional[Mapping[str, Any]] = None,
+    now_iso: Optional[str] = None,
+    recent_note_streak: int = 0,
+    is_final_closeout_step: bool = False,
+) -> list[dict[str, Any]]:
+    """Zero-write enrichment attaching concrete ``reason_hint_cn`` cues to MOVE opportunities.
+
+    Reads live zero-write cues from ``v04_neighborhood``, ``v05_living_town``,
+    ``v03_economy`` and ``build_outing_reason`` while preserving exact
+    ``opportunity_id`` and ``target_refs``.  Suppresses outdoor outing nudges
+    when weather is heavy rain/storm or acute illness is active.
+    """
+    if not opportunities:
+        return []
+    signals = _collect_move_life_signals_zero_write(
+        day_root=day_root,
+        observation=observation,
+        now_iso=now_iso,
+    )
+    stuffy = int(recent_note_streak or 0) >= 2 and not bool(is_final_closeout_step)
+    rain_heavy = bool(signals["rain_heavy"])
+    illness_acute = bool(signals["illness_acute"])
+    has_cues = bool(signals["has_any_source"] or stuffy)
+
+    enriched: list[dict[str, Any]] = []
+    for raw in opportunities:
+        if not isinstance(raw, Mapping):
+            continue
+        item = dict(raw)
+        targets = [str(r) for r in (item.get("target_refs") or ())]
+        if not targets or not targets[0].startswith(PLACE_REF_PREFIX):
+            enriched.append(item)
+            continue
+
+        dest = targets[0][len(PLACE_REF_PREFIX):].strip()
+        mapped = _map_place_for_reason(dest)
+        v05_spot = str(mapped.get("v05_spot_id") or "")
+        v04_place = str(mapped.get("v04_place_id") or "")
+        is_outdoor = bool(mapped.get("is_outdoor"))
+
+        if not has_cues:
+            enriched.append(item)
+            continue
+
+        # Suppress outdoor outing push during rain/storm or acute illness
+        if (rain_heavy or illness_acute) and is_outdoor:
+            enriched.append(item)
+            continue
+
+        hint: Optional[str] = None
+        if dest == "home":
+            if signals["current_place_id"] and signals["current_place_id"] != "home":
+                if rain_heavy:
+                    hint = "外头雨势不小，顺路回住处泡杯热茶歇口气"
+                elif illness_acute:
+                    hint = "身体有点乏，回住处安静休息一会儿"
+        elif dest in ("convenience_store", "bakery", "bakery_corner", "cafe") or v05_spot == "bakery_corner":
+            if signals["milk_empty"] and not rain_heavy:
+                outing = _build_outing_reason_helper(milk_empty=True, rain_heavy=False)
+                if isinstance(outing, Mapping) and outing.get("label_cn"):
+                    hint = str(outing["label_cn"])
+                else:
+                    hint = "家里饮品见底了，顺路去街口便利店捎一点回来"
+            elif signals["passing_cart_title"] and not rain_heavy:
+                outing = _build_outing_reason_helper(
+                    passing_cart_title=str(signals["passing_cart_title"]),
+                    rain_heavy=False,
+                )
+                if isinstance(outing, Mapping) and outing.get("label_cn"):
+                    hint = str(outing["label_cn"])
+            elif signals["v05_rainy_surplus_bag"] and dest in ("bakery", "bakery_corner"):
+                hint = "雨夜七点后面包铺挂出了半价余粮袋，顺路拎一份回来"
+            elif signals["v05_bakery_cue"] and not rain_heavy:
+                hint = "拐角小黑板今天写着%s，顺路过去转十分钟" % signals["v05_bakery_cue"]
+            elif signals["budget_tight"] and not rain_heavy:
+                hint = "这阵子预算偏紧，顺路去街口看看今日平价补给或透透气"
+            elif signals["v04_street_notice"] and not rain_heavy:
+                hint = "街口告示板有了新动静，顺路下楼走一圈看看"
+            elif stuffy and not rain_heavy:
+                outing = _build_outing_reason_helper(stuffy=True, rain_heavy=False)
+                if isinstance(outing, Mapping) and outing.get("label_cn"):
+                    hint = str(outing["label_cn"])
+            elif signals["v04_weather_present"] and not rain_heavy:
+                hint = "外头天清气爽，去街口溜达十分钟换换空气"
+        elif v05_spot == "old_bookshop" or v04_place == "bookstore":
+            if "old_bookshop" in signals["v05_drifting_book_spots"] or signals["v04_bookstore_cue"]:
+                hint = "旧书铺书架和漂流书箱有新动静，过去翻两页换换脑子"
+            elif "old_bookshop" in signals["v05_present_regular_spots"]:
+                hint = "旧书铺这会儿开门正安静，过去看会儿书歇歇眼"
+            elif signals["v04_weather_present"] and not rain_heavy:
+                hint = "外头天气清爽，书店这会儿开门了，去逛逛换个节奏"
+            elif not rain_heavy:
+                hint = "去书店安安静静翻两页书，给眼睛和脑子透透气"
+        elif v05_spot == "river_pier":
+            if signals["low_tide_open"] and not rain_heavy:
+                outing = _build_outing_reason_helper(low_tide_open=True, rain_heavy=False)
+                if isinstance(outing, Mapping) and outing.get("label_cn"):
+                    hint = str(outing["label_cn"])
+            elif signals["v05_spectacle_title"] and not rain_heavy:
+                hint = "外头难得遇上%s，顺路去河埠看一眼吹十分钟风" % signals["v05_spectacle_title"]
+            elif signals["v05_ferry_running"] and not rain_heavy:
+                hint = "渡口长椅空着、渡船正按点靠岸，出去吹十分钟风"
+            elif stuffy and not rain_heavy:
+                outing = _build_outing_reason_helper(stuffy=True, rain_heavy=False)
+                if isinstance(outing, Mapping) and outing.get("label_cn"):
+                    hint = str(outing["label_cn"])
+            elif not rain_heavy:
+                hint = "去河边走十分钟吹吹风，听听水声换口气"
+        elif v05_spot == "hillside_overlook":
+            if signals["v05_spectacle_title"] and not rain_heavy:
+                hint = "外头遇上%s，上坡去眺望台看一眼远处" % signals["v05_spectacle_title"]
+            elif signals["v05_telescope_clear"] and not rain_heavy:
+                hint = "今天视野清亮，上坡去眺望台吹风看看街区屋檐"
+            elif stuffy and not rain_heavy:
+                outing = _build_outing_reason_helper(stuffy=True, rain_heavy=False)
+                if isinstance(outing, Mapping) and outing.get("label_cn"):
+                    hint = str(outing["label_cn"])
+            elif not rain_heavy:
+                hint = "上坡走几步去眺望台透透气，活动一下肩背"
+        elif v05_spot == "blank_grove":
+            if signals["v05_grove_stage"] and not rain_heavy:
+                hint = "留白空坪这会儿是「%s」，去树荫下放空十分钟" % signals["v05_grove_stage"]
+            elif not rain_heavy:
+                hint = "去留白空坪慢慢散步，吹吹轻风松弛一下"
+        elif v05_spot == "coin_laundromat":
+            hint = "自助烘衣房长凳暖烘烘的，顺路过去坐会儿换个环境"
+        elif v04_place in ("yard", "porch"):
+            if signals["v04_courtyard_care"] and not rain_heavy:
+                hint = "院子里的晾衣和盆栽正好瞧一瞧，顺便呼吸一下外头空气"
+            elif not rain_heavy:
+                hint = "推门去院檐下站几分钟，晒点自然光活动一下"
+        else:
+            outing = _build_outing_reason_helper(
+                milk_empty=bool(signals["milk_empty"]),
+                low_tide_open=bool(signals["low_tide_open"]),
+                passing_cart_title=signals["passing_cart_title"],
+                stuffy=stuffy,
+                rain_heavy=rain_heavy,
+            )
+            if isinstance(outing, Mapping) and outing.get("label_cn"):
+                hint = str(outing["label_cn"])
+            elif not rain_heavy:
+                hint = "外头风正好，推门出去走十分钟换个节奏"
+
+        if hint:
+            item["reason_hint_cn"] = " ".join(str(hint).split())[:96]
+        enriched.append(item)
+    return enriched
+
+
+def attach_v05_outing_reason(
+    *,
+    milk_empty: bool = False,
+    low_tide_open: bool = False,
+    passing_cart_title: Optional[str] = None,
+    stuffy: bool = False,
+    rain_heavy: bool = False,
+) -> Optional[dict[str, Any]]:
+    """0.5 把外出目标转成贴近当下生活氛围的自然出门由头（大雨天留屋不催出门）。"""
+    if passing_cart_title and not rain_heavy:
+        return {
+            "action_id": "go_alley_cart",
+            "kind": "outing",
+            "label_cn": f"窗外刚飘来{passing_cart_title}的动静，趁这会儿下楼追上去买两块",
+            "score": 0.92,
+        }
+    if low_tide_open and not rain_heavy:
+        return {
+            "action_id": "go_seawall_tide",
+            "kind": "outing",
+            "label_cn": "下午刚好退潮露出了旧石阶，拎包散步去海堤看看",
+            "score": 0.86,
+        }
+    if milk_empty and not rain_heavy:
+        return {
+            "action_id": "go_store_milk",
+            "kind": "outing",
+            "label_cn": "家里牛奶喝空了，顺路去街口便利店捎一盒回来",
+            "score": 0.82,
+        }
+    if stuffy and not rain_heavy:
+        return {
+            "action_id": "go_breeze_walk",
+            "kind": "outing",
+            "label_cn": "在屋里坐久了有点闷，推门沿着河边走十分钟吹吹风",
+            "score": 0.78,
+        }
+    return None
+
+
 __all__ = [
     "AMBIENT_CONTEXT_SOURCE",
     "ARRANGE_VERB",
+    "attach_v05_outing_reason",
+    "enrich_move_opportunities_with_life_reasons",
     "BODY_ACTION_REF_PREFIX",
     "CONSUME_VERB",
     "CONTEXT_KIND_ORDER",

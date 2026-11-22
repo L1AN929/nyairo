@@ -7,6 +7,7 @@ model call, filesystem fixture or business mutation is needed.
 """
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -65,6 +66,68 @@ class WorldProviderInstanceBindingTest(unittest.TestCase):
         environment = {"WORLD_BODY_SOCKET": "/instance-c/gateway.sock",
                        "HERMES_HOME": "/instance-c/nondefault-profile"}
         self._check(environment, "/instance-c/nondefault-profile")
+
+    def test_instance_environment_gate_emits_move_when_process_env_unset(self):
+        import action_intent as bridge_ai
+
+        snapshot = {
+            "captured_at": "2026-11-17T10:00:00+00:00",
+            "world_revision": 3,
+            "location": {"place_id": "home", "area_id": "bedroom"},
+            "pose": "seated",
+            "visible_objects": [],
+        }
+        available = {
+            "actions": [
+                {
+                    "verb": "MOVE",
+                    "available": True,
+                    "candidates": [
+                        {"location_id": "street_1", "label": "浪打道", "kind": "street"}
+                    ],
+                }
+            ]
+        }
+        client = SimpleNamespace(
+            get_status=lambda: SimpleNamespace(outcome=wbc.OK, data={"ready": True}),
+            get_snapshot=lambda: SimpleNamespace(outcome=wbc.OK, data=snapshot),
+            get_available_actions=lambda: SimpleNamespace(outcome=wbc.OK, data=available),
+            get_surfaces=lambda: SimpleNamespace(outcome="UNAVAILABLE", data=None),
+        )
+        catalog = {
+            "status": "available",
+            "current_place_id": "home",
+            "opportunities": [
+                {"location_id": "home", "name": "家", "kind": "residence",
+                 "stay_affordances": ["USE_PHONE"]},
+                {"location_id": "street_1", "name": "浪打道", "kind": "street"},
+            ],
+        }
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("WORLD_BODY_INTENT_MUTATION_GATE", None)
+            on_provider = source.WorldMoveOpportunityProvider(
+                client=client,
+                action_intent=bridge_ai,
+                bridge_dir=str(BRIDGE),
+                catalog_reader=lambda *a, **k: catalog,
+                store_reader=lambda *a, **k: None,
+                environment={"WORLD_BODY_INTENT_MUTATION_GATE": "canonical"},
+            )
+            on_ids = [item.get("opportunity_id")
+                      for item in on_provider.observe(occurred_at="2026-11-17T10:00:00+00:00")]
+            self.assertIn("wopp:move:home:r3:street_1", on_ids)
+
+            off_provider = source.WorldMoveOpportunityProvider(
+                client=client,
+                action_intent=bridge_ai,
+                bridge_dir=str(BRIDGE),
+                catalog_reader=lambda *a, **k: catalog,
+                store_reader=lambda *a, **k: None,
+                environment={"WORLD_BODY_INTENT_MUTATION_GATE": "off"},
+            )
+            off_ids = [item.get("opportunity_id")
+                       for item in off_provider.observe(occurred_at="2026-11-17T10:00:00+00:00")]
+            self.assertNotIn("wopp:move:home:r3:street_1", off_ids)
 
 
 if __name__ == "__main__":

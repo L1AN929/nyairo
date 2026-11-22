@@ -30,6 +30,8 @@ Hard rules (they are the reason this module is small)
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 import world_body_substrate as substrate
@@ -90,22 +92,52 @@ def feature_enabled(environment: Optional[Mapping[str, str]] = None) -> bool:
     return _truthy((environment or {}).get(FEATURE_ENV))
 
 
-def declaration_of_catalog(catalog_item_id: Any) -> Optional[dict[str, Any]]:
+def declaration_of_catalog(
+    catalog_item_id: Any,
+    *,
+    hermes_home: Any = None,
+) -> Optional[dict[str, Any]]:
     """The declared light property of a catalog item (``None`` = not a light)."""
 
     if not isinstance(catalog_item_id, str):
         return None
     entry = FIXTURE_DECLARATIONS.get(catalog_item_id)
-    return dict(entry) if entry else None
+    if entry:
+        return dict(entry)
+    lookup_home = hermes_home
+    if lookup_home is None and catalog_item_id.startswith("shop_item:"):
+        lookup_home = os.environ.get("HERMES_HOME") or os.environ.get("NYAIRO_DAY_ROOT")
+    if lookup_home is not None:
+        try:
+            import sys
+
+            scripts_dir = str(Path(__file__).resolve().parent)
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            import world_content_catalog as content_catalog
+
+            return content_catalog.find_dynamic_fixture_light_declaration_zero_write(
+                lookup_home, catalog_item_id
+            )
+        except Exception:
+            return None
+    return None
 
 
 def declaration_of_object(
-    object_id: Any, catalog_by_instance: Mapping[str, str]
+    object_id: Any,
+    catalog_by_instance: Mapping[str, str],
+    *,
+    hermes_home: Any = None,
 ) -> Optional[dict[str, Any]]:
     """The declared light property of a placed *instance* (``None`` when none)."""
 
     catalog_item = catalog_by_instance.get(str(object_id))
-    return declaration_of_catalog(catalog_item) if catalog_item else None
+    return (
+        declaration_of_catalog(catalog_item, hermes_home=hermes_home)
+        if catalog_item
+        else None
+    )
 
 
 def _instant(value: Any) -> Optional[datetime]:
@@ -155,6 +187,7 @@ def derive_light(
     location_id: Optional[str],
     area_id: Optional[str] = None,
     now: Any = None,
+    hermes_home: Any = None,
 ) -> dict[str, Any]:
     """The authoritative room-light fact for one place/area.
 
@@ -168,7 +201,9 @@ def derive_light(
     present: list[tuple[str, dict[str, Any]]] = []
     for object_id in sorted(placements):
         target = placements[object_id] or {}
-        declaration = declaration_of_object(object_id, catalog_by_instance)
+        declaration = declaration_of_object(
+            object_id, catalog_by_instance, hermes_home=hermes_home
+        )
         if declaration is None:
             continue
         if str(target.get("location_id")) != str(location_id):
@@ -333,6 +368,7 @@ def light_for_home(
         location_id=place_id,
         area_id=area_id,
         now=now,
+        hermes_home=hermes_home,
     )
 
 

@@ -34,7 +34,7 @@
       "description": "在纯命令行或服务器环境下手动开启独立推演建议（/chiyo_consider）、只读世界位置服务与独立文稿工作区的方法。",
       "url": "https://nyairo.com/docs/modules/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -475,7 +475,7 @@
         <article class="markdown-body">
           <h2 id="modules-section-1">手动挂载轻量世界位置服务</h2>
 <p>在 <strong>Windows 桌面端</strong> 中，街区寻路、室内房间走动与灯具控制已经自动配好（可视化改图教程见 <a href="../world-editor/">地图编辑器与世界包</a>）。如果你使用的是<strong>纯手动命令行安装</strong>，只想单独跑一个轻量只读的位置与姿态服务，可以手动初始化并运行：</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.8.0"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \
   -m chiyo_bundle.world_read_service init --home "$HOME/.nyairo-world"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \

@@ -25,11 +25,21 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+_WORLD_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_WORLD_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_WORLD_SCRIPTS_DIR))
+
+try:
+    from components.world.scripts import instance_paths as _instance_paths
+except ImportError:  # pragma: no cover - flat script import fallback
+    import instance_paths as _instance_paths  # type: ignore[no-redef]
 
 ECOLOGY_SCHEMA = "world.v03.embodied_npc_ecology.v1"
 STATE_SCHEMA_VERSION = 1
@@ -764,36 +774,57 @@ def _extract_theme_from_world_json(world_json_path: Path) -> Optional[dict[str, 
 def detect_world_theme_readonly(day_root: Path | str) -> dict[str, Any]:
     """Pure zero-write resolution of town theme for ``day_root``."""
 
-    root = Path(day_root)
-    instance_path = root / "instance.json"
-    try:
-        if not instance_path.is_symlink() and instance_path.is_file():
-            inst = json.loads(instance_path.read_text(encoding="utf-8"))
-            if isinstance(inst, Mapping):
-                pkg_raw = inst.get("world_package")
-                if isinstance(pkg_raw, str) and pkg_raw.strip():
-                    pkg_path = Path(pkg_raw.strip())
-                    if not pkg_path.is_absolute():
-                        pkg_path = root / pkg_path
-                    found = _extract_theme_from_world_json(pkg_path / "world.json")
-                    if found is not None:
-                        return found
-                direct_theme = str(inst.get("world_theme") or inst.get("theme") or "").strip()
-                if direct_theme in KNOWN_WORLD_THEMES:
-                    return {
-                        "theme": direct_theme,
-                        "world_id": str(inst.get("world_id") or "").strip() or None,
-                        "world_name": None,
-                        "source": "instance_config",
-                    }
-    except (OSError, ValueError):
-        pass
+    paths = _instance_paths.resolve_instance_paths(day_root)
+    root = paths.day_root
+    instance_candidates = [paths.instance_json] if paths.instance_json is not None else []
+    instance_candidates.extend([root / "instance.json", root / "phone" / "instance.json"])
+    seen_inst: set[str] = set()
+    for instance_path in instance_candidates:
+        if instance_path is None:
+            continue
+        ikey = str(instance_path)
+        if ikey in seen_inst:
+            continue
+        seen_inst.add(ikey)
+        try:
+            if not instance_path.is_symlink() and instance_path.is_file():
+                inst = json.loads(instance_path.read_text(encoding="utf-8"))
+                if isinstance(inst, Mapping):
+                    pkg_raw = inst.get("world_package")
+                    if isinstance(pkg_raw, str) and pkg_raw.strip():
+                        pkg_path = Path(pkg_raw.strip())
+                        if not pkg_path.is_absolute():
+                            pkg_path = root / pkg_path
+                        found = _extract_theme_from_world_json(pkg_path / "world.json")
+                        if found is not None:
+                            return found
+                    direct_theme = str(inst.get("world_theme") or inst.get("theme") or "").strip()
+                    if direct_theme in KNOWN_WORLD_THEMES:
+                        return {
+                            "theme": direct_theme,
+                            "world_id": str(inst.get("world_id") or "").strip() or None,
+                            "world_name": None,
+                            "source": "instance_config",
+                        }
+        except (OSError, ValueError):
+            pass
 
-    for candidate in (
+    pkg_world_candidates: list[Path] = []
+    if paths.world_package_dir is not None:
+        pkg_world_candidates.append(paths.world_package_dir / "world.json")
+    pkg_world_candidates.extend([
+        root / "world-package" / "world.json",
         root / "world_package" / "world.json",
+        root / "one-day" / "world-package" / "world.json",
         root / "world" / "world.json",
         root / "world.json",
-    ):
+    ])
+    seen_pkg: set[str] = set()
+    for candidate in pkg_world_candidates:
+        ckey = str(candidate)
+        if ckey in seen_pkg:
+            continue
+        seen_pkg.add(ckey)
         found = _extract_theme_from_world_json(candidate)
         if found is not None:
             return found

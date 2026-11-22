@@ -349,6 +349,10 @@ HARD_REJECT_TIME_WINDOW_CLOSED = "HARD_REJECT:TIME_WINDOW_CLOSED"
 HARD_REJECT_POLICY_FORBIDDEN = "HARD_REJECT:POLICY_FORBIDDEN"
 HARD_REJECT_COMMITMENT_CONFLICT = "HARD_REJECT:HARD_COMMITMENT_CONFLICT"
 HARD_REJECT_IRREVERSIBLE_CONFLICT = "HARD_REJECT:IRREVERSIBLE_CONFLICT"
+#: v0.8: an acute body cannot start or continue high-cost creative work.  The
+#: body's own owner (S02) states the capacity; this is the decision layer
+#: refusing to spend it, not a feeling.
+HARD_REJECT_BODY_CREATIVE_BLOCK = "HARD_REJECT:BODY_CREATIVE_BLOCK"
 
 VALID_HARD_REJECT_CODES = frozenset(
     {
@@ -360,6 +364,7 @@ VALID_HARD_REJECT_CODES = frozenset(
         HARD_REJECT_POLICY_FORBIDDEN,
         HARD_REJECT_COMMITMENT_CONFLICT,
         HARD_REJECT_IRREVERSIBLE_CONFLICT,
+        HARD_REJECT_BODY_CREATIVE_BLOCK,
     }
 )
 
@@ -687,6 +692,7 @@ SCHEMA_FIELD_METHOD_REF = "method_ref"
 SCHEMA_FIELD_METHOD_TRIAL = "method_trial"
 SCHEMA_FIELD_METHOD_PROPOSAL = "method_proposal"
 SCHEMA_FIELD_SHARING = "sharing"
+SCHEMA_FIELD_PURCHASE_CHOICE = "purchase_choice"
 #: v0.4 explicit-condition PAUSE: the existing output field a PAUSE uses to quote the one condition
 #: this round offered.  A name, not a new key.
 SCHEMA_FIELD_REEVALUATION_HINT_REF = "reevaluation_hint_ref"
@@ -695,7 +701,7 @@ SCHEMA_FIELDS = frozenset({
     SCHEMA_FIELD_DEFERRED_CANDIDATE_IDS, SCHEMA_FIELD_REASON_CODES, SCHEMA_FIELD_SHORT_RATIONALE,
     SCHEMA_FIELD_LATER_ITEM, SCHEMA_FIELD_FUTURE_ITEM_ACTIONS, SCHEMA_FIELD_METHOD_REF,
     SCHEMA_FIELD_METHOD_TRIAL, SCHEMA_FIELD_METHOD_PROPOSAL, SCHEMA_FIELD_SHARING,
-    SCHEMA_FIELD_REEVALUATION_HINT_REF, SCHEMA_FIELD_PLAN_TODAY,
+    SCHEMA_FIELD_PURCHASE_CHOICE, SCHEMA_FIELD_REEVALUATION_HINT_REF, SCHEMA_FIELD_PLAN_TODAY,
 })
 
 #: The placeholder a refusal uses when it cannot name a field, and the word a bad value is replaced
@@ -936,6 +942,462 @@ class CognitionAdapterError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Validation Helpers
 # ---------------------------------------------------------------------------
+
+
+#: v0.8: candidates that ask for high-cost creative work.  The v03 bridge
+#: already filters its own daily candidates; this covers the main road (opening
+#: a new booklet, continuing a work, research drafts) that never passes through
+#: that bridge.
+#:
+#: The producers write a light, structured identity into the candidate's
+#: ``provenance_chain`` (``step="signal"`` entries): the domain the candidate
+#: belongs to and, when known, whether it is creative-intensive.  That keeps the
+#: ``CandidateRecord`` dataclass and its dedupe hashes untouched -- the tags are
+#: appended *after* the candidate id and semantic identity are computed -- while
+#: giving the decision layer a stable, state-free identity instead of guessing
+#: from a hashed ``semcand:`` string.  The literal-token fallbacks below stay for
+#: candidates produced before that signal existed (and for hand-built tests).
+BODY_CREATIVE_BLOCK_CODE = HARD_REJECT_BODY_CREATIVE_BLOCK
+READING_BASIS_TOKENS = (
+    "READING", "BOOK", "BOOKSTORE", "WINDOW_BOOKMARK", "LIBRARY",
+)
+CREATIVE_BASIS_TOKENS = (
+    "WORKBENCH", "CREATIVE", "WRITING", "DRAFT", "MANUSCRIPT", "STUDY_DRAFT",
+)
+CREATIVE_CANDIDATE_KINDS = frozenset({
+    CANDIDATE_KIND_PURSUE_GOAL_STEP,
+    CANDIDATE_KIND_CONSIDER_EXPLICIT_GOAL,
+})
+#: Only a fallback for a candidate whose semantic identity is written in
+#: Chinese.  It is not the primary classifier: the structured basis above wins.
+CREATIVE_SEMANTIC_HINTS = (
+    "创作", "手稿", "草稿", "小册子", "续写", "研究稿", "作品",
+)
+
+#: v0.8 signal vocabulary, shared with the real producers
+#: (``artifact_continuation_source`` / ``autonomous_life_cycle``).  A signal
+#: step is ``{"step": "signal", "signal": <name>, "value": <str>}``.
+SIGNAL_STEP_KIND = "signal"
+DOMAIN_READING_CONTINUATION = "reading_continuation"
+DOMAIN_CARE_REST = "care_rest"
+DOMAIN_CARE_HYDRATION = "care_hydration"
+DOMAIN_IDLE_DAYDREAM = "idle_daydream"
+DOMAIN_EVERYDAY = "everyday"
+DOMAIN_BOUND_WORK_CONTINUATION = "bound_work_continuation"
+DOMAIN_BOUND_WORK_CLOSEOUT = "bound_work_closeout"
+DOMAIN_MANUSCRIPT_WORK = "manuscript_work"
+DOMAIN_CREATIVE_PROJECT = "creative_project"
+NON_CREATIVE_DOMAINS = frozenset({
+    DOMAIN_READING_CONTINUATION, DOMAIN_CARE_REST, DOMAIN_CARE_HYDRATION,
+    DOMAIN_IDLE_DAYDREAM, DOMAIN_EVERYDAY,
+})
+CREATIVE_DOMAINS = frozenset({
+    DOMAIN_BOUND_WORK_CONTINUATION, DOMAIN_BOUND_WORK_CLOSEOUT,
+    DOMAIN_MANUSCRIPT_WORK, DOMAIN_CREATIVE_PROJECT,
+})
+#: Candidates the vocabulary already says are not creative work.
+NON_CREATIVE_CANDIDATE_KINDS = frozenset({
+    "NO_ACTION", "REST", "SUSTENANCE", "RELEASE_COMMITMENT",
+})
+#: The two Activity kinds that continue / close a real personal work.
+WRITING_ACTIVITY_KINDS = frozenset({
+    "CONTINUE_PERSONAL_ARTIFACT", "CLOSE_PERSONAL_ARTIFACT",
+})
+READING_REF_PREFIX = "reading:reading_ar0:"
+#: The v03 low-burden namespaces: rest, water and the zero-penalty idle window.
+CARE_REF_PREFIXES = ("v03_care:", "v03_idle:")
+REST_REF_MARKERS = ("v03_care:bed_rest_block", "v03_care-bed_rest_block")
+HYDRATION_REF_MARKERS = ("v03_care:warm_hydration", "v03_care-warm_hydration")
+IDLE_REF_MARKERS = ("v03_idle:daydream_window", "v03_idle-daydream_window")
+LOW_BURDEN_ACTION_FAMILIES = frozenset({
+    "illness_rest_recovery", "courtyard_care", "observe_plant_journal",
+    "meaningless_idle", "adopt_tentative_plan", "follow_bookstore_bookmark",
+})
+
+
+def _candidate_signal_map(candidate: Any) -> dict[str, str]:
+    """The lightweight signal tags the producer wrote onto this candidate."""
+
+    signals: dict[str, str] = {}
+    chain = getattr(candidate, "provenance_chain", None) or ()
+    for step in chain:
+        if not isinstance(step, Mapping):
+            continue
+        if str(step.get("step") or "") != SIGNAL_STEP_KIND:
+            continue
+        name = str(step.get("signal") or "")
+        value = step.get("value")
+        if name and value is not None and name not in signals:
+            signals[name] = str(value)
+    return signals
+
+
+def _candidate_refs(candidate: Any) -> list[str]:
+    """Every structured ref the candidate carries (source, targets, activity)."""
+
+    refs: list[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in refs:
+            refs.append(text)
+
+    add(getattr(candidate, "source_ref", None))
+    for ref in getattr(candidate, "target_refs", None) or ():
+        add(ref)
+    for ref in getattr(candidate, "source_refs", None) or ():
+        add(ref)
+    add(getattr(candidate, "activity_ref", None))
+    return refs
+
+
+def _bare_artifact_identity(value: Any) -> str:
+    text = str(value or "").strip()
+    while text.startswith("artifact:"):
+        text = text[len("artifact:"):]
+    return text
+
+
+def _current_activity_facts(current_state: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+    """The running Activity facts a ``CONTINUE_CURRENT`` candidate is about."""
+
+    if not isinstance(current_state, Mapping):
+        return {}
+    for key in ("foreground_activity", "active_activity", "current_activity"):
+        activity = current_state.get(key)
+        if isinstance(activity, Mapping):
+            return dict(activity)
+    facts: dict[str, Any] = {}
+    for source, target in (
+        ("foreground_activity_kind", "activity_kind"),
+        ("foreground_activity_ref", "activity_id"),
+        ("reading_activity_kind", "reading_activity_kind"),
+    ):
+        value = current_state.get(source)
+        if value:
+            facts[target] = str(value)
+    return facts
+
+
+def _current_reading_artifact_id(current_state: Optional[Mapping[str, Any]]) -> Optional[str]:
+    if not isinstance(current_state, Mapping):
+        return None
+    direct = current_state.get("reading_artifact_id")
+    if direct:
+        return str(direct)
+    material = current_state.get("reading_material")
+    if isinstance(material, Mapping) and material.get("artifact_id"):
+        return str(material.get("artifact_id"))
+    return None
+
+
+def _activity_is_creative(activity: Mapping[str, Any]) -> bool:
+    kind = str(activity.get("activity_kind") or "").upper()
+    if kind in WRITING_ACTIVITY_KINDS:
+        return True
+    if kind:
+        # A named, non-writing Activity (reading, rest, body care, a stay) is
+        # not creative work.  Only an unnamed one falls back to its title.
+        return False
+    text = " ".join(
+        [str(activity.get("title") or ""), str(activity.get("target_ref") or "")]
+        + [str(ref) for ref in (activity.get("subject_refs") or ())]
+    )
+    upper = text.upper()
+    if any(token in upper for token in CREATIVE_BASIS_TOKENS):
+        return True
+    return any(hint in text for hint in CREATIVE_SEMANTIC_HINTS)
+
+
+def candidate_is_creative_work(
+    candidate: Any,
+    current_state: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Whether this candidate asks for high-cost creative work.
+
+    Read from the candidate's own structured signals, kind and semantic basis
+    only -- no label, no model call, no lottery.  Reading, resting, drinking,
+    the idle window and ordinary outings survive; a real work continuation, a
+    wrap-up, a manuscript fee or a creative project does not.  An undecidable
+    candidate is kept: this gate refuses only what it can name.
+    """
+
+    kind = str(getattr(candidate, "candidate_kind", "") or "")
+    upper_kind = kind.upper()
+    signals = _candidate_signal_map(candidate)
+    semantic = str(getattr(candidate, "semantic_identity", "") or "")
+    basis = semantic.upper()
+    refs = _candidate_refs(candidate)
+
+    # 1. Explicit non-creative kinds and tagged domains win immediately.
+    if upper_kind in NON_CREATIVE_CANDIDATE_KINDS:
+        return False
+    domain = signals.get("domain", "")
+    if domain in NON_CREATIVE_DOMAINS:
+        return False
+    if domain in CREATIVE_DOMAINS:
+        return True
+
+    # 2. Reading is never creative work, whatever artifact object it names.
+    reading_id = _current_reading_artifact_id(current_state)
+    if reading_id:
+        wanted = _bare_artifact_identity(reading_id)
+        if any(_bare_artifact_identity(ref) == wanted for ref in refs):
+            return False
+        tagged_source = signals.get("source_ref")
+        if tagged_source and _bare_artifact_identity(tagged_source) == wanted:
+            return False
+    if any(token in basis for token in READING_BASIS_TOKENS):
+        return False
+    if any(str(ref).startswith(READING_REF_PREFIX) for ref in refs):
+        return False
+
+    # 3. Rest, water and the idle window are ordinary low-burden life.
+    if any(str(ref).startswith(CARE_REF_PREFIXES) for ref in refs):
+        return False
+    tagged_source = signals.get("source_ref", "")
+    if tagged_source.startswith(CARE_REF_PREFIXES):
+        return False
+
+    # 4. A CONTINUE_CURRENT candidate is what the running Activity is.  When
+    #    the owner's own activity kind is known it decides; an artifact target
+    #    alone must not turn a reading continuation into writing.
+    if kind == CANDIDATE_KIND_CONTINUE_CURRENT:
+        activity = _current_activity_facts(current_state)
+        if activity:
+            foreground_ref = str(
+                activity.get("activity_id") or activity.get("activity_ref") or "")
+            candidate_ref = str(getattr(candidate, "activity_ref", "") or "")
+            if foreground_ref and candidate_ref and foreground_ref != candidate_ref:
+                # This candidate continues a *different* Activity; the foreground
+                # facts say nothing about it.  Keep it (the gate names only what
+                # it can prove).
+                return False
+            return _activity_is_creative(activity)
+
+    # 5. The real creative producers, by their own refs and flags.  An explicit
+    #    flag wins over a ref: a due note that rides the project-option seam is
+    #    still ordinary life even though its ref starts with ``popt:``.
+    raw_refs = list(refs)
+    if tagged_source:
+        raw_refs.append(tagged_source)
+    creative_flag = signals.get("creative_intensive")
+    if creative_flag == "1":
+        return True
+    if creative_flag == "0":
+        return False
+    if any(ref.startswith("v03_job:manuscript_fee") for ref in raw_refs):
+        return True
+    if any(ref.startswith("popt:") for ref in raw_refs):
+        return True
+    # An artifact identity that is not the reading material is a work to write.
+    if any(str(ref).startswith("artifact:") for ref in raw_refs):
+        return True
+
+    # 5. Kinds and the legacy literal fallback.
+    if kind in CREATIVE_CANDIDATE_KINDS:
+        return True
+    if kind == CANDIDATE_KIND_CONTINUE_CURRENT:
+        return _activity_is_creative(_current_activity_facts(current_state))
+    if any(token in basis for token in CREATIVE_BASIS_TOKENS):
+        return True
+    return any(hint in semantic for hint in CREATIVE_SEMANTIC_HINTS)
+
+
+def apply_creative_block(
+    allowed: Sequence["CandidateRecord"],
+    *,
+    context_snapshot_id: str,
+    evaluated_at: str,
+    policy_version: str = POLICY_VERSION_AG1_V1,
+    current_state: Optional[Mapping[str, Any]] = None,
+) -> tuple[list["CandidateRecord"], list["CandidateConstraintResult"]]:
+    """v0.8: an acute body does not start or continue creative work.
+
+    Returns the candidates that survive and one REJECTED constraint result per
+    blocked candidate, so the refusal is auditable like every hard rejection.
+    Low-burden options (rest, water, reading, ordinary routine) are untouched.
+    """
+
+    kept: list["CandidateRecord"] = []
+    rejected: list["CandidateConstraintResult"] = []
+    for cand in allowed:
+        if not candidate_is_creative_work(cand, current_state=current_state):
+            kept.append(cand)
+            continue
+        cid = cand.candidate_id
+        status = CONSTRAINT_STATUS_REJECTED
+        rejected.append(
+            CandidateConstraintResult(
+                constraint_result_id=(
+                    "hcres:%s" % sha256_hex(
+                        f"{context_snapshot_id}:{cid}:{status}:{evaluated_at}:creative"
+                    )[:16]
+                ),
+                candidate_ref=cid,
+                status=status,
+                reason_codes=[BODY_CREATIVE_BLOCK_CODE],
+                constraint_refs=["body.envelope:creative_block"],
+                evaluated_at=evaluated_at,
+                policy_version=policy_version,
+            )
+        )
+    return kept, rejected
+
+
+#: v0.8: candidate-cap priority slots.  A narrow body keeps one real rest, one
+#: warm drink and the one material she is actually reading before anything else;
+#: ``daydream_window`` deliberately matches none of them.
+def _is_rest_choice(candidate: Any, signals: Mapping[str, str], refs: Sequence[str]) -> bool:
+    if signals.get("domain") == DOMAIN_CARE_REST:
+        return True
+    if str(getattr(candidate, "candidate_kind", "") or "").upper() == "REST":
+        return True
+    return any(str(ref).startswith(REST_REF_MARKERS) for ref in refs)
+
+
+def _is_hydration_choice(candidate: Any, signals: Mapping[str, str],
+                         refs: Sequence[str]) -> bool:
+    if signals.get("domain") == DOMAIN_CARE_HYDRATION:
+        return True
+    if str(getattr(candidate, "candidate_kind", "") or "").upper() == "SUSTENANCE":
+        return True
+    return any(str(ref).startswith(HYDRATION_REF_MARKERS) for ref in refs)
+
+
+def _is_reading_choice(candidate: Any, signals: Mapping[str, str],
+                       refs: Sequence[str],
+                       current_state: Optional[Mapping[str, Any]]) -> bool:
+    if signals.get("domain") == DOMAIN_READING_CONTINUATION:
+        return True
+    if any(str(ref).startswith(READING_REF_PREFIX) for ref in refs):
+        return True
+    reading_id = _current_reading_artifact_id(current_state)
+    if reading_id:
+        wanted = _bare_artifact_identity(reading_id)
+        return any(_bare_artifact_identity(ref) == wanted for ref in refs)
+    return False
+
+
+def _is_idle_choice(candidate: Any, signals: Mapping[str, str],
+                    refs: Sequence[str]) -> bool:
+    if signals.get("domain") == DOMAIN_IDLE_DAYDREAM:
+        return True
+    return any(str(ref).startswith(IDLE_REF_MARKERS) for ref in refs)
+
+
+def _is_continue_current_choice(candidate: Any) -> bool:
+    return (
+        str(getattr(candidate, "candidate_kind", "") or "").upper()
+        == CANDIDATE_KIND_CONTINUE_CURRENT
+    )
+
+
+def _cap_order_key(candidate: Any, signals: Mapping[str, str],
+                   refs: Sequence[str]) -> tuple[int, str, str, str]:
+    """Deterministic remainder order: low-burden life, then quiet, then idle.
+
+    The candidate id (``cand:<sha256>``) is deliberately absent: the same real
+    inputs must seat the same candidates no matter which UUIDs an instance
+    happened to mint.
+    """
+
+    kind = str(getattr(candidate, "candidate_kind", "") or "")
+    upper_kind = kind.upper()
+    domain = signals.get("domain", "")
+    action_family = signals.get("action_family", "")
+    if _is_idle_choice(candidate, signals, refs):
+        tier = 2
+    elif upper_kind in {"NO_ACTION", "RELEASE_COMMITMENT"}:
+        tier = 1
+    elif (domain in {DOMAIN_CARE_REST, DOMAIN_CARE_HYDRATION, DOMAIN_EVERYDAY}
+          or upper_kind in {
+              CANDIDATE_KIND_CONSIDER_WORLD_OPPORTUNITY,
+              CANDIDATE_KIND_CONTINUE_CURRENT,
+          }
+          or action_family in LOW_BURDEN_ACTION_FAMILIES):
+        tier = 0
+    else:
+        tier = 3
+    target_ref = ""
+    for ref in getattr(candidate, "target_refs", None) or ():
+        target_ref = str(ref)
+        break
+    return (
+        tier,
+        kind,
+        target_ref,
+        str(getattr(candidate, "source_ref", "") or "")
+        or str(getattr(candidate, "semantic_identity", "") or ""),
+    )
+
+
+def _seat_candidate_cap(
+    candidates: Sequence["CandidateRecord"], cap: int,
+    *,
+    current_state: Optional[Mapping[str, Any]] = None,
+) -> list["CandidateRecord"]:
+    """Keep the narrow body's essential options, then fill deterministically."""
+
+    remaining = list(candidates)
+    chosen: list["CandidateRecord"] = []
+    for name in ("rest", "hydration", "continue_current", "reading"):
+        if len(chosen) >= cap:
+            break
+        for candidate in remaining:
+            signals = _candidate_signal_map(candidate)
+            refs = _candidate_refs(candidate)
+            if name == "rest":
+                matched = _is_rest_choice(candidate, signals, refs)
+            elif name == "hydration":
+                matched = _is_hydration_choice(candidate, signals, refs)
+            elif name == "continue_current":
+                matched = _is_continue_current_choice(candidate)
+            else:
+                matched = _is_reading_choice(candidate, signals, refs, current_state)
+            if matched:
+                chosen.append(candidate)
+                remaining.remove(candidate)
+                break
+    if remaining and len(chosen) < cap:
+        remaining.sort(
+            key=lambda cand: _cap_order_key(
+                cand, _candidate_signal_map(cand), _candidate_refs(cand)))
+        chosen.extend(remaining[: cap - len(chosen)])
+    return chosen
+
+
+def apply_candidate_cap(
+    allowed: Sequence["CandidateRecord"], cap: Optional[int],
+    *,
+    current_state: Optional[Mapping[str, Any]] = None,
+    body_creative_block: bool = False,
+    body_health_state: Optional[str] = None,
+) -> list["CandidateRecord"]:
+    """v0.8: a narrow body weighs fewer options.
+
+    ``cap`` comes from the S02 health envelope.  In the ordinary path the
+    candidates' own order is kept.  When health narrowing is active (the
+    creative gate is on, the body capacity state says so, or the cap itself is
+    already narrow) the essential low-burden seats are kept first -- one real
+    rest, one warm drink, the reading continuation -- and the remaining seats
+    are filled by a deterministic semantic order.  A random ``cand:<sha256>``
+    never decides who stays, and a cap can only remove candidates.
+    """
+
+    if cap is None:
+        return list(allowed)
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 0:
+        raise AgencyDecisionError(f"invalid body candidate cap: {cap!r}")
+    candidates = list(allowed)
+    if cap == 0 or len(candidates) <= cap:
+        return candidates[:cap]
+    narrowing = bool(body_creative_block) or str(body_health_state or "").upper() in {
+        "FATIGUED", "ACUTE_ILLNESS", "RECOVERING", "LIMITED",
+    } or cap <= 6
+    if not narrowing:
+        return candidates[:cap]
+    return _seat_candidate_cap(candidates, cap, current_state=current_state)
 
 
 def _require_iso(value: Any, field_name: str) -> str:
@@ -1361,6 +1823,87 @@ def validate_sharing_action(raw: Any) -> dict[str, Any]:
     elif op == SHARING_ACTION_DROP:
         action["reason"] = _text("reason", MAX_SHARE_REASON_CHARS)
     return action
+
+
+PURCHASE_CHOICE_KEYS = frozenset({"item_name", "estimated_price"})
+MAX_PURCHASE_ITEM_NAME_CHARS = 32
+MIN_PURCHASE_ESTIMATED_PRICE = 10
+MAX_PURCHASE_ESTIMATED_PRICE = 50_000
+
+
+def validate_purchase_choice(raw: Any) -> dict[str, Any]:
+    """Bounded validation for one open-counter purchase item name & optional estimated price."""
+
+    if not isinstance(raw, Mapping):
+        raise DecisionValidationError(
+            "purchase_choice must be a JSON object",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+            schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+            schema_rule=SCHEMA_RULE_NOT_AN_OBJECT,
+            schema_extra={"value_type": _json_type_name(raw)},
+        )
+    _reject_forbidden_dict_keys(raw, "purchase_choice")
+    unknown = {str(key) for key in raw} - PURCHASE_CHOICE_KEYS
+    if unknown:
+        raise DecisionValidationError(
+            "purchase_choice carries unknown keys",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+            schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+            schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+        )
+    raw_name = raw.get("item_name")
+    if not isinstance(raw_name, str):
+        raise DecisionValidationError(
+            "purchase_choice.item_name must be a string",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+            schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+            schema_rule=SCHEMA_RULE_MISSING_OR_WRONG_TYPE,
+            schema_extra={"value_type": _json_type_name(raw_name)},
+        )
+    if any(ch in raw_name for ch in "\r\n\x00"):
+        raise DecisionValidationError(
+            "purchase_choice.item_name contains control characters",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+            schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+            schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+        )
+    clean_name = " ".join(raw_name.split())
+    if not clean_name:
+        raise DecisionValidationError(
+            "purchase_choice.item_name must not be empty",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+            schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+            schema_rule=SCHEMA_RULE_EMPTY_NOT_ALLOWED,
+        )
+    if len(clean_name) > MAX_PURCHASE_ITEM_NAME_CHARS:
+        raise DecisionValidationError(
+            "purchase_choice.item_name exceeds max length",
+            failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+            schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+            schema_rule=SCHEMA_RULE_TOO_LONG,
+        )
+    est = raw.get("estimated_price")
+    if est is not None:
+        if isinstance(est, bool) or not isinstance(est, int):
+            raise DecisionValidationError(
+                "purchase_choice.estimated_price must be an integer",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+                schema_rule=SCHEMA_RULE_MISSING_OR_WRONG_TYPE,
+                schema_extra={"value_type": _json_type_name(est)},
+            )
+        if est < MIN_PURCHASE_ESTIMATED_PRICE or est > MAX_PURCHASE_ESTIMATED_PRICE:
+            raise DecisionValidationError(
+                "purchase_choice.estimated_price out of range",
+                failure_class=FAILURE_CLASS_INVALID_SCHEMA,
+                schema_field=SCHEMA_FIELD_PURCHASE_CHOICE,
+                schema_rule=SCHEMA_RULE_REFUSED_BY_DOMAIN,
+            )
+    choice: dict[str, Any] = {"item_name": clean_name}
+    if est is not None:
+        choice["estimated_price"] = est
+    return choice
+
 
 @dataclass(frozen=True)
 class AgencyDecisionCapability:
@@ -2149,6 +2692,8 @@ class DecisionRecord:
     #: ``LifeSharingService`` after the Decision commits, and only the owner's own answer (with its
     #: local receipt) is written back.  ``audience``/``channel`` are absent by construction.
     sharing_action: Optional[dict[str, Any]] = None
+    #: v0.8 open-counter shopping: concrete item name & optional price hint chosen on the spot.
+    purchase_choice: Optional[dict[str, Any]] = None
     short_rationale: Optional[str] = None
     invalid_rationale_claim_dropped: bool = False
     model_run_ref: Optional[str] = None
@@ -2331,6 +2876,9 @@ class DecisionRecord:
         if self.sharing_action is not None:
             object.__setattr__(self, "sharing_action",
                                validate_sharing_action(self.sharing_action))
+        if self.purchase_choice is not None:
+            object.__setattr__(self, "purchase_choice",
+                               validate_purchase_choice(self.purchase_choice))
         if self.model_run_ref is not None:
             object.__setattr__(
                 self,
@@ -2420,6 +2968,8 @@ class DecisionRecord:
             # v0.4 sharing: the one sharing request this Decision made, if any.  It is the
             # *request*, never the delivery: the delivery fact lives in B's owner and is read back.
             "sharing_action": copy.deepcopy(self.sharing_action),
+            **({"purchase_choice": copy.deepcopy(self.purchase_choice)}
+               if self.purchase_choice is not None else {}),
             "created_at": self.created_at,
         }
 
@@ -3178,6 +3728,7 @@ class DecisionOutputValidator:
             "method_trial",
             "method_proposal",
             "sharing",
+            "purchase_choice",
         }
         unknown_keys = set(raw_output.keys()) - allowed_top_keys
         if unknown_keys:
@@ -3552,6 +4103,12 @@ class DecisionOutputValidator:
                 sharing_action = validate_sharing_action(raw_output.get("sharing"))
             except DecisionValidationError as exc:
                 raise _annotate_schema_field(exc, SCHEMA_FIELD_SHARING)
+        purchase_choice = None
+        if raw_output.get("purchase_choice") is not None:
+            try:
+                purchase_choice = validate_purchase_choice(raw_output.get("purchase_choice"))
+            except DecisionValidationError as exc:
+                raise _annotate_schema_field(exc, SCHEMA_FIELD_PURCHASE_CHOICE)
 
         return {
             "decision": decision,
@@ -3570,6 +4127,7 @@ class DecisionOutputValidator:
             "method_trial": method_trial,
             "method_proposal": method_proposal,
             "sharing_action": sharing_action,
+            "purchase_choice": purchase_choice,
             "future_item_actions": future_item_actions,
         }
 
@@ -4519,6 +5077,32 @@ class AgencyDecisionService:
 
     # -- Main Evaluation Entrypoint ------------------------------------------
 
+    def _candidate_current_state(
+        self, context_snapshot: "DecisionContextSnapshot"
+    ) -> dict[str, Any]:
+        """The running Activity, as the creative gate needs to read it.
+
+        A ``CONTINUE_CURRENT`` candidate is about *the* foreground Activity; the
+        candidate itself only carries the id, so the kind/title that says
+        whether it is writing has to come from the Activity owner's own read.
+        A failed read is an empty state (nothing invented).
+        """
+
+        ref = getattr(context_snapshot, "current_activity_ref", None)
+        if not ref or self.activity_read_service is None:
+            return {}
+        try:
+            activity = self.activity_read_service.get_activity(str(ref))
+        except Exception:  # a failed read is reported as no state, never guessed
+            return {}
+        if not isinstance(activity, Mapping):
+            return {}
+        return {
+            "foreground_activity": dict(activity),
+            "foreground_activity_kind": activity.get("activity_kind"),
+            "foreground_activity_ref": activity.get("activity_id") or str(ref),
+        }
+
     def evaluate_opportunity(
         self,
         *,
@@ -4528,6 +5112,17 @@ class AgencyDecisionService:
         life_frame: Optional[Mapping[str, Any]] = None,
         body_capacity_state: Optional[str] = None,
         body_capacity_ref: Optional[str] = None,
+        #: v0.8: the S02 health envelope's candidate cap.  None means the body
+        #: has no opinion this round; an int narrows the allowed set after hard
+        #: constraints and the creative gate, before capacity evaluation.  It
+        #: can only remove.
+        body_candidate_cap: Optional[int] = None,
+        #: v0.8: how many plan steps this body can still carry, and whether
+        #: high-cost creative work is blocked.  Both are read by the adoption
+        #: side (step resolution / the v03 creative gate); the decision only
+        #: accepts them so one call can carry the whole envelope.
+        body_max_plan_steps: Optional[int] = None,
+        body_creative_block: Optional[bool] = None,
         device_availability_state: Optional[str] = None,
         device_access_ref: Optional[str] = None,
         resource_availability_state: Optional[str] = None,
@@ -4640,6 +5235,32 @@ class AgencyDecisionService:
             evaluated_at=context_snapshot.captured_at,
             policy_version=opportunity.policy_version,
         )
+        # v0.8: refuse creative work *before* the candidate cap.  Truncating
+        # first would let a run of creative candidates consume the whole cap
+        # and then be rejected, silently dropping the rest/water/reading
+        # options behind them.  The cap applies to the remaining legal,
+        # low-burden set: the essential seats are kept deterministically and
+        # the rest are filled by semantic order -- no lottery.
+        current_state = self._candidate_current_state(context_snapshot)
+        if body_creative_block:
+            allowed_candidates, creative_results = apply_creative_block(
+                allowed_candidates,
+                context_snapshot_id=context_snapshot.context_snapshot_id,
+                evaluated_at=context_snapshot.captured_at,
+                policy_version=opportunity.policy_version,
+                current_state=current_state,
+            )
+            constraint_results.extend(creative_results)
+        before_cap = list(allowed_candidates)
+        allowed_candidates = apply_candidate_cap(
+            allowed_candidates, body_candidate_cap,
+            current_state=current_state,
+            body_creative_block=bool(body_creative_block),
+            body_health_state=body_capacity_state,
+        )
+        kept_ids = {cand.candidate_id for cand in allowed_candidates}
+        cap_dropped = [cand.candidate_id for cand in before_cap
+                       if cand.candidate_id not in kept_ids]
         constraint_results_by_id = {r.candidate_ref: r for r in constraint_results}
 
         if fault_hook is not None:
@@ -4729,6 +5350,8 @@ class AgencyDecisionService:
                 exploration_seed=exploration_seed,
                 live_capacity_override=None,
                 fault_hook=fault_hook,
+                body_candidate_cap=body_candidate_cap,
+                body_candidate_cap_dropped=cap_dropped,
             )
 
         # COGNITIVE_REQUIRED path
@@ -4765,12 +5388,19 @@ class AgencyDecisionService:
         # 而"在临海的住居发会儿呆"躺在旁边的 world 块里等她自己去对照。用 target_ref 把
         # AG-0 已经写好的那句标签搬进来——它是 owner 的枚举式描述，不是文档正文，也不含私人内容。
         human_by_target: dict[str, str] = {}
-        for item in ((situation_context or {}).get("world") or {}).get("opportunities") or []:
-            if not isinstance(item, Mapping):
-                continue
-            ref, text = item.get("target_ref"), item.get("label")
-            if ref and isinstance(text, str) and text.strip():
-                human_by_target.setdefault(str(ref), " ".join(text.split())[:120])
+        world_ctx = (situation_context or {}).get("world")
+        if isinstance(world_ctx, Mapping):
+            raw_cand_labels = world_ctx.get("candidate_labels")
+            if isinstance(raw_cand_labels, Mapping):
+                for ref, text in raw_cand_labels.items():
+                    if ref and isinstance(text, str) and text.strip():
+                        human_by_target.setdefault(str(ref), " ".join(text.split())[:120])
+            for item in world_ctx.get("opportunities") or []:
+                if not isinstance(item, Mapping):
+                    continue
+                ref, text = item.get("target_ref"), item.get("label")
+                if ref and isinstance(text, str) and text.strip():
+                    human_by_target.setdefault(str(ref), " ".join(text.split())[:120])
 
         cog_candidates: list[dict[str, Any]] = []
         union_legal_enums: set[str] = {DECISION_NO_ACTION, DECISION_DEFER}
@@ -4954,6 +5584,8 @@ class AgencyDecisionService:
             exploration_seed=exploration_seed,
             live_capacity_override=live_cap_override,
             fault_hook=fault_hook,
+            body_candidate_cap=body_candidate_cap,
+            body_candidate_cap_dropped=cap_dropped,
         )
 
     def _persist_pre_cognition_state(
@@ -5125,6 +5757,8 @@ class AgencyDecisionService:
         exploration_seed: Optional[int],
         live_capacity_override: Optional[Mapping[str, Any]],
         fault_hook: Optional[Callable[[str], None]],
+        body_candidate_cap: Optional[int] = None,
+        body_candidate_cap_dropped: Sequence[str] = (),
     ) -> dict[str, Any]:
         if fault_hook is not None:
             fault_hook("before_freshness_recheck")
@@ -5252,6 +5886,7 @@ class AgencyDecisionService:
             # validation, never as a raw model mapping, and remains a proposal -- not a preference.
             method_proposal=validated_output.get("method_proposal"),
             sharing_action=validated_output.get("sharing_action"),
+            purchase_choice=validated_output.get("purchase_choice"),
         )
 
         # Build per-candidate disposition audit table (Section 89 & 144)
@@ -5342,6 +5977,11 @@ class AgencyDecisionService:
             "constraint_results": constraint_results,
             "capacity_snapshot": capacity_snapshot,
             "accessibility_view": accessibility_view,
+            # v0.8 report: the cap this round applied and what it removed.  The
+            # dropped ids are a diagnostic, not a decision input; the committed
+            # constraint results remain the auditable refusals.
+            "body_candidate_cap": body_candidate_cap,
+            "body_candidate_cap_dropped": list(body_candidate_cap_dropped),
         }
 
     # -- Crash Recovery Reconciliation (Sections 117-120) --------------------

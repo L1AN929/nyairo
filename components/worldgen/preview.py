@@ -341,7 +341,13 @@ def render_preview(
     return out
 
 
-_THEME_NAMES = {"coastal_town": "海滨小镇", "residential_town": "普通生活小镇"}
+_THEME_NAMES = {
+    "coastal_town": "海滨小镇",
+    "residential_town": "普通生活小镇",
+    "mountain_town": "山间温泉町",
+    "rural_farming": "田园农庄",
+    "procedural": "程序化自由小镇",
+}
 
 
 def _loc_name(package: WorldPackage, location_id: Optional[str]) -> str:

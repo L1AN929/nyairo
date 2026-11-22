@@ -135,6 +135,30 @@ def candidate_source_round_order() -> tuple[str, ...]:
     return tuple(ordered)
 
 
+#: Stage 1 anti-bedroom-loop round-robin order for rounds 0..1 when
+#: ``recent_note_streak >= 2`` and not ``is_final_closeout_step``: gives
+#: explicit user requests, commitments, outdoor/world opportunities, and
+#: non-note personal opportunities priority seats ahead of ``CURRENT_ACTIVITY``.
+ANTI_LOOP_SOURCE_KIND_ORDER = (
+    SOURCE_USER_REQUEST,
+    SOURCE_COMMITMENT,
+    SOURCE_WORLD_OPPORTUNITY,
+    SOURCE_PERSONAL_OPPORTUNITY,
+    SOURCE_RESUME_ELIGIBLE,
+    SOURCE_BLOCKED_ACTIVITY,
+    SOURCE_EXPLICIT_GOAL,
+    SOURCE_CURRENT_ACTIVITY,
+)
+
+
+def anti_loop_source_round_order() -> tuple[str, ...]:
+    """Deterministic anti-bedroom-loop source order for rounds 0..1."""
+
+    ordered = list(ANTI_LOOP_SOURCE_KIND_ORDER)
+    ordered.extend(sorted(VALID_CANDIDATE_SOURCE_KINDS - set(ordered)))
+    return tuple(ordered)
+
+
 #: The World owner's own target namespaces.  Used *only* to keep one representative of each
 #: non-empty action category when the round cap has to cut inside the World bucket, and to
 #: decide which category's *surplus* yields first.  It is not a ranking and not a priority: a
@@ -161,8 +185,8 @@ WORLD_ACTION_CATEGORY_PREFIXES = (
 #: A resource-bound order -- never a value ranking: the same set of choices stays offered, only
 #: the surplus of the most substitutable category is what a cap cut takes.
 WORLD_ACTION_CATEGORY_KEEP_ORDER = (
-    "buy:",
     "object:",
+    "buy:",
     "bodyact:rest:",
     "dailyact:place:",
     "dailyact:pick_up:",
@@ -198,7 +222,12 @@ def candidate_action_category(candidate: "CandidateRecord") -> str:
     )
 
 
-def category_fair_order(candidates: Sequence["CandidateRecord"]) -> list["CandidateRecord"]:
+def category_fair_order(
+    candidates: Sequence["CandidateRecord"],
+    *,
+    recent_note_streak: int = 0,
+    is_final_closeout_step: bool = False,
+) -> list["CandidateRecord"]:
     """Order one source's members so a cap cut keeps every non-empty category's first member.
 
     Every category's first member (in ``candidate_id`` order) is placed ahead of any second
@@ -209,6 +238,9 @@ def category_fair_order(candidates: Sequence["CandidateRecord"]) -> list["Candid
     most substitutable category that yields -- never a destination, a purchase or the only
     fixture toggle while a quiet stay still has spares.  Deterministic: it depends only on the
     set, never on input order.
+
+    v0.5 breathing rhythm extension: when ``recent_note_streak >= 2`` and it is not
+    ``is_final_closeout_step``, desk-note continuation items yield behind World/outing firsts.
     """
 
     if not candidates:
@@ -216,11 +248,37 @@ def category_fair_order(candidates: Sequence["CandidateRecord"]) -> list["Candid
     buckets: dict[str, list[CandidateRecord]] = {}
     for candidate in candidates:
         buckets.setdefault(candidate_action_category(candidate), []).append(candidate)
+
+    anti_loop_active = int(recent_note_streak or 0) >= 2 and not bool(is_final_closeout_step)
+
+    def _anti_loop_tier(item: "CandidateRecord") -> int:
+        cat = candidate_action_category(item)
+        refs = tuple(str(r) for r in (getattr(item, "target_refs", ()) or ()))
+        ckind = str(getattr(item, "candidate_kind", "") or "")
+        if cat == "place:" or any(ref.startswith("place:") for ref in refs):
+            return 0
+        if ckind == "CONTINUE_CURRENT":
+            return 4
+        if ckind == "CONSIDER_PERSONAL_OPPORTUNITY":
+            if not refs or all(ref.startswith(("artifact:", "activity:")) for ref in refs):
+                return 4
+            return 3
+        if cat in ("stay:", "bodyact:pose:"):
+            return 2
+        return 1
+
     for bucket in buckets.values():
-        bucket.sort(key=lambda item: item.candidate_id)
+        if anti_loop_active:
+            bucket.sort(key=lambda item: (_anti_loop_tier(item), item.candidate_id))
+        else:
+            bucket.sort(key=lambda item: item.candidate_id)
 
     firsts = [buckets[key][0] for key in sorted(buckets)]
+    if anti_loop_active:
+        firsts.sort(key=lambda item: (_anti_loop_tier(item), candidate_action_category(item), item.candidate_id))
     keep_rank = {key: index for index, key in enumerate(WORLD_ACTION_CATEGORY_KEEP_ORDER)}
+    if anti_loop_active:
+        keep_rank["place:"] = -1
     surplus_keys = sorted(
         (key for key, bucket in buckets.items() if len(bucket) > 1),
         key=lambda key: (keep_rank.get(key, len(keep_rank)), key),
@@ -3143,6 +3201,9 @@ class CandidateMaterializer:
         self._candidate_sets_by_id: dict[str, CandidateSet] = {}
         self._latest_candidate_set_id: Optional[str] = None
         self._target_provenance_index: dict[str, list[str]] = {}
+        # Round-scoped breathing-rhythm state (Ch. 58/80 anti-bedroom-loop; default 0/False = bit-identical)
+        self._round_recent_note_streak: int = 0
+        self._round_is_final_closeout_step: bool = False
 
         # Telemetry counters proving 0 side effects (Sections 77, 96)
         self.activity_mutation_count: int = 0
@@ -3264,67 +3325,116 @@ class CandidateMaterializer:
                     )
         return invalidated_now
 
+    def set_breathing_rhythm_context(
+        self,
+        *,
+        recent_note_streak: int = 0,
+        is_final_closeout_step: bool = False,
+    ) -> None:
+        """Bind round-scoped anti-bedroom-loop parameters for subsequent build_candidate_set calls."""
+        self._round_recent_note_streak = max(0, int(recent_note_streak or 0))
+        self._round_is_final_closeout_step = bool(is_final_closeout_step)
+
     @staticmethod
     def bounded_candidates_by_source(
-        candidates: Sequence[CandidateRecord], cap: int
+        candidates: Sequence[CandidateRecord],
+        cap: int,
+        *,
+        recent_note_streak: int = 0,
+        is_final_closeout_step: bool = False,
     ) -> list[CandidateRecord]:
         """Fit the global round cap without letting one source erase every other.
 
-        ``candidates`` is already deduplicated and deterministically sorted.  When it
-        fits, it is returned unchanged.  Otherwise each non-empty ``source_kind`` --
-        the authoritative set ``VALID_CANDIDATE_SOURCE_KINDS``, in the stable reading
-        order ``candidate_source_round_order()`` -- takes one turn per round until the
-        cap is reached.  A source with nothing this round contributes nothing (no
-        synthetic filler), and if the number of non-empty sources ever exceeds the cap
-        the result degrades to a deterministic prefix rather than pretending every
-        source is guaranteed a seat.
+        ``candidates`` is already deduplicated and deterministically sorted.  When
+        ``recent_note_streak < 2 or is_final_closeout_step``, behavior is 100%
+        bit-identical to the baseline round-robin cap: if the pool fits, it is
+        returned unchanged; otherwise each non-empty ``source_kind`` takes one turn
+        per round in ``candidate_source_round_order()`` and the bounded selection
+        is re-sorted by ``candidate_id``.
 
-        Inside a source the same fairness applies one level down: its members are
-        ordered by ``category_fair_order``, so when the cap cuts a source that offered
-        several *action categories* -- a World observation really offers stays, a move,
-        poses, pick-up, arrange and a fixture toggle at once -- the dropped tail is the
-        surplus of the most substitutable category, never a category's only
-        representative.  Without this, a whole category (e.g. the one ``TOGGLE_FIXTURE``
-        opportunity in an otherwise full home round) could vanish from a round purely
-        because its ``candidate_id`` hash happened to sort last.
-
-        The round-robin decides *which* candidates fit; the returned list is sorted by
-        ``candidate_id`` again so serialization, hashing and equality stay independent
-        of the take-turn order.
+        When ``recent_note_streak >= 2 and not is_final_closeout_step`` (Ch. 58/80
+        anti-bedroom-loop), every bucket is ordered via ``category_fair_order`` with
+        ``recent_note_streak`` enabled (placing ``place:`` moves ahead of indoor
+        stays/poses and non-note personal cues ahead of note continuations) and
+        rounds ``0..1`` rotate to ``anti_loop_source_round_order()`` so outdoor
+        World and non-note personal opportunities take priority seats ahead of
+        ``CONTINUE_CURRENT``.
         """
 
-        if len(candidates) <= cap:
-            return list(candidates)
+        anti_loop = int(recent_note_streak or 0) >= 2 and not bool(is_final_closeout_step)
+        if not anti_loop:
+            if len(candidates) <= cap:
+                return list(candidates)
 
-        buckets: dict[str, list[CandidateRecord]] = {}
+            buckets: dict[str, list[CandidateRecord]] = {}
+            for candidate in candidates:
+                buckets.setdefault(str(candidate.source_kind), []).append(candidate)
+            for source_kind, bucket in buckets.items():
+                buckets[source_kind] = category_fair_order(bucket)
+
+            order = candidate_source_round_order()
+            selected: list[CandidateRecord] = []
+            longest = max((len(bucket) for bucket in buckets.values()), default=0)
+            for round_index in range(longest):
+                for source_kind in order:
+                    bucket = buckets.get(source_kind)
+                    if not bucket or round_index >= len(bucket):
+                        continue
+                    selected.append(bucket[round_index])
+                    if len(selected) >= cap:
+                        selected.sort(key=lambda item: item.candidate_id)
+                        return selected
+            selected.sort(key=lambda item: item.candidate_id)
+            return selected
+
+        if cap <= 0 or not candidates:
+            return []
+
+        buckets = {}
         for candidate in candidates:
             buckets.setdefault(str(candidate.source_kind), []).append(candidate)
         for source_kind, bucket in buckets.items():
-            buckets[source_kind] = category_fair_order(bucket)
+            buckets[source_kind] = category_fair_order(
+                bucket,
+                recent_note_streak=int(recent_note_streak),
+                is_final_closeout_step=False,
+            )
 
-        order = candidate_source_round_order()
-        selected: list[CandidateRecord] = []
+        anti_order = anti_loop_source_round_order()
+        base_order = candidate_source_round_order()
+        selected = []
         longest = max((len(bucket) for bucket in buckets.values()), default=0)
         for round_index in range(longest):
+            order = anti_order if round_index in (0, 1) else base_order
             for source_kind in order:
                 bucket = buckets.get(source_kind)
                 if not bucket or round_index >= len(bucket):
                     continue
                 selected.append(bucket[round_index])
                 if len(selected) >= cap:
-                    selected.sort(key=lambda item: item.candidate_id)
                     return selected
-        selected.sort(key=lambda item: item.candidate_id)
         return selected
 
     def build_candidate_set(
         self,
         *,
         observed_at: Optional[str] = None,
+        recent_note_streak: Optional[int] = None,
+        is_final_closeout_step: Optional[bool] = None,
     ) -> CandidateSet:
         """Sections 35-42, 53-57: Build a point-in-time deterministic CandidateSet across all registered sources."""
         CandidateProjectionGuard.verify_capability(self.capability)
         obs_iso = _require_iso(observed_at or _iso(now()), "observed_at")
+        eff_streak = (
+            self._round_recent_note_streak
+            if recent_note_streak is None
+            else max(0, int(recent_note_streak or 0))
+        )
+        eff_closeout = (
+            self._round_is_final_closeout_step
+            if is_final_closeout_step is None
+            else bool(is_final_closeout_step)
+        )
 
         # 1. Refresh existing OPEN candidates so stale/cancelled/expired/terminal ones transition immediately
         self.refresh_existing_candidates(observed_at=obs_iso)
@@ -3352,7 +3462,12 @@ class CandidateMaterializer:
         # the admitted sources instead of one prolific source (for example the World's
         # many local opportunities) taking every seat from continuity/resume.
         global_truncated = len(deduped) > self.global_cap
-        bounded_candidates = self.bounded_candidates_by_source(deduped, self.global_cap)
+        bounded_candidates = self.bounded_candidates_by_source(
+            deduped,
+            self.global_cap,
+            recent_note_streak=eff_streak,
+            is_final_closeout_step=eff_closeout,
+        )
 
         # 5. Store active candidates and mark any previously OPEN candidate not in current valid set as STALE
         current_open_ids = {c.candidate_id for c in bounded_candidates}
@@ -3423,8 +3538,18 @@ class CandidateReadService:
     def __init__(self, materializer: CandidateMaterializer) -> None:
         self.materializer = materializer
 
-    def build_candidate_set(self, *, observed_at: Optional[str] = None) -> dict[str, Any]:
-        cset = self.materializer.build_candidate_set(observed_at=observed_at)
+    def build_candidate_set(
+        self,
+        *,
+        observed_at: Optional[str] = None,
+        recent_note_streak: Optional[int] = None,
+        is_final_closeout_step: Optional[bool] = None,
+    ) -> dict[str, Any]:
+        cset = self.materializer.build_candidate_set(
+            observed_at=observed_at,
+            recent_note_streak=recent_note_streak,
+            is_final_closeout_step=is_final_closeout_step,
+        )
         return cset.to_dict()
 
     def get_candidate(self, candidate_id: str) -> Optional[dict[str, Any]]:
@@ -3629,6 +3754,8 @@ __all__ = [
     "CandidateRecord",
     "CandidateReplayVerifier",
     "candidate_action_category",
+    "ANTI_LOOP_SOURCE_KIND_ORDER",
+    "anti_loop_source_round_order",
     "candidate_source_round_order",
     "category_fair_order",
     "CandidateSet",

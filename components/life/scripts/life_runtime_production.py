@@ -48,6 +48,7 @@ and no Decision can be fabricated.
 from __future__ import annotations
 
 import os
+import sys
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
@@ -902,8 +903,97 @@ class ProductionLifeRuntime:
             file_observer=self.ag2_file_observer_port,
         )
         self.read_service = self.coordinator.read_service
+        self.startup_reconciler_recovery = self.reconcile_canonical_wal_on_startup()
 
     # -- lifecycle ---------------------------------------------------------------------
+
+    def reconcile_canonical_wal_on_startup(self) -> dict[str, Any]:
+        """Recover any incomplete WAL / reconciler crash state under this same ``state_root`` or enclosing instance."""
+        probe_dirs: list[Path] = [self.state_root / "reconciler", self.state_root]
+        try:
+            _repo_root = Path(__file__).resolve().parents[3]
+            _world_scripts = _repo_root / "components" / "world" / "scripts"
+            for _entry in (str(_repo_root), str(_world_scripts)):
+                if _entry not in sys.path:
+                    sys.path.insert(0, _entry)
+            try:
+                from components.world.scripts import instance_paths as _instance_paths
+            except ImportError:
+                import instance_paths as _instance_paths  # type: ignore[no-redef]
+            resolved = _instance_paths.resolve_instance_paths(self.state_root)
+            for extra_dir in (
+                resolved.canonical_ledger_db.parent,
+                resolved.day_root / "v02",
+                resolved.day_root / "reconciler",
+                resolved.day_root,
+            ):
+                if extra_dir not in probe_dirs:
+                    probe_dirs.append(extra_dir)
+        except Exception:
+            pass
+
+        cand_root: Optional[Path] = None
+        for probe in probe_dirs:
+            db_file = probe / "canonical_life.sqlite3"
+            if db_file.is_file() and not db_file.is_symlink():
+                cand_root = probe
+                break
+        if cand_root is None:
+            return {"reconciler_present": False, "recovered": False, "llm_calls": 0}
+
+        try:
+            from components.life.scripts import v02_crash_and_partial_reconciler as _cpr
+        except ImportError:
+            import v02_crash_and_partial_reconciler as _cpr  # type: ignore[no-redef]
+
+        rec_store = _cpr.CrashAndPartialReconcilerStore(cand_root)
+        rec_store.initialize()
+        snap = rec_store.snapshot_db()
+        pending_outbox = [
+            o for o in snap.get("outbox", []) if str(o.get("state") or "") != "ACKED"
+        ]
+        incomplete_actions = [
+            a
+            for a in snap.get("actions", [])
+            if str(a.get("outcome") or "") in ("PENDING", "UNKNOWN")
+            or str(a.get("phase") or "") in ("REQUESTED", "DISPATCHING", "WAITING_RESULT", "RECONCILING")
+        ]
+        if not pending_outbox and not incomplete_actions:
+            return {
+                "reconciler_present": True,
+                "recovered": True,
+                "reconciler_root": str(cand_root),
+                "pending_outbox": 0,
+                "reconciled_actions": [],
+                "llm_calls": 0,
+            }
+
+        ctrl = rec_store.control.allocate_new_epoch(fence_previous=True)
+        epoch = int(ctrl.get("active_writer_epoch") or 1)
+        recovered_outbox: list[Any] = []
+        for row in pending_outbox:
+            recovered_outbox.append(
+                rec_store.consume_outbox_to_inbox(
+                    consumer=f"consumer_{row.get('destination') or 'S10'}",
+                    event_id=str(row["event_id"]),
+                    result_ref=str(row["event_id"]),
+                )
+            )
+        reconciled_actions: list[dict[str, Any]] = []
+        for act_row in incomplete_actions:
+            aid = str(act_row.get("action_id") or "")
+            if aid:
+                rec_res = rec_store.reconcile_action(action_id=aid, writer_epoch=epoch)
+                reconciled_actions.append({"action_id": aid, "result": rec_res})
+        return {
+            "reconciler_present": True,
+            "recovered": True,
+            "reconciler_root": str(cand_root),
+            "writer_epoch": epoch,
+            "recovered_outbox_count": len(recovered_outbox),
+            "reconciled_actions": reconciled_actions,
+            "llm_calls": 0,
+        }
 
     def flush_all(self) -> None:
         for store in (self.decision_store, self.action_store, self.settlement_store,

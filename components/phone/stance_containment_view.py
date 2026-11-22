@@ -54,6 +54,16 @@ from . import sensory_character_view as char_view
 from components.life.scripts import attention_view_projector as attn_proj
 from components.life.scripts import life_attention_stance_containment as owner_substrate
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 STANCE_CONTAINMENT_SCHEMA = "phone.stance.containment.v1"
 STATE_DIRNAME = "phone"
 STANCE_CONTAINMENT_FILENAME = "stance_containment.json"
@@ -107,6 +117,7 @@ MAX_PUBLIC_NOTE = 160
 MAX_TITLE = 60
 MAX_OPERATION_KEY = 120
 MAX_OPERATION_RECEIPTS = 64
+MAX_COMMITTED_OP_RING = 256
 MAX_CONTAINERS = 24
 MAX_ITEMS = 48
 MAX_CONTAINER_CAPACITY = 12
@@ -1003,6 +1014,9 @@ def default_stance_containment_state() -> dict[str, Any]:
             "table_dishes": [],
         },
         "operation_receipts": [],
+        "next_op_seq": 0,
+        "committed_op_ring": [],
+        "evicted_up_to_revision": 0,
     }
 
 
@@ -1598,7 +1612,7 @@ def _validate_stored_state(raw: Any) -> dict[str, Any]:
             max_len=MAX_OPERATION_KEY,
             reason_code="OPERATION_KEY_INVALID",
         )
-        validated_receipts.append({
+        receipt_row = {
             "operation_key": op_k,
             "action": str(rec.get("action") or "")[:64],
             "fingerprint": str(rec.get("fingerprint") or "")[:64],
@@ -1609,7 +1623,69 @@ def _validate_stored_state(raw: Any) -> dict[str, Any]:
                 None if rec.get("target_id") is None else str(rec.get("target_id"))[:120]
             ),
             "recorded_at": _iso_or_none(rec.get("recorded_at")),
-        })
+        }
+        rec_seq = rec.get("op_seq")
+        if isinstance(rec_seq, int) and not isinstance(rec_seq, bool):
+            receipt_row["op_seq"] = rec_seq
+        rec_rev = rec.get("revision")
+        if isinstance(rec_rev, int) and not isinstance(rec_rev, bool):
+            receipt_row["revision"] = rec_rev
+        validated_receipts.append(receipt_row)
+
+    ring_raw = raw.get("committed_op_ring") or []
+    if not isinstance(ring_raw, list):
+        raise ValueError("invalid committed_op_ring")
+    validated_ring: list[dict[str, Any]] = []
+    for rec in ring_raw:
+        if not isinstance(rec, Mapping):
+            raise ValueError("invalid committed_op_ring entry")
+        ring_row = {
+            "operation_key": _clean_single_line(
+                rec.get("operation_key"),
+                min_len=1,
+                max_len=MAX_OPERATION_KEY,
+                reason_code="OPERATION_KEY_INVALID",
+            ),
+            "action": str(rec.get("action") or "")[:64],
+            "fingerprint": str(rec.get("fingerprint") or "")[:64],
+            "scope_ref": (
+                None if rec.get("scope_ref") is None else str(rec.get("scope_ref"))[:120]
+            ),
+            "target_id": (
+                None if rec.get("target_id") is None else str(rec.get("target_id"))[:120]
+            ),
+            "recorded_at": _iso_or_none(rec.get("recorded_at")),
+        }
+        for seq_field in ("op_seq", "revision"):
+            seq_val = rec.get(seq_field)
+            if isinstance(seq_val, int) and not isinstance(seq_val, bool):
+                ring_row[seq_field] = seq_val
+        validated_ring.append(ring_row)
+    if len(validated_ring) > MAX_COMMITTED_OP_RING:
+        validated_ring = validated_ring[-MAX_COMMITTED_OP_RING:]
+
+    highest_seq = 0
+    for receipt_row in validated_receipts + validated_ring:
+        seq_val = receipt_row.get("op_seq")
+        if isinstance(seq_val, int) and not isinstance(seq_val, bool) and seq_val > highest_seq:
+            highest_seq = seq_val
+    stored_next_seq = raw.get("next_op_seq")
+    next_op_seq = (
+        stored_next_seq
+        if isinstance(stored_next_seq, int)
+        and not isinstance(stored_next_seq, bool)
+        and stored_next_seq >= 0
+        else 0
+    )
+    next_op_seq = max(next_op_seq, highest_seq)
+    stored_evicted_rev = raw.get("evicted_up_to_revision")
+    evicted_up_to_revision = (
+        stored_evicted_rev
+        if isinstance(stored_evicted_rev, int)
+        and not isinstance(stored_evicted_rev, bool)
+        and stored_evicted_rev >= 0
+        else 0
+    )
 
     validated_obtained_pages = owner_substrate._validate_obtained_pages_map(
         stance_dom.get("obtained_pages_by_scope")
@@ -1643,6 +1719,9 @@ def _validate_stored_state(raw: Any) -> dict[str, Any]:
             "table_dishes": validated_dishes,
         },
         "operation_receipts": validated_receipts,
+        "next_op_seq": next_op_seq,
+        "committed_op_ring": validated_ring,
+        "evicted_up_to_revision": evicted_up_to_revision,
     }
 
 
@@ -1956,12 +2035,17 @@ def project_stance_containment(
         phys_place = owner_substrate.effective_container_place(cid, containers_by_id)
         last_seen = c["subject_last_seen_place"]
         is_stale = phys_place != last_seen
+        # Epistemic masking: until she reaches the spot and refreshes the
+        # impression, a stale container is projected back to where the subject
+        # believes it is.  The physical (moved) place is never disclosed.
+        believed_hidden = bool(subject_view and is_stale)
+        shown_place = last_seen if believed_hidden else phys_place
         open_st = str(c.get("open_state") or "open_top")
         gate_block = owner_substrate.check_container_access_gate(
             cid, containers_by_id, include_self=True
         )
         reachable = bool(
-            subj_present and phys_place == subj_place and gate_block is None
+            subj_present and shown_place == subj_place and gate_block is None
         )
 
         if c.get("drinkware"):
@@ -1978,9 +2062,9 @@ def project_stance_containment(
         c_row: dict[str, Any] = {
             "container_id": cid,
             "label": c["label"],
-            "place_id": phys_place,
-            "effective_place_id": phys_place,
-            "room_id": _room_for_place(phys_place),
+            "place_id": shown_place,
+            "effective_place_id": shown_place,
+            "room_id": _room_for_place(shown_place),
             "parent_container_id": c.get("parent_container_id"),
             "open_state": open_st,
             "capacity": cap,
@@ -1996,11 +2080,15 @@ def project_stance_containment(
             "access_blocked_reason": gate_block,
             "subject_last_seen_place": last_seen,
             "subject_last_seen_at": c.get("subject_last_seen_at"),
-            "impression_stale": is_stale,
             "not_at_last_seen_place": bool(c.get("not_at_last_seen_place", False)),
         }
         if subject_view:
+            # ``impression_stale`` is a God-view fact (physical place != believed
+            # place); it is withheld from the subject and kept only for the
+            # partner projection.
             c_row["private_impression_note"] = c.get("private_impression_note")
+        else:
+            c_row["impression_stale"] = is_stale
         projected_containers.append(c_row)
 
     projected_items: list[dict[str, Any]] = []
@@ -2022,9 +2110,13 @@ def project_stance_containment(
 
         last_seen = it["subject_last_seen_place"]
         is_stale = phys_place != last_seen
+        # Same epistemic masking as containers: pre-discovery the subject sees
+        # the item where she last remembers it, never the moved ground truth.
+        believed_hidden = bool(subject_view and is_stale)
+        shown_place = last_seen if believed_hidden else phys_place
         reachable = bool(
             pkind == "hand"
-            or (subj_present and phys_place == subj_place and gate_block_it is None)
+            or (subj_present and shown_place == subj_place and gate_block_it is None)
         )
 
         i_row: dict[str, Any] = {
@@ -2033,16 +2125,15 @@ def project_stance_containment(
             "item_class": it["item_class"],
             "owner": it["owner"],
             "placement_kind": pkind,
-            "place_id": phys_place,
-            "effective_place_id": phys_place,
-            "room_id": _room_for_place(phys_place),
+            "place_id": shown_place,
+            "effective_place_id": shown_place,
+            "room_id": _room_for_place(shown_place),
             "parent_container_id": it["parent_container_id"],
             "held_in_hand": it["held_in_hand"],
             "reachable_now": reachable,
             "access_blocked_reason": gate_block_it,
             "subject_last_seen_place": last_seen,
             "subject_last_seen_at": it.get("subject_last_seen_at"),
-            "impression_stale": is_stale,
             "not_at_last_seen_place": bool(it.get("not_at_last_seen_place", False)),
         }
         if subject_view:
@@ -2059,6 +2150,8 @@ def project_stance_containment(
                 subject_cognitive_cues.append(
                     f"{name}印象里「{it['label']}」在 {last_seen}。"
                 )
+        else:
+            i_row["impression_stale"] = is_stale
         projected_items.append(i_row)
 
     cohabitation_proj = copy.deepcopy(
@@ -2076,8 +2169,16 @@ def project_stance_containment(
         "containers": projected_containers,
         "items": projected_items,
         "cohabitation": cohabitation_proj,
+        # Subject view only counts misses she has actually witnessed; the raw
+        # stale-impression count would itself leak that something moved unseen.
         "stale_impression_count": sum(
-            1 for row in (projected_containers + projected_items) if row["impression_stale"]
+            1
+            for row in (projected_containers + projected_items)
+            if (
+                bool(row.get("not_at_last_seen_place"))
+                if subject_view
+                else bool(row.get("impression_stale"))
+            )
         ),
         "no_fake_rollback": True,
         "no_background_omniscience": True,
@@ -2292,15 +2393,59 @@ def _lookup_receipt(
     fingerprint: str,
 ) -> Optional[dict[str, Any]]:
     for rec in receipts:
-        if rec["operation_key"] == operation_key:
-            if rec["action"] != action or rec["fingerprint"] != fingerprint:
+        if not isinstance(rec, Mapping):
+            continue
+        if rec.get("operation_key") == operation_key:
+            if rec.get("action") != action or rec.get("fingerprint") != fingerprint:
                 raise StanceContainmentConflictError("OPERATION_KEY_CONFLICT")
-            return rec
+            return dict(rec)
     return None
 
 
+def _lookup_ring_receipt(
+    ring: Any,
+    *,
+    operation_key: str,
+    action: str,
+    fingerprint: str,
+) -> Optional[dict[str, Any]]:
+    """Match a receipt already evicted from the active ledger into the bounded ring."""
+
+    if not isinstance(ring, list):
+        return None
+    for rec in reversed(ring):
+        if not isinstance(rec, Mapping):
+            continue
+        if rec.get("operation_key") != operation_key:
+            continue
+        if rec.get("action") != action or rec.get("fingerprint") != fingerprint:
+            raise StanceContainmentConflictError("OPERATION_KEY_CONFLICT")
+        return dict(rec)
+    return None
+
+
+def _next_op_seq(state: Mapping[str, Any]) -> int:
+    """Monotonic commit sequence; legacy rows without ``op_seq`` simply contribute nothing."""
+
+    highest = 0
+    raw = state.get("next_op_seq")
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > highest:
+        highest = raw
+    for field in ("operation_receipts", "committed_op_ring"):
+        rows = state.get(field)
+        if not isinstance(rows, list):
+            continue
+        for rec in rows:
+            if not isinstance(rec, Mapping):
+                continue
+            seq = rec.get("op_seq")
+            if isinstance(seq, int) and not isinstance(seq, bool) and seq > highest:
+                highest = seq
+    return highest + 1
+
+
 def _record_receipt(
-    receipts: list[dict[str, Any]],
+    state: dict[str, Any],
     *,
     operation_key: Optional[str],
     action: str,
@@ -2309,8 +2454,18 @@ def _record_receipt(
     scope_ref: Optional[str] = None,
     target_id: Optional[str] = None,
 ) -> None:
+    """Append a receipt in commit order; evict the lowest ``op_seq`` into the bounded ring."""
+
     if operation_key is None:
         return
+    receipts = state.setdefault("operation_receipts", [])
+    ring = state.setdefault("committed_op_ring", [])
+    if not isinstance(ring, list):
+        ring = []
+        state["committed_op_ring"] = ring
+
+    op_seq = _next_op_seq(state)
+    state["next_op_seq"] = op_seq
     receipts.append({
         "operation_key": operation_key,
         "action": action,
@@ -2318,9 +2473,38 @@ def _record_receipt(
         "scope_ref": scope_ref,
         "target_id": target_id,
         "recorded_at": now_iso,
+        "op_seq": op_seq,
+        "revision": int(state.get("revision") or 0),
     })
+
     while len(receipts) > MAX_OPERATION_RECEIPTS:
-        receipts.pop(0)
+        oldest = min(
+            receipts,
+            key=lambda rec: (
+                int(rec.get("op_seq") or 0) if isinstance(rec, Mapping) else -1
+            ),
+        )
+        receipts.remove(oldest)
+        if not isinstance(oldest, Mapping):
+            continue
+        ring.append({
+            "operation_key": oldest.get("operation_key"),
+            "action": oldest.get("action"),
+            "fingerprint": oldest.get("fingerprint"),
+            "scope_ref": oldest.get("scope_ref"),
+            "target_id": oldest.get("target_id"),
+            "recorded_at": oldest.get("recorded_at"),
+            "op_seq": oldest.get("op_seq"),
+            "revision": oldest.get("revision"),
+        })
+        evicted_rev = oldest.get("revision")
+        if isinstance(evicted_rev, int) and not isinstance(evicted_rev, bool):
+            current = state.get("evicted_up_to_revision")
+            base = current if isinstance(current, int) and not isinstance(current, bool) else 0
+            state["evicted_up_to_revision"] = max(base, evicted_rev)
+
+    while len(ring) > MAX_COMMITTED_OP_RING:
+        ring.pop(0)
 
 
 def _resolve_actor(
@@ -2346,7 +2530,30 @@ def apply_stance_containment_action(
     now: str | datetime | None = None,
     subject_view: bool = False,
 ) -> dict[str, Any]:
-    """Validate and apply one explicit action on ``stance_containment.json``."""
+    """Validate and apply one explicit action under one exclusive write lock.
+
+    The whole read-check-mutate-write cycle runs inside ``state_file_lock`` so two
+    writers can never interleave: the state is re-read from disk *after* the lock
+    is held and ``expected_revision`` / idempotency receipts are checked against
+    that fresh copy, never against a pre-lock snapshot.
+    """
+
+    if not isinstance(payload, Mapping):
+        raise StanceContainmentValidationError("PAYLOAD_NOT_OBJECT")
+    with _tx.state_file_lock(stance_containment_state_path(root)):
+        return _apply_stance_containment_action_locked(
+            root, payload, now=now, subject_view=subject_view
+        )
+
+
+def _apply_stance_containment_action_locked(
+    root: Path | str,
+    payload: Mapping[str, Any],
+    *,
+    now: str | datetime | None = None,
+    subject_view: bool = False,
+) -> dict[str, Any]:
+    """Inner write body; callers must already hold ``state_file_lock``."""
 
     if not isinstance(payload, Mapping):
         raise StanceContainmentValidationError("PAYLOAD_NOT_OBJECT")
@@ -2417,6 +2624,15 @@ def apply_stance_containment_action(
             action=action,
             fingerprint=fp,
         )
+        if existing_rec is None:
+            # The active ledger is bounded; an older key may still be safe to
+            # replay from the commit ring instead of being applied a second time.
+            existing_rec = _lookup_ring_receipt(
+                state.get("committed_op_ring"),
+                operation_key=op_key,
+                action=action,
+                fingerprint=fp,
+            )
         if existing_rec is not None:
             rec_scope = existing_rec.get("scope_ref")
             if (
@@ -2447,6 +2663,20 @@ def apply_stance_containment_action(
             })
             return out_replay
 
+        # Neither active nor ring holds the key.  If the caller's expected
+        # revision is already below the eviction watermark it is a stale retry
+        # from before the window, not a brand-new request: refuse explicitly.
+        evicted_up_to = state.get("evicted_up_to_revision")
+        current_rev = int(state["revision"])
+        if (
+            expected_rev is not None
+            and isinstance(evicted_up_to, int)
+            and not isinstance(evicted_up_to, bool)
+            and evicted_up_to > 0
+            and expected_rev <= evicted_up_to < current_rev
+        ):
+            raise StanceContainmentConflictError("RETRY_WINDOW_EXPIRED")
+
     if expected_rev is not None and int(state["revision"]) != expected_rev:
         raise StanceContainmentConflictError("REVISION_CONFLICT")
 
@@ -2466,7 +2696,7 @@ def apply_stance_containment_action(
         state["revision"] = int(state["revision"]) + 1
         state["updated_at"] = now_iso
         _record_receipt(
-            state["operation_receipts"],
+            state,
             operation_key=op_key,
             action=action,
             fingerprint=fp,

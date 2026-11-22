@@ -54,6 +54,9 @@ export function editableShape(p){
     for(const o of p.objects){
       if(!o||typeof o.id!=='string'||itemIds.has(o.id)||typeof o.name!=='string'||typeof o.description!=='string'||!ids.has(o.room_id)||!['chair','bed','book','cup','cabinet','table','plant','dispenser','lamp'].includes(o.kind))return false;
       if(!['x','y','capacity','servings'].every(k=>Number.isFinite(o[k]))||typeof o.portable!=='boolean'||!Array.isArray(o.actions)||!o.actions.every(a=>actions.includes(a)))return false;
+      if(o.matter_profile!==undefined&&(o.matter_profile===null||typeof o.matter_profile!=='object'||Array.isArray(o.matter_profile)))return false;
+      if(o.matter_profile&&o.matter_profile.material_units!==undefined&&(!Number.isInteger(o.matter_profile.material_units)||o.matter_profile.material_units<1||o.matter_profile.material_units>24))return false;
+      if(o.matter_profile&&o.matter_profile.assembly_role!==undefined&&!['none','host_frame','insert_part'].includes(o.matter_profile.assembly_role))return false;
       if(v2&&(!o.visual||!['scale','rotation','layer'].every(k=>Number.isFinite(o.visual[k]))||typeof o.visual.show_name!=='boolean'||!o.behavior||typeof o.behavior!=='object'))return false;
       const params={book:{read:['minutes','energy_cost']},bed:{rest:['minutes','energy_gain']},cup:{drink:['hydration_gain']},dispenser:{fill:['minutes','servings'],toggle_device:['minutes']},lamp:{toggle:['minutes']}}[o.kind]||{};
       if(v2&&!Object.entries(params).every(([action,keys])=>o.behavior[action]&&keys.every(k=>Number.isFinite(o.behavior[action][k]))))return false;

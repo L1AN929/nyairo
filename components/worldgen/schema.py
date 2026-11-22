@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Optional
 
@@ -39,6 +41,56 @@ MAX_AMBIENT_TEMPLATES_V1 = 16
 MAX_AMBIENT_TEMPLATES_V2 = 24
 OBJECTS_SCHEMA = "worldgen.objects.v1"
 CONTENT_SCHEMA = "worldgen.content.v1"
+
+#: 物件通用交互属性标签（v0.8 通用动作积木消费的 8 种标准标签）。
+CANONICAL_AFFORDANCE_TRAITS = (
+    "movable",
+    "insertable",
+    "container",
+    "inscribable",
+    "switchable",
+    "thermal_or_damp",
+    "usable",
+    "combinable",
+)
+
+#: v0.8 物件物质档（matter_profile）的标准闭集与键集合。
+CANONICAL_AMBIENT_ZONES = ("room", "cold", "heating")
+#: v0.4 第 40 章：可拆装配件角色（"普通单件" / 宿主框架 / 插入件）。
+CANONICAL_ASSEMBLY_ROLES = ("none", "host_frame", "insert_part")
+CANONICAL_MATTER_ITEM_KINDS = (
+    "ingredient",
+    "prepared_food",
+    "drink",
+    "vessel",
+    "tool",
+    "paper",
+    "keepsake",
+    "everyday",
+)
+MATTER_PROFILE_KEYS = frozenset(
+    {
+        "ambient_zone",
+        "water_source",
+        "capacity_slots",
+        "item_kind",
+        "paper_like",
+        "shelf_life_hours",
+        "portions",
+        "material_units",
+        "assembly_role",
+    }
+)
+
+#: objects.json 条目的必填键与可选键（affordance_traits / matter_profile / sale_spec
+#: 为 v0.8+ 可选扩展）。
+OBJECT_REQUIRED_KEYS = frozenset(
+    {"object_id", "name", "kind", "location_id", "note"}
+)
+OBJECT_OPTIONAL_KEYS = frozenset({"affordance_traits", "matter_profile", "sale_spec"})
+CANONICAL_SALE_CATEGORIES = ("food", "ingredient", "drink", "reading", "daily", "furnish")
+CANONICAL_PRICE_TIERS = ("budget", "standard", "hearty")
+SALE_SPEC_KEYS = frozenset({"category", "price_tier", "price"})
 SCENE_SCHEMA = "worldgen.scene.v1"
 MANIFEST_SCHEMA = "worldgen.manifest.v1"
 
@@ -785,6 +837,142 @@ def validate_ambient_doc(doc: Any) -> dict[str, Any]:
     )
 
 
+def normalize_affordance_traits(raw: Any, where: str) -> list[str]:
+    """校验并规范化 ``affordance_traits``：必须是标准标签的有序无重复列表。
+
+    非法输入（非列表、字符串、空项、未知标签、重复标签、超过 8 项）一律
+    抛出 :class:`WorldPackageError`，不做静默丢弃或自动纠正。
+    """
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, list):
+        raise WorldPackageError(f"{where} 必须是列表（8 种标准交互属性标签之一）")
+    if len(raw) > len(CANONICAL_AFFORDANCE_TRAITS):
+        raise WorldPackageError(
+            f"{where} 不能超过 {len(CANONICAL_AFFORDANCE_TRAITS)} 项"
+        )
+    normalized: list[str] = []
+    for index, trait in enumerate(raw):
+        if not isinstance(trait, str) or trait not in CANONICAL_AFFORDANCE_TRAITS:
+            raise WorldPackageError(
+                f"{where}[{index}] 不是标准交互属性标签: {trait!r}"
+                f"（允许 {list(CANONICAL_AFFORDANCE_TRAITS)}）"
+            )
+        if trait in normalized:
+            raise WorldPackageError(f"{where}[{index}] 重复的交互属性标签: {trait!r}")
+        normalized.append(trait)
+    return normalized
+
+
+def normalize_matter_profile(raw: Any, where: str) -> dict[str, Any]:
+    """校验并规范化 ``matter_profile``（v0.8 可选扩展）。
+
+    必须是对象（``dict`` / ``Mapping``）；未知键、类型错误或越界值一律抛出
+    :class:`WorldPackageError`，不做静默丢弃或自动纠正。只保留实际出现的键，
+    未提供的字段不补默认值——老包与只声明部分字段的包保持原样。
+    """
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Mapping):
+        raise WorldPackageError(f"{where} 必须是对象（matter_profile）")
+    unknown = set(raw) - MATTER_PROFILE_KEYS
+    if unknown:
+        raise WorldPackageError(
+            f"{where} 包含未知字段: {sorted(unknown)}"
+            f"（允许 {sorted(MATTER_PROFILE_KEYS)}）"
+        )
+    normalized: dict[str, Any] = {}
+    if "ambient_zone" in raw:
+        value = raw["ambient_zone"]
+        if not isinstance(value, str) or value not in CANONICAL_AMBIENT_ZONES:
+            raise WorldPackageError(
+                f"{where}.ambient_zone 必须是 {list(CANONICAL_AMBIENT_ZONES)} 之一"
+            )
+        normalized["ambient_zone"] = value
+    if "water_source" in raw:
+        value = raw["water_source"]
+        if not isinstance(value, bool):
+            raise WorldPackageError(f"{where}.water_source 必须是布尔值")
+        normalized["water_source"] = value
+    if "capacity_slots" in raw:
+        value = raw["capacity_slots"]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise WorldPackageError(f"{where}.capacity_slots 必须是整数")
+        if not 0 <= value <= 24:
+            raise WorldPackageError(f"{where}.capacity_slots 必须在 0..24 之间")
+        normalized["capacity_slots"] = value
+    if "item_kind" in raw:
+        value = raw["item_kind"]
+        if not isinstance(value, str) or value not in CANONICAL_MATTER_ITEM_KINDS:
+            raise WorldPackageError(
+                f"{where}.item_kind 必须是 "
+                f"{list(CANONICAL_MATTER_ITEM_KINDS)} 之一"
+            )
+        normalized["item_kind"] = value
+    if "paper_like" in raw:
+        value = raw["paper_like"]
+        if not isinstance(value, bool):
+            raise WorldPackageError(f"{where}.paper_like 必须是布尔值")
+        normalized["paper_like"] = value
+    if "shelf_life_hours" in raw:
+        value = raw["shelf_life_hours"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise WorldPackageError(f"{where}.shelf_life_hours 必须是数字")
+        if not math.isfinite(value) or not 0 < value <= 8760:
+            raise WorldPackageError(
+                f"{where}.shelf_life_hours 必须是 (0, 8760] 内的有限数字"
+            )
+        normalized["shelf_life_hours"] = value
+    if "portions" in raw:
+        value = raw["portions"]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise WorldPackageError(f"{where}.portions 必须是整数")
+        if not 1 <= value <= 24:
+            raise WorldPackageError(f"{where}.portions 必须在 1..24 之间")
+        normalized["portions"] = value
+    if "material_units" in raw:
+        value = raw["material_units"]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise WorldPackageError(f"{where}.material_units 必须是整数")
+        if not 1 <= value <= 24:
+            raise WorldPackageError(f"{where}.material_units 必须在 1..24 之间")
+        normalized["material_units"] = value
+    if "assembly_role" in raw:
+        value = raw["assembly_role"]
+        if not isinstance(value, str) or value not in CANONICAL_ASSEMBLY_ROLES:
+            raise WorldPackageError(
+                f"{where}.assembly_role 必须是 "
+                f"{list(CANONICAL_ASSEMBLY_ROLES)} 之一"
+            )
+        normalized["assembly_role"] = value
+    return normalized
+
+
+def normalize_sale_spec(raw: Any, where: str) -> dict[str, Any]:
+    """校验并规范化 ``sale_spec``（商店可售货品可选扩展）。"""
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Mapping):
+        raise WorldPackageError(f"{where} 必须是对象（sale_spec）")
+    unknown = set(raw) - SALE_SPEC_KEYS
+    if unknown:
+        raise WorldPackageError(
+            f"{where} 包含未知字段: {sorted(unknown)}（允许 {sorted(SALE_SPEC_KEYS)}）"
+        )
+    category = raw.get("category")
+    if not isinstance(category, str) or category not in CANONICAL_SALE_CATEGORIES:
+        raise WorldPackageError(
+            f"{where}.category 必须是 {list(CANONICAL_SALE_CATEGORIES)} 之一"
+        )
+    normalized: dict[str, Any] = {"category": category}
+    if "price_tier" in raw:
+        price_tier = raw["price_tier"]
+        if not isinstance(price_tier, str) or price_tier not in CANONICAL_PRICE_TIERS:
+            raise WorldPackageError(
+                f"{where}.price_tier 必须是 {list(CANONICAL_PRICE_TIERS)} 之一"
+            )
+        normalized["price_tier"] = price_tier
+    if "price" in raw and raw["price"] is not None:
+        normalized["price"] = _require_int(
+            raw["price"], f"{where}.price", minimum=10, maximum=50_000
+        )
+    return normalized
+
+
 def validate_objects_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict) or doc.get("schema_version") != OBJECTS_SCHEMA:
         raise WorldPackageError(f"objects.json schema_version 必须是 {OBJECTS_SCHEMA}")
@@ -797,21 +985,41 @@ def validate_objects_doc(doc: Any) -> dict[str, Any]:
     ids: set[str] = set()
     for index, obj in enumerate(objects_raw):
         where = f"objects.objects[{index}]"
-        if not isinstance(obj, dict) or set(obj) != {"object_id", "name", "kind", "location_id", "note"}:
-            raise WorldPackageError(f"{where} 必须包含 object_id/name/kind/location_id/note")
+        allowed_keys = OBJECT_REQUIRED_KEYS | OBJECT_OPTIONAL_KEYS
+        if (
+            not isinstance(obj, dict)
+            or not OBJECT_REQUIRED_KEYS.issubset(obj)
+            or set(obj) - allowed_keys
+        ):
+            raise WorldPackageError(
+                f"{where} 必须包含 object_id/name/kind/location_id/note，"
+                "可选 affordance_traits/matter_profile/sale_spec"
+            )
         object_id = validate_id(obj["object_id"], f"{where}.object_id", maximum=96)
         if object_id in ids:
             raise WorldPackageError(f"{where} 的 object_id 重复: {object_id}")
         ids.add(object_id)
-        objects.append(
-            {
-                "object_id": object_id,
-                "name": _require_text(obj["name"], f"{where}.name", maximum=80),
-                "kind": _require_text(obj["kind"], f"{where}.kind", maximum=40),
-                "location_id": validate_id(obj["location_id"], f"{where}.location_id", maximum=96),
-                "note": _require_text(obj["note"], f"{where}.note", maximum=200, allow_empty=True),
-            }
-        )
+        entry = {
+            "object_id": object_id,
+            "name": _require_text(obj["name"], f"{where}.name", maximum=80),
+            "kind": _require_text(obj["kind"], f"{where}.kind", maximum=40),
+            "location_id": validate_id(obj["location_id"], f"{where}.location_id", maximum=96),
+            "note": _require_text(obj["note"], f"{where}.note", maximum=200, allow_empty=True),
+        }
+        # 老包没有该字段时保持原 5 键结构，不硬塞默认值。
+        if "affordance_traits" in obj:
+            entry["affordance_traits"] = normalize_affordance_traits(
+                obj["affordance_traits"], f"{where}.affordance_traits"
+            )
+        if "matter_profile" in obj:
+            entry["matter_profile"] = normalize_matter_profile(
+                obj["matter_profile"], f"{where}.matter_profile"
+            )
+        if "sale_spec" in obj:
+            entry["sale_spec"] = normalize_sale_spec(
+                obj["sale_spec"], f"{where}.sale_spec"
+            )
+        objects.append(entry)
     return {"schema_version": OBJECTS_SCHEMA, "objects": objects}
 
 
@@ -1212,16 +1420,26 @@ def package_summary(docs: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "AMBIENT_SCHEMA",
     "AMBIENT_SCHEMA_V2",
+    "CANONICAL_AFFORDANCE_TRAITS",
+    "CANONICAL_AMBIENT_ZONES",
+    "CANONICAL_ASSEMBLY_ROLES",
+    "CANONICAL_MATTER_ITEM_KINDS",
+    "CANONICAL_PRICE_TIERS",
+    "CANONICAL_SALE_CATEGORIES",
+    "MATTER_PROFILE_KEYS",
     "MAX_AMBIENT_TEMPLATES_V1",
     "MAX_AMBIENT_TEMPLATES_V2",
     "CONTENT_SCHEMA",
     "ID_RE",
     "MANIFEST_SCHEMA",
     "NPCS_SCHEMA",
+    "OBJECT_REQUIRED_KEYS",
+    "OBJECT_OPTIONAL_KEYS",
     "OBJECTS_SCHEMA",
     "PACKAGE_FILES",
     "PACKAGE_SCHEMA",
     "RULES_SCHEMA",
+    "SALE_SPEC_KEYS",
     "SCENE_FILE",
     "SCENE_SCHEMA",
     "TOPOLOGY_SCHEMA",
@@ -1230,6 +1448,9 @@ __all__ = [
     "WORLD_SCHEMA",
     "build_manifest",
     "load_package",
+    "normalize_affordance_traits",
+    "normalize_matter_profile",
+    "normalize_sale_spec",
     "package_summary",
     "validate_ambient_doc",
     "validate_content_doc",

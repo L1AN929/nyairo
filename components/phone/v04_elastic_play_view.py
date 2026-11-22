@@ -25,6 +25,7 @@ for _entry in (str(REPO_ROOT), str(_LIFE_SCRIPTS)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)
 
+from components.life.scripts import v02_representation_lease_forget as _rlf
 from components.life.scripts import v04_elastic_play_learning as ep_engine
 
 V04_ELASTIC_PLAY_SCHEMA = ep_engine.VIEW_SCHEMA
@@ -41,23 +42,29 @@ COMMON_COMMAND_FIELDS: frozenset[str] = frozenset({
 PARTNER_ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "append_shared_notebook",
     "share_reading_notice",
+    "share_distinct_annotation",
     "propose_or_respond_experiment",
     "teach_scoped_preference",
     "request_or_answer_practice",
     "play_temporary_game",
     "respond_prepared_surprise",
+    "note_admin_world_change",
 })
 
 SUBJECT_ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "set_day_direction",
     "append_shared_notebook",
     "share_reading_notice",
+    "share_distinct_annotation",
     "propose_or_respond_experiment",
     "save_two_phrasings",
     "teach_scoped_preference",
     "request_or_answer_practice",
     "play_temporary_game",
     "prepare_or_offer_surprise",
+    "curate_personal_project",
+    "propose_grounded_alternative",
+    "note_admin_world_change",
 })
 
 ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
@@ -74,6 +81,11 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "completed_summary",
         "receipt_ref",
         "clear",
+        # Ch.49 一天可以有方向，但不应提前发生：可选步骤推进、打断保留草稿与离线断点。
+        "active_step_ref",
+        "preserve_draft_note",
+        "offline_gap_hours",
+        "offline_gap_note",
     }),
     "append_shared_notebook": COMMON_COMMAND_FIELDS | frozenset({
         "text",
@@ -85,6 +97,15 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "page",
         "line_note",
     }),
+    "share_distinct_annotation": COMMON_COMMAND_FIELDS | frozenset({
+        "material_title",
+        "source_ref",
+        "page",
+        "noticed_detail_cn",
+        "quote_excerpt_cn",
+        "annotation_ref",
+        "shared_with_partner",
+    }),
     "propose_or_respond_experiment": COMMON_COMMAND_FIELDS | frozenset({
         "exp_op",
         "operation",
@@ -95,12 +116,15 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "candidate_snippet",
         "take_text",
         "outcome",
+        "target_work_ref",
+        "divergence_memo_cn",
     }),
     "save_two_phrasings": COMMON_COMMAND_FIELDS | frozenset({
         "context_note",
         "phrasing_a",
         "phrasing_b",
         "chosen",
+        "imagined_reply_cn",
     }),
     "teach_scoped_preference": COMMON_COMMAND_FIELDS | frozenset({
         "scope",
@@ -121,6 +145,8 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "rule_summary",
         "turn_text",
         "keepsake_title",
+        "fictional_prop_object_id",
+        "fictional_role_cn",
     }),
     "prepare_or_offer_surprise": COMMON_COMMAND_FIELDS | frozenset({
         "stage",
@@ -135,6 +161,33 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "surprise_id",
         "decision",
         "response",
+    }),
+    "curate_personal_project": COMMON_COMMAND_FIELDS | frozenset({
+        "op",
+        "project_op",
+        "project_id",
+        "purpose_cn",
+        "medium_kind",
+        "linked_work_ref",
+        "next_step_cn",
+        "claimed_real_audio_recording",
+        "place_id",
+        "entry_status",
+        "note_cn",
+        "private_raw_note_cn",
+        "heard_sources",
+        "entry_index",
+        "evidence_receipt_ref",
+    }),
+    "propose_grounded_alternative": COMMON_COMMAND_FIELDS | frozenset({
+        "target_suggestion_cn",
+        "alternative_cn",
+        "grounded_basis_cn",
+        "action_ref",
+    }),
+    "note_admin_world_change": COMMON_COMMAND_FIELDS | frozenset({
+        "change_summary_cn",
+        "subject_opinion_cn",
     }),
 }
 
@@ -152,6 +205,24 @@ _OPTIONAL_BLANKABLE_FIELDS: frozenset[str] = frozenset({
     "keepsake_title",
     "invite_hint",
     "receipt_ref",
+    "linked_work_ref",
+    "next_step_cn",
+    "place_id",
+    "private_raw_note_cn",
+    "evidence_receipt_ref",
+    "action_ref",
+    "subject_opinion_cn",
+    "source_ref",
+    "quote_excerpt_cn",
+    "annotation_ref",
+    "imagined_reply_cn",
+    "target_work_ref",
+    "divergence_memo_cn",
+    "fictional_prop_object_id",
+    "fictional_role_cn",
+    "active_step_ref",
+    "preserve_draft_note",
+    "offline_gap_note",
 })
 
 
@@ -248,12 +319,18 @@ def _compose_envelope(
         "day_direction",
         "shared_notebook",
         "reading_notices",
+        "distinct_annotations",
+        "distinct_annotation_pairs",
         "experiments",
+        "unresolved_bound_divergences",
         "scoped_preferences",
         "practice_sessions",
         "temporary_game",
         "game_keepsakes",
         "prepared_surprises",
+        "personal_projects",
+        "grounded_alternatives",
+        "admin_world_edits",
         "private_two_phrasings",
         "private_two_phrasings_withheld",
         "llm_calls",
@@ -282,6 +359,75 @@ def _compose_envelope(
     return envelope
 
 
+def _apply_forget_barrier(
+    projected: Mapping[str, Any],
+    barrier: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Filter all elastic-play collections and active play/direction refs through the zero-write forget barrier."""
+    out = copy.deepcopy(dict(projected))
+    fail_closed = bool(barrier.get("fail_closed"))
+
+    for list_key in (
+        "reading_notices",
+        "distinct_annotations",
+        "distinct_annotation_pairs",
+        "experiments",
+        "scoped_preferences",
+        "game_keepsakes",
+        "prepared_surprises",
+        "personal_projects",
+        "grounded_alternatives",
+        "admin_world_edits",
+        "private_two_phrasings",
+    ):
+        if isinstance(out.get(list_key), list):
+            out[list_key] = _rlf.filter_collection_by_barrier(out[list_key], barrier)
+
+    nb = out.get("shared_notebook")
+    if isinstance(nb, dict):
+        for nb_key in ("entries", "branches"):
+            if isinstance(nb.get(nb_key), list):
+                nb[nb_key] = _rlf.filter_collection_by_barrier(nb[nb_key], barrier)
+
+    ubd = out.get("unresolved_bound_divergences")
+    if isinstance(ubd, dict) and isinstance(ubd.get("rows"), list):
+        ubd["rows"] = _rlf.filter_collection_by_barrier(ubd["rows"], barrier)
+        ubd["count"] = len(ubd["rows"])
+
+    ps = out.get("practice_sessions")
+    if isinstance(ps, dict):
+        if isinstance(ps.get("history"), list):
+            ps["history"] = _rlf.filter_collection_by_barrier(ps["history"], barrier)
+        if fail_closed or _rlf.is_entity_forget_blocked(ps, barrier):
+            for pkey in ("topic", "current_prompt", "last_answer", "gentle_feedback"):
+                if pkey in ps:
+                    ps[pkey] = None if ps[pkey] is None else ""
+
+    dd = out.get("day_direction")
+    if isinstance(dd, dict):
+        for dlist in ("optional_directions", "commitments", "completed_items"):
+            if isinstance(dd.get(dlist), list):
+                dd[dlist] = _rlf.filter_collection_by_barrier(dd[dlist], barrier)
+        if fail_closed or _rlf.is_entity_forget_blocked(dd, barrier):
+            for dkey in ("direction_id", "direction", "current_focus", "interrupt_note"):
+                if dkey in dd:
+                    dd[dkey] = None if dkey == "direction_id" else ""
+
+    tg = out.get("temporary_game")
+    if isinstance(tg, dict):
+        if isinstance(tg.get("turns"), list):
+            tg["turns"] = _rlf.filter_collection_by_barrier(tg["turns"], barrier)
+        if fail_closed or _rlf.is_entity_forget_blocked(tg, barrier):
+            tg["active"] = False
+            tg["game_id"] = None
+            tg["turns"] = []
+
+    if fail_closed and "hidden_waiting_surprise_count" in out:
+        out["hidden_waiting_surprise_count"] = 0
+
+    return out
+
+
 def read_v04_elastic_play_view(
     day_root: Path | str,
     *,
@@ -289,10 +435,14 @@ def read_v04_elastic_play_view(
     now_iso: Optional[str] = None,
 ) -> tuple[int, dict[str, Any]]:
     try:
-        projected = ep_engine.project_v04_elastic_play(
-            day_root,
-            has_subject_capability=bool(has_subject_capability),
-            now_iso=now_iso,
+        barrier = _rlf.load_unified_forget_barrier_readonly(day_root)
+        projected = _apply_forget_barrier(
+            ep_engine.project_v04_elastic_play(
+                day_root,
+                has_subject_capability=bool(has_subject_capability),
+                now_iso=now_iso,
+            ),
+            barrier,
         )
         return 200, _compose_envelope(projected, read_only=True, command_status="READ")
     except ep_engine.V04ElasticPlayError as exc:

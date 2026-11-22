@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+import copy
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -64,6 +66,32 @@ OUTCOME_FOUND_BY_SEARCH = "FOUND_BY_LOCAL_SEARCH"
 OUTCOME_STILL_MISSING_ASK = "NOT_FOUND_NEARBY_NEED_CLARIFICATION"
 OUTCOME_CLARIFIED_BY_PARTNER = "CLARIFIED_BY_PARTNER"
 
+MISSED_STATUS_UNSEEN = "MISSED_UNSEEN"
+MISSED_STATUS_MATERIAL_SUPPLIED = "MATERIAL_SUPPLIED"
+MISSED_STATUS_RECONNECTED = "RECONNECTED_NOW_KNOWN"
+MISSED_MOMENT_STATUSES: tuple[str, ...] = (
+    MISSED_STATUS_UNSEEN,
+    MISSED_STATUS_MATERIAL_SUPPLIED,
+    MISSED_STATUS_RECONNECTED,
+)
+
+CONTRIB_RESOLUTIONS: frozenset[str] = frozenset({
+    "accept_diff",
+    "propose_edit",
+    "keep_own_branch",
+})
+CONTRIB_STATUS_PENDING = "PENDING_REVIEW"
+CONTRIB_STATUS_BY_RESOLUTION: dict[str, str] = {
+    "accept_diff": "ACCEPTED_DIFF",
+    "propose_edit": "PROPOSED_EDIT",
+    "keep_own_branch": "KEPT_OWN_BRANCH",
+}
+
+VALID_ACTOR_SIDES: frozenset[str] = frozenset({"subject", "partner"})
+MAX_OPERATION_LEDGER = 256
+PHONE_COMMON_GROUND_REL_PATH = ("phone", "v02_common_ground.json")
+V04_NEIGHBORHOOD_REL_PATH = ("world", "v04_neighborhood_state.json")
+
 DEFAULT_BUSINESS_TZ = timezone(timedelta(hours=8))
 
 
@@ -101,15 +129,20 @@ def _default_state() -> dict[str, Any]:
         "items": {},
         "object_beliefs": {},
         "unseen_move_log": [],
+        "dual_rationale_decisions": {},
+        "missed_moment_reconnections": {},
+        "async_coauthor_contributions": {},
+        "receipts": [],
+        "operation_ledger": {},
         "updated_at": None,
     }
 
 
 def _load_state_readonly(day_root: Path | str) -> dict[str, Any]:
     path = _state_path(day_root)
-    if not path.is_file():
-        return _default_state()
     try:
+        if path.is_symlink() or not path.is_file():
+            return _default_state()
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return _default_state()
@@ -122,6 +155,16 @@ def _load_state_readonly(day_root: Path | str) -> dict[str, Any]:
         state["object_beliefs"] = dict(raw["object_beliefs"])
     if isinstance(raw.get("unseen_move_log"), list):
         state["unseen_move_log"] = list(raw["unseen_move_log"])
+    if isinstance(raw.get("dual_rationale_decisions"), dict):
+        state["dual_rationale_decisions"] = dict(raw["dual_rationale_decisions"])
+    if isinstance(raw.get("missed_moment_reconnections"), dict):
+        state["missed_moment_reconnections"] = dict(raw["missed_moment_reconnections"])
+    if isinstance(raw.get("async_coauthor_contributions"), dict):
+        state["async_coauthor_contributions"] = dict(raw["async_coauthor_contributions"])
+    if isinstance(raw.get("receipts"), list):
+        state["receipts"] = list(raw["receipts"])
+    if isinstance(raw.get("operation_ledger"), dict):
+        state["operation_ledger"] = dict(raw["operation_ledger"])
     state["updated_at"] = raw.get("updated_at")
     return state
 
@@ -677,6 +720,1007 @@ def resolve_unseen_move_with_partner(
     }
 
 
+def _error_result(
+    status_code: int,
+    error_code: str,
+    detail: str = "",
+    **extra: Any,
+) -> dict[str, Any]:
+    code_str = str(error_code)
+    out: dict[str, Any] = {
+        "ok": False,
+        "status_code": int(status_code),
+        "error_code": code_str,
+        "reason_code": code_str,
+        "detail": str(detail or code_str),
+    }
+    out.update(extra)
+    return out
+
+
+def _clean_required_str(value: Any, error_code: str, detail: str) -> tuple[str | None, dict[str, Any] | None]:
+    if not isinstance(value, str) or "\x00" in value or not value.strip():
+        return None, _error_result(400, error_code, detail)
+    return value.strip(), None
+
+
+def _clean_optional_str(value: Any, error_code: str = "INVALID_FIELDS") -> tuple[str, dict[str, Any] | None]:
+    if value is None:
+        return "", None
+    if not isinstance(value, str) or "\x00" in value:
+        return "", _error_result(400, error_code, "Optional string field must be a valid string")
+    return value.strip(), None
+
+
+def _resolve_actor_side(
+    raw_actor: Any,
+    *,
+    default: str | None = None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    if raw_actor is None or (isinstance(raw_actor, str) and not raw_actor.strip()):
+        if default is not None:
+            return default, None
+        return None, _error_result(400, "MISSING_ACTOR_SIDE", "actor_side is required")
+    if not isinstance(raw_actor, str) or "\x00" in raw_actor:
+        return None, _error_result(403, "FORBIDDEN_ACTOR_SIDE", "Invalid actor_side type")
+    side = raw_actor.strip().lower()
+    if side not in VALID_ACTOR_SIDES:
+        return None, _error_result(403, "FORBIDDEN_ACTOR_SIDE", f"Forbidden actor_side: {raw_actor!r}")
+    return side, None
+
+
+def _compute_op_fingerprint(action: str, fields: Mapping[str, Any]) -> str:
+    blob = json.dumps(
+        {"action": action, "fields": dict(fields)},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _check_operation_ledger(
+    state: Mapping[str, Any],
+    op_key: str,
+    fp: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not op_key:
+        return None, None
+    ledger = state.get("operation_ledger")
+    if not isinstance(ledger, Mapping):
+        return None, None
+    entry = ledger.get(op_key)
+    if not isinstance(entry, Mapping):
+        return None, None
+    if entry.get("fingerprint") != fp:
+        return None, _error_result(
+            409,
+            "OPERATION_KEY_CONFLICT",
+            f"operation_key {op_key!r} already used with different payload",
+        )
+    cached = copy.deepcopy(dict(entry.get("result") or {}))
+    cached["ok"] = True
+    cached["status_code"] = 200
+    cached["already_applied"] = True
+    cached["command_status"] = "DUPLICATE"
+    return cached, None
+
+
+def _record_operation_ledger(
+    state: dict[str, Any],
+    op_key: str,
+    *,
+    action: str,
+    fp: str,
+    stamp: str,
+    result: Mapping[str, Any],
+) -> None:
+    if not op_key:
+        return
+    ledger = state.setdefault("operation_ledger", {})
+    ledger[op_key] = {
+        "fingerprint": fp,
+        "action": action,
+        "applied_at": stamp,
+        "result": copy.deepcopy(dict(result)),
+    }
+    if len(ledger) > MAX_OPERATION_LEDGER:
+        oldest = list(ledger.keys())[: len(ledger) - MAX_OPERATION_LEDGER]
+        for old_k in oldest:
+            ledger.pop(old_k, None)
+
+
+def record_dual_rationale_decision(
+    day_root: Path | str,
+    *,
+    decision_id: str | None = None,
+    topic_cn: str,
+    scope_cn: str,
+    adopted_choice_cn: str,
+    subject_rationale_cn: str,
+    partner_rationale_cn: str,
+    subject_kept_detail_cn: str = "",
+    operation_key: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """第 15 章 §10.B：登记共同决定并保留可各自独立修订的双份理由（绝不晋升永久偏好）。"""
+    clean_topic, err = _clean_required_str(topic_cn, "MISSING_DECISION_FIELDS", "topic_cn is required")
+    if err:
+        return err
+    clean_scope, err = _clean_required_str(scope_cn, "MISSING_DECISION_FIELDS", "scope_cn is required")
+    if err:
+        return err
+    clean_choice, err = _clean_required_str(
+        adopted_choice_cn, "MISSING_DECISION_FIELDS", "adopted_choice_cn is required"
+    )
+    if err:
+        return err
+    clean_subj_rat, err = _clean_required_str(
+        subject_rationale_cn, "MISSING_DECISION_FIELDS", "subject_rationale_cn is required"
+    )
+    if err:
+        return err
+    clean_part_rat, err = _clean_required_str(
+        partner_rationale_cn, "MISSING_DECISION_FIELDS", "partner_rationale_cn is required"
+    )
+    if err:
+        return err
+    clean_kept, err = _clean_optional_str(subject_kept_detail_cn)
+    if err:
+        return err
+    op_key, err = _clean_optional_str(operation_key)
+    if err:
+        return err
+    did_opt, err = _clean_optional_str(decision_id)
+    if err:
+        return err
+    did = did_opt or f"dec_{uuid.uuid4().hex[:10]}"
+
+    fp = _compute_op_fingerprint(
+        "record_dual_rationale_decision",
+        {
+            "decision_id": did_opt,
+            "topic_cn": clean_topic,
+            "scope_cn": clean_scope,
+            "adopted_choice_cn": clean_choice,
+            "subject_rationale_cn": clean_subj_rat,
+            "partner_rationale_cn": clean_part_rat,
+            "subject_kept_detail_cn": clean_kept,
+        },
+    )
+    state = _load_state_readonly(day_root)
+    dup, conflict = _check_operation_ledger(state, op_key, fp)
+    if conflict:
+        return conflict
+    if dup:
+        return dup
+
+    stamp = _now_iso(now_iso)
+    existing = dict(state["dual_rationale_decisions"].get(did) or {})
+    record = {
+        "decision_id": did,
+        "topic_cn": clean_topic,
+        "scope_cn": clean_scope,
+        "adopted_choice_cn": clean_choice,
+        "subject_rationale_cn": clean_subj_rat,
+        "partner_rationale_cn": clean_part_rat,
+        "subject_kept_detail_cn": clean_kept,
+        "promotes_permanent_preference": False,
+        "subject_rationale_revision": int(existing.get("subject_rationale_revision") or 1),
+        "partner_rationale_revision": int(existing.get("partner_rationale_revision") or 1),
+        "rationale_history": list(existing.get("rationale_history") or []),
+        "decided_at": existing.get("decided_at") or stamp,
+        "updated_at": stamp,
+    }
+    state["dual_rationale_decisions"][did] = record
+    state["updated_at"] = stamp
+    result = {
+        "ok": True,
+        "status_code": 200,
+        "command_status": "APPLIED",
+        "decision": record,
+    }
+    _record_operation_ledger(
+        state,
+        op_key,
+        action="record_dual_rationale_decision",
+        fp=fp,
+        stamp=stamp,
+        result=result,
+    )
+    _atomic_write_json(_state_path(day_root), state)
+    return result
+
+
+def revise_own_decision_rationale(
+    day_root: Path | str,
+    *,
+    decision_id: str,
+    actor_side: str,
+    new_rationale_cn: str,
+    target_side: str | None = None,
+    operation_key: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """仅允许修订己方理由（subject 只改 subject_rationale_cn，partner 只改 partner_rationale_cn）。"""
+    side, err = _resolve_actor_side(actor_side)
+    if err:
+        return err
+    assert side is not None
+
+    if target_side is not None and str(target_side).strip():
+        clean_target = str(target_side).strip().lower()
+        if clean_target != side:
+            return _error_result(
+                403,
+                "FORBIDDEN_ACTOR_SIDE",
+                f"Actor {side!r} cannot revise {clean_target!r}'s rationale",
+                cross_side_blocked=True,
+            )
+
+    clean_did, err = _clean_required_str(decision_id, "MISSING_DECISION_ID", "decision_id is required")
+    if err:
+        return err
+    clean_rat, err = _clean_required_str(
+        new_rationale_cn, "MISSING_RATIONALE", "new_rationale_cn is required"
+    )
+    if err:
+        return err
+    op_key, err = _clean_optional_str(operation_key)
+    if err:
+        return err
+
+    fp = _compute_op_fingerprint(
+        "revise_own_decision_rationale",
+        {
+            "decision_id": clean_did,
+            "actor_side": side,
+            "new_rationale_cn": clean_rat,
+        },
+    )
+    state = _load_state_readonly(day_root)
+    dup, conflict = _check_operation_ledger(state, op_key, fp)
+    if conflict:
+        return conflict
+    if dup:
+        return dup
+
+    existing = dict(state["dual_rationale_decisions"].get(clean_did) or {})
+    if not existing:
+        return _error_result(404, "DECISION_NOT_FOUND", f"Decision not found: {clean_did!r}")
+
+    stamp = _now_iso(now_iso)
+    history = list(existing.get("rationale_history") or [])
+    if side == "subject":
+        old_val = str(existing.get("subject_rationale_cn") or "")
+        existing["subject_rationale_cn"] = clean_rat
+        existing["subject_rationale_revision"] = int(existing.get("subject_rationale_revision") or 1) + 1
+    else:
+        old_val = str(existing.get("partner_rationale_cn") or "")
+        existing["partner_rationale_cn"] = clean_rat
+        existing["partner_rationale_revision"] = int(existing.get("partner_rationale_revision") or 1) + 1
+
+    history.append(
+        {
+            "side": side,
+            "previous_rationale_cn": old_val,
+            "revised_to_cn": clean_rat,
+            "revised_at": stamp,
+        }
+    )
+    existing["rationale_history"] = history[-16:]
+    existing["promotes_permanent_preference"] = False
+    existing["updated_at"] = stamp
+
+    state["dual_rationale_decisions"][clean_did] = existing
+    state["updated_at"] = stamp
+    result = {
+        "ok": True,
+        "status_code": 200,
+        "command_status": "APPLIED",
+        "decision": existing,
+    }
+    _record_operation_ledger(
+        state,
+        op_key,
+        action="revise_own_decision_rationale",
+        fp=fp,
+        stamp=stamp,
+        result=result,
+    )
+    _atomic_write_json(_state_path(day_root), state)
+    return result
+
+
+def record_missed_moment(
+    day_root: Path | str,
+    *,
+    moment_id: str | None = None,
+    summary_cn: str,
+    actor_side: str = "subject",
+    operation_key: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """第 15 章 §10.E：登记“当时没看到”的错过瞬间（missed_originally=True, status=MISSED_UNSEEN）。"""
+    side, err = _resolve_actor_side(actor_side, default="subject")
+    if err:
+        return err
+    clean_summary, err = _clean_required_str(
+        summary_cn, "MISSING_MISSED_MOMENT_SUMMARY", "summary_cn is required"
+    )
+    if err:
+        return err
+    mid_opt, err = _clean_optional_str(moment_id)
+    if err:
+        return err
+    op_key, err = _clean_optional_str(operation_key)
+    if err:
+        return err
+    mid = mid_opt or f"mom_{uuid.uuid4().hex[:10]}"
+
+    fp = _compute_op_fingerprint(
+        "record_missed_moment",
+        {
+            "moment_id": mid_opt,
+            "summary_cn": clean_summary,
+            "actor_side": side,
+        },
+    )
+    state = _load_state_readonly(day_root)
+    dup, conflict = _check_operation_ledger(state, op_key, fp)
+    if conflict:
+        return conflict
+    if dup:
+        return dup
+
+    if mid in state["missed_moment_reconnections"]:
+        return _error_result(
+            409, "MISSED_MOMENT_ALREADY_EXISTS", f"Missed moment already exists: {mid!r}"
+        )
+
+    stamp = _now_iso(now_iso)
+    record = {
+        "moment_id": mid,
+        "summary_cn": clean_summary,
+        "recorded_by": side,
+        "missed_originally": True,
+        "status": MISSED_STATUS_UNSEEN,
+        "material_note_cn": "",
+        "material_ref": None,
+        "material_supplied_by": None,
+        "material_supplied_at": None,
+        "catchup_note_cn": "",
+        "known_since": None,
+        "reconnected_at": None,
+        "recorded_at": stamp,
+        "updated_at": stamp,
+    }
+    state["missed_moment_reconnections"][mid] = record
+    state["updated_at"] = stamp
+    result = {
+        "ok": True,
+        "status_code": 200,
+        "command_status": "APPLIED",
+        "missed_moment": record,
+    }
+    _record_operation_ledger(
+        state,
+        op_key,
+        action="record_missed_moment",
+        fp=fp,
+        stamp=stamp,
+        result=result,
+    )
+    _atomic_write_json(_state_path(day_root), state)
+    return result
+
+
+def supply_missed_moment_material(
+    day_root: Path | str,
+    *,
+    moment_id: str,
+    material_note_cn: str,
+    material_ref: str | None = None,
+    actor_side: str = "partner",
+    operation_key: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """第 15 章 §10.E：伴侣补送错过事件的材料，仅推进到 MATERIAL_SUPPLIED，绝不单方面强行已读重接。"""
+    side, err = _resolve_actor_side(actor_side, default="partner")
+    if err:
+        return err
+    clean_mid, err = _clean_required_str(moment_id, "MISSING_MOMENT_ID", "moment_id is required")
+    if err:
+        return err
+    clean_note, err = _clean_required_str(
+        material_note_cn, "MISSING_MATERIAL_NOTE", "material_note_cn is required"
+    )
+    if err:
+        return err
+    clean_ref, err = _clean_optional_str(material_ref)
+    if err:
+        return err
+    op_key, err = _clean_optional_str(operation_key)
+    if err:
+        return err
+
+    fp = _compute_op_fingerprint(
+        "supply_missed_moment_material",
+        {
+            "moment_id": clean_mid,
+            "material_note_cn": clean_note,
+            "material_ref": clean_ref or None,
+            "actor_side": side,
+        },
+    )
+    state = _load_state_readonly(day_root)
+    dup, conflict = _check_operation_ledger(state, op_key, fp)
+    if conflict:
+        return conflict
+    if dup:
+        return dup
+
+    existing = dict(state["missed_moment_reconnections"].get(clean_mid) or {})
+    if not existing:
+        return _error_result(404, "MISSED_MOMENT_NOT_FOUND", f"Missed moment not found: {clean_mid!r}")
+    if existing.get("status") == MISSED_STATUS_RECONNECTED:
+        return _error_result(
+            409,
+            "MISSED_MOMENT_ALREADY_RECONNECTED",
+            f"Missed moment {clean_mid!r} is already reconnected",
+        )
+
+    stamp = _now_iso(now_iso)
+    existing["material_note_cn"] = clean_note
+    existing["material_ref"] = clean_ref or None
+    existing["material_supplied_by"] = side
+    existing["material_supplied_at"] = stamp
+    existing["status"] = MISSED_STATUS_MATERIAL_SUPPLIED
+    existing["missed_originally"] = True
+    existing["known_since"] = None
+    existing["updated_at"] = stamp
+
+    state["missed_moment_reconnections"][clean_mid] = existing
+    state["updated_at"] = stamp
+    result = {
+        "ok": True,
+        "status_code": 200,
+        "command_status": "APPLIED",
+        "missed_moment": existing,
+    }
+    _record_operation_ledger(
+        state,
+        op_key,
+        action="supply_missed_moment_material",
+        fp=fp,
+        stamp=stamp,
+        result=result,
+    )
+    _atomic_write_json(_state_path(day_root), state)
+    return result
+
+
+def acknowledge_missed_moment_catchup(
+    day_root: Path | str,
+    *,
+    moment_id: str,
+    catchup_note_cn: str,
+    actor_side: str = "subject",
+    now_iso: str | None = None,
+    operation_key: str | None = None,
+) -> dict[str, Any]:
+    """第 15 章 §10.E：主体亲手补看后确认重接（RECONNECTED_NOW_KNOWN），永久保留 missed_originally=True。"""
+    side, err = _resolve_actor_side(actor_side, default="subject")
+    if err:
+        return err
+    if side != "subject":
+        return _error_result(
+            403,
+            "FORBIDDEN_ACTOR_SIDE",
+            "Only subject can confirm catch-up to RECONNECTED_NOW_KNOWN",
+        )
+    clean_mid, err = _clean_required_str(moment_id, "MISSING_MOMENT_ID", "moment_id is required")
+    if err:
+        return err
+    clean_note, err = _clean_required_str(
+        catchup_note_cn, "MISSING_CATCHUP_NOTE", "catchup_note_cn is required"
+    )
+    if err:
+        return err
+    op_key, err = _clean_optional_str(operation_key)
+    if err:
+        return err
+
+    fp = _compute_op_fingerprint(
+        "acknowledge_missed_moment_catchup",
+        {
+            "moment_id": clean_mid,
+            "catchup_note_cn": clean_note,
+            "actor_side": side,
+        },
+    )
+    state = _load_state_readonly(day_root)
+    dup, conflict = _check_operation_ledger(state, op_key, fp)
+    if conflict:
+        return conflict
+    if dup:
+        return dup
+
+    existing = dict(state["missed_moment_reconnections"].get(clean_mid) or {})
+    if not existing:
+        return _error_result(404, "MISSED_MOMENT_NOT_FOUND", f"Missed moment not found: {clean_mid!r}")
+
+    stamp = _now_iso(now_iso)
+    existing["status"] = MISSED_STATUS_RECONNECTED
+    existing["catchup_note_cn"] = clean_note
+    existing["known_since"] = existing.get("known_since") or stamp
+    existing["reconnected_at"] = stamp
+    # 反事后全知铁律：补看重接后也永久保留“当时确实没看见”的历史事实
+    existing["missed_originally"] = True
+    existing["updated_at"] = stamp
+
+    state["missed_moment_reconnections"][clean_mid] = existing
+    state["updated_at"] = stamp
+    result = {
+        "ok": True,
+        "status_code": 200,
+        "command_status": "APPLIED",
+        "missed_moment": existing,
+    }
+    _record_operation_ledger(
+        state,
+        op_key,
+        action="acknowledge_missed_moment_catchup",
+        fp=fp,
+        stamp=stamp,
+        result=result,
+    )
+    _atomic_write_json(_state_path(day_root), state)
+    return result
+
+
+def submit_async_coauthor_contribution(
+    day_root: Path | str,
+    *,
+    contrib_id: str | None = None,
+    work_ref: str,
+    author_id: str,
+    author_label_cn: str,
+    is_simulated: bool = True,
+    diff_summary_cn: str,
+    operation_key: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """第 15 章 §10.J：提交共同作者的异步改动贡献（模拟作者严格保留 is_simulated=True）。"""
+    if not isinstance(is_simulated, bool):
+        return _error_result(400, "INVALID_FIELDS", "is_simulated must be a boolean")
+    clean_work_ref, err = _clean_required_str(work_ref, "MISSING_CONTRIBUTION_FIELDS", "work_ref is required")
+    if err:
+        return err
+    clean_author_id, err = _clean_required_str(author_id, "MISSING_CONTRIBUTION_FIELDS", "author_id is required")
+    if err:
+        return err
+    clean_author_label, err = _clean_required_str(
+        author_label_cn, "MISSING_CONTRIBUTION_FIELDS", "author_label_cn is required"
+    )
+    if err:
+        return err
+    clean_diff, err = _clean_required_str(
+        diff_summary_cn, "MISSING_CONTRIBUTION_FIELDS", "diff_summary_cn is required"
+    )
+    if err:
+        return err
+    cid_opt, err = _clean_optional_str(contrib_id)
+    if err:
+        return err
+    op_key, err = _clean_optional_str(operation_key)
+    if err:
+        return err
+    cid = cid_opt or f"contrib_{uuid.uuid4().hex[:10]}"
+
+    fp = _compute_op_fingerprint(
+        "submit_async_coauthor_contribution",
+        {
+            "contrib_id": cid_opt,
+            "work_ref": clean_work_ref,
+            "author_id": clean_author_id,
+            "author_label_cn": clean_author_label,
+            "is_simulated": bool(is_simulated),
+            "diff_summary_cn": clean_diff,
+        },
+    )
+    state = _load_state_readonly(day_root)
+    dup, conflict = _check_operation_ledger(state, op_key, fp)
+    if conflict:
+        return conflict
+    if dup:
+        return dup
+
+    stamp = _now_iso(now_iso)
+    record = {
+        "contrib_id": cid,
+        "work_ref": clean_work_ref,
+        "author_id": clean_author_id,
+        "author_label_cn": clean_author_label,
+        "is_simulated": bool(is_simulated),
+        "identity_kind": "simulated_coauthor" if is_simulated else "authorized_coauthor",
+        "address_is_not_identity": True,
+        "diff_summary_cn": clean_diff,
+        "status": CONTRIB_STATUS_PENDING,
+        "resolution": None,
+        "resolution_note_cn": "",
+        "resolved_by": None,
+        "resolved_at": None,
+        "submitted_at": stamp,
+        "updated_at": stamp,
+    }
+    state["async_coauthor_contributions"][cid] = record
+    state["updated_at"] = stamp
+    result = {
+        "ok": True,
+        "status_code": 200,
+        "command_status": "APPLIED",
+        "contribution": record,
+    }
+    _record_operation_ledger(
+        state,
+        op_key,
+        action="submit_async_coauthor_contribution",
+        fp=fp,
+        stamp=stamp,
+        result=result,
+    )
+    _atomic_write_json(_state_path(day_root), state)
+    return result
+
+
+def resolve_async_contribution(
+    day_root: Path | str,
+    *,
+    contrib_id: str,
+    resolution: str,
+    note_cn: str = "",
+    actor_side: str = "subject",
+    operation_key: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """第 15 章 §10.J：主体恢复后处理异步合写差异（accept_diff / propose_edit / keep_own_branch）。"""
+    side, err = _resolve_actor_side(actor_side, default="subject")
+    if err:
+        return err
+    if side != "subject":
+        return _error_result(
+            403, "FORBIDDEN_ACTOR_SIDE", "Only subject can resolve async coauthor contributions"
+        )
+    clean_cid, err = _clean_required_str(contrib_id, "MISSING_CONTRIBUTION_ID", "contrib_id is required")
+    if err:
+        return err
+    clean_res, err = _clean_required_str(
+        resolution, "INVALID_CONTRIBUTION_RESOLUTION", "resolution is required"
+    )
+    if err:
+        return err
+    if clean_res not in CONTRIB_RESOLUTIONS:
+        return _error_result(
+            400,
+            "INVALID_CONTRIBUTION_RESOLUTION",
+            f"Unsupported resolution: {clean_res!r}",
+        )
+    clean_note, err = _clean_optional_str(note_cn)
+    if err:
+        return err
+    op_key, err = _clean_optional_str(operation_key)
+    if err:
+        return err
+
+    fp = _compute_op_fingerprint(
+        "resolve_async_contribution",
+        {
+            "contrib_id": clean_cid,
+            "resolution": clean_res,
+            "note_cn": clean_note,
+            "actor_side": side,
+        },
+    )
+    state = _load_state_readonly(day_root)
+    dup, conflict = _check_operation_ledger(state, op_key, fp)
+    if conflict:
+        return conflict
+    if dup:
+        return dup
+
+    existing = dict(state["async_coauthor_contributions"].get(clean_cid) or {})
+    if not existing:
+        return _error_result(
+            404, "CONTRIBUTION_NOT_FOUND", f"Async contribution not found: {clean_cid!r}"
+        )
+
+    stamp = _now_iso(now_iso)
+    # 模拟作者身份标记绝不因合写裁决而伪造成真人身份
+    preserved_simulated = bool(existing.get("is_simulated", True))
+    existing["is_simulated"] = preserved_simulated
+    existing["identity_kind"] = "simulated_coauthor" if preserved_simulated else "authorized_coauthor"
+    existing["resolution"] = clean_res
+    existing["status"] = CONTRIB_STATUS_BY_RESOLUTION[clean_res]
+    existing["resolution_note_cn"] = clean_note
+    existing["resolved_by"] = "subject"
+    existing["resolved_at"] = stamp
+    existing["updated_at"] = stamp
+
+    state["async_coauthor_contributions"][clean_cid] = existing
+    state["updated_at"] = stamp
+    result = {
+        "ok": True,
+        "status_code": 200,
+        "command_status": "APPLIED",
+        "contribution": existing,
+    }
+    _record_operation_ledger(
+        state,
+        op_key,
+        action="resolve_async_contribution",
+        fp=fp,
+        stamp=stamp,
+        result=result,
+    )
+    _atomic_write_json(_state_path(day_root), state)
+    return result
+
+
+def _read_json_mapping_readonly(path: Path) -> dict[str, Any] | None:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return dict(parsed) if isinstance(parsed, Mapping) else None
+
+
+def _extract_state_from_receipt_entry(entry: Any) -> tuple[str, str]:
+    if isinstance(entry, str):
+        return entry.strip().upper(), ""
+    if isinstance(entry, Mapping):
+        for key in ("delivery_state", "receipt_state", "receipt_stage", "state", "stage", "status"):
+            val = entry.get(key)
+            if isinstance(val, str) and val.strip():
+                stamp = str(
+                    entry.get("updated_at") or entry.get("at") or entry.get("timestamp") or ""
+                ).strip()
+                return val.strip().upper(), stamp
+    return "", ""
+
+
+def _pick_latest_receipt_from_doc(doc: Mapping[str, Any]) -> tuple[str, str]:
+    raw_receipts = doc.get("receipts")
+    candidates: list[tuple[str, int, str]] = []
+    idx = 0
+    if isinstance(raw_receipts, list):
+        for entry in raw_receipts:
+            st, ts = _extract_state_from_receipt_entry(entry)
+            if st:
+                candidates.append((ts, idx, st))
+            idx += 1
+    elif isinstance(raw_receipts, Mapping):
+        for key in sorted(raw_receipts.keys()):
+            st, ts = _extract_state_from_receipt_entry(raw_receipts[key])
+            if st:
+                candidates.append((ts, idx, st))
+            idx += 1
+    if candidates:
+        if any(c[0] for c in candidates):
+            best = max(candidates, key=lambda c: (c[0], c[1]))
+        else:
+            best = candidates[-1]
+        return best[2], "receipts"
+
+    raw_items = doc.get("items")
+    item_iter: Iterable[Any] = (
+        raw_items.values()
+        if isinstance(raw_items, Mapping)
+        else (raw_items if isinstance(raw_items, list) else ())
+    )
+    for item in item_iter:
+        if isinstance(item, Mapping):
+            st, ts = _extract_state_from_receipt_entry(item)
+            if st:
+                candidates.append((ts, idx, st))
+            idx += 1
+    if candidates:
+        if any(c[0] for c in candidates):
+            best = max(candidates, key=lambda c: (c[0], c[1]))
+        else:
+            best = candidates[-1]
+        return best[2], "items"
+    return "", ""
+
+
+def _extract_latest_receipt_state_readonly(
+    day_root: Path,
+    state: Mapping[str, Any],
+) -> tuple[str, str]:
+    """只读提取最新沟通回执状态（绝不把 SENT/DELIVERED/READ 升格为已理解）。"""
+    for rel in (PHONE_COMMON_GROUND_REL_PATH, ("v02_common_ground.json",)):
+        doc = _read_json_mapping_readonly(day_root.joinpath(*rel))
+        if doc is not None:
+            st, kind = _pick_latest_receipt_from_doc(doc)
+            if st:
+                return st, f"{'/'.join(rel)}#{kind}"
+
+    st, kind = _pick_latest_receipt_from_doc(state)
+    if st:
+        return st, f"{COMMON_GROUND_REL_PATH}#{kind}"
+    return "NONE", "none"
+
+
+def _extract_neighborhood_simulated_contacts_readonly(day_root: Path) -> list[dict[str, Any]]:
+    """仅当磁盘真实存在 world/v04_neighborhood_state.json 时只读摘要模拟联系人，空目录绝不伪造。"""
+    nb_path = day_root.joinpath(*V04_NEIGHBORHOOD_REL_PATH)
+    doc = _read_json_mapping_readonly(nb_path)
+    if doc is None:
+        return []
+
+    contacts: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def _add_contact(
+        *,
+        cid: str,
+        display_name_cn: str,
+        role_cn: str,
+        venue: str,
+        activity_cn: str = "",
+    ) -> None:
+        clean_id = str(cid or "").strip()
+        clean_name = str(display_name_cn or clean_id).strip()
+        if not clean_id or clean_id in seen_ids:
+            return
+        seen_ids.add(clean_id)
+        contacts.append(
+            {
+                "contact_id": clean_id,
+                "display_name_cn": clean_name,
+                "role_cn": str(role_cn or "").strip(),
+                "venue": str(venue or "").strip(),
+                "current_activity_cn": str(activity_cn or "").strip(),
+                "is_simulated": True,
+                "address_is_not_identity": True,
+                "source": "world/v04_neighborhood_state.json",
+            }
+        )
+
+    pub = doc.get("public_life")
+    if isinstance(pub, Mapping):
+        bookstore = pub.get("bookstore")
+        if isinstance(bookstore, Mapping) and isinstance(bookstore.get("shopkeeper_life"), Mapping):
+            sk = bookstore["shopkeeper_life"]
+            _add_contact(
+                cid=str(sk.get("resident_id") or "nukui_shinichi"),
+                display_name_cn=str(sk.get("shopkeeper_name") or sk.get("resident_name") or "温井慎一"),
+                role_cn=str(sk.get("role") or "街角旧书店店主"),
+                venue="bookstore",
+                activity_cn=str(sk.get("current_task_cn") or ""),
+            )
+        cafe = pub.get("cafe_resident")
+        if isinstance(cafe, Mapping):
+            _add_contact(
+                cid=str(cafe.get("resident_id") or "saeki_aoi"),
+                display_name_cn=str(cafe.get("resident_name") or "佐伯葵"),
+                role_cn=str(cafe.get("role") or "街角焙煎咖啡屋店主"),
+                venue=str(cafe.get("home_venue") or "cafe"),
+                activity_cn=str(cafe.get("current_phase_cn") or ""),
+            )
+
+    for container in (doc, pub if isinstance(pub, Mapping) else {}):
+        for list_key in ("independent_residents", "residents", "neighbors", "contacts", "simulated_contacts"):
+            rows = container.get(list_key)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                cid = str(row.get("resident_id") or row.get("contact_id") or row.get("id") or "").strip()
+                name = str(
+                    row.get("resident_name")
+                    or row.get("shopkeeper_name")
+                    or row.get("display_name_cn")
+                    or row.get("display_name")
+                    or row.get("name")
+                    or cid
+                ).strip()
+                _add_contact(
+                    cid=cid,
+                    display_name_cn=name,
+                    role_cn=str(row.get("role_cn") or row.get("role") or ""),
+                    venue=str(row.get("home_venue") or row.get("venue") or ""),
+                    activity_cn=str(row.get("current_task_cn") or row.get("current_phase_cn") or ""),
+                )
+
+    if (
+        not contacts
+        and doc.get("schema") == "world.v04.neighborhood_living.v1"
+        and isinstance(pub, Mapping)
+        and isinstance(pub.get("bookstore"), Mapping)
+    ):
+        _add_contact(
+            cid="nukui_shinichi",
+            display_name_cn="温井慎一",
+            role_cn="街角旧书店店主",
+            venue="bookstore",
+        )
+        _add_contact(
+            cid="saeki_aoi",
+            display_name_cn="佐伯葵",
+            role_cn="街角焙煎咖啡屋店主",
+            venue="cafe",
+        )
+
+    return contacts
+
+
+def _build_contact_directory_readonly(
+    day_root: Path | str,
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """第 13 章 §3 + 第 15 章 §10.J：纯零写只读联系人与通道名录（区分伴侣真实通道与明确模拟联系人）。"""
+    root = Path(day_root)
+    latest_receipt_state, receipt_source = _extract_latest_receipt_state_readonly(root, state)
+    partner_channels = [
+        {
+            "channel_id": "local_partner",
+            "channel_kind": "local_partner_channel",
+            "label_cn": "本地伴侣沟通通道",
+            "address_is_not_identity": True,
+            "is_simulated": False,
+            "latest_receipt_state": latest_receipt_state,
+            "has_receipt": latest_receipt_state != "NONE",
+            "understood_claimed": latest_receipt_state in (DELIVERY_UNDERSTOOD, DELIVERY_AGREED),
+            "receipt_chain_distinction_enforced": True,
+            "receipt_source": receipt_source,
+        }
+    ]
+
+    simulated_contacts = _extract_neighborhood_simulated_contacts_readonly(root)
+    sim_by_id: dict[str, dict[str, Any]] = {
+        c["contact_id"]: c for c in simulated_contacts if isinstance(c.get("contact_id"), str)
+    }
+    contribs = state.get("async_coauthor_contributions")
+    if isinstance(contribs, Mapping):
+        for cid in sorted(contribs.keys()):
+            row = contribs[cid]
+            if not isinstance(row, Mapping) or not bool(row.get("is_simulated", False)):
+                continue
+            aid = str(row.get("author_id") or "").strip()
+            if not aid:
+                continue
+            work_ref = str(row.get("work_ref") or "").strip()
+            if aid in sim_by_id:
+                refs = list(sim_by_id[aid].get("work_refs") or [])
+                if work_ref and work_ref not in refs:
+                    refs.append(work_ref)
+                sim_by_id[aid]["work_refs"] = refs
+                continue
+            entry = {
+                "contact_id": aid,
+                "display_name_cn": str(row.get("author_label_cn") or aid).strip(),
+                "role_cn": "模拟共同作者",
+                "venue": "async_coauthor",
+                "is_simulated": True,
+                "address_is_not_identity": True,
+                "source": "async_coauthor_contributions",
+                "work_refs": [work_ref] if work_ref else [],
+            }
+            sim_by_id[aid] = entry
+            simulated_contacts.append(entry)
+
+    return {
+        "partner_channels": partner_channels,
+        "simulated_contacts": simulated_contacts,
+        "address_is_not_identity": True,
+        "zero_write": True,
+    }
+
+
 def read_v02_common_ground_view(
     day_root: Path | str,
     *,
@@ -739,6 +1783,23 @@ def read_v02_common_ground_view(
             obj_view["actual_spot"] = raw_obj.get("actual_spot")
         projected_objects.append(obj_view)
 
+    dual_decisions = [
+        copy.deepcopy(state["dual_rationale_decisions"][did])
+        for did in sorted(state["dual_rationale_decisions"].keys())
+        if isinstance(state["dual_rationale_decisions"][did], Mapping)
+    ]
+    missed_moments = [
+        copy.deepcopy(state["missed_moment_reconnections"][mid])
+        for mid in sorted(state["missed_moment_reconnections"].keys())
+        if isinstance(state["missed_moment_reconnections"][mid], Mapping)
+    ]
+    async_contributions = [
+        copy.deepcopy(state["async_coauthor_contributions"][cid])
+        for cid in sorted(state["async_coauthor_contributions"].keys())
+        if isinstance(state["async_coauthor_contributions"][cid], Mapping)
+    ]
+    contact_directory = _build_contact_directory_readonly(day_root, state)
+
     return {
         "schema_version": SCHEMA_VERSION,
         "evaluated_at": stamp,
@@ -758,6 +1819,10 @@ def read_v02_common_ground_view(
         "items": visible_items,
         "object_beliefs": projected_objects,
         "pending_partner_questions": pending_questions,
+        "dual_rationale_decisions": dual_decisions,
+        "missed_moment_reconnections": missed_moments,
+        "async_coauthor_contributions": async_contributions,
+        "contact_directory": contact_directory,
     }
 
 
@@ -795,6 +1860,18 @@ def summarize_common_ground_for_cognition(
         "private_unshared": private_unshared,
         "pending_clarifications": pending,
         "pending_partner_questions": view["pending_partner_questions"][:4],
+        "dual_rationale_decisions": view["dual_rationale_decisions"][:4],
+        "pending_missed_moment_catchups": [
+            m
+            for m in view["missed_moment_reconnections"]
+            if m.get("status") != MISSED_STATUS_RECONNECTED
+        ][:4],
+        "pending_async_contributions": [
+            c
+            for c in view["async_coauthor_contributions"]
+            if c.get("status") == CONTRIB_STATUS_PENDING
+        ][:4],
+        "contact_directory": view["contact_directory"],
     }
 
 
@@ -802,10 +1879,34 @@ def mutate_v02_common_ground(
     day_root: Path | str,
     payload: Mapping[str, Any],
     *,
+    actor_side: str | None = None,
     now_iso: str | None = None,
 ) -> dict[str, Any]:
     """统一 POST 写入口。"""
+    if not isinstance(payload, Mapping):
+        return _error_result(400, "INVALID_FIELDS", "payload must be a mapping")
     action = str(payload.get("action") or "").strip()
+
+    if actor_side is not None:
+        kw_side, kw_err = _resolve_actor_side(actor_side)
+        if kw_err:
+            return kw_err
+        raw_pl_actor = payload.get("actor_side")
+        if raw_pl_actor is not None and str(raw_pl_actor).strip():
+            pl_side, pl_err = _resolve_actor_side(raw_pl_actor)
+            if pl_err:
+                return pl_err
+            if pl_side != kw_side:
+                return _error_result(
+                    403,
+                    "FORBIDDEN_ACTOR_SIDE",
+                    f"Payload actor_side {pl_side!r} does not match caller actor_side {kw_side!r}",
+                )
+
+    def _eff_actor(default: str | None = None) -> tuple[str | None, dict[str, Any] | None]:
+        raw = actor_side if actor_side is not None else payload.get("actor_side")
+        return _resolve_actor_side(raw, default=default)
+
     if action == "record_ground_item":
         return record_ground_item(
             day_root,
@@ -878,6 +1979,133 @@ def mutate_v02_common_ground(
             partner_told_spot=str(payload.get("partner_told_spot") or ""),
             now_iso=now_iso,
         )
+    if action == "record_dual_rationale_decision":
+        return record_dual_rationale_decision(
+            day_root,
+            decision_id=payload.get("decision_id"),
+            topic_cn=payload.get("topic_cn"),  # type: ignore[arg-type]
+            scope_cn=payload.get("scope_cn"),  # type: ignore[arg-type]
+            adopted_choice_cn=payload.get("adopted_choice_cn"),  # type: ignore[arg-type]
+            subject_rationale_cn=payload.get("subject_rationale_cn"),  # type: ignore[arg-type]
+            partner_rationale_cn=payload.get("partner_rationale_cn"),  # type: ignore[arg-type]
+            subject_kept_detail_cn=payload.get("subject_kept_detail_cn", ""),  # type: ignore[arg-type]
+            operation_key=payload.get("operation_key"),
+            now_iso=now_iso,
+        )
+    if action == "revise_own_decision_rationale":
+        eff_side, err = _eff_actor(default=None)
+        if err:
+            return err
+        assert eff_side is not None
+        if eff_side == "subject" and payload.get("partner_rationale_cn") is not None:
+            return _error_result(
+                403,
+                "FORBIDDEN_ACTOR_SIDE",
+                "Subject cannot revise partner_rationale_cn",
+                cross_side_blocked=True,
+            )
+        if eff_side == "partner" and payload.get("subject_rationale_cn") is not None:
+            return _error_result(
+                403,
+                "FORBIDDEN_ACTOR_SIDE",
+                "Partner cannot revise subject_rationale_cn",
+                cross_side_blocked=True,
+            )
+        raw_tfield = payload.get("target_field")
+        if raw_tfield is not None:
+            expected_field = "subject_rationale_cn" if eff_side == "subject" else "partner_rationale_cn"
+            if str(raw_tfield).strip() != expected_field:
+                return _error_result(
+                    403,
+                    "FORBIDDEN_ACTOR_SIDE",
+                    f"Actor {eff_side!r} cannot target field {raw_tfield!r}",
+                    cross_side_blocked=True,
+                )
+        return revise_own_decision_rationale(
+            day_root,
+            decision_id=payload.get("decision_id"),  # type: ignore[arg-type]
+            actor_side=eff_side,
+            new_rationale_cn=payload.get("new_rationale_cn"),  # type: ignore[arg-type]
+            target_side=payload.get("target_side"),
+            operation_key=payload.get("operation_key"),
+            now_iso=now_iso,
+        )
+    if action == "record_missed_moment":
+        eff_side, err = _eff_actor(default="subject")
+        if err:
+            return err
+        assert eff_side is not None
+        return record_missed_moment(
+            day_root,
+            moment_id=payload.get("moment_id"),
+            summary_cn=payload.get("summary_cn"),  # type: ignore[arg-type]
+            actor_side=eff_side,
+            operation_key=payload.get("operation_key"),
+            now_iso=now_iso,
+        )
+    if action == "supply_missed_moment_material":
+        eff_side, err = _eff_actor(default="partner")
+        if err:
+            return err
+        assert eff_side is not None
+        raw_status = str(payload.get("status") or "").strip().upper()
+        if raw_status == MISSED_STATUS_RECONNECTED or bool(payload.get("force_reconnected")) or payload.get("known_since") is not None:
+            return _error_result(
+                403,
+                "FORBIDDEN_ACTOR_SIDE",
+                "Cannot unilaterally force RECONNECTED_NOW_KNOWN without subject catch-up",
+            )
+        return supply_missed_moment_material(
+            day_root,
+            moment_id=payload.get("moment_id"),  # type: ignore[arg-type]
+            material_note_cn=payload.get("material_note_cn"),  # type: ignore[arg-type]
+            material_ref=payload.get("material_ref"),
+            actor_side=eff_side,
+            operation_key=payload.get("operation_key"),
+            now_iso=now_iso,
+        )
+    if action == "acknowledge_missed_moment_catchup":
+        eff_side, err = _eff_actor(default="subject")
+        if err:
+            return err
+        assert eff_side is not None
+        return acknowledge_missed_moment_catchup(
+            day_root,
+            moment_id=payload.get("moment_id"),  # type: ignore[arg-type]
+            catchup_note_cn=payload.get("catchup_note_cn"),  # type: ignore[arg-type]
+            actor_side=eff_side,
+            now_iso=now_iso or payload.get("now_iso"),
+            operation_key=payload.get("operation_key"),
+        )
+    if action == "submit_async_coauthor_contribution":
+        raw_sim = payload.get("is_simulated", True)
+        if not isinstance(raw_sim, bool):
+            return _error_result(400, "INVALID_FIELDS", "is_simulated must be a boolean")
+        return submit_async_coauthor_contribution(
+            day_root,
+            contrib_id=payload.get("contrib_id"),
+            work_ref=payload.get("work_ref"),  # type: ignore[arg-type]
+            author_id=payload.get("author_id"),  # type: ignore[arg-type]
+            author_label_cn=payload.get("author_label_cn"),  # type: ignore[arg-type]
+            is_simulated=raw_sim,
+            diff_summary_cn=payload.get("diff_summary_cn"),  # type: ignore[arg-type]
+            operation_key=payload.get("operation_key"),
+            now_iso=now_iso,
+        )
+    if action == "resolve_async_contribution":
+        eff_side, err = _eff_actor(default="subject")
+        if err:
+            return err
+        assert eff_side is not None
+        return resolve_async_contribution(
+            day_root,
+            contrib_id=payload.get("contrib_id"),  # type: ignore[arg-type]
+            resolution=payload.get("resolution"),  # type: ignore[arg-type]
+            note_cn=payload.get("note_cn", ""),  # type: ignore[arg-type]
+            actor_side=eff_side,
+            operation_key=payload.get("operation_key"),
+            now_iso=now_iso,
+        )
     return {
         "ok": False,
         "status_code": 400,
@@ -888,6 +2116,9 @@ def mutate_v02_common_ground(
 
 __all__ = [
     "COMMON_GROUND_REL_PATH",
+    "CONTRIB_RESOLUTIONS",
+    "CONTRIB_STATUS_BY_RESOLUTION",
+    "CONTRIB_STATUS_PENDING",
     "DELIVERY_ACKNOWLEDGED",
     "DELIVERY_AGREED",
     "DELIVERY_DELIVERED",
@@ -902,6 +2133,10 @@ __all__ = [
     "DISCREPANCY_UNWITNESSED",
     "EVENT_UNSEEN_MOVE",
     "GROUND_STATUSES",
+    "MISSED_MOMENT_STATUSES",
+    "MISSED_STATUS_MATERIAL_SUPPLIED",
+    "MISSED_STATUS_RECONNECTED",
+    "MISSED_STATUS_UNSEEN",
     "OUTCOME_CLARIFIED_BY_PARTNER",
     "OUTCOME_FOUND_AT_EXPECTED",
     "OUTCOME_FOUND_BY_SEARCH",
@@ -911,16 +2146,24 @@ __all__ = [
     "PRIVATE_UNSHARED",
     "SCHEMA_VERSION",
     "SHARED_WITH_PARTNER",
+    "VALID_ACTOR_SIDES",
+    "acknowledge_missed_moment_catchup",
     "advance_communication_receipt",
     "attempt_use_or_fetch_object",
     "mark_shared_with_partner",
     "mutate_v02_common_ground",
     "read_v02_common_ground_view",
+    "record_dual_rationale_decision",
     "record_ground_item",
+    "record_missed_moment",
     "record_partner_unseen_move",
     "register_object_belief",
+    "resolve_async_contribution",
     "resolve_unseen_move_with_partner",
+    "revise_own_decision_rationale",
     "revise_shared_plan",
     "search_nearby_spots",
+    "submit_async_coauthor_contribution",
     "summarize_common_ground_for_cognition",
+    "supply_missed_moment_material",
 ]

@@ -34,7 +34,7 @@
       "description": "お使いの PC に合わせた一番手軽な導入方法を選べます。Windows ならデスクトップ版をインストールするだけで始められ、初心者の方でも数百円の DeepSeek キーまたは無料のローカル Ollama を繋げばすぐに対話を開始できます。",
       "url": "https://nyairo.com/ja/docs/quickstart/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -476,16 +476,16 @@
           <h2 id="quickstart-section-0">まず環境に合った導入方法を選ぶ</h2>
 <p>始める前に必要なものは、インターネットにつながる PC 1台と LLM API（数百円チャージの DeepSeek API キー、または PC 上の無料 Ollama のどちらでも可）だけです。お使いの OS に合わせてお選びください。</p>
 <ul>
-<li><strong>Windows 10 / 11 をお使いの場合（推奨）</strong>：約 5.8 MB の <a href="../../../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe"><strong>Windows デスクトップ版インストーラー</strong></a> をダウンロードしてダブルクリックするだけで、WSL 2 を自動検出し、バックグラウンド環境の構築まで案内してくれます。ターミナルコマンドを覚える必要はありません。詳しい手順は <a href="../windows/">Windows へのインストール</a>、画面の使い方は <a href="../desktop-guide/">デスクトップクライアント利用ガイド</a> をご覧ください。</li>
+<li><strong>Windows 10 / 11 をお使いの場合（推奨）</strong>：約 6.0 MB の <a href="../../../downloads/nyairo-0.8.0-setup.exe" download="nyairo-0.8.0-setup.exe"><strong>Windows デスクトップ版インストーラー</strong></a> をダウンロードしてダブルクリックするだけで、WSL 2 を自動検出し、バックグラウンド環境の構築まで案内してくれます。ターミナルコマンドを覚える必要はありません。詳しい手順は <a href="../windows/">Windows へのインストール</a>、画面の使い方は <a href="../desktop-guide/">デスクトップクライアント利用ガイド</a> をご覧ください。</li>
 <li><strong>Linux をお使いの場合、またはターミナル操作に慣れている場合</strong>：すぐ下のワンライナー導入手順へお進みください。</li>
 <li><strong>普段 Claude Code や Codex などのコーディングアシスタントを使っている場合</strong>：<a href="../agent-install/">AI アシスタントに自動導入を任せる</a> にある標準プロンプトをそのままコピーして渡すだけで導入を代行してもらえます。</li>
 </ul>
 
 <h2 id="quickstart-smartscreen">Windows 初回起動時に「Windows によって PC が保護されました」と出た場合の2ステップ図解</h2>
-<p>nyairo は個人・独立系のオープンソースプロジェクトであり、高額な商用 EV コード署名証明書をまだ取得していないため、初回に <code>nyairo-0.7.0-setup.exe</code> をダブルクリックした際、Windows SmartScreen の通常の確認画面が表示されることがあります。以下の2ステップでそのまま開けます（管理者権限は不要です）：</p>
+<p>nyairo は個人・独立系のオープンソースプロジェクトであり、高額な商用 EV コード署名証明書をまだ取得していないため、初回に <code>nyairo-0.8.0-setup.exe</code> をダブルクリックした際、Windows SmartScreen の通常の確認画面が表示されることがあります。以下の2ステップでそのまま開けます（管理者権限は不要です）：</p>
 <ol>
 <li>まず画面の案内文の下にある「<strong>詳細情報</strong>」をクリックしてインストーラーの詳細を展開します。</li>
-<li>念のためインストーラーの SHA256 が公式サイト公開値の <code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code> と一致することを確認し、右下に現れる「<strong>実行</strong>」をクリックするとセットアップウィザードへ進みます。</li>
+<li>念のためインストーラーの SHA256 が公式サイト公開値の <code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code> と一致することを確認し、右下に現れる「<strong>実行</strong>」をクリックするとセットアップウィザードへ進みます。</li>
 </ol>
 <div class="smartscreen-guide" style="margin: 16px 0 20px;">
 <svg viewBox="0 0 680 232" role="img" aria-label="Windows SmartScreen の2ステップ許可図解：ステップ1で詳細情報を押し、ステップ2で SHA256 を確認して実行を押す" style="width: 100%; max-width: 680px; height: auto; display: block; color: var(--fg);">
@@ -519,9 +519,9 @@
   </g>
   <text x="382" y="64" fill="var(--fg)" font-size="14" font-weight="600" font-family="var(--font-sans, sans-serif)">Windows によって PC が保護されました</text>
   <rect x="382" y="78" width="276" height="66" rx="6" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
-  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">アプリ: nyairo-0.7.0-setup.exe</text>
+  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">アプリ: nyairo-0.8.0-setup.exe</text>
   <text x="394" y="116" fill="var(--muted)" font-size="11" font-family="var(--font-sans, sans-serif)">発行元: 不明な発行元（公式ハッシュ一致で安全）</text>
-  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 174e4597...14dd8</text>
+  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 36ed8ef7...76eb8</text>
   <text x="528" y="169" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600" font-family="var(--font-sans, sans-serif)">2. 次に「実行」を押す</text>
   <rect x="482" y="182" width="92" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
   <text x="528" y="200" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600" font-family="var(--font-sans, sans-serif)">実行</text>
@@ -539,13 +539,13 @@
 <p>実行前にハッシュ検証を行いたい場合は、公式アーカイブとチェックサムファイルを段階的にダウンロードできます：</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
-<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256
-python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
+<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
 </div>
-<p>事前に Python や Git を入れておく必要はありません。スクリプトが公式の <code>v0.7.0</code> リリースパッケージを自動取得・検証し、Python 3.13 の実行環境を整えたうえで、<code>~/.nyairo</code> 配下に個人用データディレクトリを作成します。</p>
+<p>事前に Python や Git を入れておく必要はありません。スクリプトが公式の <code>v0.8.0</code> リリースパッケージを自動取得・検証し、Python 3.13 の実行環境を整えたうえで、<code>~/.nyairo</code> 配下に個人用データディレクトリを作成します。</p>
 <p>ターミナルに <code>[5/5] 程序安装完成</code>（インストール完了）と表示されると、自動的にモデル設定ウィザードへ進みます：</p>
 <ol>
 <li>上下の矢印キーで利用するモデルプロバイダーを選択します。</li>

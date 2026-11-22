@@ -293,6 +293,7 @@ def build_action_space(
     *,
     poses: Sequence[str] = SUPPORTED_POSES,
     available_actions: Optional[Mapping[str, Any]] = None,
+    environment: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
     """Build the bounded action space a Decision selector may choose from.
 
@@ -322,7 +323,7 @@ def build_action_space(
     offer_place = False
     # M15 §17: the gate owns the model-facing verdict.  With the gate off the
     # space must say RUNTIME_DISABLED instead of offering a fake AVAILABLE.
-    gate_state = resolve_gate()
+    gate_state = resolve_gate(environment)
     gate_open = gate_state == GATE_CANONICAL
     if not gate_open and isinstance(available_actions, Mapping):
         available_actions = None

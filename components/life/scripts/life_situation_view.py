@@ -75,6 +75,7 @@ if _LIFE_SCRIPTS not in sys.path:
     sys.path.insert(0, _LIFE_SCRIPTS)
 
 import body_capacity_source as body_capacity  # noqa: E402
+import s03_claims  # noqa: E402
 
 __all__ = [
     "BUDGET_FAULT_REASON_CODES",
@@ -315,6 +316,12 @@ def _body_column(
             "observed_body_id": body.get("observed_body_id"),
             "observed_revision": body.get("observed_revision"),
             "evidence": list(body.get("evidence") or []),
+            # v0.8: how many candidates this body can still weigh this round.
+            # None means the body has no health opinion; the caller then leaves
+            # the upstream count alone.
+            "candidate_cap": body.get("body_candidate_cap"),
+            "max_plan_steps": body.get("body_max_plan_steps"),
+            "creative_block": body.get("body_creative_block"),
             "identity_bound": bool(body.get("identity_bound")),
             "revision_bound": bool(body.get("revision_bound")),
             "observation_time_bound": bool(body.get("observation_time_bound")),
@@ -437,7 +444,11 @@ def _budget_ref(budget: Mapping[str, Any]) -> Optional[str]:
 
 
 def _knowledge_column(
-    observations: Sequence[Any], *, now: Any, subject_id: Optional[str]
+    observations: Sequence[Any],
+    *,
+    now: Any,
+    subject_id: Optional[str],
+    s03_status: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """The knowledge column: what was actually acquired, and how old it is.
 
@@ -465,6 +476,8 @@ def _knowledge_column(
         for i in items
         if i["validity"] != VALIDITY_CURRENT
     ]
+    s03_connected = bool((s03_status or {}).get("s03_owner_connected", False))
+    s03_claim_count = int((s03_status or {}).get("s03_claim_count", 0) or 0)
     return {
         "observations": items,
         "current_refs": current_refs,
@@ -475,6 +488,8 @@ def _knowledge_column(
         "declared_bound_only": True,
         "local_threshold_used": False,
         "knowledge_is_not_a_capacity_dimension": True,
+        "s03_owner_connected": s03_connected,
+        "s03_claim_count": s03_claim_count,
     }
 
 
@@ -656,10 +671,28 @@ def _identity_unbound_view(*, home_ref: Optional[str], reason: str) -> dict[str,
             "declared_bound_only": True,
             "local_threshold_used": False,
             "knowledge_is_not_a_capacity_dimension": True,
+            "s03_owner_connected": False,
+            "s03_claim_count": 0,
         },
         reads_performed=0,
         identity_reason=reason,
     )
+
+
+def _inspect_s03_owner_zero_write(home: Any) -> dict[str, Any]:
+    """Delegate strictly zero-write S03 owner check to ``s03_claims``."""
+    try:
+        if home is None:
+            return {"s03_owner_connected": False, "s03_claim_count": 0}
+        res = s03_claims.inspect_s03_owner_readonly(home)
+        if isinstance(res, Mapping):
+            return {
+                "s03_owner_connected": bool(res.get("s03_owner_connected", False)),
+                "s03_claim_count": int(res.get("s03_claim_count", 0) or 0),
+            }
+    except Exception:
+        pass
+    return {"s03_owner_connected": False, "s03_claim_count": 0}
 
 
 def _assemble(
@@ -673,6 +706,7 @@ def _assemble(
     knowledge: Mapping[str, Any],
     reads_performed: int,
     identity_reason: Optional[str] = None,
+    s03_status: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     dimensions = {
         DIMENSION_BODY: body["state"],
@@ -688,6 +722,8 @@ def _assemble(
         for name, column in ((DIMENSION_BODY, body), (DIMENSION_RESOURCE_BUDGET, budget))
         if name in unknown
     ]
+    s03_connected = bool((s03_status or {}).get("s03_owner_connected", False))
+    s03_claim_count = int((s03_status or {}).get("s03_claim_count", 0) or 0)
     return {
         "schema_version": SCHEMA_LIFE_SITUATION_VIEW,
         "kind": KIND_LIFE_SITUATION_VIEW,
@@ -704,6 +740,8 @@ def _assemble(
         "body": body,
         "resource_budget": budget,
         "knowledge": knowledge,
+        "s03_owner_connected": s03_connected,
+        "s03_claim_count": s03_claim_count,
         "dimensions": dimensions,
         "limiting_dimensions": limiting,
         "blocking_dimensions": blocking,
@@ -777,7 +815,13 @@ def read_life_situation(
         world_scripts_dir=world_scripts_dir,
     )
     budget_column = _resource_column(budget)
-    knowledge = _knowledge_column(observations, now=reference_iso, subject_id=resolved_subject)
+    s03_status = _inspect_s03_owner_zero_write(home)
+    knowledge = _knowledge_column(
+        observations,
+        now=reference_iso,
+        subject_id=resolved_subject,
+        s03_status=s03_status,
+    )
 
     return _assemble(
         subject_id=resolved_subject,
@@ -788,6 +832,7 @@ def read_life_situation(
         budget=budget_column,
         knowledge=knowledge,
         reads_performed=reads,
+        s03_status=s03_status,
     )
 
 
@@ -827,6 +872,36 @@ def ag1_capacity_kwargs(
                 f"unknown_capacity_policy {unknown_capacity_policy!r} is not an AG-1 policy"
             )
         kwargs["unknown_capacity_policy"] = unknown_capacity_policy
+    return kwargs
+
+
+def ag1_body_limit_kwargs(view: Mapping[str, Any]) -> dict[str, Any]:
+    """v0.8: the health envelope's candidate cap for ``evaluate_opportunity``.
+
+    Read from the body column the situation view already carries.  It stays
+    apart from ``ag1_capacity_kwargs`` because the capacity evaluator has no
+    such key; a view without a health opinion adds nothing.
+    """
+
+    if not isinstance(view, Mapping) or "dimensions" not in view:
+        raise LifeSituationViewError("view must be a life-situation view")
+    body = view.get(DIMENSION_BODY)
+    if not isinstance(body, Mapping):
+        return {}
+    kwargs: dict[str, Any] = {}
+    cap = body.get("candidate_cap")
+    if cap is not None:
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap < 0:
+            raise LifeSituationViewError(f"illegal candidate cap {cap!r}")
+        kwargs["body_candidate_cap"] = cap
+    steps = body.get("max_plan_steps")
+    if steps is not None:
+        if isinstance(steps, bool) or not isinstance(steps, int) or steps < 0:
+            raise LifeSituationViewError(f"illegal plan step cap {steps!r}")
+        kwargs["body_max_plan_steps"] = steps
+    creative = body.get("creative_block")
+    if isinstance(creative, bool):
+        kwargs["body_creative_block"] = creative
     return kwargs
 
 

@@ -2,9 +2,9 @@
 
 Windows 原生桌面端用户可在应用内「设置 → 更新」检查并一键下载更新（只替换 `%LOCALAPPDATA%\Programs\nyairo` 下的客户端文件，不动 WSL 2 内的 `~/.nyairo` 个人数据）。Linux 与 Windows WSL 2 命令行用户可使用统一更新入口 `nyairo update`，整包更新 nyairo 及随包适配的内置 Hermes，不会单独拉取上游未适配的开发分支。
 
-## 当前预发布版本：v0.7.0
+## 当前预发布版本：v0.8.0
 
-`v0.7.0` 是当前 GitHub prerelease 公开测试版（不是正式稳定版）。默认频道 `candidate` 会选到最新公开测试版；`--channel stable` 会跳过预发布版本。历史版本（`v0.6.0`、`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3`）标签、ZIP 与安装包保持原样归档；如需固定安装某一历史版本，可使用 `~/.local/bin/nyairo update --version v0.6.0`。
+`v0.8.0` 是当前 GitHub prerelease 公开测试版（不是正式稳定版）。默认频道 `candidate` 会选到最新公开测试版；`--channel stable` 会跳过预发布版本。历史版本（`v0.7.0`、`v0.6.0`、`v0.5.1`、`v0.4.0`、`v0.3.0`、`v0.2.0-rc3`）标签、ZIP 与安装包保持原样归档；如需固定安装某一历史版本，可使用 `~/.local/bin/nyairo update --version v0.7.0`。
 
 升级前请先按下面「更新过程中会保留什么」一节备份 `~/.nyairo` 个人数据目录（或在桌面端导出便携旅行箱 `.nyairo-suitcase.zip`），升级完成后确认聊天、人设与长期记忆正常可用。
 

@@ -87,7 +87,7 @@ def _build_prompt(docs: Mapping[str, Any]) -> str:
 {{
   "entries": {{
     "world": {{"tagline": "一句话概括小镇的生活气息，60字以内", "festivals": ["当地节庆候选1", "节庆候选2"]}},
-    "<地点id>": {{"intro": "地点介绍，40-80字，自然、克制、有生活气息", "flavor": "一个环境细节，20字以内"}},
+    "<地点id>": {{"intro": "地点介绍，40-80字，自然、克制、有生活气息", "flavor": "一个环境细节，20字以内", "goods": ["仅商业地点可写：当地商品名|类别(food/drink/ingredient/reading/daily/furnish)|档位(budget/standard/hearty)|简短介绍"]}},
     "<npc_id>": {{"public_note": "这个公共角色的公开背景一句话，30字以内"}}
   }},
   "ambient_candidates": [{{"summary": "与当地生活相关的定期公共活动或环境事实，30字以内", "kind_hint": "shop/school/park/home/street/public 之一"}}]
@@ -96,7 +96,7 @@ def _build_prompt(docs: Mapping[str, Any]) -> str:
 要求：
 1. entries 的键必须原样使用上面列表中 id= 后面的标识符（如 bookstore、npc_xxx），
    绝对不要用地点或人物的中文名称作键。
-2. 每个地点都要有 intro；街道和公园等公共场所还要有 flavor。
+2. 每个地点都要有 intro；街道和公园等公共场所还要有 flavor；类型是 store/cafe/market 的店铺还可附带 2-4 条日常商品 goods（不写也没关系，非店铺不要写 goods）。
 3. ambient_candidates 最多 4 条，是"定期发生的环境事实"候选（例如书店定期整理旧书、
    咖啡馆推出季节饮品），不要写已经发生的具体事件，不要戏剧化。
 4. 内容要普通、日常、可信：允许平凡的店铺和没有事件的日子，不要悲惨过去、秘密组织或戏剧化设定。
@@ -211,6 +211,9 @@ def _merge_entries(docs: Mapping[str, Any], entries: Mapping[str, Any]) -> dict[
     （名称必须与地点/角色真实名称精确一致，不构成发明），映射后仍未知
     的键按错误报告。
     """
+    location_kinds = {
+        loc["location_id"]: loc.get("kind") for loc in docs["topology.json"]["locations"]
+    }
     name_to_id: dict[str, str] = {}
     for loc in docs["topology.json"]["locations"]:
         name_to_id[loc["name"]] = loc["location_id"]
@@ -219,13 +222,30 @@ def _merge_entries(docs: Mapping[str, Any], entries: Mapping[str, Any]) -> dict[
     known = set(name_to_id.values()) | {"world"}
     merged: dict[str, Any] = {}
     skipped: list[str] = []
+
+    def _sanitize_entry(target_id: str, raw_entry: Any) -> Any:
+        if not isinstance(raw_entry, Mapping):
+            return raw_entry
+        cleaned = dict(raw_entry)
+        if "goods" in cleaned:
+            raw_goods = cleaned.pop("goods")
+            if location_kinds.get(target_id) in ("store", "cafe", "market") and isinstance(raw_goods, list):
+                goods = [
+                    item.strip()[:120]
+                    for item in raw_goods
+                    if isinstance(item, str) and item.strip()
+                ][:8]
+                if goods:
+                    cleaned["goods"] = goods
+        return cleaned
+
     for key, entry in entries.items():
         if key in known:
-            merged[key] = entry
+            merged[key] = _sanitize_entry(key, entry)
             continue
         remapped = name_to_id.get(str(key).strip())
         if remapped is not None:
-            merged[remapped] = entry
+            merged[remapped] = _sanitize_entry(remapped, entry)
             continue
         skipped.append(key)
     if "world" not in merged:

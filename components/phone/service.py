@@ -41,7 +41,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _LIFE_SCRIPTS = REPO_ROOT / "components" / "life" / "scripts"
@@ -49,6 +49,11 @@ _WORLD_SCRIPTS = REPO_ROOT / "components" / "world" / "scripts"
 for _entry in (str(REPO_ROOT), str(_LIFE_SCRIPTS), str(_WORLD_SCRIPTS)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)
+
+try:  # the phone views import the shared RMW guard the same way
+    from ..life.scripts import state_tx_guard as _tx
+except ImportError:  # pragma: no cover - flat ``sys.path`` layout
+    import state_tx_guard as _tx  # type: ignore[no-redef]
 
 INSTANCE_FILENAME = "instance.json"
 SCHEMA_INSTANCE = "phone.instance.v1"
@@ -95,6 +100,26 @@ STATUS_UNKNOWN = "unknown"
 STATUS_UNAVAILABLE = "unavailable"
 STATUS_DISABLED = "disabled"
 STATUS_NOT_FOUND = "not_found"
+
+
+def _body_energy(fatigue: Optional[float]) -> Optional[dict[str, Any]]:
+    """The panel's qualitative energy band, derived only from the runtime fatigue.
+
+    ``fatigue`` comes from ``body_health_projection``'s canonical runtime reader
+    and is already clamped to ``[0, 1]``; ``None`` (no runtime / unreadable)
+    stays ``None`` so the panel never invents a band.  The wire vocabulary
+    (``low``/``mid``/``high``) is part of the phone contract and is not the
+    body-signal ``mild``/``noticeable``/``strong`` vocabulary.
+    """
+
+    if fatigue is None:
+        return None
+    scaled = round((1.0 - float(fatigue)) * 100)
+    return {
+        "fatigue_band": "low" if fatigue < 0.34 else "mid" if fatigue < 0.67 else "high",
+        "range": [max(0, scaled), min(100, scaled + 15)],
+    }
+
 
 #: ``GET /api/phone/today``：她今天已经发生的事，纯读。
 #: 日期按 +08:00 分界——与 Activity 记录自己的写入时区（``activity_compat.BJT``）同一日界，
@@ -183,7 +208,11 @@ MEMORY_OWNER_FIELD = "memory_owner"
 #: Declared request origin.  A *declaration* by the local client, recorded, never an authority.
 ACTOR_USER = "user"
 ACTOR_MODEL = "model"
+ACTOR_SUBJECT = "subject"
 ACTORS = (ACTOR_USER, ACTOR_MODEL)
+#: Journal rows may also name the subject who acted through a slice; the declared
+#: HTTP origin vocabulary (``ACTORS``) is unchanged for request validation.
+JOURNAL_ACTORS = (ACTOR_USER, ACTOR_MODEL, ACTOR_SUBJECT)
 
 
 def profile_fingerprint(value: Path | str) -> str:
@@ -572,6 +601,7 @@ class PhoneService:
         base = dict(os.environ if environment is None else environment)
         base.update(features)
         self.environment = base
+        self._explicit_clock = clock is not None
         self._clock = clock or (lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         self._world_clock = world_clock
         self._shopping = shopping
@@ -625,7 +655,7 @@ class PhoneService:
 
         row = {
             "at": self._clock(),
-            "actor": actor if actor in ACTORS else ACTOR_USER,
+            "actor": actor if actor in JOURNAL_ACTORS else ACTOR_USER,
             "action": str(action),
             "operation_key": str(operation_key),
             "status": str(result.get("status")),
@@ -866,6 +896,74 @@ class PhoneService:
             "private_text_included": True,
         }
 
+    def _lease_now_iso(self) -> str:
+        """Resolve the current ISO timestamp for representation lease enforcement without writes."""
+        if getattr(self, "_explicit_clock", False) and callable(self._clock):
+            try:
+                raw = self._clock()
+                if isinstance(raw, datetime):
+                    return raw.isoformat(timespec="seconds")
+                if isinstance(raw, str) and raw.strip():
+                    return raw.strip()
+            except Exception:
+                pass
+        if self._world_clock is not None and callable(self._world_clock):
+            try:
+                raw_w = self._world_clock()
+                if isinstance(raw_w, datetime):
+                    return raw_w.isoformat(timespec="seconds")
+                if isinstance(raw_w, str) and raw_w.strip():
+                    return raw_w.strip()
+            except Exception:
+                pass
+        try:
+            return self._somatic_now_iso()
+        except Exception:
+            return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    def _enforce_representation_lease(self, scope: str) -> Optional[dict[str, Any]]:
+        """Enforce zero-write active representation lease for ``scope`` before protected mutations."""
+        try:
+            from components.life.scripts import v02_representation_lease_forget as _rlf
+        except ImportError:
+            _life_scripts = str(Path(__file__).resolve().parents[1] / "life" / "scripts")
+            if _life_scripts not in sys.path:
+                sys.path.insert(0, _life_scripts)
+            import v02_representation_lease_forget as _rlf  # type: ignore[no-redef]
+
+        root = Path(self.root)
+        lease_root = root
+        direct_lease_file = root / "v02" / _rlf.LIVE_REP_LEASE_FILENAME
+        if not direct_lease_file.is_file():
+            try:
+                from components.world.scripts.instance_paths import resolve_instance_paths
+
+                resolved_day_root = resolve_instance_paths(root).day_root
+                if (resolved_day_root / "v02" / _rlf.LIVE_REP_LEASE_FILENAME).is_file():
+                    lease_root = resolved_day_root
+            except Exception:
+                pass
+
+        gate = _rlf.enforce_active_representation_lease(
+            lease_root,
+            scope=scope,
+            now_iso=self._lease_now_iso(),
+        )
+        if gate.get("allowed", True):
+            return None
+        reason = str(gate.get("reason") or "REPRESENTATION_LEASE_REVOKED")
+        return {
+            "ok": False,
+            "status": STATUS_REJECTED,
+            "reason_code": reason,
+            "http_status": 403,
+            "data": {
+                "scope": str(gate.get("scope") or scope),
+                "lease_id": gate.get("lease_id"),
+                "reason_cn": str(gate.get("reason_cn") or ""),
+            },
+        }
+
     def diary_write(self, *, body: str, operation_key: str) -> dict[str, Any]:
         """Write one diary entry as her own text.  No model call, no summary, no Memory write.
 
@@ -873,6 +971,10 @@ class PhoneService:
         entry instead of writing the same day twice.  Two different keys stay two entries even
         when the words are identical -- writing the same sentence on another day is not a retry.
         """
+        lease_refusal = self._enforce_representation_lease("private_diary")
+        if lease_refusal is not None:
+            return lease_refusal
+
         from private_daily_items import PrivateItemsContractRefused
 
         try:
@@ -1120,7 +1222,7 @@ class PhoneService:
         )
         return self._shopping
 
-    def _facade_call(self, method: str, *args: Any) -> dict[str, Any]:
+    def _facade_call(self, method: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         try:
             shopping = self._shopping_instance()
             handler = getattr(shopping, method, None)
@@ -1128,7 +1230,7 @@ class PhoneService:
                 # C's facade is the only owner of this fact.  A facade that does not implement the
                 # method yet is "not implemented", never an empty success and never a guess.
                 return unavailable("PHONE_FACADE_UNIMPLEMENTED", method=method)
-            answer = handler(*args)
+            answer = handler(*args, **kwargs)
         except PhoneUnavailable as exc:
             return unavailable(exc.reason_code)
         except Exception:
@@ -1153,14 +1255,24 @@ class PhoneService:
 
         return self._facade_call("store")
 
-    def store_purchase(self, catalog_item_id: str, operation_key: str) -> dict[str, Any]:
+    def store_purchase(
+        self,
+        catalog_item_id: str,
+        operation_key: str,
+        *,
+        item_name: Optional[str] = None,
+    ) -> dict[str, Any]:
         """``PhoneShopping.store_purchase()``: one counter purchase under one operation key.
 
         P does not price it, does not decide delivery and does not mark anything as arrived: the
         key is the owner's idempotency handle and a success is *not* an arrival.
         """
 
-        return self._facade_call("store_purchase", catalog_item_id, operation_key)
+        if item_name is None:
+            return self._facade_call("store_purchase", catalog_item_id, operation_key)
+        return self._facade_call(
+            "store_purchase", catalog_item_id, operation_key, item_name=item_name
+        )
 
     def inventory(self) -> dict[str, Any]:
         return self._facade_call("inventory")
@@ -1855,7 +1967,7 @@ class PhoneService:
 
         from . import day_story_view
 
-        return day_story_view.read_today_story_zero_write(self.root, day=day)
+        return day_story_view.read_today_story_zero_write(self.root, day=day, service=self)
 
     # -- 双人书桌：四态木牌 / 未发短笺 / 明日便签（只读聚合 + 一个显式写口） ---------------
 
@@ -2198,6 +2310,11 @@ class PhoneService:
         root = self._desk_state_root()
         clock = today_business_day(root) if root is not None else None
         moment = today_moment((clock or {}).get("logical_at")) if clock else None
+        if moment is None and self._world_clock is not None:
+            try:
+                moment = today_moment(self._world_clock().isoformat())
+            except Exception:
+                moment = None
         if moment is None:
             moment = datetime.now(tz=timezone.utc)
         return moment.isoformat(timespec="seconds")
@@ -2367,60 +2484,221 @@ class PhoneService:
 
     def home_keepsake_action(self, *, action: str,
                              album_artifact_id: Optional[str] = None,
-                             share_id: Optional[str] = None) -> dict[str, Any]:
-        """One explicit select / clear / pin / unpin.  Same intent never bumps revision."""
+                             share_id: Optional[str] = None,
+                             actor_side: Optional[str] = None,
+                             payload: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        """One explicit select / clear / pin / unpin or 72h slow-letter draft lifecycle action."""
 
         from . import window_keepsake_view as view
 
+        if action in view.SLOW_LETTER_DRAFT_ACTIONS:
+            return self.home_slow_letter_draft_action(
+                action=action,
+                actor_side=str(actor_side or "partner"),
+                payload=payload or {},
+            )
         if action not in ("select_lockscreen", "clear_lockscreen", "pin_share", "unpin_share"):
             return rejected("KEEPSAKE_ACTION_UNSUPPORTED", action=action)
-        state, state_reason = self._keepsake_state()
-        if state_reason:
-            return rejected(state_reason)
+        with _tx.state_file_lock(view.state_path(self.root)):
+            state, state_reason = self._keepsake_state()
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._keepsake_now_iso()
+            reference: Optional[str] = None
+            if action == "select_lockscreen":
+                if not album_artifact_id:
+                    return rejected("LOCKSCREEN_IMAGE_REQUIRED")
+                checked = self._verify_lockscreen_image(album_artifact_id)
+                if not checked.get("ok"):
+                    return rejected(str(checked.get("reason_code")
+                                       or "LOCKSCREEN_IMAGE_INVALID"))
+                reference = album_artifact_id
+                new_state, changed = view.select_lockscreen(state, album_artifact_id, now_iso)
+            elif action == "clear_lockscreen":
+                new_state, changed = view.clear_lockscreen(state, now_iso)
+            elif action == "pin_share":
+                if not share_id:
+                    return rejected("SHARE_ID_REQUIRED")
+                checked = self._verify_pin_share(share_id)
+                if not checked.get("ok"):
+                    return rejected(str(checked.get("reason_code")
+                                       or "PINNED_SHARE_NOT_DELIVERED"))
+                reference = share_id
+                new_state, changed = view.pin_share(state, share_id, now_iso)
+            else:
+                if not share_id:
+                    return rejected("SHARE_ID_REQUIRED")
+                reference = share_id
+                new_state, changed = view.unpin_share(state, share_id, now_iso)
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at")})
+            written = view.write_state(self.root, new_state)
+            data = {"action": action, "changed": True,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at")}
+            if action == "select_lockscreen":
+                data["album_artifact_id"] = reference
+            elif action in ("pin_share", "unpin_share"):
+                data["share_id"] = reference
+            return envelope(True, STATUS_OK, data)
+
+    def home_slow_letter_draft_action(
+        self,
+        *,
+        action: str,
+        actor_side: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Server-capability-scoped 72h slow-letter draft lifecycle on ``window_keepsakes.json``."""
+
+        from . import window_keepsake_view as view
+
+        if action not in view.SLOW_LETTER_DRAFT_ACTIONS:
+            return {**rejected("SLOW_LETTER_ACTION_UNSUPPORTED", action=action), "http_status": 400}
         now_iso = self._keepsake_now_iso()
-        reference: Optional[str] = None
-        if action == "select_lockscreen":
-            if not album_artifact_id:
-                return rejected("LOCKSCREEN_IMAGE_REQUIRED")
-            checked = self._verify_lockscreen_image(album_artifact_id)
-            if not checked.get("ok"):
-                return rejected(str(checked.get("reason_code") or "LOCKSCREEN_IMAGE_INVALID"))
-            reference = album_artifact_id
-            new_state, changed = view.select_lockscreen(state, album_artifact_id, now_iso)
-        elif action == "clear_lockscreen":
-            new_state, changed = view.clear_lockscreen(state, now_iso)
-        elif action == "pin_share":
-            if not share_id:
-                return rejected("SHARE_ID_REQUIRED")
-            checked = self._verify_pin_share(share_id)
-            if not checked.get("ok"):
-                return rejected(str(checked.get("reason_code") or "PINNED_SHARE_NOT_DELIVERED"))
-            reference = share_id
-            new_state, changed = view.pin_share(state, share_id, now_iso)
-        else:
-            if not share_id:
-                return rejected("SHARE_ID_REQUIRED")
-            reference = share_id
-            new_state, changed = view.unpin_share(state, share_id, now_iso)
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at")})
-        written = view.write_state(self.root, new_state)
-        data = {"action": action, "changed": True,
-                "revision": written.get("revision"),
-                "updated_at": written.get("updated_at")}
-        if action == "select_lockscreen":
-            data["album_artifact_id"] = reference
-        elif action in ("pin_share", "unpin_share"):
-            data["share_id"] = reference
-        return envelope(True, STATUS_OK, data)
+        clock = self._letters_clock()
+        offset = view.clock_offset(clock)
+        try:
+            if action == "save_slow_letter_draft":
+                res = view.save_slow_letter_draft(
+                    self.root,
+                    actor_side=actor_side,
+                    title=payload.get("title"),
+                    body=payload.get("body"),
+                    postmark_place=payload.get("postmark_place", "镇上邮筒"),
+                    now=now_iso,
+                    operation_key=payload.get("operation_key"),
+                )
+            elif action == "revise_slow_letter_draft":
+                res = view.revise_slow_letter_draft(
+                    self.root,
+                    actor_side=actor_side,
+                    draft_id=payload.get("draft_id"),
+                    title=payload.get("title"),
+                    body=payload.get("body"),
+                    postmark_place=payload.get("postmark_place"),
+                    now=now_iso,
+                    operation_key=payload.get("operation_key"),
+                )
+            elif action == "discard_slow_letter_draft":
+                res = view.discard_slow_letter_draft(
+                    self.root,
+                    actor_side=actor_side,
+                    draft_id=payload.get("draft_id"),
+                    now=now_iso,
+                    operation_key=payload.get("operation_key"),
+                )
+            else:
+                res = view.post_drafted_slow_letter(
+                    self.root,
+                    actor_side=actor_side,
+                    draft_id=payload.get("draft_id"),
+                    delay_hours=payload.get("delay_hours", view.DEFAULT_POSTED_DELAY_HOURS),
+                    postmark_place=payload.get("postmark_place"),
+                    now=now_iso,
+                    operation_key=payload.get("operation_key"),
+                )
+        except view.SlowLetterCoolingError as exc:
+            out = rejected(
+                view.SLOW_LETTER_COOLING_PERIOD,
+                cools_until=exc.cools_until,
+                remaining_cooling_seconds=exc.remaining_cooling_seconds,
+            )
+            out["cools_until"] = exc.cools_until
+            out["remaining_cooling_seconds"] = exc.remaining_cooling_seconds
+            out["http_status"] = 409
+            return out
+        except KeyError:
+            out = envelope(
+                False,
+                STATUS_NOT_FOUND,
+                {"draft_id": payload.get("draft_id")},
+                "DRAFT_NOT_FOUND",
+            )
+            out["http_status"] = 404
+            return out
+        except ValueError as exc:
+            code = str(exc) or "SLOW_LETTER_INVALID_INPUT"
+            conflict_codes = {
+                "SLOW_LETTER_DRAFT_LIMIT_REACHED",
+                "OPERATION_FINGERPRINT_MISMATCH",
+                "KEEPSAKE_STATE_UNREADABLE",
+                "KEEPSAKE_STATE_INVALID",
+                "KEEPSAKE_STATE_SYMLINK",
+            }
+            http_code = 409 if code in conflict_codes else 400
+            return {**rejected(code), "http_status": http_code}
+
+        duplicate = bool(res.get("duplicate"))
+        status = STATUS_ALREADY if duplicate else STATUS_OK
+        if action in ("save_slow_letter_draft", "revise_slow_letter_draft"):
+            draft_proj = res["draft"]
+            return envelope(True, status, {
+                "action": action,
+                "changed": not duplicate,
+                "duplicate": duplicate,
+                "draft_id": draft_proj["draft_id"],
+                "draft": draft_proj,
+                "cools_until": draft_proj["cools_until"],
+                "ready_to_post": draft_proj["ready_to_post"],
+                "remaining_cooling_seconds": draft_proj["remaining_cooling_seconds"],
+                "revision": res["revision"],
+            })
+        if action == "discard_slow_letter_draft":
+            return envelope(True, status, {
+                "action": action,
+                "changed": not duplicate,
+                "duplicate": duplicate,
+                "draft_id": res["draft_id"],
+                "discarded": True,
+                "status": "discarded",
+                "omission_debt": 0,
+                "revision": res["revision"],
+            })
+        now_dt = view.parse_instant(now_iso) or datetime.now(tz=TODAY_TZ)
+        letter_proj = view._project_slow_letter_row(
+            res,
+            now_dt=now_dt,
+            offset=offset,
+            subject_view=(actor_side == "subject"),
+        )
+        return envelope(True, status, {
+            "action": action,
+            "changed": not duplicate,
+            "duplicate": duplicate,
+            "draft_id": res["draft_id"],
+            "letter_id": letter_proj["letter_id"],
+            "letter": letter_proj,
+            "status": letter_proj["status"],
+            "sent_at": letter_proj["sent_at"],
+            "drafted_at": letter_proj["drafted_at"],
+            "deliver_after": letter_proj["deliver_after"],
+            "delay_hours": res["delay_hours"],
+            "postmark": letter_proj["postmark"],
+            "revision": res["revision"],
+        })
 
     def _letters_clock(self) -> dict[str, Any]:
         root = self._desk_state_root()
         if root is not None:
             return today_business_day(root)
+        if self._world_clock is not None:
+            try:
+                moment = today_moment(self._world_clock().isoformat())
+                if moment is not None:
+                    return {
+                        "source": "business_clock",
+                        "reason_code": None,
+                        "logical_at": moment.isoformat(timespec="seconds"),
+                        "day": moment.date().isoformat(),
+                        "run_id": None,
+                        "domain_id": None,
+                    }
+            except Exception:
+                pass
         moment = datetime.now(tz=TODAY_TZ).replace(microsecond=0)
         return {"source": "system_clock", "reason_code": "LIFE_STATE_UNBOUND",
                 "logical_at": moment.isoformat(timespec="seconds"),
@@ -2529,7 +2807,7 @@ class PhoneService:
         return envelope(True, STATUS_OK, view.letters_block(
             rows=rows, offset=offset, clock=clock, subject_view=bool(subject_view),
             scanned=len(shares), truncated=bool(data.get("truncated")),
-            unprovable=unprovable))
+            unprovable=unprovable, root=self.root, now=clock.get("logical_at")))
 
     # -- 创作托盘 / 小物履历 / 三样喜欢之物 -----------------------------------------------
 
@@ -2714,95 +2992,97 @@ class PhoneService:
 
         if action not in ("set_tray", "clear_tray"):
             return rejected("TRAY_ACTION_UNSUPPORTED", action=action)
-        state, state_reason = self._workbench_state()
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._keepsake_now_iso()
-        if action == "clear_tray":
-            new_state, changed = view.clear_tray(state, now_iso)
-            return self._tray_write_result(state, new_state, changed, "clear_tray")
+        with _tx.state_file_lock(view.tray_path(self.root)):
+            state, state_reason = self._workbench_state()
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._keepsake_now_iso()
+            if action == "clear_tray":
+                new_state, changed = view.clear_tray(state, now_iso)
+                return self._tray_write_result(state, new_state, changed, "clear_tray")
 
-        images = self._tray_id_list(album_artifact_ids, view.MAX_TRAY_IMAGES,
-                                    "TRAY_IMAGES_INVALID")
-        materials = self._tray_id_list(material_ids, view.MAX_TRAY_MATERIALS,
-                                       "TRAY_MATERIALS_INVALID")
-        work_id = None
-        if work_artifact_id not in (None, ""):
-            if not isinstance(work_artifact_id, str) or not work_artifact_id.strip():
-                return rejected("TRAY_WORK_INVALID")
-            work_id = work_artifact_id.strip()
-        if note is not None and not isinstance(note, str):
-            return rejected("TRAY_NOTE_INVALID")
-        clean_note = note.strip() if isinstance(note, str) else None
-        if clean_note is not None and (len(clean_note) > view.MAX_TRAY_NOTE
-                                       or "\x00" in clean_note or "\r" in clean_note):
-            return rejected("TRAY_NOTE_INVALID")
-        if not clean_note:
-            clean_note = None
-        if images is None:
-            return rejected("TRAY_IMAGES_INVALID")
-        if materials is None:
-            return rejected("TRAY_MATERIALS_INVALID")
+            images = self._tray_id_list(album_artifact_ids, view.MAX_TRAY_IMAGES,
+                                        "TRAY_IMAGES_INVALID")
+            materials = self._tray_id_list(material_ids, view.MAX_TRAY_MATERIALS,
+                                           "TRAY_MATERIALS_INVALID")
+            work_id = None
+            if work_artifact_id not in (None, ""):
+                if not isinstance(work_artifact_id, str) or not work_artifact_id.strip():
+                    return rejected("TRAY_WORK_INVALID")
+                work_id = work_artifact_id.strip()
+            if note is not None and not isinstance(note, str):
+                return rejected("TRAY_NOTE_INVALID")
+            clean_note = note.strip() if isinstance(note, str) else None
+            if clean_note is not None and (len(clean_note) > view.MAX_TRAY_NOTE
+                                           or "\x00" in clean_note or "\r" in clean_note):
+                return rejected("TRAY_NOTE_INVALID")
+            if not clean_note:
+                clean_note = None
+            if images is None:
+                return rejected("TRAY_IMAGES_INVALID")
+            if materials is None:
+                return rejected("TRAY_MATERIALS_INVALID")
 
-        tray = state.get("tray") if isinstance(state.get("tray"), Mapping) else {}
-        stored_images = {str(row.get("album_artifact_id")): dict(row)
-                         for row in (tray.get("images") or [])
-                         if row.get("album_artifact_id")}
-        stored_materials = {str(row.get("artifact_id")): dict(row)
-                            for row in (tray.get("materials") or [])
-                            if row.get("artifact_id")}
-        stored_work = dict(tray["work"]) if isinstance(tray.get("work"), Mapping) else None
+            tray = state.get("tray") if isinstance(state.get("tray"), Mapping) else {}
+            stored_images = {str(row.get("album_artifact_id")): dict(row)
+                             for row in (tray.get("images") or [])
+                             if row.get("album_artifact_id")}
+            stored_materials = {str(row.get("artifact_id")): dict(row)
+                                for row in (tray.get("materials") or [])
+                                if row.get("artifact_id")}
+            stored_work = (dict(tray["work"])
+                           if isinstance(tray.get("work"), Mapping) else None)
 
-        # Same intent never bumps revision and never re-baselines a work that moved on.
-        if (tuple(images) == tuple(stored_images)
-                and tuple(materials) == tuple(stored_materials)
-                and work_id == (stored_work or {}).get("artifact_id")
-                and clean_note == tray.get("note")):
-            return envelope(True, STATUS_ALREADY, {
-                "action": "set_tray", "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at")})
+            # Same intent never bumps revision and never re-baselines a work that moved on.
+            if (tuple(images) == tuple(stored_images)
+                    and tuple(materials) == tuple(stored_materials)
+                    and work_id == (stored_work or {}).get("artifact_id")
+                    and clean_note == tray.get("note")):
+                return envelope(True, STATUS_ALREADY, {
+                    "action": "set_tray", "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at")})
 
-        image_rows = []
-        for ref in images:
-            if ref in stored_images:
-                image_rows.append(stored_images[ref])
-                continue
-            checked = self._verify_tray_image(ref)
-            if not checked.get("ok"):
-                return rejected(str(checked.get("reason_code") or "TRAY_IMAGE_INVALID"),
-                                artifact_id=ref)
-            image_rows.append({"album_artifact_id": ref, "added_at": now_iso})
-        material_rows = []
-        for ref in materials:
-            if ref in stored_materials:
-                material_rows.append(stored_materials[ref])
-                continue
-            checked = self._verify_tray_material(ref)
-            if not checked.get("ok"):
-                return rejected(str(checked.get("reason_code") or "TRAY_MATERIAL_INVALID"),
-                                artifact_id=ref)
-            material_rows.append({"artifact_id": ref,
-                                  "baseline_source_revision":
-                                      checked.get("baseline_source_revision"),
-                                  "added_at": now_iso})
-        if work_id is None:
-            work_row = None
-        elif stored_work and stored_work.get("artifact_id") == work_id:
-            work_row = stored_work
-        else:
-            checked = self._verify_tray_work(work_id)
-            if not checked.get("ok"):
-                return rejected(str(checked.get("reason_code") or "TRAY_WORK_INVALID"),
-                                artifact_id=work_id)
-            work_row = {"artifact_id": work_id,
-                        "baseline_version_id": checked.get("baseline_version_id"),
-                        "baseline_version_number": checked.get("baseline_version_number"),
-                        "added_at": now_iso}
-        target = {"images": image_rows, "materials": material_rows,
-                  "work": work_row, "note": clean_note}
-        new_state, changed = view.set_tray(state, target, now_iso)
-        return self._tray_write_result(state, new_state, changed, "set_tray")
+            image_rows = []
+            for ref in images:
+                if ref in stored_images:
+                    image_rows.append(stored_images[ref])
+                    continue
+                checked = self._verify_tray_image(ref)
+                if not checked.get("ok"):
+                    return rejected(str(checked.get("reason_code") or "TRAY_IMAGE_INVALID"),
+                                    artifact_id=ref)
+                image_rows.append({"album_artifact_id": ref, "added_at": now_iso})
+            material_rows = []
+            for ref in materials:
+                if ref in stored_materials:
+                    material_rows.append(stored_materials[ref])
+                    continue
+                checked = self._verify_tray_material(ref)
+                if not checked.get("ok"):
+                    return rejected(str(checked.get("reason_code") or "TRAY_MATERIAL_INVALID"),
+                                    artifact_id=ref)
+                material_rows.append({"artifact_id": ref,
+                                      "baseline_source_revision":
+                                          checked.get("baseline_source_revision"),
+                                      "added_at": now_iso})
+            if work_id is None:
+                work_row = None
+            elif stored_work and stored_work.get("artifact_id") == work_id:
+                work_row = stored_work
+            else:
+                checked = self._verify_tray_work(work_id)
+                if not checked.get("ok"):
+                    return rejected(str(checked.get("reason_code") or "TRAY_WORK_INVALID"),
+                                    artifact_id=work_id)
+                work_row = {"artifact_id": work_id,
+                            "baseline_version_id": checked.get("baseline_version_id"),
+                            "baseline_version_number": checked.get("baseline_version_number"),
+                            "added_at": now_iso}
+            target = {"images": image_rows, "materials": material_rows,
+                      "work": work_row, "note": clean_note}
+            new_state, changed = view.set_tray(state, target, now_iso)
+            return self._tray_write_result(state, new_state, changed, "set_tray")
 
     def _tray_write_result(self, state: Mapping[str, Any], new_state: Mapping[str, Any],
                            changed: bool, action: str) -> dict[str, Any]:
@@ -2881,8 +3161,14 @@ class PhoneService:
             item_id = str(item.get("item_instance_id") or "")
             if not item_id:
                 continue
+            meta = item.get("item_meta")
+            name = (
+                str(meta.get("name")).strip()
+                if isinstance(meta, Mapping) and str(meta.get("name") or "").strip()
+                else None
+            ) or catalog.get(item.get("catalog_item_id"))
             rows.append(view.curio_row(
-                item=item, name=catalog.get(item.get("catalog_item_id")),
+                item=item, name=name,
                 placement=placements.get(item_id), delivery=deliveries.get(item_id),
                 substrate_unavailable=substrate_unavailable))
         return envelope(True, STATUS_OK, view.curios_block(
@@ -2934,59 +3220,60 @@ class PhoneService:
 
         if action not in ("set_her_picks", "set_partner_picks"):
             return rejected("TRIO_ACTION_UNSUPPORTED", action=action)
-        state, state_reason = self._trio_state()
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._keepsake_now_iso()
-        if action == "set_her_picks":
-            ids: list[str] = []
-            if her_picks is not None:
-                if not isinstance(her_picks, list) or len(her_picks) > view.MAX_TRIO_HER:
-                    return rejected("TRIO_HER_PICKS_INVALID")
-                for item in her_picks:
-                    if not isinstance(item, str) or not item.strip():
+        with _tx.state_file_lock(view.trio_path(self.root)):
+            state, state_reason = self._trio_state()
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._keepsake_now_iso()
+            if action == "set_her_picks":
+                ids: list[str] = []
+                if her_picks is not None:
+                    if not isinstance(her_picks, list) or len(her_picks) > view.MAX_TRIO_HER:
                         return rejected("TRIO_HER_PICKS_INVALID")
-                    ref = item.strip()
-                    if ref in ids:
-                        return rejected("TRIO_HER_PICKS_INVALID")
-                    ids.append(ref)
-            stored_picked = {str(row.get("share_id")): row.get("picked_at")
-                             for row in (state.get("her_picks") or [])}
-            picks = []
-            for ref in ids:
-                checked = self._verify_pin_share(ref)
-                if not checked.get("ok"):
-                    return rejected(self._trio_reason(checked.get("reason_code"))
-                                    or "SHARE_NOT_DELIVERED", share_id=ref)
-                picks.append({"share_id": ref,
-                              "picked_at": stored_picked.get(ref) or now_iso})
-            new_state, changed = view.set_her_picks(state, picks, now_iso)
-            return self._trio_write_result(state, new_state, changed, action)
+                    for item in her_picks:
+                        if not isinstance(item, str) or not item.strip():
+                            return rejected("TRIO_HER_PICKS_INVALID")
+                        ref = item.strip()
+                        if ref in ids:
+                            return rejected("TRIO_HER_PICKS_INVALID")
+                        ids.append(ref)
+                stored_picked = {str(row.get("share_id")): row.get("picked_at")
+                                 for row in (state.get("her_picks") or [])}
+                picks = []
+                for ref in ids:
+                    checked = self._verify_pin_share(ref)
+                    if not checked.get("ok"):
+                        return rejected(self._trio_reason(checked.get("reason_code"))
+                                        or "SHARE_NOT_DELIVERED", share_id=ref)
+                    picks.append({"share_id": ref,
+                                  "picked_at": stored_picked.get(ref) or now_iso})
+                new_state, changed = view.set_her_picks(state, picks, now_iso)
+                return self._trio_write_result(state, new_state, changed, action)
 
-        items = partner_picks if partner_picks is not None else []
-        if not isinstance(items, list) or len(items) > view.MAX_TRIO_PARTNER:
-            return rejected("TRIO_PARTNER_PICKS_INVALID")
-        stored_added = {(str(row.get("title") or ""), str(row.get("description") or "")):
-                        row.get("added_at")
-                        for row in (state.get("partner_picks") or [])}
-        rows = []
-        for item in items:
-            if not isinstance(item, Mapping) or set(item) != {"title", "description"}:
+            items = partner_picks if partner_picks is not None else []
+            if not isinstance(items, list) or len(items) > view.MAX_TRIO_PARTNER:
                 return rejected("TRIO_PARTNER_PICKS_INVALID")
-            title = item.get("title")
-            description = item.get("description")
-            if not isinstance(title, str) or not title.strip() \
-                    or len(title.strip()) > view.MAX_PARTNER_TITLE:
-                return rejected("TRIO_PARTNER_TITLE_INVALID")
-            if not isinstance(description, str) \
-                    or len(description.strip()) > view.MAX_PARTNER_DESCRIPTION:
-                return rejected("TRIO_PARTNER_DESCRIPTION_INVALID")
-            key = (title.strip(), description.strip())
-            rows.append({"title": key[0], "description": key[1],
-                         "partner_contributed": True,
-                         "added_at": stored_added.get(key) or now_iso})
-        new_state, changed = view.set_partner_picks(state, rows, now_iso)
-        return self._trio_write_result(state, new_state, changed, action)
+            stored_added = {(str(row.get("title") or ""), str(row.get("description") or "")):
+                            row.get("added_at")
+                            for row in (state.get("partner_picks") or [])}
+            rows = []
+            for item in items:
+                if not isinstance(item, Mapping) or set(item) != {"title", "description"}:
+                    return rejected("TRIO_PARTNER_PICKS_INVALID")
+                title = item.get("title")
+                description = item.get("description")
+                if not isinstance(title, str) or not title.strip() \
+                        or len(title.strip()) > view.MAX_PARTNER_TITLE:
+                    return rejected("TRIO_PARTNER_TITLE_INVALID")
+                if not isinstance(description, str) \
+                        or len(description.strip()) > view.MAX_PARTNER_DESCRIPTION:
+                    return rejected("TRIO_PARTNER_DESCRIPTION_INVALID")
+                key = (title.strip(), description.strip())
+                rows.append({"title": key[0], "description": key[1],
+                             "partner_contributed": True,
+                             "added_at": stored_added.get(key) or now_iso})
+            new_state, changed = view.set_partner_picks(state, rows, now_iso)
+            return self._trio_write_result(state, new_state, changed, action)
 
     def _trio_write_result(self, state: Mapping[str, Any], new_state: Mapping[str, Any],
                            changed: bool, action: str) -> dict[str, Any]:
@@ -3057,49 +3344,50 @@ class PhoneService:
 
         from . import wardrobe_pocket_view as view
 
-        state, state_reason = view.read_wardrobe_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._keepsake_now_iso()
-        if action == "set":
-            chosen = dict(values or {})
-            if not chosen:
-                return rejected("WARDROBE_FIELDS_REQUIRED")
-            economy_state, economy_reason = self._wardrobe_economy()
-            for field in view.SLOT_FIELDS:
-                if not field.endswith("_item_instance_id") or field not in chosen:
-                    continue
-                slot = field[: -len("_item_instance_id")]
-                if economy_reason is not None:
-                    return rejected(economy_reason)
-                checked = view.owned_item_check(
-                    economy_state, subject=self.world_subject, slot=slot,
-                    item_instance_id=str(chosen[field]))
-                if checked.get("status") != "verified":
-                    return rejected(str(checked.get("reason_code") or "ITEM_NOT_OWNED"),
-                                    slot=slot)
-            try:
-                new_state, changed = view.apply_wardrobe_set(state, chosen, now_iso)
-            except view.PocketStateError as exc:
-                return rejected(exc.reason_code)
-        elif action == "clear":
-            try:
-                new_state, changed = view.apply_wardrobe_clear(state, list(fields or []),
-                                                               now_iso)
-            except view.PocketStateError as exc:
-                return rejected(exc.reason_code)
-        else:
-            return rejected("WARDROBE_ACTION_UNSUPPORTED", action=action)
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at")})
-        written = view.write_wardrobe_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action, "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at")})
+        with _tx.state_file_lock(view.wardrobe_state_path(self.root)):
+            state, state_reason = view.read_wardrobe_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._keepsake_now_iso()
+            if action == "set":
+                chosen = dict(values or {})
+                if not chosen:
+                    return rejected("WARDROBE_FIELDS_REQUIRED")
+                economy_state, economy_reason = self._wardrobe_economy()
+                for field in view.SLOT_FIELDS:
+                    if not field.endswith("_item_instance_id") or field not in chosen:
+                        continue
+                    slot = field[: -len("_item_instance_id")]
+                    if economy_reason is not None:
+                        return rejected(economy_reason)
+                    checked = view.owned_item_check(
+                        economy_state, subject=self.world_subject, slot=slot,
+                        item_instance_id=str(chosen[field]))
+                    if checked.get("status") != "verified":
+                        return rejected(str(checked.get("reason_code") or "ITEM_NOT_OWNED"),
+                                        slot=slot)
+                try:
+                    new_state, changed = view.apply_wardrobe_set(state, chosen, now_iso)
+                except view.PocketStateError as exc:
+                    return rejected(exc.reason_code)
+            elif action == "clear":
+                try:
+                    new_state, changed = view.apply_wardrobe_clear(state, list(fields or []),
+                                                                   now_iso)
+                except view.PocketStateError as exc:
+                    return rejected(exc.reason_code)
+            else:
+                return rejected("WARDROBE_ACTION_UNSUPPORTED", action=action)
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at")})
+            written = view.write_wardrobe_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
+                "action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at")})
 
     def pocket_lists(self, *, subject_view: bool = False) -> dict[str, Any]:
         """``GET /api/phone/pocket/lists``: shared-by-default cards + partner suggestions."""
@@ -3120,56 +3408,57 @@ class PhoneService:
 
         from . import wardrobe_pocket_view as view
 
-        state, state_reason = view.read_pocket_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._keepsake_now_iso()
-        chosen = dict(values or {})
-        title = chosen.pop("title", None)
-        try:
-            if action == "add":
-                if kind not in view.LIST_KINDS:
-                    return rejected("POCKET_LIST_INVALID")
-                if not isinstance(operation_key, str) or not operation_key:
-                    return rejected("POCKET_OPERATION_KEY_REQUIRED")
-                new_state, changed = view.pocket_add(
-                    state, kind=kind, entry_id=view.new_entry_id(kind), title=title,
-                    values=chosen, status=status, shared=shared,
-                    operation_key=operation_key, now_iso=now_iso)
-            elif action == "update":
-                if kind not in view.LIST_KINDS:
-                    return rejected("POCKET_LIST_INVALID")
-                if not isinstance(entry_id, str) or not entry_id:
-                    return rejected("POCKET_ENTRY_ID_REQUIRED")
-                new_state, changed = view.pocket_update(
-                    state, kind=kind, entry_id=entry_id, values=chosen, status=status,
-                    shared=shared, now_iso=now_iso)
-            elif action == "remove":
-                if kind not in view.LIST_KINDS:
-                    return rejected("POCKET_LIST_INVALID")
-                if not isinstance(entry_id, str) or not entry_id:
-                    return rejected("POCKET_ENTRY_ID_REQUIRED")
-                new_state, changed = view.pocket_remove(
-                    state, kind=kind, entry_id=entry_id, now_iso=now_iso)
-            elif action == "set_partner_suggestions":
-                new_state, changed = view.pocket_set_partner_suggestions(
-                    state, list(suggestions or []), now_iso)
-            else:
-                return rejected("POCKET_ACTION_UNSUPPORTED", action=action)
-        except view.PocketStateError as exc:
-            return rejected(exc.reason_code)
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at")})
-        written = view.write_pocket_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action, "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            "counts": {name: len(rows) for name, rows in written["lists"].items()},
-            "partner_suggestion_count": len(written["partner_suggestions"])})
+        with _tx.state_file_lock(view.pocket_state_path(self.root)):
+            state, state_reason = view.read_pocket_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._keepsake_now_iso()
+            chosen = dict(values or {})
+            title = chosen.pop("title", None)
+            try:
+                if action == "add":
+                    if kind not in view.LIST_KINDS:
+                        return rejected("POCKET_LIST_INVALID")
+                    if not isinstance(operation_key, str) or not operation_key:
+                        return rejected("POCKET_OPERATION_KEY_REQUIRED")
+                    new_state, changed = view.pocket_add(
+                        state, kind=kind, entry_id=view.new_entry_id(kind), title=title,
+                        values=chosen, status=status, shared=shared,
+                        operation_key=operation_key, now_iso=now_iso)
+                elif action == "update":
+                    if kind not in view.LIST_KINDS:
+                        return rejected("POCKET_LIST_INVALID")
+                    if not isinstance(entry_id, str) or not entry_id:
+                        return rejected("POCKET_ENTRY_ID_REQUIRED")
+                    new_state, changed = view.pocket_update(
+                        state, kind=kind, entry_id=entry_id, values=chosen, status=status,
+                        shared=shared, now_iso=now_iso)
+                elif action == "remove":
+                    if kind not in view.LIST_KINDS:
+                        return rejected("POCKET_LIST_INVALID")
+                    if not isinstance(entry_id, str) or not entry_id:
+                        return rejected("POCKET_ENTRY_ID_REQUIRED")
+                    new_state, changed = view.pocket_remove(
+                        state, kind=kind, entry_id=entry_id, now_iso=now_iso)
+                elif action == "set_partner_suggestions":
+                    new_state, changed = view.pocket_set_partner_suggestions(
+                        state, list(suggestions or []), now_iso)
+                else:
+                    return rejected("POCKET_ACTION_UNSUPPORTED", action=action)
+            except view.PocketStateError as exc:
+                return rejected(exc.reason_code)
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at")})
+            written = view.write_pocket_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
+                "action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
+                "counts": {name: len(rows) for name, rows in written["lists"].items()},
+                "partner_suggestion_count": len(written["partner_suggestions"])})
 
     def _pocket_delivered_share_for_version(self, artifact_id: str,
                                             version_id: str) -> dict[str, Any]:
@@ -3469,27 +3758,28 @@ class PhoneService:
 
         from . import home_hearth_view as view
 
-        state, state_reason = view.read_reunion_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        snapshot = self._reunion_snapshot()
-        now_iso = self._home_now_iso(snapshot["clock"])
-        new_state, changed = view.capture_anchor(state, snapshot, now_iso)
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": "capture", "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
-                "has_anchor": bool(state.get("anchor"))})
-        written = view.write_reunion_state(self.root, new_state)
-        anchor = written.get("anchor") or {}
-        return envelope(True, STATUS_OK, {
-            "action": "capture", "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            "has_anchor": True,
-            "captured_at_local": anchor.get("captured_at_local"),
-            "complete": bool(anchor.get("complete"))})
+        with _tx.state_file_lock(view.reunion_path(self.root)):
+            state, state_reason = view.read_reunion_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            snapshot = self._reunion_snapshot()
+            now_iso = self._home_now_iso(snapshot["clock"])
+            new_state, changed = view.capture_anchor(state, snapshot, now_iso)
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": "capture", "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    "has_anchor": bool(state.get("anchor"))})
+            written = view.write_reunion_state(self.root, new_state)
+            anchor = written.get("anchor") or {}
+            return envelope(True, STATUS_OK, {
+                "action": "capture", "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
+                "has_anchor": True,
+                "captured_at_local": anchor.get("captured_at_local"),
+                "complete": bool(anchor.get("complete"))})
 
     def _recipe_references(self) -> dict[str, Any]:
         """A bounded read of real purchases/consumptions; never evidence of cooking."""
@@ -3503,6 +3793,10 @@ class PhoneService:
                               for entry in economy.phone_catalog_entries()}
         except Exception:
             consumable_ids = set()
+        try:
+            import world_open_storefront as open_storefront
+        except Exception:
+            open_storefront = None
         if not consumable_ids:
             return {"status": "unavailable",
                     "reason_code": "CONSUMABLE_CATALOG_UNAVAILABLE",
@@ -3519,7 +3813,13 @@ class PhoneService:
             if not isinstance(entry, Mapping):
                 continue
             catalog_id = str(entry.get("catalog_item_id") or "")
-            if catalog_id not in consumable_ids:
+            is_recipe_consumable = catalog_id in consumable_ids
+            if not is_recipe_consumable and open_storefront is not None:
+                parsed = open_storefront.parse_shop_item_id(catalog_id)
+                if parsed is not None:
+                    category = str(entry.get("category") or parsed[1] or "").strip()
+                    is_recipe_consumable = category in ("food", "ingredient", "drink")
+            if not is_recipe_consumable:
                 continue
             matched += 1
             consumed = bool(entry.get("consumed"))
@@ -3565,31 +3865,32 @@ class PhoneService:
 
         from . import home_hearth_view as view
 
-        state, state_reason = view.read_recipes_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._home_now_iso(self._home_clock())
-        new_state, changed, card, error = view.upsert_recipe(
-            state, recipe_id=recipe_id, title=title, memo=memo,
-            author_side=author_side, now_iso=now_iso)
-        if error:
-            return rejected(error)
-        target_id = str((card or {}).get("recipe_id") or recipe_id or "")
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": "upsert", "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
-                "recipe_id": target_id,
-                "recipe": card})
-        written = view.write_recipes_state(self.root, new_state)
-        updated = next((row for row in written.get("recipes") or []
-                        if row.get("recipe_id") == target_id), None)
-        return envelope(True, STATUS_OK, {
-            "action": "upsert", "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            "recipe_id": target_id, "recipe": updated})
+        with _tx.state_file_lock(view.recipes_path(self.root)):
+            state, state_reason = view.read_recipes_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._home_now_iso(self._home_clock())
+            new_state, changed, card, error = view.upsert_recipe(
+                state, recipe_id=recipe_id, title=title, memo=memo,
+                author_side=author_side, now_iso=now_iso)
+            if error:
+                return rejected(error)
+            target_id = str((card or {}).get("recipe_id") or recipe_id or "")
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": "upsert", "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    "recipe_id": target_id,
+                    "recipe": card})
+            written = view.write_recipes_state(self.root, new_state)
+            updated = next((row for row in written.get("recipes") or []
+                            if row.get("recipe_id") == target_id), None)
+            return envelope(True, STATUS_OK, {
+                "action": "upsert", "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
+                "recipe_id": target_id, "recipe": updated})
 
     def _arrangements_summary(self, subject_view: bool) -> dict[str, Any]:
         """Safe arrangement facts only: counts/status/day by default, titles with her capability."""
@@ -3649,49 +3950,51 @@ class PhoneService:
 
         if action not in ("propose", "reschedule", "drop"):
             return rejected("PLAN_ACTION_UNSUPPORTED", action=action)
-        state, state_reason = view.read_plans_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._home_now_iso(self._home_clock())
-        if action == "propose":
-            if proposer not in view.PLAN_PROPOSERS:
-                return rejected("PLAN_PROPOSER_INVALID")
-            if proposer == "her" and not actor_is_her:
-                return rejected("PLAN_PROPOSER_FORBIDDEN")
-            new_state, changed, card, error = view.propose_plan(
-                state, plan_id=plan_id, title=title, window_note=window_note,
-                proposer=proposer, now_iso=now_iso)
-        else:
-            existing = view.find_plan(state, plan_id or "") if plan_id else None
-            if existing is None:
-                return rejected("PLAN_NOT_FOUND")
-            if existing.get("proposer") == "her" and not actor_is_her:
-                return rejected("PLAN_FORBIDDEN")
-            if action == "reschedule":
-                new_state, changed, card, error = view.reschedule_plan(
-                    state, plan_id=plan_id or "", window_note=window_note, now_iso=now_iso)
+        with _tx.state_file_lock(view.plans_path(self.root)):
+            state, state_reason = view.read_plans_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._home_now_iso(self._home_clock())
+            if action == "propose":
+                if proposer not in view.PLAN_PROPOSERS:
+                    return rejected("PLAN_PROPOSER_INVALID")
+                if proposer == "her" and not actor_is_her:
+                    return rejected("PLAN_PROPOSER_FORBIDDEN")
+                new_state, changed, card, error = view.propose_plan(
+                    state, plan_id=plan_id, title=title, window_note=window_note,
+                    proposer=proposer, now_iso=now_iso)
             else:
-                new_state, changed, card, error = view.drop_plan(
-                    state, plan_id=plan_id or "", now_iso=now_iso)
-        if error:
-            return rejected(error)
-        target_id = str((card or {}).get("plan_id") or plan_id or "")
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
+                existing = view.find_plan(state, plan_id or "") if plan_id else None
+                if existing is None:
+                    return rejected("PLAN_NOT_FOUND")
+                if existing.get("proposer") == "her" and not actor_is_her:
+                    return rejected("PLAN_FORBIDDEN")
+                if action == "reschedule":
+                    new_state, changed, card, error = view.reschedule_plan(
+                        state, plan_id=plan_id or "", window_note=window_note,
+                        now_iso=now_iso)
+                else:
+                    new_state, changed, card, error = view.drop_plan(
+                        state, plan_id=plan_id or "", now_iso=now_iso)
+            if error:
+                return rejected(error)
+            target_id = str((card or {}).get("plan_id") or plan_id or "")
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    "plan_id": target_id,
+                    "plan": view.plan_row(card) if isinstance(card, Mapping) else None})
+            written = view.write_plans_state(self.root, new_state)
+            updated = next((row for row in written.get("plans") or []
+                            if row.get("plan_id") == target_id), None)
+            return envelope(True, STATUS_OK, {
+                "action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
                 "plan_id": target_id,
-                "plan": view.plan_row(card) if isinstance(card, Mapping) else None})
-        written = view.write_plans_state(self.root, new_state)
-        updated = next((row for row in written.get("plans") or []
-                        if row.get("plan_id") == target_id), None)
-        return envelope(True, STATUS_OK, {
-            "action": action, "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            "plan_id": target_id,
-            "plan": view.plan_row(updated) if isinstance(updated, Mapping) else None})
+                "plan": view.plan_row(updated) if isinstance(updated, Mapping) else None})
 
     # -- 房间外日常：长椅书店 / 散步路线节日集市 / 可重访作品展与共同新地点草图 ------------
 
@@ -3850,61 +4153,63 @@ class PhoneService:
 
         from . import outing_places_view as view
 
-        state, state_reason = view.read_bench_bookstore_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        world_ctx = self._outing_world_context()
-        now_iso = world_ctx["now_iso"]
-        local_date = world_ctx["local_date"]
+        with _tx.state_file_lock(view.bench_bookstore_state_path(self.root)):
+            state, state_reason = view.read_bench_bookstore_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            world_ctx = self._outing_world_context()
+            now_iso = world_ctx["now_iso"]
+            local_date = world_ctx["local_date"]
 
-        try:
-            if action == "log_bench_visit":
-                if not world_ctx["available"]:
-                    return unavailable(str(world_ctx["reason_code"] or "WORLD_UNAVAILABLE"))
-                valid_ids = set((world_ctx["places"].get("places_by_id") or {}).keys())
-                new_state, item, changed = view.apply_log_bench_visit(
-                    state, place_id=str(place_id or ""), valid_place_ids=valid_ids,
-                    operation_key=str(operation_key or ""), note=note, shared=shared,
-                    now_iso=now_iso)
-                detail: dict[str, Any] = {"visit_id": item["visit_id"], "visit": item}
-            elif action == "set_bench_visibility":
-                new_state, item, changed = view.apply_set_bench_visibility(
-                    state, visit_id=str(visit_id or ""), shared=bool(shared), now_iso=now_iso)
-                detail = {"visit_id": item["visit_id"], "shared": item["shared"]}
-            elif action == "bookmark_window_book":
-                new_state, item, changed = view.apply_bookmark_window_book(
-                    state, slot_index=int(slot_index) if slot_index is not None else -1,
-                    local_date=local_date, shared=shared, note=note,
-                    note_supplied=bool(note_supplied), now_iso=now_iso)
-                detail = {"bookmark_id": item["bookmark_id"], "bookmark": item}
-            elif action == "set_partner_window_note":
-                new_state, item, changed = view.apply_set_partner_window_note(
-                    state, slot_index=int(slot_index) if slot_index is not None else -1,
-                    local_date=local_date, note=str(note or ""), now_iso=now_iso)
-                detail = {"partner_window_note": item}
-            elif action == "clear_partner_window_note":
-                new_state, changed = view.apply_clear_partner_window_note(
-                    state, now_iso=now_iso)
-                detail = {"partner_window_note": None}
-            else:
-                return rejected("BENCH_BOOKSTORE_ACTION_UNSUPPORTED", action=action)
-        except view.OutingStateError as exc:
-            return rejected(exc.reason_code)
+            try:
+                if action == "log_bench_visit":
+                    if not world_ctx["available"]:
+                        return unavailable(str(world_ctx["reason_code"] or "WORLD_UNAVAILABLE"))
+                    valid_ids = set((world_ctx["places"].get("places_by_id") or {}).keys())
+                    new_state, item, changed = view.apply_log_bench_visit(
+                        state, place_id=str(place_id or ""), valid_place_ids=valid_ids,
+                        operation_key=str(operation_key or ""), note=note, shared=shared,
+                        now_iso=now_iso)
+                    detail: dict[str, Any] = {"visit_id": item["visit_id"], "visit": item}
+                elif action == "set_bench_visibility":
+                    new_state, item, changed = view.apply_set_bench_visibility(
+                        state, visit_id=str(visit_id or ""), shared=bool(shared),
+                        now_iso=now_iso)
+                    detail = {"visit_id": item["visit_id"], "shared": item["shared"]}
+                elif action == "bookmark_window_book":
+                    new_state, item, changed = view.apply_bookmark_window_book(
+                        state, slot_index=int(slot_index) if slot_index is not None else -1,
+                        local_date=local_date, shared=shared, note=note,
+                        note_supplied=bool(note_supplied), now_iso=now_iso)
+                    detail = {"bookmark_id": item["bookmark_id"], "bookmark": item}
+                elif action == "set_partner_window_note":
+                    new_state, item, changed = view.apply_set_partner_window_note(
+                        state, slot_index=int(slot_index) if slot_index is not None else -1,
+                        local_date=local_date, note=str(note or ""), now_iso=now_iso)
+                    detail = {"partner_window_note": item}
+                elif action == "clear_partner_window_note":
+                    new_state, changed = view.apply_clear_partner_window_note(
+                        state, now_iso=now_iso)
+                    detail = {"partner_window_note": None}
+                else:
+                    return rejected("BENCH_BOOKSTORE_ACTION_UNSUPPORTED", action=action)
+            except view.OutingStateError as exc:
+                return rejected(exc.reason_code)
 
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    **detail,
+                })
+            written = view.write_bench_bookstore_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
+                "action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
                 **detail,
             })
-        written = view.write_bench_bookstore_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action, "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            **detail,
-        })
 
     def outing_routes_market(self, *, subject_view: bool = False) -> dict[str, Any]:
         """``GET /api/phone/outing/routes-market``: walk routes/photos + virtual festival market."""
@@ -3958,75 +4263,78 @@ class PhoneService:
 
         from . import outing_places_view as view
 
-        state, state_reason = view.read_routes_market_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        world_ctx = self._outing_world_context()
-        now_iso = world_ctx["now_iso"]
+        with _tx.state_file_lock(view.routes_market_state_path(self.root)):
+            state, state_reason = view.read_routes_market_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            world_ctx = self._outing_world_context()
+            now_iso = world_ctx["now_iso"]
 
-        try:
-            if action == "save_walk_route":
-                if not world_ctx["available"]:
-                    return unavailable(str(world_ctx["reason_code"] or "WORLD_UNAVAILABLE"))
-                if album_artifact_id is not None:
-                    detail_check = self.album_detail(album_artifact_id)
-                    image = (detail_check.get("image")
-                             if isinstance(detail_check.get("image"), Mapping) else {})
-                    if not detail_check.get("ok"):
-                        if str(detail_check.get("reason_code") or "") == "SUPPLY_UNAVAILABLE":
-                            return unavailable("SUPPLY_UNAVAILABLE")
-                        return rejected("ALBUM_IMAGE_NOT_FOUND",
-                                        album_artifact_id=album_artifact_id)
-                    if str(image.get("lifecycle") or "ACTIVE") != "ACTIVE":
-                        return rejected("ALBUM_IMAGE_NOT_FOUND",
-                                        album_artifact_id=album_artifact_id)
-                valid_ids = set((world_ctx["places"].get("places_by_id") or {}).keys())
-                new_state, item, changed = view.apply_save_walk_route(
-                    state, route_id=route_id, title=str(title or ""),
-                    place_ids=place_ids if isinstance(place_ids, list) else [],
-                    valid_place_ids=valid_ids,
-                    album_artifact_id=album_artifact_id, album_supplied=bool(album_supplied),
-                    caption=caption, caption_supplied=bool(caption_supplied),
-                    shared=shared, now_iso=now_iso)
-                detail = {"route_id": item["route_id"], "route": item}
-            elif action == "remove_walk_route":
-                new_state, changed = view.apply_remove_walk_route(
-                    state, route_id=str(route_id or ""), now_iso=now_iso)
-                detail = {"route_id": str(route_id or "")}
-            elif action == "note_market_wish":
-                new_state, item, changed = view.apply_note_market_wish(
-                    state, stall_code=str(stall_code or ""), memo=str(memo or ""),
-                    budget_cap_jpy=budget_cap_jpy, budget_supplied=bool(budget_supplied),
-                    shared=shared, now_iso=now_iso)
-                detail = {"wish_id": item["wish_id"], "wish": item}
-            elif action == "set_partner_market_tip":
-                new_state, item, changed = view.apply_set_partner_market_tip(
-                    state, stall_code=str(stall_code or ""), tip=str(tip or ""),
-                    now_iso=now_iso)
-                detail = {"partner_market_tip": item}
-            elif action == "clear_partner_market_tip":
-                new_state, changed = view.apply_clear_partner_market_tip(
-                    state, now_iso=now_iso)
-                detail = {"partner_market_tip": None}
-            else:
-                return rejected("ROUTES_MARKET_ACTION_UNSUPPORTED", action=action)
-        except view.OutingStateError as exc:
-            return rejected(exc.reason_code)
+            try:
+                if action == "save_walk_route":
+                    if not world_ctx["available"]:
+                        return unavailable(str(world_ctx["reason_code"] or "WORLD_UNAVAILABLE"))
+                    if album_artifact_id is not None:
+                        detail_check = self.album_detail(album_artifact_id)
+                        image = (detail_check.get("image")
+                                 if isinstance(detail_check.get("image"), Mapping) else {})
+                        if not detail_check.get("ok"):
+                            if (str(detail_check.get("reason_code") or "")
+                                    == "SUPPLY_UNAVAILABLE"):
+                                return unavailable("SUPPLY_UNAVAILABLE")
+                            return rejected("ALBUM_IMAGE_NOT_FOUND",
+                                            album_artifact_id=album_artifact_id)
+                        if str(image.get("lifecycle") or "ACTIVE") != "ACTIVE":
+                            return rejected("ALBUM_IMAGE_NOT_FOUND",
+                                            album_artifact_id=album_artifact_id)
+                    valid_ids = set((world_ctx["places"].get("places_by_id") or {}).keys())
+                    new_state, item, changed = view.apply_save_walk_route(
+                        state, route_id=route_id, title=str(title or ""),
+                        place_ids=place_ids if isinstance(place_ids, list) else [],
+                        valid_place_ids=valid_ids,
+                        album_artifact_id=album_artifact_id,
+                        album_supplied=bool(album_supplied),
+                        caption=caption, caption_supplied=bool(caption_supplied),
+                        shared=shared, now_iso=now_iso)
+                    detail = {"route_id": item["route_id"], "route": item}
+                elif action == "remove_walk_route":
+                    new_state, changed = view.apply_remove_walk_route(
+                        state, route_id=str(route_id or ""), now_iso=now_iso)
+                    detail = {"route_id": str(route_id or "")}
+                elif action == "note_market_wish":
+                    new_state, item, changed = view.apply_note_market_wish(
+                        state, stall_code=str(stall_code or ""), memo=str(memo or ""),
+                        budget_cap_jpy=budget_cap_jpy, budget_supplied=bool(budget_supplied),
+                        shared=shared, now_iso=now_iso)
+                    detail = {"wish_id": item["wish_id"], "wish": item}
+                elif action == "set_partner_market_tip":
+                    new_state, item, changed = view.apply_set_partner_market_tip(
+                        state, stall_code=str(stall_code or ""), tip=str(tip or ""),
+                        now_iso=now_iso)
+                    detail = {"partner_market_tip": item}
+                elif action == "clear_partner_market_tip":
+                    new_state, changed = view.apply_clear_partner_market_tip(
+                        state, now_iso=now_iso)
+                    detail = {"partner_market_tip": None}
+                else:
+                    return rejected("ROUTES_MARKET_ACTION_UNSUPPORTED", action=action)
+            except view.OutingStateError as exc:
+                return rejected(exc.reason_code)
 
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    **detail,
+                })
+            written = view.write_routes_market_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
+                "action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
                 **detail,
             })
-        written = view.write_routes_market_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action, "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            **detail,
-        })
 
     def _outing_project_exhibit(self, exhibit: Mapping[str, Any], *,
                                 subject_view: bool) -> dict[str, Any]:
@@ -4146,91 +4454,96 @@ class PhoneService:
 
         from . import outing_places_view as view
 
-        state, state_reason = view.read_gallery_blueprint_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._home_now_iso(self._home_clock())
+        with _tx.state_file_lock(view.gallery_blueprint_state_path(self.root)):
+            state, state_reason = view.read_gallery_blueprint_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._home_now_iso(self._home_clock())
 
-        try:
-            if action == "curate_exhibit":
-                target_artifact = str(artifact_id or "")
-                target_version = str(version_id or "")
-                project_answer = self.project(target_artifact)
-                if not project_answer.get("ok"):
-                    reason = str(project_answer.get("reason_code") or "")
-                    if (project_answer.get("status") == STATUS_UNAVAILABLE
-                            and not reason.startswith("PROJECT_IS_")):
-                        return _project_failure(project_answer, "PROJECT_UNAVAILABLE")
-                    return rejected(view.NOT_A_PROJECT, artifact_id=target_artifact)
-                project = project_answer.get("project") \
-                    if isinstance(project_answer.get("project"), Mapping) else {}
-                if str(project.get("artifact_type") or "") != "project":
-                    return rejected(view.NOT_A_PROJECT, artifact_id=target_artifact)
-                try:
-                    from life_sharing_service import is_share_title
-                except Exception:
-                    return unavailable("SHARE_GUARD_UNAVAILABLE")
-                if is_share_title(project.get("title")):
-                    return rejected(view.SHARE_ENVELOPE_NOT_A_PROJECT,
-                                    artifact_id=target_artifact)
-                if str(project.get("lifecycle") or "") != "ACTIVE":
-                    return rejected(view.ARCHIVED_SOURCE, artifact_id=target_artifact)
+            try:
+                if action == "curate_exhibit":
+                    target_artifact = str(artifact_id or "")
+                    target_version = str(version_id or "")
+                    project_answer = self.project(target_artifact)
+                    if not project_answer.get("ok"):
+                        reason = str(project_answer.get("reason_code") or "")
+                        if (project_answer.get("status") == STATUS_UNAVAILABLE
+                                and not reason.startswith("PROJECT_IS_")):
+                            return _project_failure(project_answer, "PROJECT_UNAVAILABLE")
+                        return rejected(view.NOT_A_PROJECT, artifact_id=target_artifact)
+                    project = project_answer.get("project") \
+                        if isinstance(project_answer.get("project"), Mapping) else {}
+                    if str(project.get("artifact_type") or "") != "project":
+                        return rejected(view.NOT_A_PROJECT, artifact_id=target_artifact)
+                    try:
+                        from life_sharing_service import is_share_title
+                    except Exception:
+                        return unavailable("SHARE_GUARD_UNAVAILABLE")
+                    if is_share_title(project.get("title")):
+                        return rejected(view.SHARE_ENVELOPE_NOT_A_PROJECT,
+                                        artifact_id=target_artifact)
+                    if str(project.get("lifecycle") or "") != "ACTIVE":
+                        return rejected(view.ARCHIVED_SOURCE, artifact_id=target_artifact)
 
-                ver_read = self.project_version(target_artifact, target_version)
-                if not ver_read.get("ok"):
-                    reason = str(ver_read.get("reason_code") or "PROJECT_VERSION_UNAVAILABLE")
-                    if (reason in (view.VERSION_NOT_IN_ARTIFACT, "VERSION_NOT_FOUND")
-                            or ver_read.get("status") == STATUS_NOT_FOUND):
+                    ver_read = self.project_version(target_artifact, target_version)
+                    if not ver_read.get("ok"):
+                        reason = str(ver_read.get("reason_code")
+                                     or "PROJECT_VERSION_UNAVAILABLE")
+                        if (reason in (view.VERSION_NOT_IN_ARTIFACT, "VERSION_NOT_FOUND")
+                                or ver_read.get("status") == STATUS_NOT_FOUND):
+                            return rejected(view.VERSION_NOT_IN_ARTIFACT,
+                                            artifact_id=target_artifact)
+                        return _project_failure(ver_read, "PROJECT_VERSION_UNAVAILABLE")
+                    version = ver_read.get("version") \
+                        if isinstance(ver_read.get("version"), Mapping) else {}
+                    if (str(version.get("version_id") or "") != target_version
+                            or str(ver_read.get("artifact_id") or "") != target_artifact):
                         return rejected(view.VERSION_NOT_IN_ARTIFACT,
                                         artifact_id=target_artifact)
-                    return _project_failure(ver_read, "PROJECT_VERSION_UNAVAILABLE")
-                version = ver_read.get("version") \
-                    if isinstance(ver_read.get("version"), Mapping) else {}
-                if (str(version.get("version_id") or "") != target_version
-                        or str(ver_read.get("artifact_id") or "") != target_artifact):
-                    return rejected(view.VERSION_NOT_IN_ARTIFACT, artifact_id=target_artifact)
-                if str(version.get("lifecycle") or "ACTIVE") != "ACTIVE":
-                    return rejected(view.ARCHIVED_SOURCE, artifact_id=target_artifact)
+                    if str(version.get("lifecycle") or "ACTIVE") != "ACTIVE":
+                        return rejected(view.ARCHIVED_SOURCE, artifact_id=target_artifact)
 
-                new_state, item, changed = view.apply_curate_exhibit(
-                    state, artifact_id=target_artifact, version_id=target_version,
-                    wall_caption=wall_caption, caption_supplied=bool(caption_supplied),
-                    now_iso=now_iso)
-                detail: dict[str, Any] = {"exhibit_id": item["exhibit_id"], "exhibit": item}
-            elif action == "remove_exhibit":
-                new_state, changed = view.apply_remove_exhibit(
-                    state, exhibit_id=str(exhibit_id or ""), now_iso=now_iso)
-                detail = {"exhibit_id": str(exhibit_id or "")}
-            elif action == "upsert_blueprint":
-                new_state, item, changed = view.apply_upsert_blueprint(
-                    state, blueprint_id=blueprint_id, title=str(title or ""),
-                    sketch_note=str(sketch_note or ""), intended_use=str(intended_use or ""),
-                    author_side=str(author_side or ""), now_iso=now_iso)
-                detail = {"blueprint_id": item["blueprint_id"], "blueprint": item}
-            elif action == "archive_blueprint":
-                new_state, item, changed = view.apply_archive_blueprint(
-                    state, blueprint_id=str(blueprint_id or ""),
-                    author_side=str(author_side or ""), now_iso=now_iso)
-                detail = {"blueprint_id": item["blueprint_id"], "blueprint": item}
-            else:
-                return rejected("GALLERY_BLUEPRINT_ACTION_UNSUPPORTED", action=action)
-        except view.OutingStateError as exc:
-            return rejected(exc.reason_code)
+                    new_state, item, changed = view.apply_curate_exhibit(
+                        state, artifact_id=target_artifact, version_id=target_version,
+                        wall_caption=wall_caption, caption_supplied=bool(caption_supplied),
+                        now_iso=now_iso)
+                    detail: dict[str, Any] = {"exhibit_id": item["exhibit_id"],
+                                              "exhibit": item}
+                elif action == "remove_exhibit":
+                    new_state, changed = view.apply_remove_exhibit(
+                        state, exhibit_id=str(exhibit_id or ""), now_iso=now_iso)
+                    detail = {"exhibit_id": str(exhibit_id or "")}
+                elif action == "upsert_blueprint":
+                    new_state, item, changed = view.apply_upsert_blueprint(
+                        state, blueprint_id=blueprint_id, title=str(title or ""),
+                        sketch_note=str(sketch_note or ""),
+                        intended_use=str(intended_use or ""),
+                        author_side=str(author_side or ""), now_iso=now_iso)
+                    detail = {"blueprint_id": item["blueprint_id"], "blueprint": item}
+                elif action == "archive_blueprint":
+                    new_state, item, changed = view.apply_archive_blueprint(
+                        state, blueprint_id=str(blueprint_id or ""),
+                        author_side=str(author_side or ""), now_iso=now_iso)
+                    detail = {"blueprint_id": item["blueprint_id"], "blueprint": item}
+                else:
+                    return rejected("GALLERY_BLUEPRINT_ACTION_UNSUPPORTED", action=action)
+            except view.OutingStateError as exc:
+                return rejected(exc.reason_code)
 
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    **detail,
+                })
+            written = view.write_gallery_blueprint_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
+                "action": action, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
                 **detail,
             })
-        written = view.write_gallery_blueprint_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action, "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            **detail,
-        })
 
     # -- 长程陪伴六项日常细节：首日房间/盆栽手账/共同习惯册/礼物轨迹/双层灯光/一键续接 --------
 
@@ -4580,121 +4893,123 @@ class PhoneService:
 
         from . import long_companionship_view as view
 
-        state, state_reason = view.read_room_habits_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._home_now_iso(self._home_clock())
+        with _tx.state_file_lock(view.room_habits_state_path(self.root)):
+            state, state_reason = view.read_room_habits_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._home_now_iso(self._home_clock())
 
-        try:
-            if action == "capture_first_room":
-                existing_first = state.get("first_room")
-                already_captured = (
-                    isinstance(existing_first, Mapping) and existing_first.get("captured") is True
-                )
-                if not already_captured and album_artifact_id is not None:
-                    if not self._longterm_album_is_active(album_artifact_id):
-                        return rejected("FIRST_ROOM_ALBUM_NOT_FOUND",
-                                        album_artifact_id=album_artifact_id)
-                room_ctx = self._longterm_home_room_context()
-                new_state, item, changed = view.apply_capture_first_room(
-                    state,
-                    snapshot=room_ctx["snapshot"],
-                    album_artifact_id=album_artifact_id,
-                    note=note,
-                    now_iso=now_iso,
-                )
-                detail: dict[str, Any] = {"first_room": item}
-            elif action == "link_plant_sketch":
-                room_ctx = self._longterm_home_room_context()
-                plants_by_id = room_ctx["plants_by_id"]
-                clean_pid = str(plant_id or "").strip()
-                if clean_pid not in plants_by_id:
-                    return rejected("PLANT_NOT_IN_HOME", plant_id=clean_pid)
-                clean_kind = str(target_kind or "").strip()
-                clean_target = str(target_artifact_id or "").strip()
-                if clean_kind == "album":
-                    if not self._longterm_album_is_active(clean_target):
-                        return rejected("SKETCH_TARGET_NOT_FOUND",
-                                        target_artifact_id=clean_target)
-                elif clean_kind == "project":
-                    proj_ans = self.project(clean_target)
-                    proj = (
-                        proj_ans.get("project")
-                        if isinstance(proj_ans.get("project"), Mapping) else {}
+            try:
+                if action == "capture_first_room":
+                    existing_first = state.get("first_room")
+                    already_captured = (
+                        isinstance(existing_first, Mapping)
+                        and existing_first.get("captured") is True
                     )
-                    try:
-                        from life_sharing_service import is_share_title
-                        share_titled = is_share_title(proj.get("title"))
-                    except Exception:
-                        return unavailable("SHARE_GUARD_UNAVAILABLE")
-                    if (not proj_ans.get("ok")
-                            or share_titled
-                            or str(proj.get("artifact_type") or "") != "project"
-                            or str(proj.get("lifecycle") or "") != "ACTIVE"):
-                        return rejected("SKETCH_TARGET_NOT_FOUND",
-                                        target_artifact_id=clean_target)
+                    if not already_captured and album_artifact_id is not None:
+                        if not self._longterm_album_is_active(album_artifact_id):
+                            return rejected("FIRST_ROOM_ALBUM_NOT_FOUND",
+                                            album_artifact_id=album_artifact_id)
+                    room_ctx = self._longterm_home_room_context()
+                    new_state, item, changed = view.apply_capture_first_room(
+                        state,
+                        snapshot=room_ctx["snapshot"],
+                        album_artifact_id=album_artifact_id,
+                        note=note,
+                        now_iso=now_iso,
+                    )
+                    detail: dict[str, Any] = {"first_room": item}
+                elif action == "link_plant_sketch":
+                    room_ctx = self._longterm_home_room_context()
+                    plants_by_id = room_ctx["plants_by_id"]
+                    clean_pid = str(plant_id or "").strip()
+                    if clean_pid not in plants_by_id:
+                        return rejected("PLANT_NOT_IN_HOME", plant_id=clean_pid)
+                    clean_kind = str(target_kind or "").strip()
+                    clean_target = str(target_artifact_id or "").strip()
+                    if clean_kind == "album":
+                        if not self._longterm_album_is_active(clean_target):
+                            return rejected("SKETCH_TARGET_NOT_FOUND",
+                                            target_artifact_id=clean_target)
+                    elif clean_kind == "project":
+                        proj_ans = self.project(clean_target)
+                        proj = (
+                            proj_ans.get("project")
+                            if isinstance(proj_ans.get("project"), Mapping) else {}
+                        )
+                        try:
+                            from life_sharing_service import is_share_title
+                            share_titled = is_share_title(proj.get("title"))
+                        except Exception:
+                            return unavailable("SHARE_GUARD_UNAVAILABLE")
+                        if (not proj_ans.get("ok")
+                                or share_titled
+                                or str(proj.get("artifact_type") or "") != "project"
+                                or str(proj.get("lifecycle") or "") != "ACTIVE"):
+                            return rejected("SKETCH_TARGET_NOT_FOUND",
+                                            target_artifact_id=clean_target)
+                    else:
+                        return rejected("SKETCH_TARGET_KIND_INVALID")
+
+                    new_state, item, changed = view.apply_link_plant_sketch(
+                        state,
+                        plant_id=clean_pid,
+                        plant_name=str(plants_by_id[clean_pid].get("name") or clean_pid),
+                        valid_plant_ids=set(plants_by_id.keys()),
+                        target_kind=clean_kind,
+                        target_artifact_id=clean_target,
+                        observation_note=str(observation_note or ""),
+                        shared=False if shared is None else bool(shared),
+                        now_iso=now_iso,
+                    )
+                    detail = {"link_id": item["link_id"], "link": item}
+                elif action == "remove_plant_sketch":
+                    new_state, changed = view.apply_remove_plant_sketch(
+                        state, link_id=str(link_id or ""), now_iso=now_iso)
+                    detail = {"link_id": str(link_id or "")}
+                elif action == "upsert_habit":
+                    new_state, item, changed = view.apply_upsert_habit(
+                        state,
+                        habit_id=habit_id,
+                        title=str(title or ""),
+                        habit_text=str(habit_text or ""),
+                        revised_reason=revised_reason,
+                        author_side=str(author_side or ""),
+                        now_iso=now_iso,
+                    )
+                    detail = {"habit_id": item["habit_id"], "habit": item}
+                elif action == "retire_habit":
+                    new_state, item, changed = view.apply_retire_habit(
+                        state,
+                        habit_id=str(habit_id or ""),
+                        retired_reason=retired_reason,
+                        author_side=str(author_side or ""),
+                        now_iso=now_iso,
+                    )
+                    detail = {"habit_id": item["habit_id"], "habit": item}
                 else:
-                    return rejected("SKETCH_TARGET_KIND_INVALID")
+                    return rejected("FIRST_ROOM_HABITS_ACTION_UNSUPPORTED", action=action)
+            except view.LongtermStateError as exc:
+                return rejected(exc.reason_code)
 
-                new_state, item, changed = view.apply_link_plant_sketch(
-                    state,
-                    plant_id=clean_pid,
-                    plant_name=str(plants_by_id[clean_pid].get("name") or clean_pid),
-                    valid_plant_ids=set(plants_by_id.keys()),
-                    target_kind=clean_kind,
-                    target_artifact_id=clean_target,
-                    observation_note=str(observation_note or ""),
-                    shared=False if shared is None else bool(shared),
-                    now_iso=now_iso,
-                )
-                detail = {"link_id": item["link_id"], "link": item}
-            elif action == "remove_plant_sketch":
-                new_state, changed = view.apply_remove_plant_sketch(
-                    state, link_id=str(link_id or ""), now_iso=now_iso)
-                detail = {"link_id": str(link_id or "")}
-            elif action == "upsert_habit":
-                new_state, item, changed = view.apply_upsert_habit(
-                    state,
-                    habit_id=habit_id,
-                    title=str(title or ""),
-                    habit_text=str(habit_text or ""),
-                    revised_reason=revised_reason,
-                    author_side=str(author_side or ""),
-                    now_iso=now_iso,
-                )
-                detail = {"habit_id": item["habit_id"], "habit": item}
-            elif action == "retire_habit":
-                new_state, item, changed = view.apply_retire_habit(
-                    state,
-                    habit_id=str(habit_id or ""),
-                    retired_reason=retired_reason,
-                    author_side=str(author_side or ""),
-                    now_iso=now_iso,
-                )
-                detail = {"habit_id": item["habit_id"], "habit": item}
-            else:
-                return rejected("FIRST_ROOM_HABITS_ACTION_UNSUPPORTED", action=action)
-        except view.LongtermStateError as exc:
-            return rejected(exc.reason_code)
-
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action,
+                    "changed": False,
+                    "already_applied": True,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    **detail,
+                })
+            written = view.write_room_habits_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
                 "action": action,
-                "changed": False,
-                "already_applied": True,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
+                "changed": True,
+                "already_applied": False,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
                 **detail,
             })
-        written = view.write_room_habits_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action,
-            "changed": True,
-            "already_applied": False,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            **detail,
-        })
 
     def longterm_gifts_lantern(
         self,
@@ -4778,83 +5093,87 @@ class PhoneService:
 
         from . import long_companionship_view as view
 
-        state, state_reason = view.read_gifts_lantern_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._home_now_iso(self._home_clock())
+        with _tx.state_file_lock(view.gifts_lantern_state_path(self.root)):
+            state, state_reason = view.read_gifts_lantern_state(self.root)
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._home_now_iso(self._home_clock())
 
-        try:
-            if action == "upsert_gift":
-                if str(author_side or "") == "her" and artifact_id is not None and version_id is not None:
+            try:
+                if action == "upsert_gift":
+                    if (str(author_side or "") == "her" and artifact_id is not None
+                            and version_id is not None):
+                        insp = self._longterm_inspect_project_version(
+                            artifact_id, version_id, include_owner_text=False)
+                        if not insp.get("readable"):
+                            return rejected(
+                                str(insp.get("reason_code") or "GIFT_WORK_NOT_FOUND"),
+                                artifact_id=artifact_id)
+                    new_state, item, changed = view.apply_upsert_gift(
+                        state,
+                        gift_id=gift_id,
+                        author_side=str(author_side or ""),
+                        stage=str(stage or ""),
+                        title=str(title or ""),
+                        draft_seed_note=str(draft_seed_note or ""),
+                        finished_note=finished_note,
+                        artifact_id=artifact_id,
+                        version_id=version_id,
+                        finished_note_supplied=bool(finished_note_supplied),
+                        link_supplied=bool(link_supplied),
+                        now_iso=now_iso,
+                    )
+                    detail: dict[str, Any] = {"gift_id": item["gift_id"], "gift": item}
+                elif action == "send_gift":
+                    new_state, item, changed = view.apply_send_gift(
+                        state,
+                        gift_id=str(gift_id or ""),
+                        author_side=str(author_side or ""),
+                        finished_note=finished_note,
+                        now_iso=now_iso,
+                    )
+                    detail = {"gift_id": item["gift_id"], "gift": item}
+                elif action == "record_later_reflection":
+                    src_art = str(source_artifact_id or "")
+                    src_ver = str(source_version_id or "")
                     insp = self._longterm_inspect_project_version(
-                        artifact_id, version_id, include_owner_text=False)
+                        src_art, src_ver, include_owner_text=False)
                     if not insp.get("readable"):
-                        return rejected(str(insp.get("reason_code") or "GIFT_WORK_NOT_FOUND"),
-                                        artifact_id=artifact_id)
-                new_state, item, changed = view.apply_upsert_gift(
-                    state,
-                    gift_id=gift_id,
-                    author_side=str(author_side or ""),
-                    stage=str(stage or ""),
-                    title=str(title or ""),
-                    draft_seed_note=str(draft_seed_note or ""),
-                    finished_note=finished_note,
-                    artifact_id=artifact_id,
-                    version_id=version_id,
-                    finished_note_supplied=bool(finished_note_supplied),
-                    link_supplied=bool(link_supplied),
-                    now_iso=now_iso,
-                )
-                detail: dict[str, Any] = {"gift_id": item["gift_id"], "gift": item}
-            elif action == "send_gift":
-                new_state, item, changed = view.apply_send_gift(
-                    state,
-                    gift_id=str(gift_id or ""),
-                    author_side=str(author_side or ""),
-                    finished_note=finished_note,
-                    now_iso=now_iso,
-                )
-                detail = {"gift_id": item["gift_id"], "gift": item}
-            elif action == "record_later_reflection":
-                src_art = str(source_artifact_id or "")
-                src_ver = str(source_version_id or "")
-                insp = self._longterm_inspect_project_version(
-                    src_art, src_ver, include_owner_text=False)
-                if not insp.get("readable"):
-                    return rejected(str(insp.get("reason_code") or "SOURCE_WORK_NOT_FOUND"),
-                                    source_artifact_id=src_art)
-                new_state, item, changed = view.apply_record_later_reflection(
-                    state,
-                    source_artifact_id=src_art,
-                    source_version_id=src_ver,
-                    reflection_note=str(reflection_note or ""),
-                    shared=False if shared is None else bool(shared),
-                    now_iso=now_iso,
-                )
-                detail = {"reflection_id": item["reflection_id"], "reflection": item}
-            else:
-                return rejected("GIFTS_LANTERN_ACTION_UNSUPPORTED", action=action)
-        except view.LongtermStateError as exc:
-            return rejected(exc.reason_code)
+                        return rejected(
+                            str(insp.get("reason_code") or "SOURCE_WORK_NOT_FOUND"),
+                            source_artifact_id=src_art)
+                    new_state, item, changed = view.apply_record_later_reflection(
+                        state,
+                        source_artifact_id=src_art,
+                        source_version_id=src_ver,
+                        reflection_note=str(reflection_note or ""),
+                        shared=False if shared is None else bool(shared),
+                        now_iso=now_iso,
+                    )
+                    detail = {"reflection_id": item["reflection_id"], "reflection": item}
+                else:
+                    return rejected("GIFTS_LANTERN_ACTION_UNSUPPORTED", action=action)
+            except view.LongtermStateError as exc:
+                return rejected(exc.reason_code)
 
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action,
+                    "changed": False,
+                    "already_applied": True,
+                    "revision": state.get("revision"),
+                    "updated_at": state.get("updated_at"),
+                    **detail,
+                })
+            written = view.write_gifts_lantern_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
                 "action": action,
-                "changed": False,
-                "already_applied": True,
-                "revision": state.get("revision"),
-                "updated_at": state.get("updated_at"),
+                "changed": True,
+                "already_applied": False,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
                 **detail,
             })
-        written = view.write_gifts_lantern_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action,
-            "changed": True,
-            "already_applied": False,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            **detail,
-        })
 
     def runtime_recovery_review(self) -> dict[str, Any]:
         """Pure zero-write read of `runtime_recovery_review.review(...)`, or safe fallback if unbound."""
@@ -5484,24 +5803,24 @@ class PhoneService:
         from . import autonomy_rhythm_view as view
 
         body = dict(payload or {})
-        state, state_reason = view.read_autonomy_rhythm_state(self.root)
-        if state_reason:
-            return rejected(state_reason)
         ctx = self._autonomy_live_context()
 
         try:
-            new_state, extra = view.apply_autonomy_action(
-                state,
-                action=action,
-                payload=body,
+            # One shared channel: the view's own ``state_file_lock`` read-check-mutate-write
+            # is the same boundary the readiness heartbeat uses, so a foreground action can
+            # neither clobber nor be clobbered by a concurrently committed tick.  A caller
+            # supplied ``expected_revision`` is re-checked under that lock (CAS).
+            out_data = view.apply_autonomy_rhythm_action(
+                self.root,
+                {**body, "action": action},
                 subject_view=bool(subject_view),
+                now_iso=ctx["now_iso"],
                 character_state=ctx["character_state"],
                 world_result=ctx["world_result"],
                 body_view=ctx["body_view"],
                 desk_result=ctx["desk_result"],
                 somatic_state=ctx["somatic_state"],
                 sensory_projection=ctx["sensory_projection"],
-                now_iso=ctx["now_iso"],
             )
         except view.AutonomyRhythmValidationError as exc:
             return self._bad_request(exc.reason_code)
@@ -5509,28 +5828,12 @@ class PhoneService:
             return envelope(False, STATUS_NOT_FOUND, {}, exc.reason_code)
         except view.AutonomyRhythmConflictError as exc:
             return rejected(exc.reason_code)
-
-        try:
-            written = view.write_autonomy_rhythm_state(self.root, new_state)
         except ValueError as exc:
             return rejected(str(exc) or "AUTONOMY_RHYTHM_WRITE_FAILED")
 
-        projected = view.project_autonomy_rhythm(
-            written,
-            state_reason=None,
-            subject_view=bool(subject_view),
-            character_state=ctx["character_state"],
-            world_result=ctx["world_result"],
-            body_view=ctx["body_view"],
-            desk_result=ctx["desk_result"],
-            somatic_state=ctx["somatic_state"],
-            sensory_projection=ctx["sensory_projection"],
-            now_iso=ctx["now_iso"],
-        )
-        out_data = dict(projected)
-        out_data["action"] = action
-        out_data["changed"] = True
-        out_data.update(extra)
+        # ``apply_autonomy_rhythm_action`` already projects; the envelope owns ``ok``.
+        out_data = dict(out_data)
+        out_data.pop("ok", None)
         return envelope(True, STATUS_OK, out_data)
 
     # -- 0.3 情绪脾气与日常张力 / 看法修订与物件共在 / 欲望与 36B 成年亲密 ---------------
@@ -5704,19 +6007,173 @@ class PhoneService:
 
         return clock_mod
 
+    @staticmethod
+    def _load_body_health_module() -> Any:
+        import sys as _sys
+
+        world_scripts = Path(__file__).resolve().parents[1] / "world" / "scripts"
+        if str(world_scripts) not in _sys.path:
+            _sys.path.insert(0, str(world_scripts))
+        from components.world.scripts import body_health_projection as health_mod
+
+        return health_mod
+
+    def body_health(self) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/body/health``: health tier and the capacity envelope.
+
+        Read-only: v03's illness state wins while a course runs, otherwise the
+        persisted record speaks.  Next to it is the real ``body_runtime``
+        fatigue band, so the panel can show an energy range without inventing a
+        number.
+
+        The runtime is read through ``body_health_projection``'s canonical
+        reader (the same one backing ``body_health_view``), never by parsing
+        ``runtime.json`` here: a missing/unreadable runtime stays a named
+        unknown instead of a second, drifting reader.
+        """
+
+        health_mod = self._load_body_health_module()
+        now_iso = self._somatic_now_iso()
+        at = datetime.fromisoformat(now_iso)
+        view = health_mod.body_health_view(self.world_home, at=at)
+        runtime_state, _reason = health_mod._read_runtime_state(self.world_home)
+        fatigue = (
+            health_mod._somatic_fatigue(runtime_state)
+            if runtime_state is not None
+            else None
+        )
+        view["energy"] = _body_energy(fatigue)
+        view["status"] = STATUS_OK
+        return 200, view
+
+    # -- slice adapter: one read/write path for the v0.2-v0.8 projection views ----
+
+    def _read_slice_view(
+        self,
+        reader: Callable[..., tuple[int, Mapping[str, Any]]],
+        *,
+        subject_view: bool = False,
+        mark_ok: bool = True,
+        now_iso: Optional[str] = None,
+    ) -> tuple[int, dict[str, Any]]:
+        """Run one ``read_*_view(root, has_subject_capability=..., now_iso=...)`` slice.
+
+        The owner keeps the clock and the capability so witnesses its own
+        perspective; this adapter only copies the body and, on a real success,
+        stamps the phone's ``status=applied``.  A refusal is returned verbatim:
+        its code, ``reason_code`` and any detail keys are never rewritten, so a
+        403/409 cannot be flattened into a generic 400.
+        """
+
+        code, body = reader(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=now_iso if now_iso is not None else self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if mark_ok and int(code) == 200 and out.get("ok") is True:
+            out["status"] = STATUS_OK
+        return int(code), out
+
+    def _mutate_slice_view(
+        self,
+        mutator: Callable[..., tuple[int, Mapping[str, Any]]],
+        payload: Optional[Mapping[str, Any]] = None,
+        *,
+        subject_view: bool = False,
+        normalize: str = "applied",
+        now_iso: Optional[str] = None,
+    ) -> tuple[int, dict[str, Any]]:
+        """Run one ``mutate_*_view(root, payload, actor_side=..., now_iso=...)`` slice.
+
+        ``normalize`` is the owner's own success vocabulary, kept explicit
+        rather than forced into one shape:
+
+        * ``"applied"`` — ``already_applied``/``DUPLICATE`` becomes
+          ``already_applied``; ``ok``/missing status becomes ``applied``
+          (v0.2/v0.4/v0.8 slices).
+        * ``"ecology"`` — v0.3 ecology speaks ``command_status``; only a
+          ``DUPLICATE`` or an ``ok`` status is re-labelled.
+        * ``"as_is"`` — the owner's body is authoritative (clock and
+          embodied-social already carry the exact status/HTTP code).
+
+        Error bodies are never normalised: the owner's HTTP code and
+        ``reason_code`` pass through unchanged.
+        """
+
+        code, body = mutator(
+            self.root,
+            dict(payload or {}),
+            actor_side="subject" if subject_view else "partner",
+            now_iso=now_iso if now_iso is not None else self._somatic_now_iso(),
+        )
+        out = dict(body)
+        if int(code) == 200 and out.get("ok") is True:
+            if normalize == "applied":
+                if (
+                    out.get("command_status") == "DUPLICATE"
+                    or out.get("status") == "already_applied"
+                ):
+                    out["status"] = STATUS_ALREADY
+                elif out.get("status") in ("ok", None, ""):
+                    out["status"] = STATUS_OK
+            elif normalize == "ecology":
+                if out.get("command_status") == "DUPLICATE":
+                    out["status"] = STATUS_ALREADY
+                elif out.get("status") == "ok":
+                    out["status"] = STATUS_OK
+            self._journal_slice_operation(
+                payload,
+                out,
+                mutator=mutator,
+                subject_view=subject_view,
+            )
+        return int(code), out
+
+    def _journal_slice_operation(
+        self,
+        payload: Optional[Mapping[str, Any]],
+        result: Mapping[str, Any],
+        *,
+        mutator: Callable[..., Any],
+        subject_view: bool,
+    ) -> None:
+        """Append one attribution row for a slice ``operation_key`` (best effort).
+
+        A replayed request (``already_applied``) is not journaled a second time: the
+        journal is a compact evidence trail, not a duplicate request log.  Minimal
+        test shims built on ``SimpleNamespace`` have no ``record_operation``; they
+        simply skip journaling instead of crashing the slice.
+        """
+
+        if not isinstance(payload, Mapping):
+            return
+        operation_key = str(payload.get("operation_key") or "").strip()
+        if not operation_key:
+            return
+        if result.get("already_applied") or str(result.get("status") or "") == STATUS_ALREADY:
+            return
+        recorder = getattr(self, "record_operation", None)
+        if not callable(recorder):
+            return
+        action = str(payload.get("action") or getattr(mutator, "__name__", "slice_action"))
+        try:
+            recorder(
+                actor="subject" if subject_view else "user",
+                action=action,
+                operation_key=operation_key,
+                result=result,
+            )
+        except Exception:  # noqa: BLE001 - attribution must never fake a slice result
+            return
+
     def v03_clock(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v03/clock``: pure zero-write three-clock & evaporation projection."""
 
         clock_mod = self._load_v03_clock_module()
-        code, body = clock_mod.read_v03_clock_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            clock_mod.read_v03_clock_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v03_clock_action(
         self,
@@ -5727,26 +6184,21 @@ class PhoneService:
         """``POST /api/phone/v03/clock``: zero-LLM clock projection advance, evaporable & idle actions."""
 
         clock_mod = self._load_v03_clock_module()
-        actor_side = "subject" if subject_view else "partner"
-        code, body = clock_mod.mutate_v03_clock_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            clock_mod.mutate_v03_clock_view,
+            payload,
+            subject_view=subject_view,
+            normalize="as_is",
         )
-        return int(code), dict(body)
 
     def v03_ecology(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v03/ecology``: pure zero-write economy, illness & reality-bridge projection."""
 
         from . import v03_ecology_view as view
 
-        code, body = view.read_v03_ecology_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v03_ecology_view, subject_view=subject_view, mark_ok=False
         )
-        return int(code), dict(body)
 
     def v03_ecology_action(
         self,
@@ -5758,35 +6210,21 @@ class PhoneService:
 
         from . import v03_ecology_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v03_ecology_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v03_ecology_view,
+            payload,
+            subject_view=subject_view,
+            normalize="ecology",
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            if out.get("command_status") == "DUPLICATE":
-                out["status"] = STATUS_ALREADY
-            elif out.get("status") == "ok":
-                out["status"] = "applied"
-        return int(code), out
 
     def v03_embodied_social(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v03/embodied-social``: pure zero-write kitchen, contact, NPC & style projection."""
 
         from . import v03_embodied_social_view as view
 
-        code, body = view.read_v03_embodied_social_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v03_embodied_social_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v03_embodied_social_action(
         self,
@@ -5798,14 +6236,12 @@ class PhoneService:
 
         from . import v03_embodied_social_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v03_embodied_social_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v03_embodied_social_view,
+            payload,
+            subject_view=subject_view,
+            normalize="as_is",
         )
-        return int(code), dict(body)
 
     # -- v0.4 街区院子手作公共生活 / 世界建设诊断与试住沙盒 / 弹性方向共同试验与玩心 ------
 
@@ -5814,15 +6250,9 @@ class PhoneService:
 
         from . import v04_neighborhood_view as view
 
-        code, body = view.read_v04_neighborhood_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v04_neighborhood_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v04_neighborhood_action(
         self,
@@ -5834,35 +6264,18 @@ class PhoneService:
 
         from . import v04_neighborhood_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v04_neighborhood_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v04_neighborhood_view, payload, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
-                out["status"] = STATUS_ALREADY
-            elif out.get("status") in ("ok", None, ""):
-                out["status"] = "applied"
-        return int(code), out
 
     def v04_builder_trylive(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v04/builder-trylive``: pure zero-write world diagnostics & sandbox projection."""
 
         from . import v04_builder_trylive_view as view
 
-        code, body = view.read_v04_builder_trylive_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v04_builder_trylive_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v04_builder_trylive_action(
         self,
@@ -5874,35 +6287,18 @@ class PhoneService:
 
         from . import v04_builder_trylive_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v04_builder_trylive_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v04_builder_trylive_view, payload, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
-                out["status"] = STATUS_ALREADY
-            elif out.get("status") in ("ok", None, ""):
-                out["status"] = "applied"
-        return int(code), out
 
     def v04_elastic_play(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v04/elastic-play``: pure zero-write elastic direction, shared learning & playfulness."""
 
         from . import v04_elastic_play_view as view
 
-        code, body = view.read_v04_elastic_play_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v04_elastic_play_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v04_elastic_play_action(
         self,
@@ -5914,35 +6310,18 @@ class PhoneService:
 
         from . import v04_elastic_play_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v04_elastic_play_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v04_elastic_play_view, payload, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
-                out["status"] = STATUS_ALREADY
-            elif out.get("status") in ("ok", None, ""):
-                out["status"] = "applied"
-        return int(code), out
 
     def v02_agency_depth(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v02/agency-depth``: pure zero-write agency depth projection."""
 
         from . import v02_agency_depth_view as view
 
-        code, body = view.read_v02_agency_depth_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v02_agency_depth_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v02_agency_depth_action(
         self,
@@ -5954,35 +6333,18 @@ class PhoneService:
 
         from . import v02_agency_depth_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v02_agency_depth_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v02_agency_depth_view, payload, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
-                out["status"] = STATUS_ALREADY
-            elif out.get("status") in ("ok", None, ""):
-                out["status"] = "applied"
-        return int(code), out
 
     def v02_crossmodal(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v02/crossmodal``: pure zero-write crossmodal palette, trial pad & reading marks."""
 
         from . import v02_crossmodal_view as view
 
-        code, body = view.read_v02_crossmodal_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v02_crossmodal_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v02_crossmodal_action(
         self,
@@ -5994,35 +6356,18 @@ class PhoneService:
 
         from . import v02_crossmodal_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v02_crossmodal_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v02_crossmodal_view, payload, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
-                out["status"] = STATUS_ALREADY
-            elif out.get("status") in ("ok", None, ""):
-                out["status"] = "applied"
-        return int(code), out
 
     def v02_runtime_migration(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v02/runtime-migration``: pure zero-write runtime governance & migration projection."""
 
         from . import v02_runtime_migration_view as view
 
-        code, body = view.read_v02_runtime_migration_view(
-            self.root,
-            has_subject_capability=bool(subject_view),
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._read_slice_view(self, 
+            view.read_v02_runtime_migration_view, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            out["status"] = STATUS_OK
-        return int(code), out
 
     def v02_runtime_migration_action(
         self,
@@ -6034,20 +6379,32 @@ class PhoneService:
 
         from . import v02_runtime_migration_view as view
 
-        actor_side = "subject" if subject_view else "partner"
-        code, body = view.mutate_v02_runtime_migration_view(
-            self.root,
-            dict(payload or {}),
-            actor_side=actor_side,
-            now_iso=self._somatic_now_iso(),
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v02_runtime_migration_view, payload, subject_view=subject_view
         )
-        out = dict(body)
-        if code == 200 and out.get("ok") is True:
-            if out.get("command_status") == "DUPLICATE" or out.get("status") == "already_applied":
-                out["status"] = STATUS_ALREADY
-            elif out.get("status") in ("ok", None, ""):
-                out["status"] = "applied"
-        return int(code), out
+
+    def v02_honest_ux(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v02/honest-ux``: pure zero-write honest UX & partner boundary projection."""
+
+        from . import v02_honest_ux_view as view
+
+        return PhoneService._read_slice_view(self,
+            view.read_v02_honest_ux_view, subject_view=subject_view
+        )
+
+    def v02_honest_ux_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v02/honest-ux``: partner-safe boundary actions & subject-only mutations."""
+
+        from . import v02_honest_ux_view as view
+
+        return PhoneService._mutate_slice_view(self,
+            view.mutate_v02_honest_ux_view, payload, subject_view=subject_view
+        )
 
     def v02_recall_projection(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
         """``GET /api/phone/v02/recall-projection``: pure zero-write 4-level recall projection."""
@@ -6055,15 +6412,34 @@ class PhoneService:
         from components.life.scripts import v02_recall_projection as rp
 
         now_iso = self._somatic_now_iso()
-        raw_view = rp.read_v02_recall_projection_view(self.root, now_iso=now_iso)
-        cognition = rp.summarize_recall_for_cognition(self.root, now_iso=now_iso)
+        raw_view = rp.read_v02_recall_projection_view(
+            self.root,
+            now_iso=now_iso,
+            has_subject_capability=bool(subject_view),
+        )
+        cognition = rp.summarize_recall_for_cognition(
+            self.root,
+            now_iso=now_iso,
+            has_subject_capability=bool(subject_view),
+        )
         persp = "subject" if subject_view else "partner"
+        p12_block = raw_view.get("p12_autobiographical_narrative") or {}
+        state_exists = (
+            (Path(self.root) / rp.RECALL_STATE_REL_PATH).is_file()
+            if subject_view
+            else bool(
+                raw_view.get("direct_recall_items")
+                or raw_view.get("proactive_surfaceable_ids")
+                or p12_block.get("chapters")
+                or p12_block.get("attested_event_count")
+            )
+        )
         data_block: dict[str, Any] = {
             "schema": rp.SCHEMA_VERSION,
             "endpoint": "/api/phone/v02/recall-projection",
             "perspective": persp,
             "revision": len(raw_view.get("direct_recall_items") or []),
-            "state_exists": (Path(self.root) / rp.RECALL_STATE_REL_PATH).is_file(),
+            "state_exists": state_exists,
             "llm_calls": 0,
             **raw_view,
             "cognition_summary": cognition,
@@ -6101,7 +6477,7 @@ class PhoneService:
                 "llm_calls": 0,
                 "data": {},
             }
-        if action in ("mark_active_fade", "record_rehearsal") and not subject_view:
+        if action in ("mark_active_fade", "record_rehearsal", "tombstone_memory") and not subject_view:
             return 403, {
                 "ok": False,
                 "status": STATUS_REJECTED,
@@ -6110,7 +6486,12 @@ class PhoneService:
                 "llm_calls": 0,
                 "data": {},
             }
-        res = rp.mutate_v02_recall_projection(self.root, body, now_iso=self._somatic_now_iso())
+        res = rp.mutate_v02_recall_projection(
+            self.root,
+            body,
+            now_iso=self._somatic_now_iso(),
+            has_subject_capability=bool(subject_view),
+        )
         code = int(res.get("status_code") or (200 if res.get("ok") else 400))
         if not res.get("ok"):
             err = str(res.get("error_code") or res.get("reason_code") or "INVALID_FIELDS")
@@ -6191,7 +6572,13 @@ class PhoneService:
                 "llm_calls": 0,
                 "data": {},
             }
-        if action in ("attempt_use_or_fetch_object", "search_nearby_spots") and not subject_view:
+        if action in (
+            "attempt_use_or_fetch_object",
+            "search_nearby_spots",
+            "record_missed_moment",
+            "acknowledge_missed_moment_catchup",
+            "resolve_async_contribution",
+        ) and not subject_view:
             return 403, {
                 "ok": False,
                 "status": STATUS_REJECTED,
@@ -6226,6 +6613,210 @@ class PhoneService:
             "data": data_out,
             **data_out,
         }
+
+    def v08_living_traces(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v08/living-traces``: pure zero-write traces & routines projection."""
+
+        from . import v08_living_traces_view as view
+
+        return PhoneService._read_slice_view(self, 
+            view.read_v08_living_traces_view, subject_view=subject_view
+        )
+
+    def v08_living_traces_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v08/living-traces``: universal verbs, traces & habit routines."""
+
+        from . import v08_living_traces_view as view
+
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v08_living_traces_view, payload, subject_view=subject_view
+        )
+
+    def v08_composable_body(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v08/composable-body``: pure zero-write optional body packs."""
+
+        from . import v08_composable_body_view as view
+
+        return PhoneService._read_slice_view(self, 
+            view.read_v08_composable_body_view, subject_view=subject_view
+        )
+
+    def v08_composable_body_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v08/composable-body``: optional body pack actions."""
+
+        from . import v08_composable_body_view as view
+
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v08_composable_body_view, payload, subject_view=subject_view
+        )
+
+    def v03_encounters(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v03/encounters``: pure zero-write epistemic encounter projection."""
+
+        from . import v03_encounters_view as view
+
+        return PhoneService._read_slice_view(self, 
+            view.read_v03_encounters_view, subject_view=subject_view
+        )
+
+    def v03_encounters_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v03/encounters``: finite glance, shared material & hearsay actions."""
+
+        from . import v03_encounters_view as view
+
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v03_encounters_view, payload, subject_view=subject_view
+        )
+
+    def v08_emergent_echoes(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v08/emergent-echoes``: pure zero-write emergent echoes projection."""
+
+        from . import v08_emergent_echoes_view as view
+
+        return PhoneService._read_slice_view(self, 
+            view.read_v08_emergent_echoes_view, subject_view=subject_view
+        )
+
+    def v08_emergent_echoes_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v08/emergent-echoes``: questions, idioms, reinterpretations & sparks."""
+
+        from . import v08_emergent_echoes_view as view
+
+        return PhoneService._mutate_slice_view(self, 
+            view.mutate_v08_emergent_echoes_view, payload, subject_view=subject_view
+        )
+
+    def v09_living_agency(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v09/living-agency``: pure zero-write Pillars A + D projection."""
+
+        from . import v09_living_agency_view as view
+
+        return PhoneService._read_slice_view(
+            self,
+            view.read_v09_living_agency_view,
+            subject_view=subject_view,
+            mark_ok=False,
+            now_iso=self._outbound_now_iso(),
+        )
+
+    def v09_living_agency_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v09/living-agency``: blind choices, growth stances, objects & taxonomy."""
+
+        from . import v09_living_agency_view as view
+
+        return PhoneService._mutate_slice_view(
+            self,
+            view.mutate_v09_living_agency_view,
+            payload,
+            subject_view=subject_view,
+            now_iso=self._outbound_now_iso(),
+        )
+
+    def v09_world_commitments(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/v09/world-commitments``: pure zero-write Pillars B + C projection."""
+
+        from . import v09_world_commitments_view as view
+
+        return PhoneService._read_slice_view(
+            self,
+            view.read_v09_world_commitments_view,
+            subject_view=subject_view,
+            mark_ok=False,
+            now_iso=self._outbound_now_iso(),
+        )
+
+    def v09_world_commitments_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/v09/world-commitments``: dynamic catalog, NPC commitments & contact."""
+
+        from . import v09_world_commitments_view as view
+
+        return PhoneService._mutate_slice_view(
+            self,
+            view.mutate_v09_world_commitments_view,
+            payload,
+            subject_view=subject_view,
+            now_iso=self._outbound_now_iso(),
+        )
+
+    # -- Stage 3 unified pollable outbound outbox (proactive outreach + ready deferred replies) --
+
+    def _outbound_now_iso(self) -> str:
+        """Pure zero-write clock for outbox polling & acks (honors injected world_clock or business clock)."""
+
+        if self._world_clock is not None:
+            try:
+                moment = today_moment(self._world_clock().isoformat())
+                if moment is not None:
+                    return moment.isoformat(timespec="seconds")
+            except Exception:
+                pass
+        return self._somatic_now_iso()
+
+    def outbound_pending(self, *, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+        """``GET /api/phone/outbound/pending``: 100% zero-write unified pollable outbox."""
+
+        from . import outbound_outbox_view as view
+
+        return view.read_outbound_pending_view(
+            self.root,
+            has_subject_capability=bool(subject_view),
+            now_iso=self._outbound_now_iso(),
+        )
+
+    def outbound_ack_action(
+        self,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        subject_view: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
+        """``POST /api/phone/outbound/ack``: idempotent transport ack for proactive & deferred items."""
+
+        from . import outbound_outbox_view as view
+
+        code, out = view.mutate_outbound_ack_view(
+            self.root,
+            payload,
+            actor_side="subject" if subject_view else "partner",
+            now_iso=self._outbound_now_iso(),
+        )
+        if int(code) == 200 and out.get("ok") is True:
+            self._journal_slice_operation(
+                payload,
+                out,
+                mutator=view.mutate_outbound_ack_view,
+                subject_view=subject_view,
+            )
+        return int(code), out
 
     # -- 具身冷暖 / 窗扇与外衣 / 桌边照顾（纯投影 + 一段显式本地仿真） ------------------
 
@@ -6288,46 +6879,50 @@ class PhoneService:
 
         from . import somatic_comfort_view as view
 
-        current, state_reason = self._somatic_state()
-        if state_reason:
-            return rejected(state_reason)
-        now_iso = self._somatic_now_iso()
-        if action == "set_window":
-            new_state, changed, error = view.set_window(current, state_value, now_iso)
-        elif action == "set_local_position":
-            place, area, why = self._somatic_place(self.world())
-            if why:
-                return rejected(why)
-            new_state, changed, error = view.set_local_position(
-                current, zone=zone, place_id=place, area_id=area, now_iso=now_iso)
-        elif action == "wear_outerwear":
-            new_state, changed, error = view.wear_outerwear(
-                current, garment_id=garment_id, label=label, dryness=dryness,
-                now_iso=now_iso)
-        elif action == "hang_outerwear":
-            new_state, changed, error = view.hang_outerwear(
-                current, garment_id=garment_id, hang_position=hang_position,
-                dryness=dryness, now_iso=now_iso)
-        else:
-            return rejected("GARMENT_WINDOW_ACTION_UNSUPPORTED", action=action)
-        if error:
-            return rejected(error)
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "changed": False,
-                "revision": current.get("revision"),
-                "updated_at": current.get("updated_at")})
-        written = view.write_state(self.root, new_state)
-        data = {"action": action, "changed": True,
-                "revision": written.get("revision"),
-                "updated_at": written.get("updated_at")}
-        if action == "set_window":
-            data["window"] = written.get("window")
-        elif action == "set_local_position":
-            data["local_position"] = written.get("local_position")
-        else:
-            data["garment"] = view.derive_garment(written, now_iso)
-        return envelope(True, STATUS_OK, data)
+        # The whole read-check-mutate-write runs under the same per-file lock the view's
+        # own ``mutate_somatic_comfort_view`` / drink path uses, so a concurrent offer or
+        # drink can never lose this window / garment update (or be lost by it).
+        with _tx.state_file_lock(view.state_path(self.root)):
+            current, state_reason = self._somatic_state()
+            if state_reason:
+                return rejected(state_reason)
+            now_iso = self._somatic_now_iso()
+            if action == "set_window":
+                new_state, changed, error = view.set_window(current, state_value, now_iso)
+            elif action == "set_local_position":
+                place, area, why = self._somatic_place(self.world())
+                if why:
+                    return rejected(why)
+                new_state, changed, error = view.set_local_position(
+                    current, zone=zone, place_id=place, area_id=area, now_iso=now_iso)
+            elif action == "wear_outerwear":
+                new_state, changed, error = view.wear_outerwear(
+                    current, garment_id=garment_id, label=label, dryness=dryness,
+                    now_iso=now_iso)
+            elif action == "hang_outerwear":
+                new_state, changed, error = view.hang_outerwear(
+                    current, garment_id=garment_id, hang_position=hang_position,
+                    dryness=dryness, now_iso=now_iso)
+            else:
+                return rejected("GARMENT_WINDOW_ACTION_UNSUPPORTED", action=action)
+            if error:
+                return rejected(error)
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "changed": False,
+                    "revision": current.get("revision"),
+                    "updated_at": current.get("updated_at")})
+            written = view.write_state(self.root, new_state)
+            data = {"action": action, "changed": True,
+                    "revision": written.get("revision"),
+                    "updated_at": written.get("updated_at")}
+            if action == "set_window":
+                data["window"] = written.get("window")
+            elif action == "set_local_position":
+                data["local_position"] = written.get("local_position")
+            else:
+                data["garment"] = view.derive_garment(written, now_iso)
+            return envelope(True, STATUS_OK, data)
 
     def _somatic_bound_drink_item(self, place_id: str, area_id: str) -> dict[str, Any]:
         """A real, currently usable thirst-relieving instance at the bound room.
@@ -6440,53 +7035,62 @@ class PhoneService:
             return rejected("CARE_SLOT_ACTION_MISMATCH", action=action, slot=slot)
         if action == "use" and slot != "cushion":
             return rejected("CARE_SLOT_ACTION_MISMATCH", action=action, slot=slot)
-        if action == "offer":
-            supported, why_position = self._somatic_position_supported(
-                world_result, str(position))
-            if not supported:
-                return rejected(why_position or "CARE_POSITION_UNSUPPORTED",
-                                position=position)
-            bound = None
-            if slot == "drink":
-                bound = self._somatic_bound_drink_item(place, area)
-                if bound.get("item_instance_id") is None:
-                    bound = None
-            new_state, changed, error, offer = view.offer_care(
-                current, slot=slot, kind=kind, actor_side=actor_side,
-                position=position, place_id=place, area_id=area, now_iso=now_iso,
-                bound_item=bound)
-        elif action == "take":
-            new_state, changed, error, offer = view.take_drink(
-                current, place_id=place, area_id=area, now_iso=now_iso)
-        elif action == "use":
-            body_view = self._body_from_world(world_result)
-            pose = view.body_context(body_view).get("pose")
-            new_state, changed, error, offer = view.use_cushion(
-                current, pose=pose, place_id=place, area_id=area, now_iso=now_iso)
-        elif action == "stow":
-            new_state, changed, error, offer = view.stow_care(
-                current, slot=slot, now_iso=now_iso)
-        elif action == "withdraw":
-            new_state, changed, error, offer = view.withdraw_care(
-                current, slot=slot, now_iso=now_iso)
-        elif action == "drink":
+        if action == "drink":
+            # ``drink`` first asks the world owner (one idempotent operation key) and then
+            # commits the local slot under ``state_file_lock`` inside ``_somatic_drink``;
+            # the lock is never held across that external call.
             return self._somatic_drink(current, now_iso=now_iso, place=place, area=area)
-        else:
-            return rejected("CARE_ACTION_UNSUPPORTED", action=action)
-        if error:
-            return rejected(error)
-        if not changed:
-            return envelope(True, STATUS_ALREADY, {
-                "action": action, "slot": slot, "changed": False,
-                "revision": current.get("revision"),
-                "updated_at": current.get("updated_at"),
+        # Every other action is this instance's own bounded simulation JSON: one locked
+        # read-check-mutate-write, the same boundary as ``mutate_somatic_comfort_view``.
+        with _tx.state_file_lock(view.state_path(self.root)):
+            current, state_reason = self._somatic_state()
+            if state_reason:
+                return rejected(state_reason)
+            if action == "offer":
+                supported, why_position = self._somatic_position_supported(
+                    world_result, str(position))
+                if not supported:
+                    return rejected(why_position or "CARE_POSITION_UNSUPPORTED",
+                                    position=position)
+                bound = None
+                if slot == "drink":
+                    bound = self._somatic_bound_drink_item(place, area)
+                    if bound.get("item_instance_id") is None:
+                        bound = None
+                new_state, changed, error, offer = view.offer_care(
+                    current, slot=slot, kind=kind, actor_side=actor_side,
+                    position=position, place_id=place, area_id=area, now_iso=now_iso,
+                    bound_item=bound)
+            elif action == "take":
+                new_state, changed, error, offer = view.take_drink(
+                    current, place_id=place, area_id=area, now_iso=now_iso)
+            elif action == "use":
+                body_view = self._body_from_world(world_result)
+                pose = view.body_context(body_view).get("pose")
+                new_state, changed, error, offer = view.use_cushion(
+                    current, pose=pose, place_id=place, area_id=area, now_iso=now_iso)
+            elif action == "stow":
+                new_state, changed, error, offer = view.stow_care(
+                    current, slot=slot, now_iso=now_iso)
+            elif action == "withdraw":
+                new_state, changed, error, offer = view.withdraw_care(
+                    current, slot=slot, now_iso=now_iso)
+            else:
+                return rejected("CARE_ACTION_UNSUPPORTED", action=action)
+            if error:
+                return rejected(error)
+            if not changed:
+                return envelope(True, STATUS_ALREADY, {
+                    "action": action, "slot": slot, "changed": False,
+                    "revision": current.get("revision"),
+                    "updated_at": current.get("updated_at"),
+                    "offer": offer})
+            written = view.write_state(self.root, new_state)
+            return envelope(True, STATUS_OK, {
+                "action": action, "slot": slot, "changed": True,
+                "revision": written.get("revision"),
+                "updated_at": written.get("updated_at"),
                 "offer": offer})
-        written = view.write_state(self.root, new_state)
-        return envelope(True, STATUS_OK, {
-            "action": action, "slot": slot, "changed": True,
-            "revision": written.get("revision"),
-            "updated_at": written.get("updated_at"),
-            "offer": offer})
 
     def _somatic_drink(self, current: Mapping[str, Any], *, now_iso: str,
                        place: str, area: str) -> dict[str, Any]:
@@ -6513,7 +7117,8 @@ class PhoneService:
             return rejected("DRINK_UNSUPPORTED",
                             detail="NO_THIRST_RELIEVING_CONSUMABLE",
                             consumed=False)
-        key = "somatic-drink:%s" % str(row.get("offer_id") or "")
+        offer_id = str(row.get("offer_id") or "")
+        key = "somatic-drink:%s" % offer_id
         answer = self.use(item_id, key)
         status = str(answer.get("status") or "")
         data = answer.get("data") if isinstance(answer.get("data"), Mapping) else {}
@@ -6521,12 +7126,31 @@ class PhoneService:
             receipt = data.get("receipt") if isinstance(data.get("receipt"),
                                                          Mapping) else {}
             receipt_ref = receipt.get("receipt_id") or data.get("receipt_id")
-            new_state, changed = view.mark_drink_result(
-                current, outcome="consumed", receipt_ref=receipt_ref,
-                operation_key=key, now_iso=now_iso)
-            if changed:
-                view.write_state(self.root, new_state)
-            return envelope(True, STATUS_OK if status == STATUS_OK else STATUS_ALREADY, {
+            # The world consume has already happened; re-read the local slot under the
+            # shared lock and re-check this exact offer before marking it consumed, so a
+            # concurrent replay of the same care can never double-mark or double-relieve.
+            with _tx.state_file_lock(view.state_path(self.root)):
+                fresh, fresh_reason = self._somatic_state()
+                if fresh_reason:
+                    return rejected(fresh_reason)
+                fresh_row = (fresh.get("care") or {}).get("drink")
+                if not isinstance(fresh_row, Mapping):
+                    return rejected("NO_DRINK_OFFER")
+                already = fresh_row.get("state") == "consumed"
+                if not already and (
+                        fresh_row.get("state") != "taken"
+                        or str(fresh_row.get("offer_id") or "") != offer_id):
+                    return rejected("DRINK_REQUIRES_TAKE_FIRST",
+                                    state=fresh_row.get("state"))
+                changed = False
+                if not already:
+                    new_state, changed = view.mark_drink_result(
+                        fresh, outcome="consumed", receipt_ref=receipt_ref,
+                        operation_key=key, now_iso=now_iso)
+                    if changed:
+                        view.write_state(self.root, new_state)
+            return envelope(True, STATUS_ALREADY if already else
+                            (STATUS_OK if status == STATUS_OK else STATUS_ALREADY), {
                 "action": "drink", "slot": "drink",
                 "changed": bool(changed), "consumed": True,
                 "bound_item_instance_id": item_id,
@@ -6630,10 +7254,106 @@ class PhoneService:
             else STATUS_OK
         return envelope(True, status, result)
 
+    def _sync_project_to_rlf_representation(
+        self,
+        *,
+        artifact_id: str,
+        title: str,
+        content: str,
+        commit: bool = False,
+    ) -> None:
+        """Best-effort bind/sync a real project .md file into RLF representation tracking.
+
+        Private projects always keep ``visibility='private'`` (never exposed to partner),
+        and an externally edited (``DIVERGED``) markdown file on disk is never overwritten.
+        """
+        aid = str(artifact_id or "").strip()
+        if not aid:
+            return
+        try:
+            root_path = Path(self.root)
+            if not root_path.is_dir():
+                return
+            try:
+                from components.life.scripts import v02_representation_lease_forget as _rlf
+            except ImportError:
+                import v02_representation_lease_forget as _rlf  # type: ignore[no-redef]
+
+            now_iso = self._somatic_now_iso()
+            safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", aid).strip("_")[:64] or "work"
+            ws_root = root_path / "workspace"
+            rel_path = f"works/{safe_name}.md"
+            rlf_state, rlf_exists = _rlf._load_state_readonly(root_path)
+            existing = (rlf_state.get("artifacts") or {}).get(aid) if rlf_exists else None
+
+            if not isinstance(existing, Mapping):
+                st_c, res_c = _rlf.create_managed_artifact(
+                    root_path,
+                    artifact_id=aid,
+                    controller_principal_ref="subject",
+                    subject_id=str(getattr(self, "subject", None) or "subject"),
+                    initial_body=str(content or ""),
+                    operation_id=f"rlf_proj_init:{aid}"[:96],
+                    title=str(title or aid)[:120],
+                    visibility="private",
+                    now_iso=now_iso,
+                )
+                if st_c == 200 and res_c.get("ok"):
+                    _rlf.bind_representation(
+                        root_path,
+                        artifact_id=aid,
+                        workspace_root=ws_root,
+                        workspace_rel_path=rel_path,
+                        operation_id=f"rlf_proj_bind:{aid}"[:96],
+                        write_projection=True,
+                        now_iso=now_iso,
+                    )
+                return
+
+            if not commit or existing.get("lifecycle") != _rlf.LIFECYCLE_ACTIVE:
+                return
+
+            _rc, rep = _rlf.inspect_representation(
+                root_path, artifact_id=aid, has_subject_capability=True
+            )
+            ext_edited = bool(rep.get("external_edit_detected"))
+            cur_head = str(existing.get("current_head") or "")
+            body_text = str(content or "")
+            ver_hash = hashlib.sha256(body_text.encode("utf-8")).hexdigest()[:16]
+            c_st, c_res = _rlf.commit_artifact_version(
+                root_path,
+                artifact_id=aid,
+                expected_head=cur_head,
+                body=body_text,
+                operation_id=f"rlf_proj_commit:{aid}:{ver_hash}"[:96],
+                action_ref_id=f"phone:commit:{aid}"[:96],
+                subject_id=str(existing.get("subject_id") or getattr(self, "subject", None) or "subject"),
+                now_iso=now_iso,
+            )
+            if c_st == 200 and c_res.get("ok") and not ext_edited:
+                new_head = str(c_res.get("current_head") or c_res.get("version_id") or ver_hash)
+                binding = (rlf_state.get("representations") or {}).get(aid)
+                bind_ws = Path(binding["workspace_root"]) if isinstance(binding, Mapping) and binding.get("workspace_root") else ws_root
+                bind_rel = str(binding.get("workspace_rel_path") or rel_path) if isinstance(binding, Mapping) else rel_path
+                _rlf.bind_representation(
+                    root_path,
+                    artifact_id=aid,
+                    workspace_root=bind_ws,
+                    workspace_rel_path=bind_rel,
+                    operation_id=f"rlf_proj_sync:{aid}:{new_head}"[:96],
+                    write_projection=True,
+                    now_iso=now_iso,
+                )
+        except Exception:
+            return
+
     def create_derived_project(self, *, title: str, content: str, source_artifact_id: str,
                                source_version_id: str, purpose: str, note: str = "",
                                operation_key: str) -> dict[str, Any]:
         """``POST`` one **new** work that records the old artifact/version it was taken from."""
+        lease_refusal = self._enforce_representation_lease("personal_artifact")
+        if lease_refusal is not None:
+            return lease_refusal
         try:
             answer = self._projects_service().create_derived_project(
                 title=title, content=content, source_artifact_id=source_artifact_id,
@@ -6649,11 +7369,21 @@ class PhoneService:
                 mapped["data"]["provenance"] = answer.get("provenance")
             if answer.get("source_reason_code"):
                 mapped["data"]["source_reason_code"] = answer.get("source_reason_code")
+        if mapped.get("ok") and isinstance(mapped.get("data"), Mapping):
+            self._sync_project_to_rlf_representation(
+                artifact_id=str(mapped["data"].get("artifact_id") or ""),
+                title=title,
+                content=content,
+                commit=False,
+            )
         return mapped
 
     def create_project(self, *, title: str, content: str,
                        operation_key: str) -> dict[str, Any]:
         """One explicit new project.  P sends title+text; the owner mints the artifact."""
+        lease_refusal = self._enforce_representation_lease("personal_artifact")
+        if lease_refusal is not None:
+            return lease_refusal
         try:
             answer = self._projects_service().create_project(
                 title=title, content=content, operation_key=operation_key)
@@ -6661,7 +7391,15 @@ class PhoneService:
             return unavailable(exc.reason_code)
         except Exception as exc:
             return unavailable("PROJECTS_UNAVAILABLE", error_type=type(exc).__name__)
-        return _project_answer(answer, "PROJECT_CREATE_REFUSED")
+        mapped = _project_answer(answer, "PROJECT_CREATE_REFUSED")
+        if mapped.get("ok") and isinstance(mapped.get("data"), Mapping):
+            self._sync_project_to_rlf_representation(
+                artifact_id=str(mapped["data"].get("artifact_id") or ""),
+                title=title,
+                content=content,
+                commit=False,
+            )
+        return mapped
 
     def commit_project(self, *, artifact_id: str, content: str, expected_head: str,
                        operation_key: str) -> dict[str, Any]:
@@ -6672,6 +7410,9 @@ class PhoneService:
         work, or drop a research's citations).  Those two have their own screens and their own
         owner calls.
         """
+        lease_refusal = self._enforce_representation_lease("personal_artifact")
+        if lease_refusal is not None:
+            return lease_refusal
         guard = self._continuable_guard(artifact_id)
         if guard is not None:
             return guard
@@ -6683,7 +7424,15 @@ class PhoneService:
             return unavailable(exc.reason_code)
         except Exception as exc:
             return unavailable("PROJECTS_UNAVAILABLE", error_type=type(exc).__name__)
-        return _project_answer(answer, "PROJECT_COMMIT_REFUSED")
+        mapped = _project_answer(answer, "PROJECT_COMMIT_REFUSED")
+        if mapped.get("ok"):
+            self._sync_project_to_rlf_representation(
+                artifact_id=artifact_id,
+                title=artifact_id,
+                content=content,
+                commit=True,
+            )
+        return mapped
 
     def _content_kind(self, content: Any) -> str:
         """First-line marker -> which kind of document this is (``unknown`` on doubt).
@@ -7270,6 +8019,53 @@ class PhoneService:
                 "note": "只读对账：不会用新键重发，也不会改写这条分享",
                 "local_only": True,
             },
+        }
+
+    def slice_operation(self, operation_key: str) -> dict[str, Any]:
+        """``GET`` reconcile one persisted slice key from ``phone/operations.jsonl``.
+
+        Pure read-only lookup of the attribution journal the slice adapter wrote:
+        it never mints a second key, never creates the journal and never touches
+        the store.  ``found=False`` simply means no such key was ever journaled.
+        """
+
+        wanted = str(operation_key or "").strip()
+        records: list[dict[str, Any]] = []
+        path = self._journal_path()
+        if wanted and path.exists():
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            row = json.loads(line)
+                        except ValueError:
+                            continue
+                        if not isinstance(row, Mapping):
+                            continue
+                        if str(row.get("operation_key") or "") != wanted:
+                            continue
+                        records.append({
+                            "at": str(row.get("at") or "")[:40],
+                            "actor": str(row.get("actor") or "")[:20],
+                            "action": str(row.get("action") or "")[:60],
+                            "status": str(row.get("status") or "")[:30],
+                            "reason_code": str(row.get("reason_code") or "")[:64],
+                            "ok": bool(row.get("ok")),
+                        })
+            except OSError:
+                records = []
+        return {
+            "ok": True,
+            "status": "ok",
+            "operation_key": wanted,
+            "found": bool(records),
+            "records": records[-20:],
+            "latest": records[-1] if records else None,
+            "note": "只读对账：不写入、不重发、不创建日志",
+            "local_only": True,
         }
 
     # -- external stop (local operator; the Activity owner is still LR-2) -------------------
@@ -7892,6 +8688,9 @@ class PhoneService:
                         scope: str = "", uncertainty: Optional[str] = None,
                         operation_key: str) -> dict[str, Any]:
         """Create one research from a question plus explicitly chosen material sources."""
+        lease_refusal = self._enforce_representation_lease("personal_artifact")
+        if lease_refusal is not None:
+            return lease_refusal
         kwargs: dict[str, Any] = {"question": question, "source_refs": source_refs,
                                   "scope": scope, "operation_key": operation_key}
         if title is not None:
@@ -7904,6 +8703,9 @@ class PhoneService:
                         operation_key: str, scope: Optional[str] = None,
                         uncertainty: Optional[str] = None) -> dict[str, Any]:
         """Continue one research under the caller's own CAS head; the marker is rebuilt."""
+        lease_refusal = self._enforce_representation_lease("personal_artifact")
+        if lease_refusal is not None:
+            return lease_refusal
         kwargs: dict[str, Any] = {"artifact_id": artifact_id, "content": content,
                                   "expected_head": expected_head, "operation_key": operation_key}
         if scope is not None:

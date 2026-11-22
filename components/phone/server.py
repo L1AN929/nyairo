@@ -53,7 +53,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 from urllib.parse import parse_qsl, urlsplit
 
 from . import capability as phone_capability
@@ -69,6 +69,28 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 
 #: The one API prefix this surface serves.  Nothing else under the host is routed here.
 API_PREFIX = "/api/phone"
+
+#: v0.8 general object affordances, living traces and personal habit routines.
+ROUTE_V08_LIVING_TRACES = "/api/phone/v08/living-traces"
+
+#: v0.4 Ch.51 composable optional body process packs.
+ROUTE_V08_COMPOSABLE_BODY = "/api/phone/v08/composable-body"
+
+#: v3.0 finite glance / shared material / shopkeeper hearsay surface.
+ROUTE_V03_ENCOUNTERS = "/api/phone/v03/encounters"
+
+#: v0.4 Ch.48/50 + v3.0 Ch.24 emergent echoes (questions, idioms, reinterpretations, sparks, notices).
+ROUTE_V08_EMERGENT_ECHOES = "/api/phone/v08/emergent-echoes"
+
+#: v0.9 Pillars A + D (blind choices, growth stances, repurposed objects, custom taxonomy, capability gaps).
+ROUTE_V09_LIVING_AGENCY = "/api/phone/v09/living-agency"
+
+#: v0.9 Pillars B + C (dynamic catalog, persistent NPCs, durable commitments & venue notices).
+ROUTE_V09_WORLD_COMMITMENTS = "/api/phone/v09/world-commitments"
+
+#: Stage 3 unified pollable outbound outbox (proactive outreach + ready deferred replies).
+ROUTE_OUTBOUND_PENDING = "/api/phone/outbound/pending"
+ROUTE_OUTBOUND_ACK = "/api/phone/outbound/ack"
 
 MAX_BODY_BYTES = 64 * 1024
 #: One album import may carry ~5 MiB of picture bytes (~7 MiB of base64 JSON).  This wider body
@@ -119,7 +141,7 @@ USE_FIELDS = frozenset({"item_instance_id", "operation_key"})
 #: ``POST /api/phone/store/purchases``: the counter purchase of one physical-store item.  The
 #: client names the catalogue row and its own idempotency key; it never names a price, a balance,
 #: a delivery state or an owner.
-STORE_PURCHASE_FIELDS = frozenset({"catalog_item_id", "operation_key"})
+STORE_PURCHASE_FIELDS = frozenset({"catalog_item_id", "item_name", "operation_key"})
 
 #: The reading workbench's request shapes (``docs/engineering/rc1-reading-contract.md``, C's).
 #: The client only ever names *its own* intent: the text it explicitly supplies, the page, the
@@ -196,6 +218,12 @@ WINDOW_KEEPSAKE_REFUSED_FIELDS = frozenset({
     "caption", "text", "title", "summary", "media", "bytes", "data", "sha256", "hash",
     "path", "file", "file_path", "url", "uri", "endpoint", "body", "content",
     "audience", "channel", "recipient", "to", "transport", "provider", "source",
+})
+SLOW_LETTER_SMUGGLED_FIELDS = frozenset({
+    "author_side", "actor_side", "uid", "euid", "gid", "owner", "subject", "actor",
+    "authority", "authorities", "main_self_verified", "confirm_apply", "score",
+    "attachment_score", "omission_debt", "cools_until", "drafted_at", "sent_at",
+    "deliver_after",
 })
 
 #: ``/api/phone/home/workbench`` -- the explicit creation tray.  ``GET`` re-reads every
@@ -381,7 +409,7 @@ AUTONOMY_RHYTHM_FIELDS = frozenset({
     "action",
     "user_text", "urgent", "session_id",
     "topic_label", "category", "reason_summary", "private_note", "lock_id",
-    "reason", "owner", "thread_id",
+    "reason", "owner", "thread_id", "turn_id", "hold_thread",
     "custom_prompt",
     "mode", "minutes", "note",
     "msg_id", "msg_ids",
@@ -754,6 +782,7 @@ class PhoneHTTPServer(ThreadingHTTPServer):
 
     daemon_threads = True
     allow_reuse_address = False
+    request_queue_size = 128
 
     def __init__(self, address: tuple[str, int], *, service: phone_service.PhoneService,
                  csrf_token: str, log_path: Optional[Path] = None,
@@ -1455,6 +1484,9 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/v03/ecology":
                 self._get_v03_ecology(service)
                 return
+            if path == f"{API_PREFIX}/body/health":
+                self._get_body_health(service)
+                return
             if path == f"{API_PREFIX}/v03/embodied-social":
                 self._get_v03_embodied_social(service)
                 return
@@ -1476,11 +1508,50 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/v02/runtime-migration":
                 self._get_v02_runtime_migration(service)
                 return
+            if path == f"{API_PREFIX}/v02/honest-ux":
+                self._get_v02_honest_ux(service)
+                return
             if path == f"{API_PREFIX}/v02/recall-projection":
                 self._get_v02_recall_projection(service)
                 return
             if path == f"{API_PREFIX}/v02/common-ground":
                 self._get_v02_common_ground(service)
+                return
+            if path == f"{API_PREFIX}/v02/ecology-growth":
+                self._get_v02_ecology_growth(service)
+                return
+            if path == f"{API_PREFIX}/v02/world-lineage":
+                self._get_v02_world_lineage(service)
+                return
+            if path == f"{API_PREFIX}/v05/living-town":
+                self._get_v05_living_town(service)
+                return
+            if path == f"{API_PREFIX}/v05/inner-spark":
+                self._get_v05_inner_spark(service)
+                return
+            if path == f"{API_PREFIX}/v05/home-craft":
+                self._get_v05_home_craft(service)
+                return
+            if path == ROUTE_V08_LIVING_TRACES:
+                self._get_v08_living_traces(service)
+                return
+            if path == ROUTE_V08_COMPOSABLE_BODY:
+                self._get_v08_composable_body(service)
+                return
+            if path == ROUTE_V03_ENCOUNTERS:
+                self._get_v03_encounters(service)
+                return
+            if path == ROUTE_V08_EMERGENT_ECHOES:
+                self._get_v08_emergent_echoes(service)
+                return
+            if path == ROUTE_V09_LIVING_AGENCY:
+                self._get_v09_living_agency(service)
+                return
+            if path == ROUTE_V09_WORLD_COMMITMENTS:
+                self._get_v09_world_commitments(service)
+                return
+            if path == ROUTE_OUTBOUND_PENDING:
+                self._get_outbound_pending(service)
                 return
             # Her shares (B's LifeSharingService): two guarded pure reads and one pure-read
             # reconciliation.  ``/shares/sources`` is matched before the id pattern.
@@ -1564,6 +1635,9 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             # 冰箱贴/锁屏的唯一写口：只记显式选择引用，不复制正文或图片。
             if path == f"{API_PREFIX}/home/keepsakes":
                 self._post_home_keepsakes(service)
+                return
+            if path == f"{API_PREFIX}/home/letters":
+                self._post_home_letters(service)
                 return
             # 创作托盘：显式放入/清空引用，只写实例自己的 JSON。
             if path == f"{API_PREFIX}/home/workbench":
@@ -1656,11 +1730,50 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             if path == f"{API_PREFIX}/v02/runtime-migration":
                 self._post_v02_runtime_migration(service)
                 return
+            if path == f"{API_PREFIX}/v02/honest-ux":
+                self._post_v02_honest_ux(service)
+                return
             if path == f"{API_PREFIX}/v02/recall-projection":
                 self._post_v02_recall_projection(service)
                 return
             if path == f"{API_PREFIX}/v02/common-ground":
                 self._post_v02_common_ground(service)
+                return
+            if path == f"{API_PREFIX}/v02/ecology-growth":
+                self._post_v02_ecology_growth(service)
+                return
+            if path == f"{API_PREFIX}/v02/world-lineage":
+                self._post_v02_world_lineage(service)
+                return
+            if path == f"{API_PREFIX}/v05/living-town":
+                self._post_v05_living_town(service)
+                return
+            if path == f"{API_PREFIX}/v05/inner-spark":
+                self._post_v05_inner_spark(service)
+                return
+            if path == f"{API_PREFIX}/v05/home-craft":
+                self._post_v05_home_craft(service)
+                return
+            if path == ROUTE_V08_LIVING_TRACES:
+                self._post_v08_living_traces(service)
+                return
+            if path == ROUTE_V08_COMPOSABLE_BODY:
+                self._post_v08_composable_body(service)
+                return
+            if path == ROUTE_V03_ENCOUNTERS:
+                self._post_v03_encounters(service)
+                return
+            if path == ROUTE_V08_EMERGENT_ECHOES:
+                self._post_v08_emergent_echoes(service)
+                return
+            if path == ROUTE_V09_LIVING_AGENCY:
+                self._post_v09_living_agency(service)
+                return
+            if path == ROUTE_V09_WORLD_COMMITMENTS:
+                self._post_v09_world_commitments(service)
+                return
+            if path == ROUTE_OUTBOUND_ACK:
+                self._post_outbound_ack(service)
                 return
             if path == f"{API_PREFIX}/control/activity/stop":
                 self._post_activity_stop(service)
@@ -2179,18 +2292,111 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_or_map(service.home_letters(subject_view=subject_view))
 
-    def _post_home_keepsakes(self, service: phone_service.PhoneService) -> None:
-        """``POST /api/phone/home/keepsakes``: one explicit select/clear/pin/unpin."""
+    def _read_raw_json_object(self, *, max_bytes: int = MAX_BODY_BYTES) -> dict[str, Any]:
+        content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            raise PhoneRequestError("CONTENT_TYPE_REQUIRED")
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None or not str(raw_length).strip().isdigit():
+            raise PhoneRequestError("CONTENT_LENGTH_REQUIRED")
+        length = int(str(raw_length).strip())
+        if length <= 0:
+            raise PhoneRequestError("BODY_REQUIRED")
+        if length > int(max_bytes):
+            raise PhoneRequestError("BODY_TOO_LARGE", 413)
+        raw = self.rfile.read(length)
+        self._body_consumed = True
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise PhoneRequestError("BODY_NOT_JSON") from None
+        if not isinstance(payload, dict):
+            raise PhoneRequestError("BODY_NOT_AN_OBJECT")
+        return payload
+
+    def _dispatch_slow_letter_draft_action(
+        self,
+        service: phone_service.PhoneService,
+        payload: Mapping[str, Any],
+        *,
+        actor_side: str,
+    ) -> None:
+        from . import window_keepsake_view as wk_view
+
+        smuggled = sorted(set(payload) & SLOW_LETTER_SMUGGLED_FIELDS)
+        if smuggled:
+            raise PhoneRequestError("CLIENT_FIELD_FORBIDDEN:%s" % ",".join(smuggled), 400)
+        action = _clean_text(payload.get("action"), 40, "SLOW_LETTER_ACTION_REQUIRED").lower()
+        if action not in wk_view.SLOW_LETTER_DRAFT_ACTIONS:
+            raise PhoneRequestError("SLOW_LETTER_ACTION_UNSUPPORTED", 400)
+        allowed = wk_view.ACTION_ALLOWED_FIELDS[action]
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(extra), 400)
+        for key, val in payload.items():
+            if isinstance(val, (dict, list)):
+                raise PhoneRequestError("INVALID_FIELD_TYPE:%s" % key, 400)
+        self._send_or_map(service.home_slow_letter_draft_action(
+            action=action,
+            actor_side=actor_side,
+            payload=payload,
+        ))
+
+    def _post_home_letters(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/letters``: 72h cooling slow-letter draft lifecycle."""
 
         guard = self._guard_mutation()
         if guard is not None:
             self._send(*guard)
             return
-        refusal = self._capability_refusal()
-        if refusal is not None:
-            self._send(*refusal)
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, cap_refusal = self._desk_subject_view()
+        if cap_refusal is not None:
+            self._send(*cap_refusal)
             return
-        payload = self._read_body(WINDOW_KEEPSAKE_FIELDS, WINDOW_KEEPSAKE_REFUSED_FIELDS)
+        payload = self._read_raw_json_object()
+        actor_side = "subject" if subject_view else "partner"
+        self._dispatch_slow_letter_draft_action(service, payload, actor_side=actor_side)
+
+    def _post_home_keepsakes(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/home/keepsakes``: select/clear/pin/unpin + slow-letter draft actions."""
+
+        from . import window_keepsake_view as wk_view
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        subject_view, cap_refusal = self._desk_subject_view()
+        if cap_refusal is not None:
+            self._send(*cap_refusal)
+            return
+        payload = self._read_raw_json_object()
+        raw_action = payload.get("action")
+        if (
+            isinstance(raw_action, str)
+            and raw_action.strip().lower() in wk_view.SLOW_LETTER_DRAFT_ACTIONS
+        ):
+            actor_side = "subject" if subject_view else "partner"
+            self._dispatch_slow_letter_draft_action(service, payload, actor_side=actor_side)
+            return
+        if not subject_view:
+            refusal = self._capability_refusal()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+        identifiers = sorted(set(payload) & IDENTITY_FIELDS)
+        if identifiers:
+            raise PhoneRequestError("CLIENT_IDENTITY_REFUSED:%s" % ",".join(identifiers), 409)
+        addressing = sorted(set(payload) & set(WINDOW_KEEPSAKE_REFUSED_FIELDS))
+        if addressing:
+            raise PhoneRequestError("SHARE_ADDRESSING_REFUSED:%s" % ",".join(addressing), 409)
+        unknown = sorted(set(payload) - set(WINDOW_KEEPSAKE_FIELDS))
+        if unknown:
+            raise PhoneRequestError("UNKNOWN_FIELD:%s" % ",".join(unknown), 400)
         action = _clean_text(payload.get("action"), 40, "KEEPSAKE_ACTION_REQUIRED").lower()
         if action not in WINDOW_KEEPSAKE_ACTIONS:
             raise PhoneRequestError("KEEPSAKE_ACTION_UNSUPPORTED")
@@ -3532,6 +3738,7 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             "release_refusal": {"action", "lock_id"},
             "record_turn_context": {
                 "action", "topic_label", "reason", "owner", "private_note",
+                "turn_id", "session_id", "hold_thread",
             },
             "hold_subject_topic": {
                 "action", "topic_label", "reason", "owner", "private_note",
@@ -3565,13 +3772,20 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
 
     # -- 0.3 情绪脾气与日常张力 / 看法修订与物件共在 / 欲望与 36B 成年亲密 -----------------
 
-    def _read_v03_json_body(
+    def _read_slice_json_body(
         self,
         *,
         allow_identity_fields: frozenset[str] = frozenset(),
         max_bytes: int = MAX_BODY_BYTES,
+        require_non_empty: bool = False,
     ) -> dict[str, Any]:
-        """Parse a strict JSON object body with Content-Type/Length guards and identity fence."""
+        """The one strict JSON object reader for every slice route.
+
+        Content-Type/Length guards, ``BODY_TOO_LARGE`` (413), strict dict
+        parsing and the identity fence (``CLIENT_IDENTITY_REFUSED`` / 409) are
+        identical everywhere.  ``require_non_empty`` keeps the older image/echo
+        doors' "an empty object is not a command" refusal unchanged.
+        """
 
         content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
@@ -3592,10 +3806,100 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
             raise PhoneRequestError("BODY_NOT_JSON") from None
         if not isinstance(payload, dict):
             raise PhoneRequestError("BODY_NOT_AN_OBJECT")
+        if require_non_empty and not payload:
+            raise PhoneRequestError("BODY_REQUIRED")
         identifiers = sorted((set(payload) & IDENTITY_FIELDS) - set(allow_identity_fields))
         if identifiers:
             raise PhoneRequestError("CLIENT_IDENTITY_REFUSED:%s" % ",".join(identifiers), 409)
         return payload
+
+    def _read_v03_json_body(
+        self,
+        *,
+        allow_identity_fields: frozenset[str] = frozenset(),
+        max_bytes: int = MAX_BODY_BYTES,
+    ) -> dict[str, Any]:
+        """Compatibility alias for the canonical slice reader (empty object allowed)."""
+
+        return self._read_slice_json_body(
+            allow_identity_fields=allow_identity_fields, max_bytes=max_bytes
+        )
+
+    def _serve_slice_get(
+        self,
+        read: Callable[..., Any],
+        *,
+        desk: bool = True,
+        deliver: str = "tuple",
+    ) -> None:
+        """Run the common slice GET sequence and send exactly one answer.
+
+        ``desk=True`` resolves the optional subject capability through
+        ``_desk_subject_view`` (absent credential = partner view, a wrong one is
+        a 403); ``desk=False`` is the credential-free body-health door.
+        ``deliver="tuple"`` sends ``(code, body)``; ``deliver="result"`` sends a
+        single envelope through the one status map.
+        """
+
+        guard = self._guard_common()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        if desk:
+            subject_view, refusal = self._desk_subject_view()
+            if refusal is not None:
+                self._send(*refusal)
+                return
+            result = read(subject_view=subject_view)
+        else:
+            result = read()
+        if deliver == "result":
+            self._send_or_map(result)
+            return
+        code, body = result
+        self._send(code, body)
+
+    def _serve_slice_post(
+        self,
+        mutate: Callable[..., Any],
+        *,
+        allow_identity_fields: frozenset[str] = frozenset(),
+        max_bytes: int = MAX_BODY_BYTES,
+        require_non_empty: bool = False,
+        deliver: str = "tuple",
+    ) -> None:
+        """Run the common slice POST sequence and send exactly one answer.
+
+        CSRF first, then the optional capability (absent = partner door, a wrong
+        one is a 403, never a downgrade), then the strict JSON body.  The same
+        verification decides ``subject_view``.  ``deliver="v03_result"`` routes
+        an envelope result through ``_send_v03_result`` (403 hint preserved).
+        """
+
+        guard = self._guard_mutation()
+        if guard is not None:
+            self._send(*guard)
+            return
+        if urlsplit(self.path).query:
+            raise PhoneRequestError("UNKNOWN_QUERY")
+        opt_refusal = self._optional_capability_refusal()
+        if opt_refusal is not None:
+            self._send(*opt_refusal)
+            return
+        payload = self._read_slice_json_body(
+            allow_identity_fields=allow_identity_fields,
+            max_bytes=max_bytes,
+            require_non_empty=require_non_empty,
+        )
+        subject_view = self._capability_refusal() is None
+        result = mutate(payload=payload, subject_view=subject_view)
+        if deliver == "v03_result":
+            self._send_v03_result(result)
+            return
+        code, body = result
+        self._send(code, body)
 
     def _send_v03_result(self, result: Mapping[str, Any]) -> None:
         if not result.get("ok") and result.get("http_status") == 403:
@@ -3606,85 +3910,35 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
     def _get_emotional_tension(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/emotion/tension``: pure zero-write 5-domain tension projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        self._send_or_map(service.emotional_tension(subject_view=subject_view))
+        self._serve_slice_get(service.emotional_tension, deliver="result")
 
     def _post_emotional_tension(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/emotion/tension``: schedule, quarrel, missing, low-mood & favor actions."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body(allow_identity_fields=frozenset({"actor"}))
-        subject_view = self._capability_refusal() is None
-        self._send_v03_result(
-            service.emotional_tension_action(payload=payload, subject_view=subject_view)
+        self._serve_slice_post(
+            service.emotional_tension_action,
+            allow_identity_fields=frozenset({"actor"}),
+            deliver="v03_result",
         )
 
     def _get_stance_containment(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/stance/containment``: pure zero-write stance, containment & desk/table projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        self._send_or_map(service.stance_containment(subject_view=subject_view))
+        self._serve_slice_get(service.stance_containment, deliver="result")
 
     def _post_stance_containment(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/stance/containment``: stance lineage, container & shared desk/table actions."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body(allow_identity_fields=frozenset({"actor"}))
-        subject_view = self._capability_refusal() is None
-        self._send_v03_result(
-            service.stance_containment_action(payload=payload, subject_view=subject_view)
+        self._serve_slice_post(
+            service.stance_containment_action,
+            allow_identity_fields=frozenset({"actor"}),
+            deliver="v03_result",
         )
 
     def _get_adult_intimacy(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/intimacy/adult``: pure zero-write desire decay & 36B adult intimacy projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        self._send_or_map(service.adult_intimacy(subject_view=subject_view))
+        self._serve_slice_get(service.adult_intimacy, deliver="result")
 
     def _post_adult_intimacy(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/intimacy/adult``: 36B adult gate, consent, stop & private memory actions."""
@@ -3748,212 +4002,78 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
     def _get_v03_clock(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v03/clock``: pure zero-write three-clock & memory evaporation projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v03_clock(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v03_clock)
 
     def _post_v03_clock(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v03/clock``: zero-LLM clock advance, evaporable pool & meaningless idle."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body(
-            allow_identity_fields=frozenset({"grant_id", "actor", "source"})
+        self._serve_slice_post(
+            service.v03_clock_action,
+            allow_identity_fields=frozenset({"grant_id", "actor", "source"}),
         )
-        subject_view = self._capability_refusal() is None
-        code, body = service.v03_clock_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+
+    def _get_body_health(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/body/health``: pure zero-write health tier and capacity."""
+
+        self._serve_slice_get(service.body_health, desk=False)
 
     def _get_v03_ecology(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v03/ecology``: pure zero-write economy, illness & reality-bridge projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v03_ecology(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v03_ecology)
 
     def _post_v03_ecology(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v03/ecology``: independent economy, illness self-healing & outbound gate."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body(
-            allow_identity_fields=frozenset({"source", "actor", "price", "balance", "currency"})
+        self._serve_slice_post(
+            service.v03_ecology_action,
+            allow_identity_fields=frozenset(
+                {"source", "actor", "price", "balance", "currency"}
+            ),
         )
-        subject_view = self._capability_refusal() is None
-        code, body = service.v03_ecology_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
 
     def _get_v03_embodied_social(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v03/embodied-social``: pure zero-write kitchen, contact, NPC & style projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v03_embodied_social(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v03_embodied_social)
 
     def _post_v03_embodied_social(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v03/embodied-social``: kitchen conservation, two-hand contact, NPC & style."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body(
-            allow_identity_fields=frozenset({"actor", "source"})
+        self._serve_slice_post(
+            service.v03_embodied_social_action,
+            allow_identity_fields=frozenset({"actor", "source"}),
         )
-        subject_view = self._capability_refusal() is None
-        code, body = service.v03_embodied_social_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
 
     def _get_v04_neighborhood(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v04/neighborhood``: pure zero-write neighborhood, courtyard, craft & shelf projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v04_neighborhood(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v04_neighborhood)
 
     def _post_v04_neighborhood(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v04/neighborhood``: local weather, journey, courtyard, notices, crafts & shelf."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body()
-        subject_view = self._capability_refusal() is None
-        code, body = service.v04_neighborhood_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_post(service.v04_neighborhood_action)
 
     def _get_v04_builder_trylive(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v04/builder-trylive``: pure zero-write world diagnostics & try-live sandbox projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v04_builder_trylive(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v04_builder_trylive)
 
     def _post_v04_builder_trylive(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v04/builder-trylive``: isolated route audit, prose gap check, 1h try-live & preview."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body()
-        subject_view = self._capability_refusal() is None
-        code, body = service.v04_builder_trylive_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_post(service.v04_builder_trylive_action)
 
     def _get_v04_elastic_play(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v04/elastic-play``: pure zero-write elastic direction, shared learning & playfulness."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v04_elastic_play(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v04_elastic_play)
 
     def _post_v04_elastic_play(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v04/elastic-play``: day direction, shared notebook, experiment, game & surprise."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body()
-        subject_view = self._capability_refusal() is None
-        code, body = service.v04_elastic_play_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_post(service.v04_elastic_play_action)
 
     def _read_v02_crossmodal_json_body(
         self,
@@ -3961,209 +4081,342 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         max_bytes: int = 6 * 1024 * 1024,
         allow_identity_fields: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
-        """Parse a strict non-empty JSON object body up to ``max_bytes`` for local image base64 uploads."""
+        """Compatibility alias for the canonical reader (empty object refused)."""
 
-        content_type = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        if content_type != "application/json":
-            raise PhoneRequestError("CONTENT_TYPE_REQUIRED")
-        raw_length = self.headers.get("Content-Length")
-        if raw_length is None or not str(raw_length).strip().isdigit():
-            raise PhoneRequestError("CONTENT_LENGTH_REQUIRED")
-        length = int(str(raw_length).strip())
-        if length <= 0:
-            raise PhoneRequestError("BODY_REQUIRED")
-        if length > int(max_bytes):
-            raise PhoneRequestError("BODY_TOO_LARGE", 413)
-        raw = self.rfile.read(length)
-        self._body_consumed = True
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
-            raise PhoneRequestError("BODY_NOT_JSON") from None
-        if not isinstance(payload, dict):
-            raise PhoneRequestError("BODY_NOT_AN_OBJECT")
-        if not payload:
-            raise PhoneRequestError("BODY_REQUIRED")
-        identifiers = sorted((set(payload) & IDENTITY_FIELDS) - set(allow_identity_fields))
-        if identifiers:
-            raise PhoneRequestError("CLIENT_IDENTITY_REFUSED:%s" % ",".join(identifiers), 409)
-        return payload
+        return self._read_slice_json_body(
+            allow_identity_fields=allow_identity_fields,
+            max_bytes=max_bytes,
+            require_non_empty=True,
+        )
 
     def _get_v02_agency_depth(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v02/agency-depth``: pure zero-write agency depth projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v02_agency_depth(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v02_agency_depth)
 
     def _post_v02_agency_depth(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v02/agency-depth``: agency depth mutations with actor_side & idempotency."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body()
-        subject_view = self._capability_refusal() is None
-        code, body = service.v02_agency_depth_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_post(service.v02_agency_depth_action)
 
     def _get_v02_crossmodal(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v02/crossmodal``: pure zero-write crossmodal palette, trial pad & reading marks."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v02_crossmodal(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v02_crossmodal)
 
     def _post_v02_crossmodal(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v02/crossmodal``: image palette analysis, color trial swatches & reading marks."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v02_crossmodal_json_body(max_bytes=6 * 1024 * 1024)
-        subject_view = self._capability_refusal() is None
-        code, body = service.v02_crossmodal_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_post(
+            service.v02_crossmodal_action,
+            allow_identity_fields=frozenset({"artifact_id"}),
+            max_bytes=6 * 1024 * 1024,
+            require_non_empty=True,
+        )
 
     def _get_v02_runtime_migration(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v02/runtime-migration``: pure zero-write runtime governance & migration projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v02_runtime_migration(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v02_runtime_migration)
 
     def _post_v02_runtime_migration(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v02/runtime-migration``: budget mode, carrier check, suitcase & skill reverify."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v03_json_body(max_bytes=4 * 1024 * 1024)
-        subject_view = self._capability_refusal() is None
-        code, body = service.v02_runtime_migration_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_post(
+            service.v02_runtime_migration_action,
+            allow_identity_fields=frozenset({"artifact_id"}),
+            max_bytes=4 * 1024 * 1024,
+        )
+
+    def _get_v02_honest_ux(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/honest-ux``: pure zero-write honest UX & boundary projection."""
+
+        self._serve_slice_get(service.v02_honest_ux)
+
+    def _post_v02_honest_ux(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/honest-ux``: partner boundary & subject-only honest UX actions."""
+
+        self._serve_slice_post(
+            service.v02_honest_ux_action,
+            allow_identity_fields=frozenset({"artifact_id", "actor", "source", "owner"}),
+            require_non_empty=True,
+        )
 
     def _get_v02_recall_projection(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v02/recall-projection``: pure zero-write 4-level recall projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v02_recall_projection(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v02_recall_projection)
 
     def _post_v02_recall_projection(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v02/recall-projection``: episodic trace, active fade, rehearsal & tombstone."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v02_crossmodal_json_body(
-            max_bytes=MAX_BODY_BYTES,
+        self._serve_slice_post(
+            service.v02_recall_projection_action,
             allow_identity_fields=frozenset({"actor", "source", "owner"}),
+            require_non_empty=True,
         )
-        subject_view = self._capability_refusal() is None
-        code, body = service.v02_recall_projection_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
 
     def _get_v02_common_ground(self, service: phone_service.PhoneService) -> None:
         """``GET /api/phone/v02/common-ground``: pure zero-write common ground & unseen-move projection."""
 
-        guard = self._guard_common()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        subject_view, refusal = self._desk_subject_view()
-        if refusal is not None:
-            self._send(*refusal)
-            return
-        code, body = service.v02_common_ground(subject_view=subject_view)
-        self._send(code, body)
+        self._serve_slice_get(service.v02_common_ground)
 
     def _post_v02_common_ground(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/v02/common-ground``: ground ledger, receipt state & unseen-move inquiry."""
 
-        guard = self._guard_mutation()
-        if guard is not None:
-            self._send(*guard)
-            return
-        if urlsplit(self.path).query:
-            raise PhoneRequestError("UNKNOWN_QUERY")
-        opt_refusal = self._optional_capability_refusal()
-        if opt_refusal is not None:
-            self._send(*opt_refusal)
-            return
-        payload = self._read_v02_crossmodal_json_body(
-            max_bytes=MAX_BODY_BYTES,
+        self._serve_slice_post(
+            service.v02_common_ground_action,
             allow_identity_fields=frozenset({"actor", "source", "owner"}),
+            require_non_empty=True,
         )
-        subject_view = self._capability_refusal() is None
-        code, body = service.v02_common_ground_action(payload=payload, subject_view=subject_view)
-        self._send(code, body)
+
+    def _get_v02_ecology_growth(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/ecology-growth``: pure zero-write midscale ecology & growth projection."""
+
+        def _read(*, subject_view: bool = False) -> tuple[int, dict[str, Any]]:
+            try:
+                from . import v02_midscale_ecology_view as view
+            except ImportError:
+                return 503, {
+                    "ok": False,
+                    "status": "unavailable",
+                    "command_status": "REJECTED",
+                    "endpoint": f"{API_PREFIX}/v02/ecology-growth",
+                    "reason_code": "V02_ECOLOGY_GROWTH_UNAVAILABLE",
+                    "error_code": "V02_ECOLOGY_GROWTH_UNAVAILABLE",
+                    "detail": "v02_midscale_ecology_view module is not available",
+                    "llm_calls": 0,
+                    "data": {},
+                }
+            return service._read_slice_view(
+                view.read_v02_ecology_growth_view,
+                subject_view=subject_view,
+            )
+
+        self._serve_slice_get(_read)
+
+    def _post_v02_ecology_growth(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/ecology-growth``: midscale ecology & growth mutations with CSRF & capability."""
+
+        def _mutate(
+            *,
+            payload: Optional[Mapping[str, Any]] = None,
+            subject_view: bool = False,
+        ) -> tuple[int, dict[str, Any]]:
+            try:
+                from . import v02_midscale_ecology_view as view
+            except ImportError:
+                return 503, {
+                    "ok": False,
+                    "status": "unavailable",
+                    "command_status": "REJECTED",
+                    "endpoint": f"{API_PREFIX}/v02/ecology-growth",
+                    "reason_code": "V02_ECOLOGY_GROWTH_UNAVAILABLE",
+                    "error_code": "V02_ECOLOGY_GROWTH_UNAVAILABLE",
+                    "detail": "v02_midscale_ecology_view module is not available",
+                    "llm_calls": 0,
+                    "data": {},
+                }
+            return service._mutate_slice_view(
+                view.mutate_v02_ecology_growth_view,
+                payload,
+                subject_view=subject_view,
+            )
+
+        self._serve_slice_post(
+            _mutate,
+            allow_identity_fields=frozenset({"artifact_id"}),
+            require_non_empty=True,
+        )
+
+    def _get_v02_world_lineage(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v02/world-lineage``: pure zero-write world news, carrier & lineage projection."""
+
+        from . import v02_news_carrier_lineage_view as view
+
+        self._serve_slice_get(
+            lambda *, subject_view=False: service._read_slice_view(
+                view.read_v02_world_lineage_view,
+                subject_view=subject_view,
+            )
+        )
+
+    def _post_v02_world_lineage(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v02/world-lineage``: world news layering, carrier adaptation & lineage mutations."""
+
+        from . import v02_news_carrier_lineage_view as view
+
+        self._serve_slice_post(
+            lambda *, payload=None, subject_view=False: service._mutate_slice_view(
+                view.mutate_v02_world_lineage_view,
+                payload,
+                subject_view=subject_view,
+            ),
+            require_non_empty=True,
+        )
+
+    def _get_v05_living_town(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v05/living-town``: pure zero-write living town, regulars & dual-map projection."""
+
+        from . import v05_living_town_view as view
+
+        self._serve_slice_get(
+            lambda *, subject_view=False: service._read_slice_view(
+                view.read_v05_living_town_view,
+                subject_view=subject_view,
+            )
+        )
+
+    def _post_v05_living_town(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v05/living-town``: living town, third-space, neighbor favors & dual-map mutations."""
+
+        from . import v05_living_town_view as view
+
+        self._serve_slice_post(
+            lambda *, payload=None, subject_view=False: service._mutate_slice_view(
+                view.mutate_v05_living_town_view,
+                payload,
+                subject_view=subject_view,
+            ),
+            require_non_empty=True,
+        )
+
+    def _get_v05_inner_spark(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v05/inner-spark``: pure zero-write open desires, morning dreams, foreshadow & frost."""
+
+        from . import v05_dreams_desires_view as view
+
+        self._serve_slice_get(
+            lambda *, subject_view=False: service._read_slice_view(
+                view.read_v05_inner_spark_view,
+                subject_view=subject_view,
+            )
+        )
+
+    def _post_v05_inner_spark(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v05/inner-spark``: open desires, morning dreams, tucked page notes & window frost."""
+
+        from . import v05_dreams_desires_view as view
+
+        self._serve_slice_post(
+            lambda *, payload=None, subject_view=False: service._mutate_slice_view(
+                view.mutate_v05_inner_spark_view,
+                payload,
+                subject_view=subject_view,
+            ),
+            require_non_empty=True,
+        )
+
+    def _get_v05_home_craft(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v05/home-craft``: pure zero-write patina, arrangement, moving carton & postcards."""
+
+        from . import v05_home_craft_view as view
+
+        self._serve_slice_get(
+            lambda *, subject_view=False: service._read_slice_view(
+                view.read_v05_home_craft_view,
+                subject_view=subject_view,
+            )
+        )
+
+    def _post_v05_home_craft(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v05/home-craft``: patina, arrangement compromise, carton unpack & PNG postcards."""
+
+        from . import v05_home_craft_view as view
+
+        self._serve_slice_post(
+            lambda *, payload=None, subject_view=False: service._mutate_slice_view(
+                view.mutate_v05_home_craft_view,
+                payload,
+                subject_view=subject_view,
+            ),
+            max_bytes=512 * 1024,
+            require_non_empty=True,
+        )
+
+    def _get_v08_living_traces(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v08/living-traces``: pure zero-write traces, objects & routines."""
+
+        self._serve_slice_get(service.v08_living_traces)
+
+    def _post_v08_living_traces(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v08/living-traces``: universal verbs, living traces & routines."""
+
+        self._serve_slice_post(
+            service.v08_living_traces_action, require_non_empty=True
+        )
+
+    def _get_v08_composable_body(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v08/composable-body``: pure zero-write optional body packs."""
+
+        self._serve_slice_get(service.v08_composable_body)
+
+    def _post_v08_composable_body(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v08/composable-body``: optional body pack actions."""
+
+        self._serve_slice_post(
+            service.v08_composable_body_action, require_non_empty=True
+        )
+
+    def _get_v03_encounters(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v03/encounters``: pure zero-write finite glance & shared-material projection."""
+
+        self._serve_slice_get(service.v03_encounters)
+
+    def _post_v03_encounters(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v03/encounters``: finite glance, shared materials & hearsay boundary."""
+
+        self._serve_slice_post(
+            service.v03_encounters_action, require_non_empty=True
+        )
+
+    def _get_v08_emergent_echoes(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v08/emergent-echoes``: pure zero-write emergent echoes projection."""
+
+        self._serve_slice_get(service.v08_emergent_echoes)
+
+    def _post_v08_emergent_echoes(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v08/emergent-echoes``: questions, idioms, reinterpretations & sparks."""
+
+        self._serve_slice_post(
+            service.v08_emergent_echoes_action, require_non_empty=True
+        )
+
+    def _get_v09_living_agency(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v09/living-agency``: pure zero-write Pillars A + D projection."""
+
+        self._serve_slice_get(service.v09_living_agency)
+
+    def _post_v09_living_agency(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v09/living-agency``: blind choices, stances, objects & taxonomy."""
+
+        self._serve_slice_post(
+            service.v09_living_agency_action, require_non_empty=True
+        )
+
+    def _get_v09_world_commitments(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/v09/world-commitments``: pure zero-write Pillars B + C projection."""
+
+        self._serve_slice_get(service.v09_world_commitments)
+
+    def _post_v09_world_commitments(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/v09/world-commitments``: dynamic catalog, NPC commitments & contact."""
+
+        self._serve_slice_post(
+            service.v09_world_commitments_action, require_non_empty=True
+        )
+
+    def _get_outbound_pending(self, service: phone_service.PhoneService) -> None:
+        """``GET /api/phone/outbound/pending``: 100% zero-write unified pollable outbox."""
+
+        self._serve_slice_get(service.outbound_pending)
+
+    def _post_outbound_ack(self, service: phone_service.PhoneService) -> None:
+        """``POST /api/phone/outbound/ack``: CSRF-gated idempotent transport delivery receipt."""
+
+        self._serve_slice_post(
+            service.outbound_ack_action, require_non_empty=True
+        )
 
     def _post_share_prepare(self, service: phone_service.PhoneService) -> None:
         """``POST /api/phone/shares``: one explicit draft.  Never a whole private material."""
@@ -4921,7 +5174,11 @@ class PhoneRequestHandler(BaseHTTPRequestHandler):
         catalog_item_id = _clean_text(payload.get("catalog_item_id"), 80,
                                       "CATALOG_ITEM_INVALID")
         key = _operation_key(payload.get("operation_key"))
-        result = service.store_purchase(catalog_item_id, key)
+        if "item_name" in payload and payload.get("item_name") is not None:
+            item_name = _clean_text(payload.get("item_name"), 40, "ITEM_NAME_INVALID")
+            result = service.store_purchase(catalog_item_id, key, item_name=item_name)
+        else:
+            result = service.store_purchase(catalog_item_id, key)
         service.record_operation(actor=self._actor(), action="store_purchase",
                                  operation_key=key, result=result)
         self._send_or_map(result)
@@ -6731,6 +6988,8 @@ __all__ = [
     "REST_MODES",
     "REST_STATES",
     "ROOM_WORLD_ACTION_FIELDS",
+    "ROUTE_V09_LIVING_AGENCY",
+    "ROUTE_V09_WORLD_COMMITMENTS",
     "STATIC_FILES",
     "STORE_PURCHASE_FIELDS",
     "SHARE_ACTION_FIELDS",

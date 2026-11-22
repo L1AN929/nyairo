@@ -821,6 +821,9 @@ class LifeSupplyService:
         try:
             caller = self._authorize(op, self.caller_identities(peer_uid))
             handler = getattr(self, f"_op_{op}")
+            if op in READ_OPS and self.db is not None:
+                with self.db.read_only_scope():
+                    return handler(req, caller=caller, peer_uid=peer_uid)
             return handler(req, caller=caller, peer_uid=peer_uid)
         except RequestRefused as exc:
             return exc.payload

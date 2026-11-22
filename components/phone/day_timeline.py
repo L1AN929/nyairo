@@ -496,6 +496,14 @@ def _wallet_entries(service: Any, day: str, basis: str) -> tuple[list[dict[str, 
         transaction_id = str(raw.get("transaction_id") or "")
         if not transaction_id:
             continue
+        raw_item_name = raw.get("item_name")
+        item_name = (
+            str(raw_item_name).strip()
+            if isinstance(raw_item_name, str)
+            and str(raw_item_name).strip()
+            and not str(raw_item_name).strip().startswith(("shop_slot:", "shop_item:"))
+            else None
+        )
         rows.append(_entry(
             entry_id="wallet:" + transaction_id,
             kind=KIND_WALLET,
@@ -509,6 +517,7 @@ def _wallet_entries(service: Any, day: str, basis: str) -> tuple[list[dict[str, 
             amount=raw.get("amount"),
             currency=data.get("currency"),
             catalog_item_id=raw.get("catalog_item_id"),
+            item_name=item_name,
             detail_ref="/api/phone/wallet",
             detail_not_in_aggregate=WALLET_DETAIL_NOT_IN_AGGREGATE,
         ))

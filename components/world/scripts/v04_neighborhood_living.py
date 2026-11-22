@@ -20,11 +20,46 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+try:  # ``components/life/scripts`` is on sys.path in tests and the life service
+    from state_tx_guard import (  # type: ignore[import-not-found]
+        reconcile_evicted_or_active_op,
+        stamp_receipt,
+        state_file_lock,
+        trim_receipts_by_op_seq,
+    )
+except ImportError:  # pragma: no cover - world service bootstrap
+    _LIFE_SCRIPTS = Path(__file__).resolve().parents[2] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(_LIFE_SCRIPTS))
+    from state_tx_guard import (  # type: ignore[import-not-found,no-redef]
+        reconcile_evicted_or_active_op,
+        stamp_receipt,
+        state_file_lock,
+        trim_receipts_by_op_seq,
+    )
+
+try:
+    from components.world.scripts import v05_season_solar_pulse as _season_solar_pulse
+except ImportError:  # pragma: no cover - flat script import fallback
+    _WORLD_SCRIPTS_SELF = Path(__file__).resolve().parent
+    if str(_WORLD_SCRIPTS_SELF) not in sys.path:
+        sys.path.insert(0, str(_WORLD_SCRIPTS_SELF))
+    import v05_season_solar_pulse as _season_solar_pulse  # type: ignore[no-redef]
+
+try:
+    from components.world.scripts import instance_paths as _instance_paths
+except ImportError:  # pragma: no cover - flat script import fallback
+    _WORLD_SCRIPTS_SELF = Path(__file__).resolve().parent
+    if str(_WORLD_SCRIPTS_SELF) not in sys.path:
+        sys.path.insert(0, str(_WORLD_SCRIPTS_SELF))
+    import instance_paths as _instance_paths  # type: ignore[no-redef]
 
 ENGINE_SCHEMA = "world.v04.neighborhood_living.v1"
 STATE_SCHEMA_VERSION = 1
@@ -170,6 +205,55 @@ PLANT_STAGES: tuple[str, ...] = (
 )
 
 # ---------------------------------------------------------------------------
+# Ch.41 §四/§五: Season daylight ecology, tolerant-plant milestones & seasonal market
+# ---------------------------------------------------------------------------
+# Every value below is a plain deterministic function of the world clock and the
+# declared environment.  Zero randomness, zero model calls and zero writes when
+# read through the projection: a legacy state file that never carried these keys
+# still derives them in memory and is never rewritten by a plain GET.
+
+# Sunlight window per season as ``(start_min, end_min)`` wall-clock minutes.
+SEASON_SUNLIGHT_WINDOWS: dict[str, tuple[int, int]] = {
+    "winter": (8 * 60, 16 * 60 + 30),
+    "summer": (5 * 60 + 30, 19 * 60 + 30),
+    "spring": (6 * 60 + 30, 18 * 60),
+    "autumn": (6 * 60 + 30, 18 * 60),
+}
+SEASON_SUNLIGHT_LABELS: dict[str, str] = {
+    "winter": "08:00-16:30",
+    "summer": "05:30-19:30",
+    "spring": "06:30-18:00",
+    "autumn": "06:30-18:00",
+}
+SEASON_SUMMARY_CN: dict[str, str] = {
+    "spring": "春日天亮得早，院里光线柔和，坐一会儿正合适。",
+    "summer": "夏日白昼很长，傍晚院里有风，适合在外头多待。",
+    "autumn": "秋日白昼收短，傍晚凉意渐起，靠窗更暖和些。",
+    "winter": "冬日白昼很短，晒得到太阳的时间不多，靠窗更暖。",
+}
+WINTER_DORMANT_MOISTURE_RATE = 0.55
+WINTER_DORMANT_GROWTH_RATE = 0.15
+PLANT_LEAF_BASE_COUNT = 3
+PLANT_LEAF_MAX_BONUS = 12
+PLANT_LEAF_GROWTH_PER_LEAF = 24.0
+
+# Street-corner seasonal markets: fixed calendar dates, missable by design.
+FESTIVAL_BY_SEASON: dict[str, str] = {
+    "spring": "春种子市",
+    "summer": "夏纳凉夜市",
+    "autumn": "秋晒叶市",
+    "winter": "冬纸灯市",
+}
+FESTIVAL_EVENT_DAYS: tuple[int, ...] = (12, 24)
+FESTIVAL_ACTIVE_START_HOUR = 10
+FESTIVAL_ACTIVE_END_HOUR = 18
+FESTIVAL_RESIDUAL_HOURS = 48
+FESTIVAL_TRACE_ITEMS: tuple[str, ...] = (
+    "街角檐下还没撤下的纸灯笼串",
+    "巷口集市撤场后的旧木分类回收箱",
+)
+
+# ---------------------------------------------------------------------------
 # Batch B: Routes & Process-Based Journey
 # ---------------------------------------------------------------------------
 
@@ -291,6 +375,63 @@ SHARED_SHELF_STARTER_ITEMS: tuple[dict[str, Any], ...] = (
 )
 
 QUIETNESS_BANDS: tuple[str, ...] = ("quiet", "moderate", "noisy")
+
+# ---------------------------------------------------------------------------
+# Ch.26: Living Shopkeeper Substrate (backwards-compatible inside ``bookstore``)
+# ---------------------------------------------------------------------------
+# One shopkeeper with a current task, a bounded memory of concrete public
+# counter events, and a hard privilege boundary.  Everything here is a plain
+# deterministic rotation / bounded append driven by the clock: zero LLM calls,
+# zero global friendliness score, zero crisis debt.
+
+SHOPKEEPER_ID = "nukui_shinichi"
+SHOPKEEPER_NAME = "温井慎一"
+SHOPKEEPER_ROLE = "街角旧书店店主"
+SHOPKEEPER_TASK_ROTATION_HOURS = 3
+SHOPKEEPER_TASKS: tuple[tuple[str, str], ...] = (
+    ("sorting_new_crate", "正在拆箱整理新到的旧画册"),
+    ("labeling_spines", "正在给几本旧书脊贴手写价签"),
+    ("rearranging_window_seat", "把靠窗那张旧木凳往里挪了半寸"),
+    ("counter_display_arrangement", "在柜台边整理小卡与画册陈设"),
+)
+MAX_SHOPKEEPER_MEMORIES = 12
+MAX_SHOPKEEPER_AMBIENT_CHANGES = 8
+SHOPKEEPER_PRIVILEGE_BOUNDARY = "public_counter_only"
+CARD_SPOT_AUTO_DECIDE_HOURS = 24
+DEFAULT_RUMOR_CLAIM_CN = "听说往河边那条近道最近好像在修路"
+CARD_SPOT_ADOPTED_REASON_CN = "他按你当时指的位置摆在了靠窗那一格"
+CARD_SPOT_RELOCATED_REASON_CN = "原先挑的位置刚好挡住摄影集书脊，他顺手挪到了柜台斜架上"
+SHOPKEEPER_DEFAULT_AMBIENT_CHANGES: tuple[str, ...] = (
+    "靠窗新摆了一张能晒到午后太阳的旧木凳",
+    "摄影画册挪到了顺手的低一层书架",
+)
+
+# Ch.42 & Ch.46 §三 Batch E: Second Independent Neighborhood Resident (Cafe Roaster)
+CAFE_RESIDENT_ID = "saeki_aoi"
+CAFE_RESIDENT_NAME = "佐伯葵"
+CAFE_RESIDENT_ROLE = "街角焙煎咖啡屋店主"
+CAFE_HOME_VENUE = "cafe"
+CAFE_VENUE_NAME_CN = "街角焙煎咖啡屋"
+CAFE_OPEN_WINDOW = "08:00-18:00"
+CAFE_OPEN_START_MIN = 8 * 60
+CAFE_OPEN_END_MIN = 18 * 60
+CAFE_TASK_ROTATION_HOURS = 3
+# +2h wall-clock phase offset (02/05/08/11/14/17/20/23) vs bookstore's 00/03/06/09/12/15/18/21
+CAFE_SCHEDULE_OFFSET_HOURS = 2
+CAFE_RESIDENT_PHASES: tuple[tuple[str, str], ...] = (
+    ("morning_roast", "正在烘豆机旁照看晨间烘焙豆"),
+    ("counter_pour_over", "正在木吧台后闷蒸手冲咖啡"),
+    ("stepped_out_errand", "吧台立着小木牌：去巷口补充滤纸与牛奶，稍后回来"),
+    ("evening_cleanup", "正在擦拭磨豆机并收整门口手写黑板"),
+    ("closed_rest", "咖啡屋已打烊熄灯，门缝留着微弱烘豆余香"),
+)
+CAFE_DEFAULT_RUMOR_CLAIM_CN = "听说街角往河边的石阶傍晚风有点急"
+CAFE_SEASON_REACTIONS_CN: dict[str, str] = {
+    "spring": "春日在窗台玻璃瓶里插了一支新剪的迷迭香",
+    "summer": "夏日吧台备着冰镇麦茶与冷萃玻璃壶",
+    "autumn": "秋日换上了偏醇厚的中深烘拼配豆单",
+    "winter": "冬日门口挂上了厚棉布门帘挡风保温",
+}
 
 ID_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,119}$")
 MAX_CARDS = 64
@@ -616,7 +757,10 @@ def default_state() -> dict[str, Any]:
         "environment": {
             "weather": "clear",
             "airflow": "medium",
-            "season": "autumn",
+            "season": None,
+            "season_explicit": False,
+            "weather_slot_key": None,
+            "manual_pin_until": None,
             "updated_at": None,
         },
         "places": places,
@@ -673,6 +817,13 @@ def default_state() -> dict[str, Any]:
             "stage": "seedling",
             "public_care_enabled": False,
             "never_dies_offline": True,
+            "leaf_count": PLANT_LEAF_BASE_COUNT,
+            "seasonal_state": "active_growth",
+            "new_leaf_note_cn": None,
+            "last_new_leaf_at": None,
+            "wilt_recovered_count": 0,
+            "recovery_note_cn": None,
+            "public_care_note_cn": None,
         },
         "craft_bench": {
             "paper_units": INITIAL_PAPER_UNITS,
@@ -706,6 +857,7 @@ def default_state() -> dict[str, Any]:
             },
             "public_notices": [],
             "notice_seq": 0,
+            "attended_festivals": [],
             "place_booklet": {
                 "booklet_id": "quiet_reading_places_booklet",
                 "title": "家附近能安静读书的地点小册",
@@ -976,6 +1128,89 @@ def _cut_cloth_segment_for_regime_change(
     item["last_anchor_at"] = now_str
 
 
+def _derive_season_ecology(
+    season: str, weather: str, airflow: str, now_dt: datetime
+) -> dict[str, Any]:
+    """Pure, zero-write daylight / yard-comfort read for the current instant.
+
+    A short honest summary of whether the yard is usable right now and whether
+    the indoor spot by the window is the warmer choice.  No model calls, no
+    abbreviations and no terms leaking into the Chinese summary line.
+    """
+    season_key = season if season in SEASON_SUNLIGHT_WINDOWS else "autumn"
+    start_min, end_min = SEASON_SUNLIGHT_WINDOWS[season_key]
+    cur_min = now_dt.hour * 60 + now_dt.minute
+    in_window = start_min <= cur_min < end_min
+    clear_sky = weather == "clear"
+    rainy = weather in ("drizzle", "rain")
+    sunlight_active = bool(in_window and clear_sky)
+
+    yard_suitable = False
+    yard_hint_cn = ""
+    if rainy:
+        yard_hint_cn = "雨丝里院子湿滑，先在有檐处待一会儿更安稳"
+    elif season_key == "winter":
+        if (not in_window) or airflow == "strong":
+            yard_hint_cn = "冬夜露天微寒，室内靠窗更安稳"
+        else:
+            yard_suitable = True
+            yard_hint_cn = "冬日有阳光时院里能短坐，风大就回檐下"
+    elif season_key == "summer":
+        if 17 * 60 <= cur_min < 20 * 60 + 30:
+            yard_suitable = True
+            yard_hint_cn = "夏傍晚院风凉爽适宜停留"
+        elif in_window:
+            yard_suitable = True
+            yard_hint_cn = "夏日白天阳光足，院里略晒但有荫可躲"
+        else:
+            yard_hint_cn = "夏夜院里蚊虫多，回屋更安稳"
+    else:
+        if in_window:
+            yard_suitable = True
+            yard_hint_cn = "白天院里光线好，坐着不冷不热"
+        else:
+            yard_hint_cn = "入夜后院子里凉下来，回室内更舒服"
+
+    if season_key == "winter":
+        window_warmth = True
+    elif season_key == "autumn" and (rainy or not in_window):
+        window_warmth = True
+    else:
+        window_warmth = False
+
+    pulse = _season_solar_pulse.project_season_solar_pulse(
+        now_iso=now_dt,
+        explicit_season=season_key,
+        weather=weather,
+    )
+    st = pulse["solar_term"]
+    micro = pulse["microclimate"]
+
+    return {
+        "season": season_key,
+        "sunlight_window": SEASON_SUNLIGHT_LABELS[season_key],
+        "daylight_minutes": end_min - start_min,
+        "is_daylight": bool(in_window),
+        "sunlight_active": bool(sunlight_active),
+        "yard_suitable_now": bool(yard_suitable),
+        "yard_hint_cn": yard_hint_cn,
+        "window_warmth_recommended": bool(window_warmth),
+        "season_summary_cn": SEASON_SUMMARY_CN[season_key],
+        "solar_term": {
+            "solar_term_idx": int(st["solar_term_idx"]),
+            "term_id": str(st["term_id"]),
+            "term_name_cn": str(st["term_name_cn"]),
+            "is_term_day": bool(st["is_term_day"]),
+            "next_term_name_cn": str(st["next_term_name_cn"]),
+            "days_until_next_term": int(st["days_until_next_term"]),
+            "phenology_note_cn": str(st["phenology_note_cn"]),
+        },
+        "tea_cooling_multiplier": float(micro["tea_cooling_multiplier"]),
+        "soundscape_palette": str(micro["soundscape_palette"]),
+        "window_motif": str(micro["window_motif"]),
+    }
+
+
 def _derive_plant_stage(hydration: float, growth_points: float) -> str:
     if hydration <= 10.0:
         return "wilting_recoverable"
@@ -988,18 +1223,60 @@ def _derive_plant_stage(hydration: float, growth_points: float) -> str:
     return "seedling"
 
 
+def _plant_leaf_count_for_growth(growth_points: float) -> int:
+    """Deterministic leaf-count milestone read from accumulated growth points.
+
+    ``3 + min(12, growth // 24)`` -> stays within ``3..15`` leaves.  The number
+    is a world-process result (water + light accumulated over time), never a
+    mood effect.
+    """
+    bonus = int(max(0.0, float(growth_points)) // PLANT_LEAF_GROWTH_PER_LEAF)
+    return PLANT_LEAF_BASE_COUNT + min(PLANT_LEAF_MAX_BONUS, bonus)
+
+
+def _plant_seasonal_state(season: str, hydration: float) -> str:
+    """Derive the plant's seasonal mode: dry rest, winter dormancy or growth."""
+    if hydration <= 25.0:
+        return "resting_dry"
+    if season == "winter":
+        return "winter_dormant"
+    return "active_growth"
+
+
+def _advance_plant_leaf_milestone(
+    plant: dict[str, Any], *, previous_growth: float, now_dt: datetime
+) -> bool:
+    """Record a new-leaf milestone when growth crosses to a higher leaf count."""
+    new_count = _plant_leaf_count_for_growth(float(plant.get("growth_points", 0.0)))
+    stored = plant.get("leaf_count")
+    if isinstance(stored, int) and not isinstance(stored, bool):
+        prev_count = int(stored)
+    else:
+        prev_count = _plant_leaf_count_for_growth(previous_growth)
+    plant["leaf_count"] = new_count
+    if new_count > prev_count:
+        plant["last_new_leaf_at"] = format_iso(now_dt)
+        plant["new_leaf_note_cn"] = "抽出了新绿叶（水分与光照累积所致）"
+        return True
+    return False
+
+
 def _settle_plant_in_place(
     plant: dict[str, Any],
     *,
     weather: str,
     now_dt: datetime,
+    season: str = "autumn",
 ) -> bool:
     plant["never_dies_offline"] = True
+    season_key = season if season in SEASON_KINDS else "autumn"
     seg_raw = plant.get("segment_started_at") or plant.get("last_anchor_at")
     if not seg_raw:
-        plant["stage"] = _derive_plant_stage(
-            float(plant.get("hydration", 70.0)), float(plant.get("growth_points", 0.0))
-        )
+        hydration_now = float(plant.get("hydration", 70.0))
+        growth_now = float(plant.get("growth_points", 0.0))
+        plant["stage"] = _derive_plant_stage(hydration_now, growth_now)
+        plant["seasonal_state"] = _plant_seasonal_state(season_key, hydration_now)
+        _advance_plant_leaf_milestone(plant, previous_growth=growth_now, now_dt=now_dt)
         return False
 
     seg_dt = parse_iso_moment(seg_raw, field_name="plant.segment_started_at")
@@ -1012,58 +1289,230 @@ def _settle_plant_in_place(
     start_h = float(plant.get("segment_start_hydration", plant.get("hydration", 70.0)))
     start_g = float(plant.get("segment_start_growth", plant.get("growth_points", 0.0)))
     place_id = str(plant.get("place_id") or "porch")
+    # A winter plant that is still comfortably hydrated rests rather than grows:
+    # it transpires at 0.55x and only adds 0.15x growth, so gentle over-wintering
+    # never punishes an absent caretaker.
+    winter_dormant = season_key == "winter" and start_h > 25.0
 
     if plant.get("public_care_enabled"):
         # Neighbor public care keeps soil comfortably moist while away
         target_h = max(start_h, 60.0) if start_h < 60.0 else max(55.0, start_h - 0.15 * hours)
         new_h = min(100.0, target_h)
-        new_g = start_g + 0.8 * hours
+        growth_rate = 0.8 * (WINTER_DORMANT_GROWTH_RATE if winter_dormant else 1.0)
+        new_g = start_g + growth_rate * hours
+        if hours >= 12.0:
+            plant["public_care_note_cn"] = "远出期间托街坊顺手添过一次水"
     else:
         if place_id == "yard" and weather in ("drizzle", "rain"):
             rain_gain = 14.0 if weather == "drizzle" else 28.0
             new_h = min(98.0, start_h + rain_gain * hours)
         else:
             loss_rate = {"yard": 1.5, "porch": 1.0, "home": 0.8}.get(place_id, 1.0)
+            if winter_dormant:
+                loss_rate *= WINTER_DORMANT_MOISTURE_RATE
             new_h = max(0.0, start_h - loss_rate * hours)
 
         # Growth accumulates only while well-hydrated (> 25.0)
         if start_h > 25.0:
             loss_rate = {"yard": 1.5, "porch": 1.0, "home": 0.8}.get(place_id, 1.0)
+            if winter_dormant:
+                loss_rate *= WINTER_DORMANT_MOISTURE_RATE
             if new_h > 25.0 or (place_id == "yard" and weather in ("drizzle", "rain")):
                 productive_hours = hours
             else:
                 productive_hours = max(0.0, (start_h - 25.0) / loss_rate)
             light_factor = {"yard": 1.25, "porch": 1.1, "home": 0.85}.get(place_id, 1.0)
-            new_g = start_g + 1.2 * light_factor * productive_hours
+            growth_rate = 1.2 * light_factor
+            if winter_dormant:
+                growth_rate *= WINTER_DORMANT_GROWTH_RATE
+            new_g = start_g + growth_rate * productive_hours
         else:
             new_g = start_g
 
     new_h_r = round(new_h, 4)
     new_g_r = round(new_g, 4)
     new_stage = _derive_plant_stage(new_h_r, new_g_r)
+    new_seasonal = _plant_seasonal_state(season_key, new_h_r)
     now_str = format_iso(now_dt)
+    prev_seasonal = plant.get("seasonal_state")
 
     changed = (
         abs(float(plant.get("hydration", 0.0)) - new_h_r) > 1e-6
         or abs(float(plant.get("growth_points", 0.0)) - new_g_r) > 1e-6
         or plant.get("stage") != new_stage
+        or prev_seasonal != new_seasonal
     )
     plant["hydration"] = new_h_r
     plant["growth_points"] = new_g_r
     plant["stage"] = new_stage
+    plant["seasonal_state"] = new_seasonal
     plant["last_anchor_at"] = now_str
+    if _advance_plant_leaf_milestone(plant, previous_growth=start_g, now_dt=now_dt):
+        changed = True
     return changed
 
 
-def _reanchor_plant_segment(plant: dict[str, Any], *, old_weather: str, now_dt: datetime) -> None:
+def _reanchor_plant_segment(
+    plant: dict[str, Any],
+    *,
+    old_weather: str,
+    now_dt: datetime,
+    season: str = "autumn",
+) -> None:
+    season_key = season if season in SEASON_KINDS else "autumn"
     if plant.get("segment_started_at") is not None:
-        _settle_plant_in_place(plant, weather=old_weather, now_dt=now_dt)
+        _settle_plant_in_place(plant, weather=old_weather, now_dt=now_dt, season=season_key)
     now_str = format_iso(now_dt)
     plant["segment_start_hydration"] = float(plant.get("hydration", 70.0))
     plant["segment_start_growth"] = float(plant.get("growth_points", 0.0))
     plant["segment_started_at"] = now_str
     plant["last_anchor_at"] = now_str
     plant["stage"] = _derive_plant_stage(plant["hydration"], plant["growth_points"])
+    plant["seasonal_state"] = _plant_seasonal_state(
+        season_key, float(plant.get("hydration", 70.0))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ch.41 §四: Missable street-corner seasonal markets & physical residual traces
+# ---------------------------------------------------------------------------
+
+
+def extract_explicit_season(env: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """Return an explicit season override, or ``None`` for dynamic calendar season."""
+    if not isinstance(env, Mapping):
+        return None
+    norm = _season_solar_pulse.normalize_season(env.get("season"))
+    if norm is None:
+        return None
+    if env.get("season_explicit") is True:
+        return norm
+    if env.get("season_explicit") is False:
+        return None
+    if env.get("updated_at") is not None:
+        return norm
+    if "season_explicit" not in env:
+        return norm
+    return None
+
+
+def _resolve_effective_season(env: Optional[Mapping[str, Any]], now_dt: datetime) -> str:
+    explicit = extract_explicit_season(env)
+    if explicit is not None:
+        return explicit
+    return _season_solar_pulse.resolve_effective_season(now_dt)[0]
+
+
+def _weather_slot_key(local_dt: datetime) -> str:
+    return f"{local_dt.date().isoformat()}:S{int(local_dt.hour) // 6}"
+
+
+def _derive_seasonal_festival(
+    state: Mapping[str, Any], now_dt: datetime
+) -> dict[str, Any]:
+    """Pure, zero-write seasonal-market read driven only by the world calendar.
+
+    A street-corner market runs every month on the 12th and 24th, 10:00–18:00
+    local.  For 48 hours after it closes, real physical traces remain (an un-taken-
+    down lantern string and an old sorting/recycling crate).  Attendance is never
+    fabricated: ``attended_firsthand`` only becomes True when the subject actually
+    stood at ``street_corner`` during an active window and that festival key was
+    recorded on real state by the journey commands.
+    """
+    env = state.get("environment")
+    season = _resolve_effective_season(env if isinstance(env, Mapping) else None, now_dt)
+    if season not in FESTIVAL_BY_SEASON:
+        season = _season_solar_pulse.resolve_effective_season(now_dt)[0]
+
+    tz = now_dt.tzinfo
+    year, month = now_dt.year, now_dt.month
+    phase = "quiet"
+    festival_key: Optional[str] = None
+    residual_traces: list[str] = []
+
+    for day in FESTIVAL_EVENT_DAYS:
+        event_day = datetime(year, month, day, tzinfo=tz)
+        active_start = event_day.replace(hour=FESTIVAL_ACTIVE_START_HOUR)
+        active_end = event_day.replace(hour=FESTIVAL_ACTIVE_END_HOUR)
+        residual_end = active_end + timedelta(hours=FESTIVAL_RESIDUAL_HOURS)
+        candidate_key = f"festival_{year:04d}{month:02d}{day:02d}"
+        if active_start <= now_dt < active_end:
+            phase = "active"
+            festival_key = candidate_key
+            break
+        if active_end <= now_dt < residual_end:
+            phase = "residual_traces"
+            festival_key = candidate_key
+            residual_traces = list(FESTIVAL_TRACE_ITEMS)
+            break
+
+    festival_name_cn = (
+        FESTIVAL_BY_SEASON[season] if phase in ("active", "residual_traces") else None
+    )
+
+    public_life = state.get("public_life")
+    attended_raw = (
+        public_life.get("attended_festivals") if isinstance(public_life, Mapping) else None
+    )
+    attended = [str(x) for x in attended_raw] if isinstance(attended_raw, list) else []
+    attended_firsthand = bool(festival_key is not None and festival_key in attended)
+
+    if phase == "active":
+        note_cn = f"街角正在办{festival_name_cn}"
+        window_label_cn = f"每月十二日与二十四日上午十点到傍晚六点，街角有{festival_name_cn}"
+    elif phase == "residual_traces":
+        note_cn = "街角集市已经散了，檐下还留着纸灯笼串与回收箱"
+        window_label_cn = "集市散了不到两天，街角还留着一点没撤干净的痕迹"
+    else:
+        note_cn = "街角这段时间没有集市"
+        window_label_cn = "眼下街角没有集市，安静照常"
+
+    return {
+        "phase": phase,
+        "season": season,
+        "place_id": "street_corner",
+        "festival_key": festival_key,
+        "festival_name_cn": festival_name_cn,
+        "residual_traces": residual_traces,
+        "attended_firsthand": attended_firsthand,
+        "attended_festivals": attended,
+        "window_label_cn": window_label_cn,
+        "note_cn": note_cn,
+    }
+
+
+def _record_festival_attendance_if_active(
+    state: dict[str, Any], now_dt: datetime
+) -> bool:
+    """Record a firsthand festival visit only while standing at an active market.
+
+    Called exclusively from the real journey commands (``start_journey`` /
+    ``advance_or_turnback_journey``) so a plain read can never manufacture a
+    shared experience.  Arriving during the leftover-trace window records
+    nothing; the subject only sees the physical remains.
+    """
+    journey = state.get("journey")
+    if not isinstance(journey, dict):
+        return False
+    if str(journey.get("current_place_id") or "") != "street_corner":
+        return False
+    info = _derive_seasonal_festival(state, now_dt)
+    if info.get("phase") != "active":
+        return False
+    festival_key = info.get("festival_key")
+    if not festival_key:
+        return False
+    public_life = state.get("public_life")
+    if not isinstance(public_life, dict):
+        return False
+    attended = public_life.get("attended_festivals")
+    if not isinstance(attended, list):
+        attended = []
+    if festival_key in attended:
+        return False
+    attended.append(festival_key)
+    public_life["attended_festivals"] = attended
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1141,6 +1590,495 @@ def _is_route_really_blocked(state: Mapping[str, Any], route_id: str) -> bool:
     return bool(isinstance(rb, Mapping) and rb.get("blocked") is True)
 
 
+# ---------------------------------------------------------------------------
+# Ch.26 §一 / §三 / §四 / §七: Living Shopkeeper Helpers
+# ---------------------------------------------------------------------------
+
+
+def _default_shopkeeper_life() -> dict[str, Any]:
+    task_key, task_cn = SHOPKEEPER_TASKS[0]
+    return {
+        "shopkeeper_name": SHOPKEEPER_NAME,
+        "current_task": task_key,
+        "current_task_cn": task_cn,
+        "current_task_started_at": None,
+        "ambient_changes": list(SHOPKEEPER_DEFAULT_AMBIENT_CHANGES),
+        "privilege_boundary": SHOPKEEPER_PRIVILEGE_BOUNDARY,
+        "private_room_knowledge": False,
+        "remembered_interactions": [],
+        "card_spot_suggestions": [],
+        "heard_rumors": [],
+    }
+
+
+def _ensure_shopkeeper_life(bookstore: dict[str, Any]) -> dict[str, Any]:
+    """Lazily normalize ``bookstore["shopkeeper_life"]`` on a mutable state copy.
+
+    Legacy state files never gain this key on a read: projections operate on a
+    deep copy, and only a real mutation persists the normalized substrate.
+    """
+    life = bookstore.get("shopkeeper_life")
+    if not isinstance(life, dict):
+        life = _default_shopkeeper_life()
+        bookstore["shopkeeper_life"] = life
+        return life
+    for key, val in _default_shopkeeper_life().items():
+        if key not in life:
+            life[key] = copy.deepcopy(val)
+    life["shopkeeper_name"] = SHOPKEEPER_NAME
+    life["privilege_boundary"] = SHOPKEEPER_PRIVILEGE_BOUNDARY
+    life["private_room_knowledge"] = False
+    if not isinstance(life.get("ambient_changes"), list):
+        life["ambient_changes"] = list(SHOPKEEPER_DEFAULT_AMBIENT_CHANGES)
+    for key in ("remembered_interactions", "card_spot_suggestions", "heard_rumors"):
+        if not isinstance(life.get(key), list):
+            life[key] = []
+    return life
+
+
+def _shopkeeper_task_for(now_dt: datetime) -> tuple[str, str, datetime]:
+    """Deterministic task rotation keyed purely on neighborhood wall-clock time."""
+    abs_hours = now_dt.toordinal() * 24 + now_dt.hour
+    slot = abs_hours // SHOPKEEPER_TASK_ROTATION_HOURS
+    slot_abs_hours = slot * SHOPKEEPER_TASK_ROTATION_HOURS
+    start_dt = datetime.fromordinal(slot_abs_hours // 24).replace(tzinfo=now_dt.tzinfo)
+    start_dt = start_dt + timedelta(hours=slot_abs_hours % 24)
+    key, task_cn = SHOPKEEPER_TASKS[slot % len(SHOPKEEPER_TASKS)]
+    return key, task_cn, start_dt
+
+
+def _append_shopkeeper_ambient(life: dict[str, Any], note_cn: str) -> None:
+    changes = [str(x) for x in (life.get("ambient_changes") or []) if str(x).strip()]
+    if note_cn in changes:
+        changes.remove(note_cn)
+    changes.append(note_cn)
+    life["ambient_changes"] = changes[-MAX_SHOPKEEPER_AMBIENT_CHANGES:]
+
+
+def _remember_shopkeeper_interaction(
+    life: dict[str, Any], *, kind: str, ref_id: str, note_cn: str, at_iso: str
+) -> None:
+    """Append one concrete public-counter event; asymmetric facts only, no praise."""
+    rows = [r for r in (life.get("remembered_interactions") or []) if isinstance(r, Mapping)]
+    rows.append({"kind": kind, "ref_id": ref_id, "note_cn": note_cn, "at": at_iso})
+    life["remembered_interactions"] = rows[-MAX_SHOPKEEPER_MEMORIES:]
+
+
+def _card_spot_auto_outcome(suggestion_id: str) -> str:
+    digest = hashlib.sha256(str(suggestion_id).encode("utf-8")).hexdigest()
+    return "adopted" if int(digest[:8], 16) % 2 == 0 else "relocated"
+
+
+def _resolve_card_spot_suggestion(
+    suggestion: dict[str, Any],
+    now_dt: datetime,
+    *,
+    life: dict[str, Any],
+    outcome: Optional[str] = None,
+    reason_cn: Optional[str] = None,
+) -> bool:
+    """Resolve one pending suggestion with a grounded physical reason only."""
+    chosen = outcome or _card_spot_auto_outcome(str(suggestion.get("suggestion_id") or ""))
+    if chosen not in ("adopted", "relocated"):
+        return False
+    if not reason_cn:
+        reason_cn = (
+            CARD_SPOT_ADOPTED_REASON_CN
+            if chosen == "adopted"
+            else CARD_SPOT_RELOCATED_REASON_CN
+        )
+    suggestion["status"] = chosen
+    suggestion["outcome_reason_cn"] = str(reason_cn)
+    suggestion["resolved_at"] = format_iso(now_dt)
+    if chosen == "adopted":
+        _append_shopkeeper_ambient(
+            life, f"柜台边的说明卡摆进了{suggestion.get('spot_note') or '他挑的位置'}"
+        )
+    else:
+        _append_shopkeeper_ambient(life, "说明卡从原位置挪到了柜台斜架，免得挡住摄影集书脊")
+    return True
+
+
+def _settle_shopkeeper_life_in_place(
+    state: dict[str, Any], now_dt: datetime
+) -> dict[str, int]:
+    """Rotate the shopkeeper's current task and auto-resolve card spots after 24h.
+
+    Only ever touches an already-present ``shopkeeper_life`` substrate so a
+    legacy file stays byte-identical on plain advance/projection reads.
+    """
+    counts = {"task_rotated": 0, "card_spots_decided": 0}
+    b_store = (state.get("public_life") or {}).get("bookstore")
+    if not isinstance(b_store, dict) or not isinstance(b_store.get("shopkeeper_life"), dict):
+        return counts
+    life = _ensure_shopkeeper_life(b_store)
+
+    task_key, task_cn, start_dt = _shopkeeper_task_for(now_dt)
+    start_iso = format_iso(start_dt)
+    if life.get("current_task") != task_key:
+        life["current_task"] = task_key
+        life["current_task_cn"] = task_cn
+        life["current_task_started_at"] = start_iso
+        counts["task_rotated"] = 1
+    elif life.get("current_task_started_at") != start_iso:
+        life["current_task_started_at"] = start_iso
+
+    if _is_bookstore_open(now_dt):
+        for suggestion in life.get("card_spot_suggestions") or []:
+            if not isinstance(suggestion, dict):
+                continue
+            if suggestion.get("status") != "pending_shopkeeper_review":
+                continue
+            raw_at = suggestion.get("suggested_at")
+            if not raw_at:
+                continue
+            try:
+                suggested_dt = parse_iso_moment(raw_at, field_name="suggested_at")
+            except V04NeighborhoodError:
+                continue
+            if now_dt - suggested_dt >= timedelta(hours=CARD_SPOT_AUTO_DECIDE_HOURS):
+                if _resolve_card_spot_suggestion(suggestion, now_dt, life=life):
+                    counts["card_spots_decided"] += 1
+    return counts
+
+
+def _is_cafe_open(now_dt: datetime) -> bool:
+    cur_min = now_dt.hour * 60 + now_dt.minute
+    return CAFE_OPEN_START_MIN <= cur_min < CAFE_OPEN_END_MIN
+
+
+def _cafe_phase_for(now_dt: datetime) -> tuple[str, str, datetime, bool]:
+    """Independent 3-hour schedule for Saeki Aoi, offset from Nukui Shinichi's clock."""
+    shifted_hours = now_dt.toordinal() * 24 + now_dt.hour - CAFE_SCHEDULE_OFFSET_HOURS
+    slot = shifted_hours // CAFE_TASK_ROTATION_HOURS
+    slot_abs_hours = slot * CAFE_TASK_ROTATION_HOURS + CAFE_SCHEDULE_OFFSET_HOURS
+    start_dt = datetime.fromordinal(slot_abs_hours // 24).replace(tzinfo=now_dt.tzinfo)
+    start_dt = start_dt + timedelta(hours=slot_abs_hours % 24)
+    hour = now_dt.hour
+    if 8 <= hour < 11:
+        phase_key, phase_cn = CAFE_RESIDENT_PHASES[0]  # morning_roast
+        at_counter = True
+    elif 11 <= hour < 14:
+        phase_key, phase_cn = CAFE_RESIDENT_PHASES[1]  # counter_pour_over
+        at_counter = True
+    elif 14 <= hour < 17:
+        phase_key, phase_cn = CAFE_RESIDENT_PHASES[2]  # stepped_out_errand
+        at_counter = False
+    elif 17 <= hour < 20:
+        phase_key, phase_cn = CAFE_RESIDENT_PHASES[3]  # evening_cleanup
+        at_counter = True
+    else:
+        phase_key, phase_cn = CAFE_RESIDENT_PHASES[4]  # closed_rest
+        at_counter = False
+    return phase_key, phase_cn, start_dt, at_counter
+
+
+def _cafe_environment_notes(
+    weather: str, season: str, festival_info: Mapping[str, Any]
+) -> dict[str, str]:
+    if weather in ("drizzle", "rain"):
+        weather_cn = "雨天屋檐下挂出了避雨暖歇木牌，门缝飘着深烘豆的热气"
+    else:
+        weather_cn = "晴天推开了半扇木格窗通风，烘焙香气顺着街角散开"
+    season_key = season if season in CAFE_SEASON_REACTIONS_CN else "autumn"
+    season_cn = CAFE_SEASON_REACTIONS_CN[season_key]
+    fest_phase = str(festival_info.get("phase") or "quiet")
+    if fest_phase == "active":
+        fest_name = str(festival_info.get("festival_name_cn") or "街角集市")
+        market_cn = f"趁{fest_name}在店门口支起了手冲试饮小木架"
+    elif fest_phase == "residual_traces":
+        market_cn = "集市散场后把门口手冲小木架收进了檐下"
+    else:
+        market_cn = ""
+    parts = [p for p in (weather_cn, market_cn, season_cn) if p]
+    return {
+        "weather_reaction_cn": weather_cn,
+        "season_reaction_cn": season_cn,
+        "market_reaction_cn": market_cn,
+        "environment_reaction_cn": "；".join(parts),
+    }
+
+
+def _default_cafe_resident_life() -> dict[str, Any]:
+    phase_key, phase_cn = CAFE_RESIDENT_PHASES[0]
+    return {
+        "resident_id": CAFE_RESIDENT_ID,
+        "resident_name": CAFE_RESIDENT_NAME,
+        "role": CAFE_RESIDENT_ROLE,
+        "home_venue": CAFE_HOME_VENUE,
+        "current_phase": phase_key,
+        "current_phase_cn": phase_cn,
+        "current_phase_started_at": None,
+        "privilege_boundary": SHOPKEEPER_PRIVILEGE_BOUNDARY,
+        "private_room_knowledge": False,
+        "favorability_score": None,
+        "omission_debt": 0,
+        "coaster_notes": [],
+        "shared_errand_board": [],
+        "remembered_interactions": [],
+        "heard_rumors": [],
+    }
+
+
+def _ensure_cafe_resident_life(public_life: dict[str, Any]) -> dict[str, Any]:
+    """Lazily normalize ``public_life["cafe_resident"]`` on a mutable state copy."""
+    life = public_life.get("cafe_resident")
+    if not isinstance(life, dict):
+        life = _default_cafe_resident_life()
+        public_life["cafe_resident"] = life
+        return life
+    for key, val in _default_cafe_resident_life().items():
+        if key not in life:
+            life[key] = copy.deepcopy(val)
+    life["resident_id"] = CAFE_RESIDENT_ID
+    life["resident_name"] = CAFE_RESIDENT_NAME
+    life["role"] = CAFE_RESIDENT_ROLE
+    life["home_venue"] = CAFE_HOME_VENUE
+    life["privilege_boundary"] = SHOPKEEPER_PRIVILEGE_BOUNDARY
+    life["private_room_knowledge"] = False
+    life["favorability_score"] = None
+    life["omission_debt"] = 0
+    for key in ("coaster_notes", "shared_errand_board", "remembered_interactions", "heard_rumors"):
+        if not isinstance(life.get(key), list):
+            life[key] = []
+    return life
+
+
+def _settle_cafe_resident_in_place(state: dict[str, Any], now_dt: datetime) -> int:
+    """Rotate Saeki Aoi's 3h phase only if ``cafe_resident`` already exists on state."""
+    pub = state.get("public_life")
+    if not isinstance(pub, dict) or not isinstance(pub.get("cafe_resident"), dict):
+        return 0
+    life = _ensure_cafe_resident_life(pub)
+    phase_key, phase_cn, start_dt, _at_counter = _cafe_phase_for(now_dt)
+    start_iso = format_iso(start_dt)
+    if life.get("current_phase") != phase_key:
+        life["current_phase"] = phase_key
+        life["current_phase_cn"] = phase_cn
+        life["current_phase_started_at"] = start_iso
+        return 1
+    if life.get("current_phase_started_at") != start_iso:
+        life["current_phase_started_at"] = start_iso
+    return 0
+
+
+def _flip_rumors_for_route_in_list(
+    rumors_list: Any,
+    route_id: str,
+    *,
+    verified_blocked: bool,
+    at_iso: str,
+) -> int:
+    if not isinstance(rumors_list, list):
+        return 0
+    flipped = 0
+    for rumor in rumors_list:
+        if not isinstance(rumor, dict) or rumor.get("route_id") != route_id:
+            continue
+        if rumor.get("verified_firsthand"):
+            continue
+        rumor["verified_firsthand"] = True
+        rumor["verified_at"] = at_iso
+        if verified_blocked:
+            rumor["epistemic_status"] = "verified_firsthand"
+            rumor["verification_note_cn"] = "亲眼看见了路口的围挡，不只是听说"
+        else:
+            rumor["epistemic_status"] = "refuted_firsthand"
+            rumor["verification_note_cn"] = "走到路口时路面是通的，那条闲话没有应验"
+            rumor["refutation_note_cn"] = "走到路口时路面是通的，那条闲话没有应验"
+        flipped += 1
+    return flipped
+
+
+def _record_firsthand_rumor_check(
+    state: Mapping[str, Any],
+    route_id: str,
+    *,
+    verified_blocked: bool,
+    at_iso: str,
+) -> int:
+    """Flip unverified rumors for ``route_id`` only when the subject stands there.
+
+    Hearing a rumor never itself grants route knowledge; this helper is called
+    exclusively on real entrance encounters (roadblock halt or free passage).
+    """
+    pub = state.get("public_life")
+    if not isinstance(pub, Mapping):
+        return 0
+    flipped = 0
+    b_store = pub.get("bookstore")
+    if isinstance(b_store, Mapping):
+        life = b_store.get("shopkeeper_life")
+        if isinstance(life, Mapping):
+            flipped += _flip_rumors_for_route_in_list(
+                life.get("heard_rumors"),
+                route_id,
+                verified_blocked=verified_blocked,
+                at_iso=at_iso,
+            )
+    cafe_life = pub.get("cafe_resident")
+    if isinstance(cafe_life, Mapping):
+        flipped += _flip_rumors_for_route_in_list(
+            cafe_life.get("heard_rumors"),
+            route_id,
+            verified_blocked=verified_blocked,
+            at_iso=at_iso,
+        )
+    return flipped
+
+
+# ---------------------------------------------------------------------------
+# Ch.39 §三–§六: Route Closure Epistemics, Sheltered Detour & Portable Matter
+# ---------------------------------------------------------------------------
+
+V08_MATTER_FILENAME = "v08_matter_space.json"
+V08_SUBJECT_UNKNOWN_PARENT = "__subject_unknown__"
+
+# Compact, human-readable place names used in the honest transit narration.
+_PLACE_SHORT_NAMES: dict[str, str] = {
+    "home": "家",
+    "porch": "门廊",
+    "yard": "小院",
+    "street_corner": "街角",
+    "bookstore": "旧书店",
+    "riverside": "河边",
+}
+
+
+def _place_short_name(place_id: Any) -> str:
+    pid = str(place_id or "").strip()
+    if pid in _PLACE_SHORT_NAMES:
+        return _PLACE_SHORT_NAMES[pid]
+    row = PLACES_BY_ID.get(pid)
+    if row is not None:
+        tail = str(row.get("name") or "").split(" · ")[-1].strip()
+        if tail:
+            return tail
+    return pid or "路上"
+
+
+def _route_is_sheltered(route_id: Any) -> bool:
+    """Whether a catalogued route keeps rain off the walker (honest, no guessing).
+
+    Catalog ``sheltered`` wins; an unknown route id falls back to a plain
+    shelter/roof/eaves/indoor keyword read so future sheltered walkways still
+    project truthfully instead of defaulting to open air.
+    """
+    rid = str(route_id or "")
+    spec = ROUTES_CATALOG.get(rid)
+    if spec is not None:
+        return bool(spec.get("sheltered"))
+    hay = rid.lower()
+    return any(
+        tok in hay for tok in ("shelter", "roof", "eaves", "indoor", "porch", "檐", "廊", "屋", "门廊")
+    )
+
+
+def _journey_location_cn(journey: Mapping[str, Any]) -> str:
+    """Plain-Chinese honest location line for the current journey state.
+
+    Never claims arrival early: while ``in_transit`` this describes the active
+    leg and its shelter cue; a roadblock pause names the junction it stopped at.
+    """
+    state = str(journey.get("state") or "")
+    legs = list(journey.get("legs") or [])
+    idx = int(journey.get("active_leg_index") or 0)
+    leg = legs[idx] if 0 <= idx < len(legs) else None
+
+    if state == "in_transit":
+        if leg is not None:
+            frm = _place_short_name(leg.get("from_place"))
+            to = _place_short_name(leg.get("to_place"))
+        else:
+            frm = _place_short_name(journey.get("origin_place_id"))
+            to = _place_short_name(journey.get("target_place_id"))
+        if bool(journey.get("is_turning_back")):
+            if frm and to:
+                return f"在从{frm}折返{to}的路上"
+            return f"在返回{to or '原处'}的路上"
+        cue = "有檐长廊" if _route_is_sheltered(journey.get("active_route_id")) else "露天近道"
+        if frm and to:
+            return f"在从{frm}前往{to}的路上（{cue}）"
+        return f"在路上（{cue}）"
+
+    if state == "paused_at_node":
+        anchor = journey.get("current_place_id")
+        if not anchor and leg is not None:
+            anchor = leg.get("from_place")
+        anchor = _place_short_name(anchor or journey.get("origin_place_id"))
+        if journey.get("halt_reason") == "ROADBLOCK_ENCOUNTERED":
+            return f"停在{anchor}路口（发现前方临时围栏）"
+        return f"停在{anchor}附近（稍作停留）"
+
+    pid = journey.get("current_place_id")
+    if pid:
+        return f"在{_place_short_name(pid)}"
+    return ""
+
+
+def _read_v08_matter_object_readonly(root: Path, item_id: str) -> Optional[dict[str, Any]]:
+    """Read one owned ``v08_universal_matter`` object with zero writes.
+
+    Two-Worlds boundary: this owner only ever reads ``v08_matter_space.json``;
+    it never creates, migrates or mutates it.  A missing/symlinked/corrupt file
+    simply yields ``None`` so the caller rejects the carry (fail closed).
+    """
+    path = Path(root) / STATE_DIRNAME / V08_MATTER_FILENAME
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, Mapping):
+        return None
+    for key in ("matter_objects", "objects"):
+        objects = doc.get(key)
+        if isinstance(objects, Mapping):
+            row = objects.get(item_id)
+            if isinstance(row, Mapping):
+                return dict(row)
+        elif isinstance(objects, list):
+            for row in objects:
+                if not isinstance(row, Mapping):
+                    continue
+                oid = row.get("object_id") or row.get("id")
+                if str(oid or "") == item_id:
+                    return dict(row)
+    return None
+
+
+def _v08_object_portability(row: Mapping[str, Any]) -> str:
+    profile = row.get("matter_profile")
+    for source in (row, profile if isinstance(profile, Mapping) else None):
+        if not isinstance(source, Mapping):
+            continue
+        raw = source.get("portability")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    return ""
+
+
+def _v08_object_hidden_from_subject(row: Mapping[str, Any]) -> bool:
+    """Whether the subject has no legitimate known spot for this v08 object."""
+    if row.get("not_at_believed_spot") is True:
+        return True
+    snapshot = row.get("subject_last_seen_snapshot")
+    if isinstance(snapshot, Mapping):
+        snap_parent = snapshot.get("parent_id")
+        if not snap_parent or str(snap_parent) == V08_SUBJECT_UNKNOWN_PARENT:
+            return True
+        return False
+    believed_parent = row.get("subject_last_seen_parent")
+    if not believed_parent or str(believed_parent) == V08_SUBJECT_UNKNOWN_PARENT:
+        return True
+    return False
+
+
+def _legs_walk_seconds(legs: list[dict[str, Any]], start_index: int = 0) -> int:
+    return sum(int(l["duration_seconds"]) for l in legs[start_index:])
+
+
 def _settle_journey_in_place(state: dict[str, Any], now_dt: datetime) -> bool:
     """Advance in-transit journey up to now_dt, stopping at undiscovered roadblocks or arriving."""
     journey = state["journey"]
@@ -1174,6 +2112,10 @@ def _settle_journey_in_place(state: dict[str, Any], now_dt: datetime) -> bool:
         # Real-world roadblock check when entering or traversing a forward leg
         if not is_turning_back and _is_route_really_blocked(state, route_id):
             _add_discovered_roadblock(journey, route_id)
+            # Ch.26 §四: standing at the entrance now makes the secondhand claim firsthand.
+            _record_firsthand_rumor_check(
+                state, route_id, verified_blocked=True, at_iso=format_iso(cursor_dt)
+            )
             rb_entry = state["world_truth"]["roadblocks"][route_id]
             rb_dt = parse_iso_moment(rb_entry["updated_at"], field_name="roadblock.updated_at")
             if rb_dt <= cursor_dt:
@@ -1202,6 +2144,11 @@ def _settle_journey_in_place(state: dict[str, Any], now_dt: datetime) -> bool:
         # Route is physically open -> clear any stale roadblock belief upon traversing
         if route_id in (journey.get("discovered_roadblocks") or []):
             _remove_discovered_roadblock(journey, route_id)
+            changed = True
+        # Ch.26 §四: reaching the open entrance refutes the shopkeeper's hearsay.
+        if _record_firsthand_rumor_check(
+            state, route_id, verified_blocked=False, at_iso=format_iso(cursor_dt)
+        ):
             changed = True
 
         leg_end_dt = cursor_dt + timedelta(seconds=dur_sec)
@@ -1278,15 +2225,20 @@ def settle_all_processes_in_place(state: dict[str, Any], now_dt: datetime) -> di
     env = state["environment"]
     weather = str(env.get("weather") or "clear")
     airflow = str(env.get("airflow") or "medium")
+    season = _resolve_effective_season(env, now_dt)
 
     cloths_advanced = 0
     for item in state["drying_items"].values():
         if _settle_single_cloth_in_place(item, weather=weather, airflow=airflow, now_dt=now_dt):
             cloths_advanced += 1
 
-    plant_advanced = _settle_plant_in_place(state["potted_plant"], weather=weather, now_dt=now_dt)
+    plant_advanced = _settle_plant_in_place(
+        state["potted_plant"], weather=weather, now_dt=now_dt, season=season
+    )
     journey_advanced = _settle_journey_in_place(state, now_dt)
     pub_counts = _settle_bookstore_and_notices_in_place(state, now_dt)
+    shopkeeper_counts = _settle_shopkeeper_life_in_place(state, now_dt)
+    cafe_phase_rotated = _settle_cafe_resident_in_place(state, now_dt)
 
     any_changed = (
         cloths_advanced > 0
@@ -1294,6 +2246,9 @@ def settle_all_processes_in_place(state: dict[str, Any], now_dt: datetime) -> di
         or journey_advanced
         or pub_counts["expired_reservations"] > 0
         or pub_counts["expired_notices"] > 0
+        or shopkeeper_counts["task_rotated"] > 0
+        or shopkeeper_counts["card_spots_decided"] > 0
+        or cafe_phase_rotated > 0
     )
     return {
         "changed": any_changed,
@@ -1302,6 +2257,9 @@ def settle_all_processes_in_place(state: dict[str, Any], now_dt: datetime) -> di
         "journey_advanced": journey_advanced,
         "expired_reservations": pub_counts["expired_reservations"],
         "expired_notices": pub_counts["expired_notices"],
+        "shopkeeper_task_rotated": shopkeeper_counts["task_rotated"],
+        "card_spots_decided": shopkeeper_counts["card_spots_decided"],
+        "cafe_phase_rotated": cafe_phase_rotated,
     }
 
 
@@ -1328,6 +2286,7 @@ def advance_v04_neighborhood_processes(
         + (1 if summary["journey_advanced"] else 0)
         + int(summary["expired_reservations"])
         + int(summary["expired_notices"])
+        + int(summary.get("card_spots_decided") or 0)
     )
     if not summary["changed"]:
         return {
@@ -1345,6 +2304,26 @@ def advance_v04_neighborhood_processes(
     state["revision"] = int(state.get("revision") or 0) + 1
     state["updated_at"] = now_str
     save_state_atomic(root, state)
+    journey_after = state.get("journey") if isinstance(state.get("journey"), Mapping) else {}
+    if summary.get("journey_advanced") and str(journey_after.get("state") or "") == "arrived":
+        dest = str(journey_after.get("current_place_id") or "street_corner")
+        arr_ts = str(journey_after.get("arrived_at") or now_str)
+        env_w = str((state.get("environment") or {}).get("weather") or "clear")
+        is_rain = env_w in ("rain", "heavy_rain", "storm", "drizzle")
+        dest_label = _place_short_name(dest)
+        _emit_v04_lived_episode(
+            root,
+            episode_key=f"v04_outing:arrived:{dest}:{arr_ts}",
+            topic=f"{'雨中' if is_rain else ''}步行抵达{dest_label}",
+            exact_detail=f"在{env_w}天气里一路步行到了{dest_label}（抵达时间 {arr_ts}）",
+            gist_summary=f"{'冒雨' if is_rain else '出门'}走到了{dest_label}",
+            occurred_at=arr_ts,
+            emotional_salience=0.58 if is_rain else 0.48,
+            affect_kind="mood_shift" if is_rain else "affect_pulse",
+            affect_intensity=46 if is_rain else 38,
+            shared=True,
+            source_refs=(("encounter_id", f"v04_arrived_{dest}_{arr_ts}"), ("place_id", dest)),
+        )
     return {
         "ok": True,
         "advanced": True,
@@ -1359,9 +2338,438 @@ def advance_v04_neighborhood_processes(
     }
 
 
+def _draw_autonomous_weather(
+    *,
+    world_id: str,
+    slot_key: str,
+    effective_season: str,
+    solar_term_id: str,
+    prev_weather: str,
+) -> tuple[str, str]:
+    """Deterministic SHA-256 draw for 6-hour autonomous weather & airflow."""
+    seed = f"{world_id}|{slot_key}|{effective_season}|{solar_term_id}|{prev_weather}"
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    roll_w = int.from_bytes(digest[:4], "big") % 100
+    roll_a = int.from_bytes(digest[4:8], "big") % 100
+
+    # Seasonal realism weights: (clear, drizzle, rain) summing to 100.
+    if effective_season == "spring":
+        if solar_term_id in ("qingming", "guyu"):
+            w_clear, w_drizzle = 45, 32
+        else:
+            w_clear, w_drizzle = 55, 27
+    elif effective_season == "summer":
+        if solar_term_id in ("mangzhong", "xiazhi"):
+            w_clear, w_drizzle = 40, 25
+        else:
+            w_clear, w_drizzle = 58, 17
+    elif effective_season == "winter":
+        w_clear, w_drizzle = 70, 18
+    else:  # autumn
+        w_clear, w_drizzle = 66, 20
+
+    # Mild weather continuity: rain tapers toward drizzle rather than strobing abruptly.
+    if prev_weather == "rain":
+        w_clear = max(25, w_clear - 8)
+        w_drizzle = min(50, w_drizzle + 8)
+    elif prev_weather == "drizzle":
+        w_clear = max(30, w_clear - 4)
+
+    if roll_w < w_clear:
+        weather = "clear"
+    elif roll_w < w_clear + w_drizzle:
+        weather = "drizzle"
+    else:
+        weather = "rain"
+
+    if weather == "rain":
+        a_weak, a_med = 15, 45
+    elif weather == "drizzle":
+        a_weak, a_med = 25, 55
+    elif effective_season in ("winter", "autumn"):
+        a_weak, a_med = 25, 50
+    else:
+        a_weak, a_med = 30, 52
+
+    if roll_a < a_weak:
+        airflow = "weak"
+    elif roll_a < a_weak + a_med:
+        airflow = "medium"
+    else:
+        airflow = "strong"
+    return weather, airflow
+
+
+def _parse_optional_iso(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return parse_iso_moment(value, field_name="manual_pin_until")
+    except V04NeighborhoodError:
+        return None
+
+
+def _resolve_world_id_zero_write(paths: _instance_paths.InstancePaths) -> str:
+    loc_info = _instance_paths.read_canonical_world_location_zero_write(paths.day_root)
+    wid = str(loc_info.get("world_id") or "").strip()
+    if wid:
+        return wid
+    if paths.instance_json is not None and paths.instance_json.is_file() and not paths.instance_json.is_symlink():
+        try:
+            doc = json.loads(paths.instance_json.read_text(encoding="utf-8"))
+            if isinstance(doc, Mapping):
+                wid = str(doc.get("world_id") or "").strip()
+                if wid:
+                    return wid
+        except (OSError, ValueError):
+            pass
+    return "shiomi_city"
+
+
+def advance_autonomous_weather_pulse(
+    day_root: Path | str,
+    *,
+    now_iso: Optional[str] = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Advance deterministic 6-hour autonomous weather pulse (S0..S3, zero-LLM).
+
+    Zero-write when ``v04_neighborhood_state.json`` is absent, when the current
+    6-hour slot was already settled (and ``force=False``), or while an active
+    ``manual_pin_until`` pin holds.
+    """
+    raw_root = Path(day_root)
+    if raw_root.exists() and raw_root.is_symlink():
+        raise V04NeighborhoodError(
+            "STATE_SYMLINK_REFUSED", "day_root must not be a symlink", http_status=503
+        )
+    paths = _instance_paths.resolve_instance_paths(raw_root)
+    canonical_root = paths.day_root
+    local_dt = resolve_now_readonly(canonical_root, now_iso)
+    now_str = format_iso(local_dt)
+    slot_key = _weather_slot_key(local_dt)
+
+    state, exists = load_state_readonly(canonical_root)
+    if not exists:
+        return {
+            "ok": True,
+            "changed": False,
+            "slot_key": slot_key,
+            "reason": "state_missing",
+            "llm_calls": 0,
+            "model_called": False,
+        }
+
+    env = state["environment"]
+    prev_weather = str(env.get("weather") or "clear")
+    prev_airflow = str(env.get("airflow") or "medium")
+    effective_season = _resolve_effective_season(env, local_dt)
+
+    pin_dt = _parse_optional_iso(env.get("manual_pin_until"))
+    if pin_dt is not None and pin_dt > local_dt:
+        return {
+            "ok": True,
+            "changed": False,
+            "slot_key": slot_key,
+            "weather": prev_weather,
+            "airflow": prev_airflow,
+            "season": effective_season,
+            "manual_pin_until": env.get("manual_pin_until"),
+            "reason": "manual_pin_active",
+            "llm_calls": 0,
+            "model_called": False,
+        }
+
+    if not force and env.get("weather_slot_key") == slot_key:
+        return {
+            "ok": True,
+            "changed": False,
+            "slot_key": slot_key,
+            "weather": prev_weather,
+            "airflow": prev_airflow,
+            "season": effective_season,
+            "reason": "same_slot",
+            "llm_calls": 0,
+            "model_called": False,
+        }
+
+    with state_file_lock(state_file_path(canonical_root)):
+        state, exists = load_state_readonly(canonical_root)
+        if not exists:
+            return {
+                "ok": True,
+                "changed": False,
+                "slot_key": slot_key,
+                "reason": "state_missing",
+                "llm_calls": 0,
+                "model_called": False,
+            }
+        env = state["environment"]
+        prev_weather = str(env.get("weather") or "clear")
+        prev_airflow = str(env.get("airflow") or "medium")
+        explicit_season = extract_explicit_season(env)
+        pulse = _season_solar_pulse.project_season_solar_pulse(
+            now_iso=local_dt, explicit_season=explicit_season
+        )
+        effective_season = str(pulse["season"])
+        solar_term_id = str(pulse["solar_term"]["term_id"])
+
+        pin_dt = _parse_optional_iso(env.get("manual_pin_until"))
+        if pin_dt is not None and pin_dt > local_dt:
+            return {
+                "ok": True,
+                "changed": False,
+                "slot_key": slot_key,
+                "weather": prev_weather,
+                "airflow": prev_airflow,
+                "season": effective_season,
+                "manual_pin_until": env.get("manual_pin_until"),
+                "reason": "manual_pin_active",
+                "llm_calls": 0,
+                "model_called": False,
+            }
+        if not force and env.get("weather_slot_key") == slot_key:
+            return {
+                "ok": True,
+                "changed": False,
+                "slot_key": slot_key,
+                "weather": prev_weather,
+                "airflow": prev_airflow,
+                "season": effective_season,
+                "reason": "same_slot",
+                "llm_calls": 0,
+                "model_called": False,
+            }
+
+        world_id = _resolve_world_id_zero_write(paths)
+        new_weather, new_airflow = _draw_autonomous_weather(
+            world_id=world_id,
+            slot_key=slot_key,
+            effective_season=effective_season,
+            solar_term_id=solar_term_id,
+            prev_weather=prev_weather,
+        )
+
+        if new_weather != prev_weather or new_airflow != prev_airflow:
+            for item in state["drying_items"].values():
+                _cut_cloth_segment_for_regime_change(
+                    item,
+                    old_weather=prev_weather,
+                    old_airflow=prev_airflow,
+                    new_weather=new_weather,
+                    new_airflow=new_airflow,
+                    new_support_id=item["support_id"],
+                    now_dt=local_dt,
+                )
+            _reanchor_plant_segment(
+                state["potted_plant"],
+                old_weather=prev_weather,
+                now_dt=local_dt,
+                season=effective_season,
+            )
+
+        env["weather"] = new_weather
+        env["airflow"] = new_airflow
+        env["weather_slot_key"] = slot_key
+        if pin_dt is not None and pin_dt <= local_dt:
+            env["manual_pin_until"] = None
+        if explicit_season is None:
+            env["season"] = None
+            env["season_explicit"] = False
+        env["updated_at"] = now_str
+        state["potted_plant"]["seasonal_state"] = _plant_seasonal_state(
+            effective_season, float(state["potted_plant"].get("hydration", 70.0))
+        )
+        state["revision"] = int(state.get("revision") or 0) + 1
+        state["updated_at"] = now_str
+        save_state_atomic(canonical_root, state)
+
+    return {
+        "ok": True,
+        "changed": True,
+        "weather_changed": bool(new_weather != prev_weather or new_airflow != prev_airflow),
+        "slot_key": slot_key,
+        "weather": new_weather,
+        "airflow": new_airflow,
+        "previous_weather": prev_weather,
+        "previous_airflow": prev_airflow,
+        "season": effective_season,
+        "solar_term_id": solar_term_id,
+        "revision": int(state["revision"]),
+        "updated_at": now_str,
+        "llm_calls": 0,
+        "model_called": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Pure Projection (100% Zero Disk Writes, Perspective Redaction)
 # ---------------------------------------------------------------------------
+
+
+def _project_shopkeeper_life(life: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the public-counter shopkeeper view with private drafts strictly withheld."""
+    suggestions: list[dict[str, Any]] = []
+    for row in life.get("card_spot_suggestions") or []:
+        if not isinstance(row, Mapping):
+            continue
+        suggestions.append({
+            "suggestion_id": row.get("suggestion_id"),
+            "card_id": row.get("card_id"),
+            "spot_note": row.get("spot_note"),
+            "suggested_at": row.get("suggested_at"),
+            "status": row.get("status"),
+            "outcome_reason_cn": row.get("outcome_reason_cn") or "",
+            "resolved_at": row.get("resolved_at"),
+        })
+    rumors: list[dict[str, Any]] = []
+    for row in life.get("heard_rumors") or []:
+        if not isinstance(row, Mapping):
+            continue
+        vf = bool(row.get("verified_firsthand"))
+        ep_status = str(row.get("epistemic_status") or "").strip()
+        if not ep_status:
+            if vf and row.get("refutation_note_cn"):
+                ep_status = "refuted_firsthand"
+            elif vf:
+                ep_status = "verified_firsthand"
+            else:
+                ep_status = "hearsay_unverified"
+        rumors.append({
+            "rumor_id": row.get("rumor_id"),
+            "source_resident_id": SHOPKEEPER_ID,
+            "source_name": row.get("source_name"),
+            "route_id": row.get("route_id"),
+            "claim_cn": row.get("claim_cn"),
+            "heard_at": row.get("heard_at"),
+            "epistemic_status": ep_status,
+            "verified_firsthand": vf,
+            "refutation_note_cn": row.get("refutation_note_cn") or "",
+            "verification_note_cn": row.get("verification_note_cn") or "",
+        })
+    memories = [
+        copy.deepcopy(dict(r))
+        for r in (life.get("remembered_interactions") or [])
+        if isinstance(r, Mapping)
+    ]
+    return {
+        "resident_id": SHOPKEEPER_ID,
+        "resident_name": SHOPKEEPER_NAME,
+        "shopkeeper_name": SHOPKEEPER_NAME,
+        "role": SHOPKEEPER_ROLE,
+        "home_venue": "bookstore",
+        "venue_name_cn": "街角旧书店",
+        "open_window": "10:00-19:00",
+        "schedule_rotation_hours": SHOPKEEPER_TASK_ROTATION_HOURS,
+        "schedule_offset_hours": 0,
+        "current_phase": life.get("current_task"),
+        "current_phase_cn": life.get("current_task_cn"),
+        "current_phase_started_at": life.get("current_task_started_at"),
+        "current_task": life.get("current_task"),
+        "current_task_cn": life.get("current_task_cn"),
+        "current_task_started_at": life.get("current_task_started_at"),
+        "ambient_changes": [
+            str(x) for x in (life.get("ambient_changes") or [])
+        ][-MAX_SHOPKEEPER_AMBIENT_CHANGES:],
+        "privilege_boundary": SHOPKEEPER_PRIVILEGE_BOUNDARY,
+        "private_room_knowledge": False,
+        "warehouse_access": False,
+        "inventory_rewrite_authority": False,
+        "private_drafts_exposed": False,
+        "favorability_score": None,
+        "omission_debt": 0,
+        "remembered_interactions": memories[-MAX_SHOPKEEPER_MEMORIES:],
+        "card_spot_suggestions": suggestions[-MAX_SHOPKEEPER_MEMORIES:],
+        "heard_rumors": rumors[-MAX_SHOPKEEPER_MEMORIES:],
+    }
+
+
+def _project_cafe_resident_life(
+    life: Mapping[str, Any],
+    *,
+    weather: str,
+    season: str,
+    festival_info: Mapping[str, Any],
+    now_dt: datetime,
+) -> dict[str, Any]:
+    """Project second independent resident (Saeki Aoi) under public_counter_only laws."""
+    phase_key, phase_cn, start_dt, at_counter = _cafe_phase_for(now_dt)
+    start_iso = format_iso(start_dt)
+    env_notes = _cafe_environment_notes(weather, season, festival_info)
+    rumors: list[dict[str, Any]] = []
+    for row in life.get("heard_rumors") or []:
+        if not isinstance(row, Mapping):
+            continue
+        vf = bool(row.get("verified_firsthand"))
+        ep_status = str(row.get("epistemic_status") or "").strip()
+        if not ep_status:
+            if vf and row.get("refutation_note_cn"):
+                ep_status = "refuted_firsthand"
+            elif vf:
+                ep_status = "verified_firsthand"
+            else:
+                ep_status = "hearsay_unverified"
+        rumors.append({
+            "rumor_id": row.get("rumor_id"),
+            "source_resident_id": CAFE_RESIDENT_ID,
+            "source_name": row.get("source_name") or CAFE_RESIDENT_NAME,
+            "route_id": row.get("route_id"),
+            "claim_cn": row.get("claim_cn"),
+            "heard_at": row.get("heard_at"),
+            "epistemic_status": ep_status,
+            "verified_firsthand": vf,
+            "refutation_note_cn": row.get("refutation_note_cn") or "",
+            "verification_note_cn": row.get("verification_note_cn") or "",
+        })
+    coaster_notes = [
+        copy.deepcopy(dict(r))
+        for r in (life.get("coaster_notes") or [])
+        if isinstance(r, Mapping)
+    ][-MAX_SHOPKEEPER_MEMORIES:]
+    errand_board = [
+        copy.deepcopy(dict(r))
+        for r in (life.get("shared_errand_board") or [])
+        if isinstance(r, Mapping)
+    ][-MAX_SHOPKEEPER_MEMORIES:]
+    memories = [
+        copy.deepcopy(dict(r))
+        for r in (life.get("remembered_interactions") or [])
+        if isinstance(r, Mapping)
+    ][-MAX_SHOPKEEPER_MEMORIES:]
+    return {
+        "resident_id": CAFE_RESIDENT_ID,
+        "resident_name": CAFE_RESIDENT_NAME,
+        "shopkeeper_name": CAFE_RESIDENT_NAME,
+        "role": CAFE_RESIDENT_ROLE,
+        "home_venue": CAFE_HOME_VENUE,
+        "venue_name_cn": CAFE_VENUE_NAME_CN,
+        "open_window": CAFE_OPEN_WINDOW,
+        "is_open_now": _is_cafe_open(now_dt),
+        "at_counter": bool(at_counter),
+        "schedule_rotation_hours": CAFE_TASK_ROTATION_HOURS,
+        "schedule_offset_hours": CAFE_SCHEDULE_OFFSET_HOURS,
+        "current_phase": phase_key,
+        "current_phase_cn": phase_cn,
+        "current_phase_started_at": start_iso,
+        "current_task": phase_key,
+        "current_task_cn": phase_cn,
+        "current_task_started_at": start_iso,
+        "weather_reaction_cn": env_notes["weather_reaction_cn"],
+        "season_reaction_cn": env_notes["season_reaction_cn"],
+        "market_reaction_cn": env_notes["market_reaction_cn"],
+        "environment_reaction_cn": env_notes["environment_reaction_cn"],
+        "privilege_boundary": SHOPKEEPER_PRIVILEGE_BOUNDARY,
+        "private_room_knowledge": False,
+        "warehouse_access": False,
+        "inventory_rewrite_authority": False,
+        "private_drafts_exposed": False,
+        "favorability_score": None,
+        "omission_debt": 0,
+        "coaster_notes": coaster_notes,
+        "shared_errand_board": errand_board,
+        "remembered_interactions": memories,
+        "heard_rumors": rumors[-MAX_SHOPKEEPER_MEMORIES:],
+    }
 
 
 def _effective_carried_location(journey: Mapping[str, Any]) -> str:
@@ -1379,25 +2787,50 @@ def project_v04_neighborhood(
     preloaded_state: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Project full v0.4 neighborhood view in memory with 100% zero disk writes."""
-    root = Path(day_root)
+    raw_root = Path(day_root)
+    if raw_root.exists() and raw_root.is_symlink():
+        raise V04NeighborhoodError(
+            "STATE_SYMLINK_REFUSED", "day_root must not be a symlink", http_status=503
+        )
+    paths = _instance_paths.resolve_instance_paths(raw_root)
+    root = paths.day_root
     now_dt = resolve_now_readonly(root, now_iso)
     now_str = format_iso(now_dt)
     identity = read_character_identity_readonly(root)
 
     if preloaded_state is None:
-        raw_state, _ = load_state_readonly(root)
+        raw_state, state_exists = load_state_readonly(root)
     else:
         raw_state = copy.deepcopy(dict(preloaded_state))
+        state_exists = True
 
     working = copy.deepcopy(raw_state)
+    env_raw = working["environment"]
+    # Ch.26 & Ch.42: normalize living residents inside the in-memory copy only.
+    _ensure_shopkeeper_life(working["public_life"]["bookstore"])
+    _ensure_cafe_resident_life(working["public_life"])
     settle_all_processes_in_place(working, now_dt)
 
+    # Canonical world -> v04 location projection (in-memory only, zero-write) when no
+    # v04-internal journey has moved or is currently in transit.
+    j_work = working.get("journey")
+    if (
+        isinstance(j_work, dict)
+        and j_work.get("state") == "at_place"
+        and j_work.get("arrived_at") is None
+        and j_work.get("started_at") is None
+    ):
+        world_loc = _instance_paths.read_canonical_world_location_zero_write(root)
+        if world_loc.get("found") and world_loc.get("v04_place_id") in working["places"]:
+            j_work["current_place_id"] = str(world_loc["v04_place_id"])
+
     perspective = "her_private" if has_subject_capability else "partner_default"
-    env_raw = working["environment"]
     weather = str(env_raw.get("weather") or "clear")
     airflow = str(env_raw.get("airflow") or "medium")
-    season = str(env_raw.get("season") or "autumn")
+    season = _resolve_effective_season(env_raw, now_dt)
     bookstore_open = _is_bookstore_open(now_dt)
+    season_ecology = _derive_season_ecology(season, weather, airflow, now_dt)
+    festival_info = _derive_seasonal_festival(working, now_dt)
 
     # 1. Places & local ground exposure
     places_out: dict[str, dict[str, Any]] = {}
@@ -1435,6 +2868,12 @@ def project_v04_neighborhood(
         "yard_bench_damp": weather in ("drizzle", "rain"),
         "porch_sheltered_dry": True,
         "ground_by_place": ground_by_place,
+        "season_ecology": season_ecology,
+        "festival_traces": {
+            "phase": festival_info["phase"],
+            "festival_name_cn": festival_info.get("festival_name_cn"),
+            "residual_traces": list(festival_info.get("residual_traces") or []),
+        },
         "updated_at": env_raw.get("updated_at"),
     }
 
@@ -1473,13 +2912,22 @@ def project_v04_neighborhood(
 
     carried_ids = list(j_raw.get("carried_item_ids") or [])
     carried_loc = _effective_carried_location(j_raw)
+    active_route_id = j_raw.get("active_route_id")
+    # Honest shelter cue is only meaningful while actually walking an active leg.
+    active_route_sheltered = bool(
+        j_raw.get("state") == "in_transit"
+        and active_route_id
+        and _route_is_sheltered(active_route_id)
+    )
 
     journey_out: dict[str, Any] = {
         "state": j_raw["state"],
         "current_place_id": j_raw.get("current_place_id"),
         "origin_place_id": j_raw.get("origin_place_id"),
         "target_place_id": j_raw.get("target_place_id"),
-        "active_route_id": j_raw.get("active_route_id"),
+        "active_route_id": active_route_id,
+        "active_route_sheltered": active_route_sheltered,
+        "transit_location_cn": _journey_location_cn(j_raw),
         "planned_route_ids": [l["route_id"] for l in legs],
         "completed_route_ids": list(j_raw.get("completed_route_ids") or []),
         "is_turning_back": bool(j_raw.get("is_turning_back")),
@@ -1540,17 +2988,32 @@ def project_v04_neighborhood(
         }
 
     plant_raw = working["potted_plant"]
+    plant_hydration = round(float(plant_raw.get("hydration", 70.0)), 4)
+    plant_growth = round(float(plant_raw.get("growth_points", 0.0)), 4)
+    stored_leaf_count = plant_raw.get("leaf_count")
+    if isinstance(stored_leaf_count, int) and not isinstance(stored_leaf_count, bool):
+        plant_leaf_count = int(stored_leaf_count)
+    else:
+        plant_leaf_count = _plant_leaf_count_for_growth(plant_growth)
     plant_out: dict[str, Any] = {
         "plant_id": plant_raw["plant_id"],
         "name": plant_raw["name"],
         "place_id": plant_raw["place_id"],
-        "hydration": round(float(plant_raw.get("hydration", 70.0)), 4),
-        "growth_points": round(float(plant_raw.get("growth_points", 0.0)), 4),
+        "hydration": plant_hydration,
+        "growth_points": plant_growth,
         "stage": plant_raw["stage"],
         "public_care_enabled": bool(plant_raw.get("public_care_enabled")),
         "never_dies_offline": True,
         "last_watered_at": plant_raw.get("last_watered_at"),
         "last_anchor_at": plant_raw.get("last_anchor_at"),
+        # Ch.41 §五: honest, derived plant milestones (never written by a plain read).
+        "leaf_count": plant_leaf_count,
+        "seasonal_state": _plant_seasonal_state(season, plant_hydration),
+        "new_leaf_note_cn": plant_raw.get("new_leaf_note_cn") or "",
+        "last_new_leaf_at": plant_raw.get("last_new_leaf_at"),
+        "wilt_recovered_count": int(plant_raw.get("wilt_recovered_count") or 0),
+        "recovery_note_cn": plant_raw.get("recovery_note_cn") or "",
+        "public_care_note_cn": plant_raw.get("public_care_note_cn") or "",
     }
 
     courtyard_out: dict[str, Any] = {
@@ -1670,13 +3133,14 @@ def project_v04_neighborhood(
     bookstore_out: dict[str, Any] = {
         "place_id": "bookstore",
         "shop_name": "街角旧书店",
-        "shopkeeper_name": "温井慎一",
+        "shopkeeper_name": SHOPKEEPER_NAME,
         "open_window": "10:00-19:00",
         "is_open_now": bookstore_open,
         "return_box_available": True,
         "books": books_list,
         "books_by_id": books_by_id,
         "display_cards": copy.deepcopy(b_raw.get("display_cards") or []),
+        "shopkeeper_life": _project_shopkeeper_life(b_raw.get("shopkeeper_life") or {}),
     }
 
     shelf_list: list[dict[str, Any]] = []
@@ -1791,6 +3255,30 @@ def project_v04_neighborhood(
             "updated_at": None,
         }
 
+    living_shopkeeper_out = copy.deepcopy(bookstore_out["shopkeeper_life"])
+    second_resident_out = _project_cafe_resident_life(
+        pl_raw.get("cafe_resident") or {},
+        weather=weather,
+        season=season,
+        festival_info=festival_info,
+        now_dt=now_dt,
+    )
+    independent_residents_out = [
+        copy.deepcopy(living_shopkeeper_out),
+        copy.deepcopy(second_resident_out),
+    ]
+    if has_subject_capability:
+        concern_tinted_shelf_out = project_concern_tinted_shelf_zero_write(
+            root,
+            now_iso=now_str,
+            preloaded_state=working,
+            auto_discover_concerns=True,
+        )
+    else:
+        concern_tinted_shelf_out = _project_partner_scrubbed_shelf_zero_write(working)
+
+    bookstore_out["concern_tinted_shelf"] = copy.deepcopy(concern_tinted_shelf_out)
+
     public_life_out: dict[str, Any] = {
         "bookstore": bookstore_out,
         "shared_shelf": shared_shelf_out,
@@ -1798,6 +3286,10 @@ def project_v04_neighborhood(
         "roadblocks": roadblocks_out,
         "place_booklet": booklet_out,
         "place_booklets": [copy.deepcopy(booklet_out)],
+        "seasonal_festival": copy.deepcopy(festival_info),
+        "living_shopkeeper": copy.deepcopy(living_shopkeeper_out),
+        "second_resident": copy.deepcopy(second_resident_out),
+        "independent_residents": copy.deepcopy(independent_residents_out),
     }
 
     rev_int = int(working.get("revision") or 0)
@@ -1817,6 +3309,10 @@ def project_v04_neighborhood(
         "roadblocks": copy.deepcopy(roadblocks_out),
         "shared_shelf": copy.deepcopy(shared_shelf_out),
         "bookstore": copy.deepcopy(bookstore_out),
+        "concern_tinted_shelf": concern_tinted_shelf_out,
+        "living_shopkeeper": living_shopkeeper_out,
+        "second_resident": second_resident_out,
+        "independent_residents": independent_residents_out,
         "place_booklets": [copy.deepcopy(booklet_out)],
         "public_life": public_life_out,
     }
@@ -1849,6 +3345,7 @@ def _handle_set_local_weather(
     env = state["environment"]
     old_weather = str(env.get("weather") or "clear")
     old_airflow = str(env.get("airflow") or "medium")
+    old_season = _resolve_effective_season(env, now_dt)
 
     new_airflow = old_airflow
     if payload.get("airflow") is not None:
@@ -1858,13 +3355,20 @@ def _handle_set_local_weather(
                 "INVALID_FIELDS", f"airflow must be one of {AIRFLOW_KINDS}", http_status=400
             )
 
-    new_season = str(env.get("season") or "autumn")
-    if payload.get("season") is not None:
+    explicit_season_requested = payload.get("season") is not None
+    if explicit_season_requested:
         new_season = _clean_text(payload.get("season"), field_name="season", max_len=24)
         if new_season not in SEASON_KINDS:
             raise V04NeighborhoodError(
                 "INVALID_FIELDS", f"season must be one of {SEASON_KINDS}", http_status=400
             )
+        effective_season = new_season
+    else:
+        existing_explicit = extract_explicit_season(env)
+        new_season = existing_explicit
+        effective_season = existing_explicit or _season_solar_pulse.resolve_effective_season(
+            now_dt
+        )[0]
 
     # Cut segment for all drying items & reanchor plant under old weather first
     for item in state["drying_items"].values():
@@ -1877,17 +3381,30 @@ def _handle_set_local_weather(
             new_support_id=item["support_id"],
             now_dt=now_dt,
         )
-    _reanchor_plant_segment(state["potted_plant"], old_weather=old_weather, now_dt=now_dt)
+    _reanchor_plant_segment(
+        state["potted_plant"], old_weather=old_weather, now_dt=now_dt, season=old_season
+    )
 
     now_str = format_iso(now_dt)
+    pin_until_dt = now_dt + timedelta(hours=6)
+    if payload.get("manual_pin_until") is not None:
+        pin_until_dt = parse_iso_moment(
+            payload.get("manual_pin_until"), field_name="manual_pin_until"
+        )
     env["weather"] = weather
     env["airflow"] = new_airflow
     env["season"] = new_season
+    env["season_explicit"] = bool(new_season is not None)
+    env["weather_slot_key"] = _weather_slot_key(now_dt)
+    env["manual_pin_until"] = format_iso(pin_until_dt)
     env["updated_at"] = now_str
+    state["potted_plant"]["seasonal_state"] = _plant_seasonal_state(
+        effective_season, float(state["potted_plant"].get("hydration", 70.0))
+    )
     return {
         "weather": weather,
         "airflow": new_airflow,
-        "season": new_season,
+        "season": effective_season,
         "updated_at": now_str,
     }
 
@@ -2038,7 +3555,8 @@ def _handle_water_or_move_plant(
             raise V04NeighborhoodError("PLANT_NOT_FOUND", f"Unknown plant {pid!r}", http_status=404)
 
     weather = str(state["environment"].get("weather") or "clear")
-    _reanchor_plant_segment(plant, old_weather=weather, now_dt=now_dt)
+    season = _resolve_effective_season(state["environment"], now_dt)
+    _reanchor_plant_segment(plant, old_weather=weather, now_dt=now_dt, season=season)
     now_str = format_iso(now_dt)
 
     raw_op = payload.get("operation")
@@ -2064,11 +3582,21 @@ def _handle_water_or_move_plant(
             raise V04NeighborhoodError(
                 "INVALID_FIELDS", "water_amount must be within (0, 100]", http_status=400
             )
+        was_wilting = (
+            plant.get("stage") == "wilting_recoverable"
+            or float(plant.get("hydration", 0.0)) <= 10.0
+        )
         new_h = min(100.0, float(plant["hydration"]) + float(amt_raw))
         plant["hydration"] = round(new_h, 4)
         plant["segment_start_hydration"] = plant["hydration"]
         plant["last_watered_at"] = now_str
         plant["stage"] = _derive_plant_stage(plant["hydration"], float(plant["growth_points"]))
+        if was_wilting and plant["hydration"] > 10.0:
+            plant["wilt_recovered_count"] = int(plant.get("wilt_recovered_count") or 0) + 1
+            plant["recovery_note_cn"] = "浇水后垂下去的叶片慢慢舒展回来了"
+        plant["seasonal_state"] = _plant_seasonal_state(
+            season, float(plant["hydration"])
+        )
     elif op == "move":
         if payload.get("target_place") is None:
             raise V04NeighborhoodError(
@@ -2140,7 +3668,9 @@ def _handle_set_roadblock(
     }
 
 
-def _validate_carriable_item(state: Mapping[str, Any], item_id: str) -> None:
+def _validate_carriable_item(
+    state: Mapping[str, Any], item_id: str, *, root: Optional[Path] = None
+) -> None:
     if item_id in state["drying_items"]:
         return
     if item_id in state["craft_bench"]["cards"]:
@@ -2153,13 +3683,43 @@ def _validate_carriable_item(state: Mapping[str, Any], item_id: str) -> None:
         return
     if item_id == state["public_life"]["place_booklet"]["booklet_id"]:
         return
+    # Cross-domain portable matter (Ch.39 §六): recognise an active v08 object
+    # strictly read-only, without ever writing the matter owner's file.
+    if root is not None:
+        row = _read_v08_matter_object_readonly(Path(root), item_id)
+        if row is not None:
+            if row.get("consumed") or row.get("discarded") or row.get("returned_out"):
+                raise V04NeighborhoodError(
+                    "ITEM_NOT_CARRIABLE",
+                    f"Item {item_id!r} is no longer physically present",
+                    http_status=409,
+                )
+            if _v08_object_portability(row) == "fixed":
+                raise V04NeighborhoodError(
+                    "ITEM_NOT_CARRIABLE",
+                    f"Item {item_id!r} is fixed in place and cannot be carried",
+                    http_status=409,
+                )
+            # Carrying is a subject capability: Two-Worlds safety forbids
+            # picking up matter the subject has never legitimately seen.
+            if _v08_object_hidden_from_subject(row):
+                raise V04NeighborhoodError(
+                    "ITEM_NOT_CARRIABLE",
+                    f"Item {item_id!r} is not at a spot the subject knows",
+                    http_status=409,
+                )
+            return
     raise V04NeighborhoodError(
         "ITEM_NOT_CARRIABLE", f"Item {item_id!r} does not exist or is not in subject custody", http_status=409
     )
 
 
 def _handle_start_journey(
-    state: dict[str, Any], payload: Mapping[str, Any], *, now_dt: datetime
+    state: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    now_dt: datetime,
+    root: Optional[Path] = None,
 ) -> dict[str, Any]:
     journey = state["journey"]
     if journey.get("state") == "in_transit":
@@ -2174,6 +3734,9 @@ def _handle_start_journey(
             "Subject is paused mid-segment at a roadblock; call advance_or_turnback_journey with turn_back first",
             http_status=409,
         )
+
+    # Standing at the street corner while a market is active makes the visit firsthand.
+    _record_festival_attendance_if_active(state, now_dt)
 
     src = str(journey.get("current_place_id") or journey.get("origin_place_id") or "home")
     raw_dst = payload.get("target_place") or payload.get("destination")
@@ -2252,7 +3815,7 @@ def _handle_start_journey(
         dedup_carry: list[str] = []
         for entry in raw_carry:
             cid = _require_id(entry, field_name="carry_item_ids[]")
-            _validate_carriable_item(state, cid)
+            _validate_carriable_item(state, cid, root=root)
             if cid not in dedup_carry:
                 dedup_carry.append(cid)
         # Keep borrowed items & sync cloth support if wet_cloth_main carried
@@ -2277,6 +3840,9 @@ def _handle_start_journey(
     # Standing at src (entrance of first_route), real roadblock is directly observable!
     if _is_route_really_blocked(state, first_route):
         _add_discovered_roadblock(journey, first_route)
+        _record_firsthand_rumor_check(
+            state, first_route, verified_blocked=True, at_iso=now_str
+        )
         journey["state"] = "paused_at_node"
         journey["current_place_id"] = src
         journey["origin_place_id"] = src
@@ -2298,6 +3864,10 @@ def _handle_start_journey(
     # Clear stale false rumor if real entrance is open
     if first_route in discovered:
         _remove_discovered_roadblock(journey, first_route)
+    # Standing at the open entrance refutes the shopkeeper's hearsay firsthand.
+    _record_firsthand_rumor_check(
+        state, first_route, verified_blocked=False, at_iso=now_str
+    )
 
     total_sec = sum(int(l["duration_seconds"]) for l in legs)
     exp_dt = now_dt + timedelta(seconds=total_sec)
@@ -2337,14 +3907,18 @@ def _handle_advance_or_turnback_journey(
     journey = state["journey"]
     raw_op = payload.get("operation")
     op = _clean_text(raw_op, field_name="operation", max_len=32) if raw_op is not None else "advance"
-    if op not in ("advance", "turn_back", "pause", "resume"):
+    if op not in ("advance", "turn_back", "pause", "resume", "reroute"):
         raise V04NeighborhoodError(
             "INVALID_FIELDS",
-            "operation must be one of ('advance', 'turn_back', 'pause', 'resume')",
+            "operation must be one of ('advance', 'turn_back', 'pause', 'resume', 'reroute')",
             http_status=400,
         )
 
     now_str = format_iso(now_dt)
+
+    # Arriving at street_corner while a market is active is a firsthand visit; a
+    # later arrival only sees the leftover physical traces and records nothing.
+    _record_festival_attendance_if_active(state, now_dt)
 
     if op == "advance":
         # Note: pre-command settlement already ran _settle_journey_in_place(state, now_dt)
@@ -2397,6 +3971,149 @@ def _handle_advance_or_turnback_journey(
             "operation": "resume",
             "state": "in_transit",
             "expected_arrival_at": journey["expected_arrival_at"],
+        }
+
+    if op == "reroute":
+        state_label = journey.get("state")
+        if state_label not in ("in_transit", "paused_at_node"):
+            raise V04NeighborhoodError(
+                "NOT_IN_TRANSIT",
+                "reroute requires journey to be in_transit or paused_at_node",
+                http_status=409,
+            )
+        target = journey.get("target_place_id")
+        if not target:
+            raise V04NeighborhoodError(
+                "NO_TARGET", "reroute requires an active journey target", http_status=409
+            )
+
+        legs = list(journey.get("legs") or [])
+        idx = int(journey.get("active_leg_index") or 0)
+        walked_now = 0.0
+        if state_label == "in_transit":
+            if idx < len(legs) and journey.get("segment_started_at"):
+                seg_dt = parse_iso_moment(
+                    journey["segment_started_at"], field_name="segment_started_at"
+                )
+                walked_now = max(
+                    0.0,
+                    min(float(legs[idx]["duration_seconds"]), (now_dt - seg_dt).total_seconds()),
+                )
+            anchor = (
+                str(legs[idx]["from_place"])
+                if idx < len(legs)
+                else str(journey.get("current_place_id") or journey.get("origin_place_id") or "home")
+            )
+        elif journey.get("current_place_id"):
+            anchor = str(journey["current_place_id"])
+        else:
+            walked_now = float(journey.get("paused_walked_seconds") or 0.0)
+            anchor = (
+                str(legs[idx]["from_place"])
+                if idx < len(legs)
+                else str(journey.get("origin_place_id") or "home")
+            )
+
+        # Body effort already spent is never rolled back: bank any partial walk
+        # into the accumulated total before rebuilding the remaining legs.
+        if walked_now > 0:
+            journey["accumulated_walk_seconds"] = round(
+                float(journey.get("accumulated_walk_seconds") or 0.0) + walked_now, 3
+            )
+        journey["paused_walked_seconds"] = 0.0
+
+        raw_pref = payload.get("preferred_branch")
+        branch: Optional[str] = None
+        if raw_pref is not None:
+            branch = _clean_text(raw_pref, field_name="preferred_branch", max_len=48)
+            if branch not in ("open_shortcut", "eaves_walkway"):
+                raise V04NeighborhoodError(
+                    "INVALID_FIELDS",
+                    "preferred_branch must be 'open_shortcut' or 'eaves_walkway'",
+                    http_status=400,
+                )
+
+        discovered = list(journey.get("discovered_roadblocks") or [])
+        blocked = str(journey.get("blocked_route_id") or "")
+        if branch is None:
+            if blocked == "open_shortcut":
+                branch = "eaves_walkway"
+            elif blocked == "eaves_walkway":
+                branch = "open_shortcut"
+            elif "open_shortcut" in discovered:
+                branch = "eaves_walkway"
+            else:
+                branch = "eaves_walkway"
+
+        if anchor == target:
+            journey["state"] = "arrived"
+            journey["current_place_id"] = anchor
+            journey["active_route_id"] = None
+            journey["active_leg_index"] = 0
+            journey["legs"] = []
+            journey["paused_walked_seconds"] = 0.0
+            journey["halt_reason"] = None
+            journey["blocked_route_id"] = None
+            journey["arrived_at"] = now_str
+            _mark_place_visited(state, anchor, now_str)
+            return {
+                "operation": "reroute",
+                "outcome": "already_at_target",
+                "state": "arrived",
+                "current_place_id": anchor,
+                "accumulated_walk_seconds": journey["accumulated_walk_seconds"],
+            }
+
+        new_legs = _build_route_legs(anchor, target, branch_route_id=branch)
+        first_route = new_legs[0]["route_id"] if new_legs else None
+
+        # Standing at the junction, a real closure on the chosen entrance is
+        # directly observable. Discover it honestly and stay put -- never loop.
+        if first_route is not None and _is_route_really_blocked(state, first_route):
+            _add_discovered_roadblock(journey, first_route)
+            journey["state"] = "paused_at_node"
+            journey["current_place_id"] = anchor
+            journey["active_route_id"] = None
+            journey["active_leg_index"] = 0
+            journey["legs"] = new_legs
+            journey["paused_walked_seconds"] = 0.0
+            journey["halt_reason"] = "ROADBLOCK_ENCOUNTERED"
+            journey["blocked_route_id"] = first_route
+            _mark_place_visited(state, anchor, now_str)
+            return {
+                "operation": "reroute",
+                "outcome": "halted_by_roadblock_at_entrance",
+                "state": "paused_at_node",
+                "at_place_id": anchor,
+                "encountered_roadblock": first_route,
+                "discovered_roadblocks": list(journey.get("discovered_roadblocks") or []),
+                "accumulated_walk_seconds": journey["accumulated_walk_seconds"],
+            }
+
+        total_sec = _legs_walk_seconds(new_legs)
+        journey["state"] = "in_transit"
+        journey["current_place_id"] = None
+        journey["target_place_id"] = target
+        journey["active_route_id"] = first_route
+        journey["active_leg_index"] = 0
+        journey["legs"] = new_legs
+        journey["is_turning_back"] = False
+        journey["turned_back_at"] = None
+        journey["segment_started_at"] = now_str
+        journey["expected_arrival_at"] = format_iso(now_dt + timedelta(seconds=total_sec))
+        journey["arrived_at"] = None
+        journey["halt_reason"] = None
+        journey["blocked_route_id"] = None
+        return {
+            "operation": "reroute",
+            "outcome": "rerouted",
+            "state": "in_transit",
+            "target_place_id": target,
+            "active_route_id": first_route,
+            "preferred_branch": branch,
+            "planned_route_ids": [l["route_id"] for l in new_legs],
+            "expected_arrival_at": journey["expected_arrival_at"],
+            "accumulated_walk_seconds": journey["accumulated_walk_seconds"],
         }
 
     # op == "turn_back"
@@ -2801,6 +4518,390 @@ def _handle_craft_paper_or_box(
     )
 
 
+_CONCERN_SEGMENT_SPLIT_RE = re.compile(r"[^0-9A-Za-z一-鿿]+")
+_CJK_RUN_RE = re.compile(r"[一-鿿]+")
+
+
+def _book_concern_corpus(book: Mapping[str, Any]) -> str:
+    """Flatten the browseable non-full-text fields of one book into one haystack."""
+    parts: list[str] = [
+        str(book.get("title") or ""),
+        str(book.get("cover_summary") or ""),
+    ]
+    toc = book.get("toc")
+    if isinstance(toc, (list, tuple)):
+        parts.extend(str(entry) for entry in toc)
+    parts.append(str(book.get("sample_excerpt") or ""))
+    return "\n".join(parts)
+
+
+def _iter_concern_segments(cue: str) -> list[str]:
+    return [seg for seg in _CONCERN_SEGMENT_SPLIT_RE.split(cue) if seg]
+
+
+def _match_concern_cues(
+    book: Mapping[str, Any],
+    focus_question: str,
+    concern_keywords: Sequence[str],
+) -> list[str]:
+    """Return the cue fragments that catch the eye for this book (never mutates the book)."""
+    corpus = _book_concern_corpus(book)
+    hay = corpus.casefold()
+    cues: list[str] = []
+    if isinstance(focus_question, str) and focus_question.strip():
+        cues.append(focus_question.strip())
+    for kw in concern_keywords or ():
+        if isinstance(kw, str) and kw.strip():
+            cues.append(kw.strip())
+
+    matched: list[str] = []
+    for cue in cues:
+        for seg in _iter_concern_segments(cue):
+            seg_fold = seg.casefold()
+            if seg_fold in hay:
+                matched.append(seg)
+                continue
+            # Chinese cues are compound words; a 2-character landmark is enough to
+            # let the eye catch the shelf without pretending the book was understood.
+            if len(seg) >= 2 and _CJK_RUN_RE.fullmatch(seg):
+                for i in range(len(seg) - 1):
+                    gram = seg[i : i + 2]
+                    if gram in corpus:
+                        matched.append(gram)
+                        break
+
+    deduped: list[str] = []
+    for item in matched:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
+def _concern_noticed_angle(
+    book: Mapping[str, Any],
+    focus_question: str,
+    matched_cues: Sequence[str],
+) -> str:
+    """Explain, in-world, why the gaze stopped on this spine (not what the whole book says)."""
+    title = str(book.get("title") or "")
+    question = focus_question.strip() if isinstance(focus_question, str) else ""
+    if matched_cues:
+        cue_text = "、".join(list(matched_cues)[:3])
+        if question:
+            return (
+                f"刚才眼角停在这本《{title}》上：书里“{cue_text}”这一角，"
+                f"正好接上了你心里惦记的“{question}”。"
+            )
+        return f"刚才眼角停在这本《{title}》上：书里“{cue_text}”这一角和你此刻惦记的事对上了。"
+    if question:
+        return f"你翻着《{title}》，心里惦记的“{question}”暂时没在封面、目录和试读里落定。"
+    return f"你翻着《{title}》，暂时没有哪一角特别勾住你此刻的念头。"
+
+
+def _book_in_shelf_view_range(book: Mapping[str, Any]) -> bool:
+    """Whether the book currently sits inside the shelf field of view."""
+    status = str(book.get("status") or "")
+    if status in ("available", "reserved"):
+        return True
+    return (
+        str(book.get("custody_place_id") or "") == "bookstore"
+        and str(book.get("holder") or "") == "bookstore"
+    )
+
+
+def _read_optional_json_readonly(path: Path) -> Optional[Mapping[str, Any]]:
+    """Read an optional JSON mapping with 100% zero disk writes (symlink-safe)."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        return doc if isinstance(doc, Mapping) else None
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return None
+
+
+def _gather_subject_shelf_concerns_readonly(
+    root: Path, state: Mapping[str, Any]
+) -> tuple[str, list[str], list[dict[str, Any]]]:
+    """Gather subject-side active concerns in memory with 100% zero disk writes."""
+    focus_candidates: list[str] = []
+    keyword_candidates: list[str] = []
+    concern_rows: list[dict[str, Any]] = []
+    seen_texts: set[str] = set()
+
+    def _add_concern(text: Any, *, source: str, cid: str = "", as_focus: bool = False) -> None:
+        cleaned = " ".join(str(text or "").split()).strip()
+        if not cleaned or cleaned in seen_texts:
+            return
+        seen_texts.add(cleaned)
+        concern_id = str(cid or _stable_id("concern", source, cleaned))
+        concern_rows.append({
+            "concern_id": concern_id,
+            "concern_text": cleaned,
+            "source": source,
+        })
+        if as_focus and not focus_candidates:
+            focus_candidates.append(cleaned)
+        else:
+            keyword_candidates.append(cleaned)
+
+    pub = state.get("public_life")
+    b_store = pub.get("bookstore") if isinstance(pub, Mapping) else None
+    shelf_focus = b_store.get("last_shelf_focus") if isinstance(b_store, Mapping) else None
+    if isinstance(shelf_focus, Mapping):
+        fq = shelf_focus.get("focus_question")
+        if isinstance(fq, str) and fq.strip():
+            _add_concern(fq, source="bookstore_focus", as_focus=True)
+        for kw in shelf_focus.get("concern_keywords") or ():
+            if isinstance(kw, str) and kw.strip():
+                _add_concern(kw, source="bookstore_keyword")
+
+    echoes_doc = _read_optional_json_readonly(root / "phone" / "v08_emergent_echoes.json")
+    if isinstance(echoes_doc, Mapping):
+        for row in echoes_doc.get("future_self_questions") or []:
+            if not isinstance(row, Mapping) or str(row.get("status") or "") != "open":
+                continue
+            qid = str(row.get("question_id") or "")
+            _add_concern(
+                row.get("question_cn"),
+                source="future_self_question",
+                cid=qid,
+                as_focus=True,
+            )
+            for kw in row.get("keywords") or ():
+                if isinstance(kw, str) and kw.strip():
+                    _add_concern(kw, source="future_self_keyword")
+        for row in echoes_doc.get("day_directions") or []:
+            if not isinstance(row, Mapping) or str(row.get("status") or "") == "faded":
+                continue
+            _add_concern(row.get("horizon_note_cn"), source="emergent_day_direction")
+
+    elastic_doc = _read_optional_json_readonly(root / "phone" / "v04_elastic_play.json")
+    if isinstance(elastic_doc, Mapping):
+        dd = elastic_doc.get("day_direction")
+        if isinstance(dd, Mapping) and str(dd.get("status") or "") not in ("idle", "cleared", "dropped"):
+            _add_concern(
+                dd.get("current_focus") or dd.get("direction"),
+                source="elastic_day_direction",
+                cid=str(dd.get("direction_id") or ""),
+                as_focus=True,
+            )
+            _add_concern(dd.get("direction"), source="elastic_day_direction")
+        for proj in elastic_doc.get("personal_projects") or []:
+            if not isinstance(proj, Mapping):
+                continue
+            if str(proj.get("status") or "") in ("paused", "retired", "dropped"):
+                continue
+            _add_concern(
+                proj.get("purpose_cn") or proj.get("next_step_cn"),
+                source="personal_project",
+                cid=str(proj.get("project_id") or ""),
+            )
+
+    resolved_paths = _instance_paths.resolve_instance_paths(root)
+    agency_candidates = (
+        resolved_paths.agency_depth_state_json,
+        root / "state" / "v02_agency_depth_state.json",
+        root / "phone" / "v02_agency_depth_state.json",
+        resolved_paths.legacy_nested_agency_depth_json,
+    )
+    seen_agency: set[str] = set()
+    for agency_path in agency_candidates:
+        akey = str(agency_path)
+        if akey in seen_agency:
+            continue
+        seen_agency.add(akey)
+        agency_doc = _read_optional_json_readonly(agency_path)
+        if not isinstance(agency_doc, Mapping):
+            continue
+        for inq in agency_doc.get("inquiries") or []:
+            if not isinstance(inq, Mapping):
+                continue
+            if str(inq.get("status") or "").upper() not in ("OPEN", "INVESTIGATING", "ACTIVE"):
+                continue
+            _add_concern(
+                inq.get("question") or inq.get("topic") or inq.get("title"),
+                source="agency_inquiry",
+                cid=str(inq.get("inquiry_id") or ""),
+                as_focus=True,
+            )
+
+    cb = state.get("craft_bench")
+    box = cb.get("card_organizer_box") if isinstance(cb, Mapping) else None
+    if isinstance(box, Mapping) and box.get("fit_note"):
+        _add_concern(box.get("fit_note"), source="craft_box_fit_note")
+
+    primary_focus = focus_candidates[0] if focus_candidates else ""
+    extra_keywords = [kw for kw in keyword_candidates if kw != primary_focus]
+    return primary_focus, extra_keywords, concern_rows
+
+
+def _build_public_shelf_books(
+    books: Mapping[str, Any], display_cards: Sequence[Any]
+) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]]]:
+    public_cards: list[dict[str, Any]] = []
+    for card in display_cards or ():
+        if not isinstance(card, Mapping):
+            continue
+        public_cards.append({
+            "card_id": str(card.get("card_id") or ""),
+            "title": str(card.get("title") or ""),
+            "displayed_revision": card.get("displayed_revision"),
+            "displayed_text": str(card.get("displayed_text") or ""),
+            "private_draft_exposed": False,
+        })
+    public_notes = [c["displayed_text"] for c in public_cards if c["displayed_text"]]
+
+    in_range_ids: list[str] = []
+    public_books: list[dict[str, Any]] = []
+    for raw_bid, book in books.items():
+        if not isinstance(book, Mapping) or not _book_in_shelf_view_range(book):
+            continue
+        bid = str(raw_bid)
+        in_range_ids.append(bid)
+        public_books.append({
+            "book_id": bid,
+            "title": str(book.get("title") or ""),
+            "author_name": str(book.get("author_name") or ""),
+            "cover_summary": str(book.get("cover_summary") or ""),
+            "status": str(book.get("status") or "available"),
+            "public_display_notes": list(public_notes),
+            "in_range": True,
+            "full_text_dumped": False,
+        })
+    return in_range_ids, public_books, public_cards
+
+
+def _project_partner_scrubbed_shelf_zero_write(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Deep-scrubbed partner shelf view: zero private concerns, zero matched cues, zero counts."""
+    public_life = state.get("public_life")
+    bookstore = public_life.get("bookstore") if isinstance(public_life, Mapping) else None
+    books = bookstore.get("books") if isinstance(bookstore, Mapping) else None
+    if not isinstance(books, Mapping):
+        books = {}
+    display_cards = (
+        bookstore.get("display_cards") if isinstance(bookstore, Mapping) else None
+    ) or []
+    in_range_ids, public_books, public_cards = _build_public_shelf_books(books, display_cards)
+    return {
+        "in_range_book_ids": in_range_ids,
+        "noticed_items": [],
+        "tinted_books": [],
+        "untinted_books": copy.deepcopy(public_books),
+        "public_shelf_books": public_books,
+        "public_display_cards": public_cards,
+        "active_concerns": [],
+        "focus_question": "",
+        "concern_keywords": [],
+        "private_concerns_scrubbed": True,
+        "llm_calls": 0,
+        "zero_write": True,
+    }
+
+
+def project_concern_tinted_shelf_zero_write(
+    day_root: Path | str,
+    *,
+    focus_question: str = "",
+    concern_keywords: Sequence[str] = (),
+    now_iso: str | None = None,
+    preloaded_state: Optional[Mapping[str, Any]] = None,
+    auto_discover_concerns: bool = False,
+) -> dict[str, Any]:
+    """Zero-write projection of the bookstore shelf under one concern filter (Ch.23).
+
+    Only books inside the shelf field of view are considered.  A book is ``noticed``
+    when its title / cover summary / TOC / sample excerpt matches the current
+    ``focus_question`` or ``concern_keywords``; noticing one slice of the cover or
+    TOC never means the whole book was understood or dumped.  When nothing matches,
+    ``noticed_items`` is an honest empty list.
+
+    Reads ``load_state_readonly`` only: no mkdir, no temp file, no mtime change,
+    ``llm_calls == 0``.
+    """
+    root = Path(day_root)
+    if preloaded_state is None:
+        state, _exists = load_state_readonly(root)
+    else:
+        state = dict(preloaded_state)
+
+    public_life = state.get("public_life")
+    bookstore = public_life.get("bookstore") if isinstance(public_life, Mapping) else None
+    books = bookstore.get("books") if isinstance(bookstore, Mapping) else None
+    if not isinstance(books, Mapping):
+        books = {}
+    display_cards = (
+        bookstore.get("display_cards") if isinstance(bookstore, Mapping) else None
+    ) or []
+
+    focus_clean = " ".join(str(focus_question).split()) if focus_question else ""
+    keywords_clean: list[str] = []
+    for kw in concern_keywords or ():
+        if isinstance(kw, str):
+            cleaned_kw = " ".join(kw.split())
+            if cleaned_kw:
+                keywords_clean.append(cleaned_kw)
+
+    active_concerns: list[dict[str, Any]] = []
+    if auto_discover_concerns and not focus_clean and not keywords_clean:
+        focus_clean, keywords_clean, active_concerns = _gather_subject_shelf_concerns_readonly(
+            root, state
+        )
+    else:
+        if focus_clean:
+            active_concerns.append({
+                "concern_id": _stable_id("concern", "explicit_focus", focus_clean),
+                "concern_text": focus_clean,
+                "source": "explicit_focus",
+            })
+        for kw in keywords_clean:
+            active_concerns.append({
+                "concern_id": _stable_id("concern", "explicit_keyword", kw),
+                "concern_text": kw,
+                "source": "explicit_keyword",
+            })
+
+    in_range_book_ids, public_books, public_cards = _build_public_shelf_books(books, display_cards)
+    public_by_id = {b["book_id"]: b for b in public_books}
+    noticed_items: list[dict[str, Any]] = []
+    untinted_books: list[dict[str, Any]] = []
+    for book_id in in_range_book_ids:
+        book = books.get(book_id)
+        if not isinstance(book, Mapping):
+            continue
+        matched = _match_concern_cues(book, focus_clean, keywords_clean)
+        if not matched:
+            untinted_books.append(copy.deepcopy(public_by_id[book_id]))
+            continue
+        noticed_items.append(
+            {
+                "book_id": book_id,
+                "title": str(book.get("title") or ""),
+                "noticed_angle_cn": _concern_noticed_angle(book, focus_clean, matched),
+                "matched_cues": matched,
+                "in_range": True,
+                "noticed": True,
+                "understood": False,
+                "full_text_dumped": False,
+            }
+        )
+
+    return {
+        "in_range_book_ids": in_range_book_ids,
+        "noticed_items": noticed_items,
+        "tinted_books": copy.deepcopy(noticed_items),
+        "untinted_books": untinted_books,
+        "public_shelf_books": public_books,
+        "public_display_cards": public_cards,
+        "active_concerns": active_concerns,
+        "focus_question": focus_clean,
+        "concern_keywords": keywords_clean,
+        "private_concerns_scrubbed": False,
+        "llm_calls": 0,
+        "zero_write": True,
+    }
+
+
 def _handle_bookstore_service(
     state: dict[str, Any], payload: Mapping[str, Any], *, now_dt: datetime
 ) -> dict[str, Any]:
@@ -2810,6 +4911,9 @@ def _handle_bookstore_service(
     books = b_store["books"]
     open_now = _is_bookstore_open(now_dt)
     now_str = format_iso(now_dt)
+    life = _ensure_shopkeeper_life(b_store)
+    # Keep the persisted task block aligned with the clock after lazy normalization.
+    _settle_shopkeeper_life_in_place(state, now_dt)
 
     if svc == "browse_book":
         if not open_now:
@@ -2820,7 +4924,7 @@ def _handle_bookstore_service(
         book = books.get(bid)
         if book is None:
             raise V04NeighborhoodError("BOOK_NOT_FOUND", f"Unknown book {bid!r}", http_status=404)
-        return {
+        browse_result: dict[str, Any] = {
             "service": "browse_book",
             "book_id": bid,
             "title": book["title"],
@@ -2830,6 +4934,41 @@ def _handle_bookstore_service(
             "sample_excerpt": book["sample_excerpt"],
             "full_text_dumped": False,
         }
+        if (
+            payload.get("focus_question") is not None
+            or payload.get("concern_keywords") is not None
+        ):
+            focus_clean = (
+                _clean_text(payload["focus_question"], field_name="focus_question", max_len=200)
+                if payload.get("focus_question") is not None
+                else ""
+            )
+            keywords_clean: list[str] = []
+            raw_keywords = payload.get("concern_keywords")
+            if raw_keywords is not None:
+                if isinstance(raw_keywords, (str, bytes)) or not isinstance(
+                    raw_keywords, (list, tuple)
+                ):
+                    raise V04NeighborhoodError(
+                        "INVALID_FIELDS",
+                        "concern_keywords must be a list of strings",
+                        http_status=400,
+                    )
+                for item in raw_keywords:
+                    keywords_clean.append(
+                        _clean_text(item, field_name="concern_keywords", max_len=80)
+                    )
+            matched = _match_concern_cues(book, focus_clean, keywords_clean)
+            b_store["last_shelf_focus"] = {
+                "focus_question": focus_clean,
+                "concern_keywords": list(keywords_clean),
+                "updated_at": now_str,
+            }
+            browse_result["focus_question"] = focus_clean
+            browse_result["noticed_angle_cn"] = _concern_noticed_angle(book, focus_clean, matched)
+            browse_result["understood"] = False
+            browse_result["full_text_dumped"] = False
+        return browse_result
 
     if svc == "reserve_book":
         if not open_now:
@@ -2906,6 +5045,13 @@ def _handle_bookstore_service(
         if bid not in carried:
             carried.append(bid)
         state["journey"]["carried_item_ids"] = carried
+        _remember_shopkeeper_interaction(
+            life,
+            kind="borrow_book",
+            ref_id=bid,
+            note_cn=f"借走了《{book['title']}》",
+            at_iso=now_str,
+        )
 
         return {
             "service": "borrow_book",
@@ -2959,6 +5105,13 @@ def _handle_bookstore_service(
             book["custody_place_id"] = "bookstore"
             book["return_receipt_kind"] = "shopkeeper_received"
             book["shopkeeper_received"] = True
+        _remember_shopkeeper_interaction(
+            life,
+            kind="return_book",
+            ref_id=bid,
+            note_cn=f"把《{book['title']}》还回了{'归还箱' if book['status'] == 'return_box_pending' else '柜台'}",
+            at_iso=now_str,
+        )
 
         return {
             "service": "return_book",
@@ -3007,12 +5160,191 @@ def _handle_bookstore_service(
         }
         display_cards.append(display_entry)
         b_store["display_cards"] = display_cards
+        _remember_shopkeeper_interaction(
+            life,
+            kind="submit_display_card",
+            ref_id=cid,
+            note_cn=f"把《{card['title']}》的说明卡留在了柜台展示面",
+            at_iso=now_str,
+        )
         return {
             "service": "submit_display_card",
             "card_id": cid,
             "displayed_revision": rev,
             "displayed_text": exact_text,
             "private_draft_exposed": False,
+        }
+
+    if svc in ("share_shopkeeper_rumor", "note_rumor"):
+        # Explicit rumor exchange is allowed whenever the subject is at the shop
+        # counter (the shop owner may pass on hearsay outside posted hours too);
+        # unlike card/borrow actions it is not gated on 10:00-19:00.
+        route_id = _clean_text(payload.get("route_id"), field_name="route_id", max_len=48)
+        if route_id not in ROUTES_CATALOG:
+            raise V04NeighborhoodError(
+                "INVALID_FIELDS", f"Unknown route_id {route_id!r}", http_status=400
+            )
+        claim_cn = (
+            _optional_text(payload.get("claim_cn"), field_name="claim_cn", max_len=200)
+            or DEFAULT_RUMOR_CLAIM_CN
+        )
+        rumors = [r for r in (life.get("heard_rumors") or []) if isinstance(r, dict)]
+        existing = next(
+            (
+                r
+                for r in rumors
+                if r.get("route_id") == route_id
+                and r.get("claim_cn") == claim_cn
+                and not r.get("verified_firsthand")
+            ),
+            None,
+        )
+        if existing is not None:
+            rumor = existing
+            replay = True
+        else:
+            rumor = {
+                "rumor_id": _stable_id("rumor", route_id, claim_cn, now_str),
+                "source_name": SHOPKEEPER_NAME,
+                "route_id": route_id,
+                "claim_cn": claim_cn,
+                "heard_at": now_str,
+                "verified_firsthand": False,
+                "refutation_note_cn": "",
+            }
+            rumors.append(rumor)
+            life["heard_rumors"] = rumors[-MAX_SHOPKEEPER_MEMORIES:]
+            replay = False
+        # CRITICAL: hearsay NEVER writes journey.discovered_roadblocks or world_truth.
+        return {
+            "service": "share_shopkeeper_rumor",
+            "rumor_id": rumor["rumor_id"],
+            "route_id": route_id,
+            "claim_cn": claim_cn,
+            "source_name": SHOPKEEPER_NAME,
+            "verified_firsthand": bool(rumor.get("verified_firsthand")),
+            "known_blocked_to_subject": route_id
+            in (state["journey"].get("discovered_roadblocks") or []),
+            "replay": replay,
+        }
+
+    if svc == "suggest_card_spot":
+        if not open_now:
+            raise V04NeighborhoodError(
+                "BOOKSTORE_CLOSED", "Bookstore is only open 10:00-19:00", http_status=409
+            )
+        cid = _require_id(payload.get("card_id"), field_name="card_id")
+        card = state["craft_bench"]["cards"].get(cid)
+        if card is None:
+            raise V04NeighborhoodError("CARD_NOT_FOUND", f"Unknown card {cid!r}", http_status=404)
+        if int(card.get("inscribed_revision") or 0) < 1:
+            raise V04NeighborhoodError(
+                "CARD_NOT_INSCRIBED",
+                "Only an inscribed card version can be suggested for a display spot",
+                http_status=409,
+            )
+        spot_note = _clean_text(payload.get("spot_note"), field_name="spot_note", max_len=120)
+        suggestions = [
+            s for s in (life.get("card_spot_suggestions") or []) if isinstance(s, dict)
+        ]
+        suggestion_id = _stable_id("sugg", cid, spot_note, now_str, len(suggestions))
+        suggestion = {
+            "suggestion_id": suggestion_id,
+            "card_id": cid,
+            "spot_note": spot_note,
+            "suggested_at": now_str,
+            "status": "pending_shopkeeper_review",
+            "outcome_reason_cn": "",
+            "resolved_at": None,
+        }
+        suggestions.append(suggestion)
+        life["card_spot_suggestions"] = suggestions[-MAX_SHOPKEEPER_MEMORIES:]
+        _remember_shopkeeper_interaction(
+            life,
+            kind="suggest_card_spot",
+            ref_id=suggestion_id,
+            note_cn=f"指着{spot_note}，说这张卡也许能摆在那里",
+            at_iso=now_str,
+        )
+        return {
+            "service": "suggest_card_spot",
+            "suggestion_id": suggestion_id,
+            "card_id": cid,
+            "spot_note": spot_note,
+            "status": "pending_shopkeeper_review",
+            "outcome_reason_cn": "",
+        }
+
+    if svc == "decide_card_spot":
+        suggestions = [
+            s
+            for s in (life.get("card_spot_suggestions") or [])
+            if isinstance(s, dict)
+        ]
+        raw_sid = payload.get("suggestion_id")
+        if raw_sid is not None:
+            sid = _require_id(raw_sid, field_name="suggestion_id")
+            target = next(
+                (s for s in suggestions if s.get("suggestion_id") == sid), None
+            )
+            if target is None:
+                raise V04NeighborhoodError(
+                    "SUGGESTION_NOT_FOUND", f"Unknown suggestion {sid!r}", http_status=404
+                )
+        else:
+            pending = [
+                s
+                for s in suggestions
+                if s.get("status") == "pending_shopkeeper_review"
+            ]
+            if not pending:
+                raise V04NeighborhoodError(
+                    "SUGGESTION_NOT_FOUND", "No pending card spot suggestion to decide", http_status=404
+                )
+            target = pending[-1]
+
+        if target.get("status") != "pending_shopkeeper_review":
+            # Idempotent replay: an already resolved suggestion keeps its outcome.
+            return {
+                "service": "decide_card_spot",
+                "suggestion_id": target.get("suggestion_id"),
+                "card_id": target.get("card_id"),
+                "status": target.get("status"),
+                "outcome_reason_cn": target.get("outcome_reason_cn"),
+                "resolved_at": target.get("resolved_at"),
+                "replay": True,
+            }
+
+        outcome = _clean_text(payload.get("outcome"), field_name="outcome", max_len=24)
+        if outcome not in ("adopted", "relocated"):
+            raise V04NeighborhoodError(
+                "INVALID_FIELDS", "outcome must be 'adopted' or 'relocated'", http_status=400
+            )
+        reason_cn = _optional_text(payload.get("reason_cn"), field_name="reason_cn", max_len=200)
+        _resolve_card_spot_suggestion(
+            target, now_dt, life=life, outcome=outcome, reason_cn=reason_cn
+        )
+        return {
+            "service": "decide_card_spot",
+            "suggestion_id": target["suggestion_id"],
+            "card_id": target["card_id"],
+            "status": target["status"],
+            "outcome_reason_cn": target["outcome_reason_cn"],
+            "resolved_at": target["resolved_at"],
+            "replay": False,
+        }
+
+    if svc == "shop_ambient_shift":
+        # Gentle non-crisis shelf/seat update; no business-hours gate.
+        change_note = _clean_text(
+            payload.get("change_note"), field_name="change_note", max_len=200
+        )
+        _append_shopkeeper_ambient(life, change_note)
+        return {
+            "service": "shop_ambient_shift",
+            "change_note": change_note,
+            "crisis": False,
+            "ambient_changes": list(life.get("ambient_changes") or []),
         }
 
     raise V04NeighborhoodError(
@@ -3472,9 +5804,461 @@ def _handle_update_place_booklet(
     )
 
 
+def project_second_resident_zero_write(
+    day_root: Path | str,
+    *,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """Zero-write projection of the second independent neighborhood resident (Saeki Aoi)."""
+    root = Path(day_root)
+    now_dt = resolve_now_readonly(root, now_iso)
+    raw_state, _ = load_state_readonly(root)
+    working = copy.deepcopy(raw_state)
+    _ensure_cafe_resident_life(working["public_life"])
+    env = working["environment"]
+    weather = str(env.get("weather") or "clear")
+    season = _resolve_effective_season(env, now_dt)
+    festival_info = _derive_seasonal_festival(working, now_dt)
+    return _project_cafe_resident_life(
+        working["public_life"]["cafe_resident"],
+        weather=weather,
+        season=season,
+        festival_info=festival_info,
+        now_dt=now_dt,
+    )
+
+
+def _handle_interact_cafe_resident(
+    state: dict[str, Any], payload: Mapping[str, Any], *, now_dt: datetime
+) -> dict[str, Any]:
+    """Handle public-counter interactions with Saeki Aoi at the roastery cafe."""
+    pub = state["public_life"]
+    cafe_life = _ensure_cafe_resident_life(pub)
+    _settle_cafe_resident_in_place(state, now_dt)
+    now_str = format_iso(now_dt)
+    phase_key, phase_cn, start_dt, at_counter = _cafe_phase_for(now_dt)
+    open_now = _is_cafe_open(now_dt)
+    env = state["environment"]
+    weather = str(env.get("weather") or "clear")
+    season = _resolve_effective_season(env, now_dt)
+    festival_info = _derive_seasonal_festival(state, now_dt)
+    env_notes = _cafe_environment_notes(weather, season, festival_info)
+
+    raw_op = payload.get("operation") if payload.get("operation") is not None else payload.get("service")
+    if raw_op is not None:
+        op = _clean_text(raw_op, field_name="operation", max_len=40)
+    elif payload.get("coaster_note") is not None or payload.get("note") is not None:
+        op = "leave_cafe_coaster_note"
+    elif payload.get("errand_note") is not None:
+        op = "post_shared_errand"
+    elif payload.get("route_id") is not None:
+        op = "share_cafe_rumor"
+    else:
+        op = "check_neighbor_schedule"
+
+    if op in ("leave_cafe_coaster_note", "coaster_note"):
+        raw_note = (
+            payload.get("coaster_note")
+            if payload.get("coaster_note") is not None
+            else payload.get("note")
+        )
+        note_text = _sanitize_public_text(
+            _clean_text(raw_note, field_name="coaster_note", max_len=240)
+        )
+        coasters = [c for c in (cafe_life.get("coaster_notes") or []) if isinstance(c, dict)]
+        coaster_id = _stable_id("coaster", note_text, now_str, len(coasters))
+        received_in_person = bool(open_now and at_counter)
+        entry = {
+            "coaster_id": coaster_id,
+            "note_cn": note_text,
+            "left_at": now_str,
+            "resident_phase_at_drop": phase_key,
+            "received_in_person": received_in_person,
+            "custody_spot": "counter_hand_received" if received_in_person else "counter_tray_pending",
+            "privilege_boundary": SHOPKEEPER_PRIVILEGE_BOUNDARY,
+            "favorability_score": None,
+            "omission_debt": 0,
+        }
+        coasters.append(entry)
+        cafe_life["coaster_notes"] = coasters[-MAX_SHOPKEEPER_MEMORIES:]
+        _remember_shopkeeper_interaction(
+            cafe_life,
+            kind="leave_cafe_coaster_note",
+            ref_id=coaster_id,
+            note_cn=(
+                "在吧台杯垫夹上留了一张便签（店主当面收在木托盘边）"
+                if received_in_person
+                else "在吧台门口托盘夹上留了一张杯垫便签（待店主回吧台查看）"
+            ),
+            at_iso=now_str,
+        )
+        return {
+            "operation": "leave_cafe_coaster_note",
+            "resident_id": CAFE_RESIDENT_ID,
+            "resident_name": CAFE_RESIDENT_NAME,
+            "coaster_id": coaster_id,
+            "note_cn": note_text,
+            "received_in_person": received_in_person,
+            "current_phase": phase_key,
+            "privilege_boundary": SHOPKEEPER_PRIVILEGE_BOUNDARY,
+            "favorability_score": None,
+            "omission_debt": 0,
+        }
+
+    if op in ("post_shared_errand", "shared_errand_board"):
+        raw_err = (
+            payload.get("errand_note")
+            if payload.get("errand_note") is not None
+            else payload.get("note")
+        )
+        errand_text = _sanitize_public_text(
+            _clean_text(raw_err, field_name="errand_note", max_len=240)
+        )
+        board = [e for e in (cafe_life.get("shared_errand_board") or []) if isinstance(e, dict)]
+        errand_id = _stable_id("errand", errand_text, now_str, len(board))
+        item = {
+            "errand_id": errand_id,
+            "note_cn": errand_text,
+            "posted_at": now_str,
+            "status": "posted_optional",
+            "favorability_score": None,
+            "omission_debt": 0,
+        }
+        board.append(item)
+        cafe_life["shared_errand_board"] = board[-MAX_SHOPKEEPER_MEMORIES:]
+        _remember_shopkeeper_interaction(
+            cafe_life,
+            kind="post_shared_errand",
+            ref_id=errand_id,
+            note_cn="在咖啡屋门口街坊顺手板上贴了一条便签",
+            at_iso=now_str,
+        )
+        return {
+            "operation": "post_shared_errand",
+            "resident_id": CAFE_RESIDENT_ID,
+            "errand_id": errand_id,
+            "note_cn": errand_text,
+            "status": "posted_optional",
+            "favorability_score": None,
+            "omission_debt": 0,
+        }
+
+    if op in ("share_cafe_rumor", "note_rumor"):
+        route_id = _clean_text(payload.get("route_id"), field_name="route_id", max_len=48)
+        if route_id not in ROUTES_CATALOG:
+            raise V04NeighborhoodError(
+                "INVALID_FIELDS", f"Unknown route_id {route_id!r}", http_status=400
+            )
+        claim_cn = (
+            _optional_text(payload.get("claim_cn"), field_name="claim_cn", max_len=200)
+            or CAFE_DEFAULT_RUMOR_CLAIM_CN
+        )
+        rumors = [r for r in (cafe_life.get("heard_rumors") or []) if isinstance(r, dict)]
+        existing = next(
+            (
+                r
+                for r in rumors
+                if r.get("route_id") == route_id
+                and r.get("claim_cn") == claim_cn
+                and not r.get("verified_firsthand")
+            ),
+            None,
+        )
+        if existing is not None:
+            rumor = existing
+            replay = True
+        else:
+            rumor = {
+                "rumor_id": _stable_id("cafe_rumor", route_id, claim_cn, now_str),
+                "source_resident_id": CAFE_RESIDENT_ID,
+                "source_name": CAFE_RESIDENT_NAME,
+                "route_id": route_id,
+                "claim_cn": claim_cn,
+                "heard_at": now_str,
+                "epistemic_status": "hearsay_unverified",
+                "verified_firsthand": False,
+                "refutation_note_cn": "",
+                "verification_note_cn": "",
+            }
+            rumors.append(rumor)
+            cafe_life["heard_rumors"] = rumors[-MAX_SHOPKEEPER_MEMORIES:]
+            replay = False
+        # CRITICAL: hearsay NEVER modifies journey.discovered_roadblocks or world_truth.roadblocks!
+        return {
+            "operation": "share_cafe_rumor",
+            "rumor_id": rumor["rumor_id"],
+            "source_resident_id": CAFE_RESIDENT_ID,
+            "source_name": CAFE_RESIDENT_NAME,
+            "route_id": route_id,
+            "claim_cn": claim_cn,
+            "epistemic_status": rumor.get("epistemic_status") or "hearsay_unverified",
+            "verified_firsthand": bool(rumor.get("verified_firsthand")),
+            "known_blocked_to_subject": route_id
+            in (state["journey"].get("discovered_roadblocks") or []),
+            "replay": replay,
+        }
+
+    if op == "check_neighbor_schedule":
+        return {
+            "operation": "check_neighbor_schedule",
+            "resident_id": CAFE_RESIDENT_ID,
+            "resident_name": CAFE_RESIDENT_NAME,
+            "role": CAFE_RESIDENT_ROLE,
+            "home_venue": CAFE_HOME_VENUE,
+            "open_window": CAFE_OPEN_WINDOW,
+            "is_open_now": open_now,
+            "at_counter": bool(at_counter),
+            "current_phase": phase_key,
+            "current_phase_cn": phase_cn,
+            "current_phase_started_at": format_iso(start_dt),
+            "weather_reaction_cn": env_notes["weather_reaction_cn"],
+            "market_reaction_cn": env_notes["market_reaction_cn"],
+            "privilege_boundary": SHOPKEEPER_PRIVILEGE_BOUNDARY,
+            "private_room_knowledge": False,
+            "favorability_score": None,
+            "omission_debt": 0,
+        }
+
+    raise V04NeighborhoodError(
+        "INVALID_FIELDS", f"Unsupported cafe resident operation {op!r}", http_status=400
+    )
+
+
 # ---------------------------------------------------------------------------
 # Unified Command Application with Idempotency & CAS
 # ---------------------------------------------------------------------------
+
+
+def _emit_v04_lived_episode(
+    day_root: Path | str,
+    *,
+    episode_key: str,
+    topic: str,
+    exact_detail: str,
+    gist_summary: str,
+    occurred_at: str,
+    emotional_salience: float = 0.48,
+    affect_kind: Optional[str] = "affect_pulse",
+    affect_intensity: int = 38,
+    shared: bool = True,
+    source_refs: tuple[tuple[str, str], ...] = (),
+) -> dict[str, Any]:
+    """Best-effort canonical memory sink hook for notable v04 neighborhood outings (write-path only)."""
+    try:
+        try:
+            from components.life.scripts import lived_memory_sink as _lms
+        except ImportError:
+            _life_dir = str(Path(__file__).resolve().parents[2] / "life" / "scripts")
+            if _life_dir not in sys.path:
+                sys.path.insert(0, _life_dir)
+            import lived_memory_sink as _lms  # type: ignore[no-redef]
+        ev = _lms.LivedEpisodeEvent(
+            episode_key=episode_key,
+            domain="v04_outing",
+            topic=topic,
+            exact_detail=exact_detail,
+            gist_summary=gist_summary,
+            occurred_at=occurred_at,
+            emotional_salience=emotional_salience,
+            affect_kind=affect_kind,
+            affect_intensity=affect_intensity,
+            shared=shared,
+            source_refs=source_refs,
+        )
+        return _lms.emit_lived_episode_safe(day_root, ev, now_iso=occurred_at)
+    except Exception as exc:
+        return {"ok": False, "recorded": False, "reason": f"SINK_IMPORT:{type(exc).__name__}", "llm_calls": 0}
+
+
+def _maybe_emit_v04_command_episode(
+    day_root: Path | str,
+    *,
+    action: str,
+    payload: Mapping[str, Any],
+    result: Mapping[str, Any],
+    projected: Mapping[str, Any],
+    now_iso: str,
+) -> Optional[dict[str, Any]]:
+    env = projected.get("environment") if isinstance(projected.get("environment"), Mapping) else {}
+    weather = str(env.get("weather") or "clear").strip().lower()
+    is_rainy = weather in ("rain", "heavy_rain", "storm", "drizzle")
+    rev = projected.get("revision")
+    op_tok = str(payload.get("operation_key") or f"rev_{rev}").strip()[:64]
+
+    if action == "start_journey":
+        dest = str(
+            result.get("target_place_id")
+            or result.get("target_place")
+            or payload.get("target_place")
+            or payload.get("destination")
+            or payload.get("target_place_id")
+            or "street_corner"
+        )
+        route_id = str(result.get("active_route_id") or "")
+        dest_label = _place_short_name(dest)
+        refs: list[tuple[str, str]] = [("encounter_id", f"v04_start_{op_tok}"), ("place_id", dest)]
+        if route_id:
+            refs.append(("route_id", route_id))
+        return _emit_v04_lived_episode(
+            day_root,
+            episode_key=f"v04_outing:start_journey:{dest}:{op_tok}",
+            topic=f"{'雨天' if is_rainy else '街区'}出门前往{dest_label}",
+            exact_detail=f"在{weather}天气从住处出发前往{dest_label}" + (f"（经由 {route_id}）" if route_id else ""),
+            gist_summary=f"{'冒雨' if is_rainy else '出门'}去了一趟{dest_label}",
+            occurred_at=now_iso,
+            emotional_salience=0.58 if is_rainy else 0.46,
+            affect_kind="mood_shift" if is_rainy else "affect_pulse",
+            affect_intensity=46 if is_rainy else 36,
+            shared=True,
+            source_refs=tuple(refs),
+        )
+
+    if action == "advance_or_turnback_journey":
+        st = str(result.get("state") or "")
+        halt = str(result.get("halt_reason") or "")
+        op_name = str(result.get("operation") or "advance")
+        if st == "arrived" or halt == "ROADBLOCK_ENCOUNTERED" or op_name == "turn_back":
+            place_id = str(
+                result.get("current_place_id")
+                or result.get("target_place_id")
+                or result.get("at_place_id")
+                or "street_corner"
+            )
+            place_label = _place_short_name(place_id)
+            blocked_r = str(result.get("encountered_roadblock") or "")
+            refs = [("encounter_id", f"v04_jstep_{op_tok}"), ("place_id", place_id)]
+            if blocked_r:
+                refs.append(("route_id", blocked_r))
+            if halt == "ROADBLOCK_ENCOUNTERED":
+                topic = f"街区路阻发现：{place_label}"
+                detail = f"途经{place_label}时发现路线受阻（{blocked_r or '前方施工'}）"
+                gist = f"出门走到{place_label}附近发现前路临时受阻"
+            elif op_name == "turn_back":
+                topic = f"街区折返：{place_label}"
+                detail = f"在{weather}天气决定中途折返前往{place_label}"
+                gist = f"半路决定折返回{place_label}"
+            else:
+                topic = f"{'雨中' if is_rainy else ''}抵达{place_label}"
+                detail = f"在{weather}天气步行到达了{place_label}"
+                gist = f"{'冒雨' if is_rainy else '步行'}到了{place_label}"
+            return _emit_v04_lived_episode(
+                day_root,
+                episode_key=f"v04_outing:journey_step:{op_name}:{place_id}:{op_tok}",
+                topic=topic,
+                exact_detail=detail,
+                gist_summary=gist,
+                occurred_at=now_iso,
+                emotional_salience=0.56 if (is_rainy or halt == "ROADBLOCK_ENCOUNTERED") else 0.48,
+                affect_kind="mood_shift" if is_rainy else "affect_pulse",
+                affect_intensity=44 if is_rainy else 38,
+                shared=True,
+                source_refs=tuple(refs),
+            )
+        return None
+
+    if action == "interact_cafe_resident":
+        op_name = str(result.get("operation") or "")
+        if op_name not in ("leave_cafe_coaster_note", "post_shared_errand", "share_cafe_rumor"):
+            return None
+        item_id = str(
+            result.get("coaster_id")
+            or result.get("errand_id")
+            or result.get("rumor_id")
+            or f"cafe_{op_tok}"
+        )
+        note_body = str(result.get("note_cn") or result.get("claim_cn") or "").strip()
+        return _emit_v04_lived_episode(
+            day_root,
+            episode_key=f"v04_outing:cafe:{op_name}:{item_id}",
+            topic=f"咖啡屋邻里互动：{CAFE_RESIDENT_NAME}",
+            exact_detail=f"在烘焙咖啡屋与{CAFE_RESIDENT_NAME}互动（{op_name}）：{note_body}",
+            gist_summary=f"在街角咖啡屋和{CAFE_RESIDENT_NAME}留了便签或聊了几句",
+            occurred_at=now_iso,
+            emotional_salience=0.50,
+            affect_kind="affect_pulse",
+            affect_intensity=40,
+            shared=True,
+            source_refs=(("encounter_id", item_id), ("resident_id", CAFE_RESIDENT_ID)),
+        )
+
+    if action in ("bookstore_service", "shared_shelf_loan"):
+        item_id = str(
+            result.get("reservation_id")
+            or result.get("loan_id")
+            or result.get("suggestion_id")
+            or result.get("book_id")
+            or f"{action}_{op_tok}"
+        )
+        b_refs: list[tuple[str, str]] = [("encounter_id", item_id), ("place_id", "bookstore")]
+        if result.get("book_id"):
+            b_refs.append(("book_id", str(result["book_id"])))
+        detail_txt = str(result.get("note_cn") or result.get("title_cn") or result.get("service") or action)
+        return _emit_v04_lived_episode(
+            day_root,
+            episode_key=f"v04_outing:{action}:{item_id}",
+            topic="旧书店借阅与翻看",
+            exact_detail=f"在旧书店办理了{action}：{detail_txt}",
+            gist_summary=f"在街角旧书店翻看或借了书（{detail_txt[:60]}）",
+            occurred_at=now_iso,
+            emotional_salience=0.48,
+            affect_kind="affect_pulse",
+            affect_intensity=38,
+            shared=True,
+            source_refs=tuple(b_refs),
+        )
+
+    if action in ("post_public_notice", "read_public_notice"):
+        nid = str(result.get("notice_id") or payload.get("notice_id") or f"notice_{op_tok}")
+        ntitle = str(result.get("title_cn") or result.get("content_cn") or "街区布告栏消息")
+        return _emit_v04_lived_episode(
+            day_root,
+            episode_key=f"v04_outing:{action}:{nid}:{op_tok}",
+            topic=f"街区布告栏：{ntitle[:40]}",
+            exact_detail=f"在街区布告栏{('贴出' if action == 'post_public_notice' else '留意到')}：{ntitle}",
+            gist_summary=f"留意到街区布告栏消息：{ntitle[:60]}",
+            occurred_at=now_iso,
+            emotional_salience=0.46,
+            affect_kind="affect_pulse",
+            affect_intensity=36,
+            shared=True,
+            source_refs=(("notice_id", nid), ("encounter_id", f"{action}_{nid}")),
+        )
+
+    if action in ("record_poi_physical_state", "update_place_booklet"):
+        pid = str(result.get("place_id") or payload.get("place_id") or "street_corner")
+        plabel = _place_short_name(pid)
+        note_s = str(result.get("note_cn") or result.get("entry_cn") or payload.get("note_cn") or plabel)
+        return _emit_v04_lived_episode(
+            day_root,
+            episode_key=f"v04_outing:{action}:{pid}:{op_tok}",
+            topic=f"街区角落发现：{plabel}",
+            exact_detail=f"记下了{plabel}的一处真实见闻：{note_s}",
+            gist_summary=f"在{plabel}有了新的街区小发现",
+            occurred_at=now_iso,
+            emotional_salience=0.48,
+            affect_kind="affect_pulse",
+            affect_intensity=38,
+            shared=True,
+            source_refs=(("encounter_id", f"v04_disc_{pid}_{op_tok}"), ("place_id", pid)),
+        )
+
+    if action == "craft_paper_or_box" and str(result.get("step") or "").strip().lower() == "finished":
+        proj_id = f"v04_box_{op_tok}"
+        return _emit_v04_lived_episode(
+            day_root,
+            episode_key=f"v04_outing:craft_finished:{proj_id}",
+            topic="完成手工分格收纳盒",
+            exact_detail="在书桌边一步步完成了手工分格收纳盒的裁切与装订",
+            gist_summary="做好了一只手工分格收纳盒",
+            occurred_at=now_iso,
+            emotional_salience=0.58,
+            affect_kind="mood_shift",
+            affect_intensity=46,
+            shared=True,
+            source_refs=(("project_id", proj_id),),
+        )
+
+    return None
 
 
 def apply_v04_neighborhood_command(
@@ -3487,8 +6271,35 @@ def apply_v04_neighborhood_command(
     """Apply one validated neighborhood command with operation_key idempotency & CAS.
 
     Returns ``(status_label, action_result, projected_envelope_core)`` where
-    ``status_label`` is ``"applied"`` or ``"already_applied"``.
+    ``status_label`` is ``"applied"`` or ``"already_applied"``.  The whole
+    Read -> reconcile -> validate -> mutate -> save cycle is serialized by the
+    shared file lock; zero-write projections never take it.
     """
+
+    with state_file_lock(state_file_path(day_root)):
+        status_label, result, projected = _apply_v04_neighborhood_command_locked(
+            day_root, payload, actor_side=actor_side, now_iso=now_iso
+        )
+    if status_label == "applied":
+        eff_iso = str(projected.get("updated_at") or projected.get("observed_at") or now_iso or "")
+        _maybe_emit_v04_command_episode(
+            day_root,
+            action=str(payload.get("action") or "").strip(),
+            payload=payload,
+            result=result,
+            projected=projected,
+            now_iso=eff_iso,
+        )
+    return status_label, result, projected
+
+
+def _apply_v04_neighborhood_command_locked(
+    day_root: Path | str,
+    payload: Mapping[str, Any],
+    *,
+    actor_side: str,
+    now_iso: str | None = None,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
     root = Path(day_root)
     now_dt = resolve_now_readonly(root, now_iso)
     now_str = format_iso(now_dt)
@@ -3516,9 +6327,22 @@ def apply_v04_neighborhood_command(
         "explicit_fp": explicit_fp,
     })
 
-    # 1. Idempotent replay check
-    if op_key is not None and op_key in state["operation_receipts"]:
-        prev = state["operation_receipts"][op_key]
+    # 2. Optional expected_revision CAS check (parsed before replay reconciliation
+    # so an evicted key can be classified as a stale retry).
+    exp_rev: Optional[int] = None
+    if payload.get("expected_revision") is not None:
+        raw_rev = payload["expected_revision"]
+        if isinstance(raw_rev, bool) or not isinstance(raw_rev, int) or raw_rev < 0:
+            raise V04NeighborhoodError(
+                "INVALID_FIELDS", "expected_revision must be a non-negative integer", http_status=400
+            )
+        exp_rev = int(raw_rev)
+
+    # 1. Idempotent replay check (active receipt first, then the eviction ring
+    # and the ``phone/operations.jsonl`` journal for long-horizon retries).
+    receipts = state["operation_receipts"]
+    if op_key is not None and op_key in receipts:
+        prev = receipts[op_key]
         if prev.get("intent_fingerprint") != intent_fp:
             raise V04NeighborhoodError(
                 "OPERATION_KEY_CONFLICT",
@@ -3533,19 +6357,43 @@ def apply_v04_neighborhood_command(
         )
         return "already_applied", copy.deepcopy(prev.get("result") or {}), projected
 
-    # 2. Optional expected_revision CAS check
-    if payload.get("expected_revision") is not None:
-        exp_rev = payload["expected_revision"]
-        if isinstance(exp_rev, bool) or not isinstance(exp_rev, int) or exp_rev < 0:
+    if op_key is not None:
+        outcome, detail = reconcile_evicted_or_active_op(
+            root,
+            state,
+            op_key,
+            dict_key="operation_receipts",
+            expected_revision=exp_rev,
+            payload_hash=intent_fp,
+        )
+        if outcome == "conflict":
             raise V04NeighborhoodError(
-                "INVALID_FIELDS", "expected_revision must be a non-negative integer", http_status=400
-            )
-        if int(state["revision"]) != int(exp_rev):
-            raise V04NeighborhoodError(
-                "REVISION_CONFLICT",
-                f"Expected revision {exp_rev}, current revision is {state['revision']}",
+                "OPERATION_KEY_CONFLICT",
+                "Same operation_key reused with a different command payload",
                 http_status=409,
             )
+        if outcome == "expired":
+            raise V04NeighborhoodError(
+                "RETRY_WINDOW_EXPIRED",
+                f"operation_key {op_key!r} is older than the retained retry window",
+                http_status=409,
+                extra=detail or {},
+            )
+        if outcome in ("hit_full", "hit_evicted"):
+            projected = project_v04_neighborhood(
+                root,
+                has_subject_capability=(actor_side == "subject"),
+                now_iso=now_str,
+                preloaded_state=state,
+            )
+            return "already_applied", copy.deepcopy(detail or {}), projected
+
+    if exp_rev is not None and int(state["revision"]) != exp_rev:
+        raise V04NeighborhoodError(
+            "REVISION_CONFLICT",
+            f"Expected revision {exp_rev}, current revision is {state['revision']}",
+            http_status=409,
+        )
 
     # 3. Settle existing due boundaries up to now_dt BEFORE applying new command (Ch.43 §五)
     settle_all_processes_in_place(state, now_dt)
@@ -3560,7 +6408,7 @@ def apply_v04_neighborhood_command(
     elif action == "set_roadblock":
         result = _handle_set_roadblock(state, payload, now_dt=now_dt)
     elif action == "start_journey":
-        result = _handle_start_journey(state, payload, now_dt=now_dt)
+        result = _handle_start_journey(state, payload, now_dt=now_dt, root=root)
     elif action == "advance_or_turnback_journey":
         result = _handle_advance_or_turnback_journey(state, payload, now_dt=now_dt)
     elif action == "craft_paper_or_box":
@@ -3577,6 +6425,8 @@ def apply_v04_neighborhood_command(
         result = _handle_record_poi_physical_state(state, payload, now_dt=now_dt)
     elif action == "update_place_booklet":
         result = _handle_update_place_booklet(state, payload, now_dt=now_dt)
+    elif action == "interact_cafe_resident":
+        result = _handle_interact_cafe_resident(state, payload, now_dt=now_dt)
     else:
         raise V04NeighborhoodError("INVALID_FIELDS", f"Unknown action {action!r}", http_status=400)
 
@@ -3584,18 +6434,29 @@ def apply_v04_neighborhood_command(
     state["updated_at"] = now_str
 
     if op_key is not None:
-        receipts = state["operation_receipts"]
-        receipts[op_key] = {
-            "intent_fingerprint": intent_fp,
-            "action": action,
-            "actor_side": actor_side,
-            "revision": state["revision"],
-            "applied_at": now_str,
-            "result": copy.deepcopy(result),
-        }
-        while len(receipts) > MAX_OPERATION_RECEIPTS:
-            oldest = next(iter(receipts))
-            del receipts[oldest]
+        stamp_receipt(
+            state,
+            op_key,
+            {
+                "intent_fingerprint": intent_fp,
+                "action": action,
+                "actor_side": actor_side,
+                "status": "applied",
+                "ok": True,
+                "revision": state["revision"],
+                "applied_at": now_str,
+                "result": copy.deepcopy(result),
+            },
+            revision=int(state["revision"]),
+            dict_key="operation_receipts",
+            payload_hash=intent_fp,
+            committed_at=now_str,
+        )
+        trim_receipts_by_op_seq(
+            state,
+            dict_key="operation_receipts",
+            max_keep=MAX_OPERATION_RECEIPTS,
+        )
 
     save_state_atomic(root, state)
 
@@ -3608,10 +6469,308 @@ def apply_v04_neighborhood_command(
     return "applied", result, projected
 
 
+# ---------------------------------------------------------------------------
+# 0.5 Step 3: Consignment Craft Micro-Income, 4-Stage Street Project & Calm Gate
+# ---------------------------------------------------------------------------
+
+V05_MOMENTS_FILENAME = "v05_neighborhood_moments.json"
+V05_CONSIGNMENT_VENUES: tuple[str, ...] = ("bookstore_bookband", "cafe_postcard")
+CALM_GATE_LIGHT_EVENTS: tuple[str, ...] = (
+    "巷口烤红薯推车",
+    "旧书店木箱新孤品",
+    "面包房傍晚打折袋",
+    "布告栏寻猫启事更新",
+)
+RARE_INTERLUDE_MIN_GAP_DAYS = 12
+
+
+def _v05_hmod(seed_text: str, mod: int) -> int:
+    digest = hashlib.sha256(seed_text.encode("utf-8")).hexdigest()
+    return int(digest[:12], 16) % mod
+
+
+def v05_moments_state_path(day_root: Path | str) -> Path:
+    return Path(day_root) / STATE_DIRNAME / V05_MOMENTS_FILENAME
+
+
+def _default_v05_moments_state() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "revision": 0,
+        "earned_wallet_jpy": 0,
+        "consignments": [],
+        "notice_followups": [],
+        "slow_project_start_day": 1,
+        "last_rare_day": None,
+        "rare_interlude_log": [],
+        "operation_receipts": {},
+    }
+
+
+def _load_v05_moments_readonly(day_root: Path | str) -> tuple[bool, dict[str, Any]]:
+    path = v05_moments_state_path(day_root)
+    if path.is_symlink():
+        raise V04NeighborhoodError("STATE_SYMLINK_REFUSED", "Refusing symlink v05 moments state", http_status=503)
+    if not path.is_file():
+        return False, _default_v05_moments_state()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise V04NeighborhoodError("STATE_CORRUPTED", f"Corrupt v05 moments state: {exc}", http_status=503) from exc
+    if not isinstance(doc, Mapping):
+        raise V04NeighborhoodError("STATE_CORRUPTED", "v05 moments state must be a JSON object", http_status=503)
+    merged = _default_v05_moments_state()
+    for k in merged:
+        if k in doc:
+            merged[k] = copy.deepcopy(doc[k])
+    return True, merged
+
+
+def _save_v05_moments_atomic(day_root: Path | str, state: Mapping[str, Any]) -> None:
+    path = v05_moments_state_path(day_root)
+    if path.is_symlink():
+        raise V04NeighborhoodError("STATE_SYMLINK_REFUSED", "Refusing symlink v05 moments state", http_status=503)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (json.dumps(state, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(prefix=".v05_moments_", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def street_slow_project_stage(day_index: int, start_day: int = 1) -> str:
+    """分四阶段自然演进的花店门口木花架慢工程（零大模型调用）。"""
+    elapsed = int(day_index) - int(start_day)
+    if elapsed < 0:
+        return "巷口如常，花店门口空着"
+    if elapsed == 0:
+        return "花店门口堆着几块新松木板和工具箱"
+    if elapsed in (1, 2):
+        return "两层阶梯木架已经钉好，还没刷漆，带一点木屑香"
+    return "豆绿色新木花架已刷好漆，摆满了刚到的秋海棠"
+
+
+def schedule_week_with_calm_gate(world_seed: str, week_index: int) -> list[Optional[str]]:
+    """第 104 章平静闸门：每周 7 天至多每天 1 件轻偶遇，且至少保底 3 个纯平淡日（None）。"""
+    plan: list[Optional[str]] = []
+    active_days = 0
+    for dow in range(7):
+        if active_days >= 4:
+            plan.append(None)
+            continue
+        roll = _v05_hmod(f"{world_seed}:w{int(week_index)}:d{dow}", 10)
+        if roll < 5:
+            ev = CALM_GATE_LIGHT_EVENTS[_v05_hmod(f"{world_seed}:ev:w{int(week_index)}:d{dow}", len(CALM_GATE_LIGHT_EVENTS))]
+            plan.append(ev)
+            active_days += 1
+        else:
+            plan.append(None)
+    return plan
+
+
+def can_trigger_rare_interlude(
+    last_rare_day: Optional[int],
+    current_day: int,
+    min_gap_days: int = RARE_INTERLUDE_MIN_GAP_DAYS,
+) -> bool:
+    """停电夜、初雪、清晨半句梦影等稀有插曲两次间隔不少于 12 天。"""
+    if last_rare_day is None:
+        return True
+    return (int(current_day) - int(last_rare_day)) >= int(min_gap_days)
+
+
+def consign_work_at_venue(
+    day_root: Path | str,
+    *,
+    consignment_id: str,
+    venue: str,
+    work_title_cn: str,
+    work_ref: str,
+    unit_price_jpy: int = 420,
+    posted_day: int = 1,
+    operation_key: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """登记在旧书店荐书腰封或咖啡馆明信片架的真实寄售作品（慢卖零奇迹瞬销）。"""
+    cid = _clean_text(consignment_id, field_name="consignment_id", max_len=64)
+    v_clean = _clean_text(venue, field_name="venue", max_len=40)
+    if v_clean not in V05_CONSIGNMENT_VENUES:
+        raise V04NeighborhoodError("INVALID_FIELDS", f"venue must be one of {V05_CONSIGNMENT_VENUES}", http_status=400)
+    title = _clean_text(work_title_cn, field_name="work_title_cn", max_len=120)
+    wref = _clean_text(work_ref, field_name="work_ref", max_len=160)
+    price = max(100, min(5000, int(unit_price_jpy)))
+    now_str = now_iso or format_iso(resolve_now_readonly(Path(day_root), None))
+
+    with state_file_lock(v05_moments_state_path(day_root)):
+        _, st = _load_v05_moments_readonly(day_root)
+        op_k = _clean_text(operation_key, field_name="operation_key", max_len=96) if operation_key else None
+        if op_k and op_k in st["operation_receipts"]:
+            return copy.deepcopy(st["operation_receipts"][op_k])
+        if any(str(row.get("consignment_id")) == cid for row in st["consignments"]):
+            raise V04NeighborhoodError("CONSIGNMENT_EXISTS", f"Consignment {cid!r} already exists", http_status=409)
+        entry = {
+            "consignment_id": cid,
+            "venue": v_clean,
+            "work_title_cn": title,
+            "work_ref": wref,
+            "unit_price_jpy": price,
+            "posted_day": int(posted_day),
+            "status": "CONSIGNED",
+            "sold_day": None,
+            "sold_at": None,
+            "created_at": now_str,
+        }
+        st["consignments"].append(entry)
+        st["revision"] = int(st.get("revision") or 0) + 1
+        out = {
+            "ok": True,
+            "status": "CONSIGNED",
+            "consignment": copy.deepcopy(entry),
+            "earned_wallet_jpy": int(st["earned_wallet_jpy"]),
+            "earned_wallet": int(st["earned_wallet_jpy"]),
+            "outbound_push_allowed": False,
+            "llm_calls": 0,
+        }
+        if op_k:
+            st["operation_receipts"][op_k] = copy.deepcopy(out)
+        _save_v05_moments_atomic(day_root, st)
+        return out
+
+
+def settle_consignment_sales(
+    day_root: Path | str,
+    *,
+    world_seed: str = "seed_town",
+    current_day: int,
+    operation_key: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """按日期确定性缓慢成交寄售作品并入账 ``earned_wallet``（慢卖、绝不在上架当天瞬售）。"""
+    now_str = now_iso or format_iso(resolve_now_readonly(Path(day_root), None))
+    with state_file_lock(v05_moments_state_path(day_root)):
+        _, st = _load_v05_moments_readonly(day_root)
+        op_k = _clean_text(operation_key, field_name="operation_key", max_len=96) if operation_key else None
+        if op_k and op_k in st["operation_receipts"]:
+            return copy.deepcopy(st["operation_receipts"][op_k])
+        newly_sold: list[dict[str, Any]] = []
+        for row in st["consignments"]:
+            if row.get("status") != "CONSIGNED":
+                continue
+            elapsed = int(current_day) - int(row.get("posted_day") or 0)
+            if elapsed < 2:
+                continue
+            cid = str(row.get("consignment_id") or "")
+            if elapsed >= 4 or _v05_hmod(f"{world_seed}:consign:{cid}:{int(current_day)}", 3) == 0:
+                row["status"] = "SOLD"
+                row["sold_day"] = int(current_day)
+                row["sold_at"] = now_str
+                st["earned_wallet_jpy"] = int(st.get("earned_wallet_jpy") or 0) + int(row.get("unit_price_jpy") or 0)
+                newly_sold.append(copy.deepcopy(row))
+        st["revision"] = int(st.get("revision") or 0) + 1
+        out = {
+            "ok": True,
+            "newly_sold": newly_sold,
+            "earned_wallet_jpy": int(st["earned_wallet_jpy"]),
+            "earned_wallet": int(st["earned_wallet_jpy"]),
+            "llm_calls": 0,
+        }
+        if op_k:
+            st["operation_receipts"][op_k] = copy.deepcopy(out)
+        _save_v05_moments_atomic(day_root, st)
+        return out
+
+
+def record_rare_interlude_check(
+    day_root: Path | str,
+    *,
+    interlude_kind: str,
+    current_day: int,
+    min_gap_days: int = RARE_INTERLUDE_MIN_GAP_DAYS,
+    operation_key: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """第 104 章稀有插曲调度检查：距上次稀有插曲不足 12 天时具名拒绝，不连演戏剧。"""
+    kind = _clean_text(interlude_kind, field_name="interlude_kind", max_len=64)
+    now_str = now_iso or format_iso(resolve_now_readonly(Path(day_root), None))
+    with state_file_lock(v05_moments_state_path(day_root)):
+        _, st = _load_v05_moments_readonly(day_root)
+        op_k = _clean_text(operation_key, field_name="operation_key", max_len=96) if operation_key else None
+        if op_k and op_k in st["operation_receipts"]:
+            return copy.deepcopy(st["operation_receipts"][op_k])
+        last_day = st.get("last_rare_day")
+        if not can_trigger_rare_interlude(last_day, current_day, min_gap_days=min_gap_days):
+            raise V04NeighborhoodError(
+                "CALM_GATE_RARE_GAP_ACTIVE",
+                f"Rare interlude {kind!r} blocked within {min_gap_days}-day calm gap",
+                http_status=409,
+            )
+        st["last_rare_day"] = int(current_day)
+        st["rare_interlude_log"].append({
+            "kind": kind,
+            "day_index": int(current_day),
+            "triggered_at": now_str,
+        })
+        st["rare_interlude_log"] = st["rare_interlude_log"][-64:]
+        st["revision"] = int(st.get("revision") or 0) + 1
+        out = {
+            "ok": True,
+            "allowed": True,
+            "interlude_kind": kind,
+            "day_index": int(current_day),
+            "last_rare_day": int(current_day),
+            "llm_calls": 0,
+        }
+        if op_k:
+            st["operation_receipts"][op_k] = copy.deepcopy(out)
+        _save_v05_moments_atomic(day_root, st)
+        return out
+
+
+def read_v05_world_moments_zero_write(
+    day_root: Path | str,
+    *,
+    world_seed: str = "seed_town",
+    day_index: int = 1,
+    week_index: int = 0,
+) -> dict[str, Any]:
+    """100% 零写入投影 0.5 Step 3 小镇烟火与平静闸门状态。"""
+    exists, st = _load_v05_moments_readonly(day_root)
+    start_day = int(st.get("slow_project_start_day") or 1)
+    week_plan = schedule_week_with_calm_gate(world_seed, week_index)
+    return {
+        "state_exists": bool(exists),
+        "revision": int(st.get("revision") or 0),
+        "earned_wallet_jpy": int(st.get("earned_wallet_jpy") or 0),
+        "earned_wallet": int(st.get("earned_wallet_jpy") or 0),
+        "consignments": copy.deepcopy(st.get("consignments") or []),
+        "street_slow_project_stage": street_slow_project_stage(day_index, start_day=start_day),
+        "calm_gate_week_plan": week_plan,
+        "calm_gate_quiet_days_count": sum(1 for item in week_plan if item is None),
+        "last_rare_day": st.get("last_rare_day"),
+        "rare_interlude_log": copy.deepcopy(st.get("rare_interlude_log") or []),
+        "outbound_push_allowed": False,
+        "llm_calls": 0,
+    }
+
+
 __all__ = [
     "AIRFLOW_KINDS",
     "BOOKSTORE_STARTER_BOOKS",
     "BOX_STEPS",
+    "CAFE_HOME_VENUE",
+    "CAFE_RESIDENT_ID",
+    "CAFE_RESIDENT_NAME",
+    "CAFE_RESIDENT_PHASES",
+    "CAFE_RESIDENT_ROLE",
     "CLOTH_SUPPORTS",
     "DRY_SLEEP_THRESHOLD",
     "ENGINE_SCHEMA",
@@ -3627,24 +6786,39 @@ __all__ = [
     "ROUTES_CATALOG",
     "SEASON_KINDS",
     "SHARED_SHELF_STARTER_ITEMS",
+    "SHOPKEEPER_ID",
+    "SHOPKEEPER_NAME",
     "STATE_DIRNAME",
     "STATE_FILENAME",
     "STATE_SCHEMA_VERSION",
     "V04NeighborhoodError",
+    "V05_CONSIGNMENT_VENUES",
     "WEATHER_KINDS",
+    "advance_autonomous_weather_pulse",
     "advance_v04_neighborhood_processes",
     "apply_v04_neighborhood_command",
+    "can_trigger_rare_interlude",
     "canonical_digest",
     "compute_cloth_hourly_rate",
+    "consign_work_at_venue",
     "default_state",
+    "extract_explicit_season",
     "format_iso",
     "load_state_readonly",
     "moisture_to_band",
     "parse_iso_moment",
+    "project_concern_tinted_shelf_zero_write",
+    "project_second_resident_zero_write",
     "project_v04_neighborhood",
     "read_character_identity_readonly",
+    "read_v05_world_moments_zero_write",
+    "record_rare_interlude_check",
     "resolve_now_readonly",
     "save_state_atomic",
+    "schedule_week_with_calm_gate",
     "settle_all_processes_in_place",
+    "settle_consignment_sales",
     "state_file_path",
+    "street_slow_project_stage",
+    "v05_moments_state_path",
 ]

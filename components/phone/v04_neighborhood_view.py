@@ -25,10 +25,12 @@ from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORLD_SCRIPTS = REPO_ROOT / "components" / "world" / "scripts"
-for _entry in (str(REPO_ROOT), str(_WORLD_SCRIPTS)):
+_LIFE_SCRIPTS = REPO_ROOT / "components" / "life" / "scripts"
+for _entry in (str(REPO_ROOT), str(_WORLD_SCRIPTS), str(_LIFE_SCRIPTS)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)
 
+from components.life.scripts import v02_representation_lease_forget as _rlf
 from components.world.scripts import v04_neighborhood_living as engine
 
 V04_NEIGHBORHOOD_SCHEMA = "phone.v04.neighborhood.v1"
@@ -164,6 +166,7 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "advance_or_turnback_journey": COMMON_COMMAND_FIELDS | frozenset({
         "operation",
         "return_to_place",
+        "preferred_branch",
         "note",
     }),
     "read_public_notice": COMMON_COMMAND_FIELDS | frozenset({
@@ -197,6 +200,17 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "source_artifact_id",
         "work_ref",
         "note",
+        # Ch.23: concern-tinted shelf browsing (finite view, no full-text dump)
+        "focus_question",
+        "concern_keywords",
+        # Ch.26 §四/§七: secondhand rumor source & measured card-spot help
+        "route_id",
+        "claim_cn",
+        "spot_note",
+        "suggestion_id",
+        "outcome",
+        "reason_cn",
+        "change_note",
     }),
     "update_place_booklet": COMMON_COMMAND_FIELDS | frozenset({
         "operation",
@@ -211,6 +225,16 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "pause",
         "source_artifact_id",
         "work_ref",
+    }),
+    "interact_cafe_resident": COMMON_COMMAND_FIELDS | frozenset({
+        "operation",
+        "service",
+        "coaster_note",
+        "coaster_text",
+        "note",
+        "errand_note",
+        "route_id",
+        "claim_cn",
     }),
 }
 
@@ -230,6 +254,11 @@ SUBJECT_ALLOWED_ACTIONS: frozenset[str] = PARTNER_ALLOWED_ACTIONS | frozenset({
     "craft_paper_or_box",
     "bookstore_service",
     "update_place_booklet",
+})
+
+# Batch E second independent resident public-counter action (preserves core 6/12 sets)
+EXTENDED_SUBJECT_RESIDENT_ACTIONS: frozenset[str] = frozenset({
+    "interact_cafe_resident",
 })
 
 
@@ -350,18 +379,110 @@ def _compose_envelope(
     return envelope
 
 
+_NEIGHBORHOOD_PRESERVE_KEYS: frozenset[str] = frozenset({
+    "revision",
+    "identity",
+    "character",
+    "schema",
+    "perspective",
+    "read_only",
+    "places",
+    "environment",
+    "weather_and_ground",
+    "private_concerns_scrubbed",
+    "public_care_enabled",
+    "never_dies_offline",
+    "at_counter",
+    "is_open_now",
+    "open_window",
+    "home_venue",
+    "venue_name_cn",
+    "role",
+    "resident_id",
+    "resident_name",
+    "shopkeeper_name",
+    "schedule_rotation_hours",
+    "schedule_offset_hours",
+    "current_phase",
+})
+
+
+def _apply_forget_barrier(
+    projected: Mapping[str, Any],
+    barrier: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Filter all neighborhood notices, outings, craft/bookstore/booklet/resident collections through the zero-write barrier."""
+    out = copy.deepcopy(dict(projected))
+    data = out.get("data")
+    if not isinstance(data, dict):
+        return out
+    fail_closed = bool(barrier.get("fail_closed"))
+
+    for list_key in ("public_notices", "place_booklets", "independent_residents"):
+        if isinstance(data.get(list_key), list):
+            data[list_key] = _rlf.filter_collection_by_barrier(data[list_key], barrier)
+
+    for sub_key in (
+        "roadblocks",
+        "drying_items",
+        "courtyard",
+        "craft_bench",
+        "crafts",
+        "shared_shelf",
+        "bookstore",
+        "concern_tinted_shelf",
+        "living_shopkeeper",
+        "second_resident",
+        "public_life",
+    ):
+        val = data.get(sub_key)
+        if isinstance(val, list):
+            data[sub_key] = _rlf.filter_collection_by_barrier(val, barrier)
+        elif isinstance(val, Mapping):
+            data[sub_key] = _rlf.filter_document_by_barrier(
+                val,
+                barrier,
+                preserve_keys=_NEIGHBORHOOD_PRESERVE_KEYS,
+                nullable_entity_keys=("potted_plant", "place_booklet"),
+            )
+
+    plant = data.get("potted_plant")
+    if isinstance(plant, Mapping):
+        plant_id = str(plant.get("plant_id") or "")
+        if fail_closed or _rlf.is_entity_forget_blocked(plant, barrier) or (
+            plant_id and _rlf.is_entity_forget_blocked(plant_id, barrier)
+        ):
+            data["potted_plant"] = None
+
+    journey = data.get("journey")
+    if isinstance(journey, dict):
+        for jlist in ("carry_item_ids", "planned_route_ids", "completed_route_ids"):
+            if isinstance(journey.get(jlist), list):
+                journey[jlist] = _rlf.filter_collection_by_barrier(journey[jlist], barrier)
+        if fail_closed or _rlf.is_entity_forget_blocked(journey, barrier):
+            for jkey in ("active_route_id", "target_place_id", "transit_location_cn", "note"):
+                if jkey in journey:
+                    journey[jkey] = None if jkey.endswith("_id") else ""
+
+    return out
+
+
 def read_v04_neighborhood_view(
     day_root: Path | str,
     *,
     has_subject_capability: bool = False,
     now_iso: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Read v0.4 neighborhood view with 100% zero disk writes."""
+    """Read v0.4 neighborhood view with 100% zero disk writes and unified forget barrier enforcement."""
     try:
-        projected = engine.project_v04_neighborhood(
-            Path(day_root),
-            has_subject_capability=bool(has_subject_capability),
-            now_iso=now_iso,
+        barrier = _rlf.load_unified_forget_barrier_readonly(day_root)
+        projected = _apply_forget_barrier(
+            engine.project_v04_neighborhood(
+                Path(day_root),
+                has_subject_capability=bool(has_subject_capability),
+                now_iso=now_iso,
+            ),
+            barrier,
         )
         envelope = _compose_envelope(
             projected,
@@ -441,6 +562,11 @@ def _normalize_command_aliases(action: str, payload: Mapping[str, Any]) -> dict[
             out["extra_hours"] = out.pop("extension_hours")
         else:
             out.pop("extension_hours", None)
+    elif action == "interact_cafe_resident":
+        if "coaster_note" not in out and "coaster_text" in out:
+            out["coaster_note"] = out.pop("coaster_text")
+        else:
+            out.pop("coaster_text", None)
     return out
 
 
@@ -515,13 +641,28 @@ def mutate_v04_neighborhood_view(
             extra={"actor_side": actor_side, "action": action},
         )
     if norm_actor == "partner" and action not in PARTNER_ALLOWED_ACTIONS:
-        return _error_response(
-            403,
-            "FORBIDDEN_ACTOR_SIDE",
-            detail=f"actor_side='partner' cannot execute {action!r}",
-            extra={"actor_side": "partner", "action": action},
+        raw_cafe_op = payload.get("operation") if payload.get("operation") is not None else payload.get("service")
+        is_partner_coaster = (
+            action == "interact_cafe_resident"
+            and raw_cafe_op in (None, "leave_cafe_coaster_note", "coaster_note")
+            and any(
+                isinstance(payload.get(k), str) and str(payload.get(k)).strip()
+                for k in ("coaster_note", "coaster_text", "note")
+            )
+            and payload.get("errand_note") is None
+            and payload.get("route_id") is None
+            and payload.get("claim_cn") is None
         )
-    if norm_actor == "subject" and action not in SUBJECT_ALLOWED_ACTIONS:
+        if not is_partner_coaster:
+            return _error_response(
+                403,
+                "FORBIDDEN_ACTOR_SIDE",
+                detail=f"actor_side='partner' cannot execute {action!r}",
+                extra={"actor_side": "partner", "action": action},
+            )
+    if norm_actor == "subject" and action not in (
+        SUBJECT_ALLOWED_ACTIONS | EXTENDED_SUBJECT_RESIDENT_ACTIONS
+    ):
         return _error_response(
             403,
             "FORBIDDEN_ACTOR_SIDE",

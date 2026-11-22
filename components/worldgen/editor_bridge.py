@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from . import schema
+from .generator import infer_affordance_traits, infer_matter_profile
 from .loader import WorldPackage, load
 
 _EDITOR_DIR = Path(__file__).resolve().parents[1] / "world-editor"
@@ -207,6 +208,121 @@ def _object_default_fields(obj: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _supports_affordance_traits(editor: Any) -> bool:
+    """编辑器是否声明支持 ``object.affordance_traits``。
+
+    与 ``world-editor`` 并行开发时兼容：旧版 ``model.py`` 没有该常量，
+    探测为 False 时不向编辑器物件强加多余键。
+    """
+    return bool(getattr(editor, "SUPPORTS_AFFORDANCE_TRAITS", False))
+
+
+def _object_affordance_traits(
+    obj: dict[str, Any], fields: dict[str, Any]
+) -> list[str]:
+    """包对象已声明属性则透传，否则按品类/名称推断。"""
+    declared = obj.get("affordance_traits")
+    if declared:
+        return list(declared)
+    return infer_affordance_traits(
+        obj.get("kind", ""),
+        name=obj.get("name", ""),
+        portable=bool(fields.get("portable", False)),
+        note=obj.get("note", ""),
+    )
+
+
+def _edited_affordance_traits(
+    actual_obj: Mapping[str, Any], editor_id: str
+) -> Optional[list[str]]:
+    """读取编辑器物件声明的属性并规范化；未声明时返回 None。"""
+    raw = actual_obj.get("affordance_traits")
+    if raw is None:
+        return None
+    try:
+        return schema.normalize_affordance_traits(
+            raw, f"编辑器物件 {editor_id}.affordance_traits"
+        )
+    except schema.WorldPackageError as exc:
+        raise EditorBridgeError(
+            f"编辑器物件 {editor_id} 的 affordance_traits 无效：{exc}"
+        ) from exc
+
+
+def _supports_matter_profile(editor: Any) -> bool:
+    """编辑器是否声明支持 ``object.matter_profile``。
+
+    与 ``world-editor`` 并行开发时兼容：旧版 ``model.py`` 没有该常量，
+    探测为 False 时不向编辑器物件强加多余键。
+    """
+    return bool(getattr(editor, "SUPPORTS_MATTER_PROFILE", False))
+
+
+def _supports_sale_spec(editor: Any) -> bool:
+    """编辑器是否声明支持 ``object.sale_spec``。"""
+    return bool(getattr(editor, "SUPPORTS_SALE_SPEC", False))
+
+
+def _edited_sale_spec(
+    actual_obj: Mapping[str, Any], editor_id: str
+) -> Optional[dict[str, Any]]:
+    """读取编辑器物件声明的可售规格并规范化；未声明时返回 None。"""
+    raw = actual_obj.get("sale_spec")
+    if raw is None:
+        return None
+    try:
+        return schema.normalize_sale_spec(
+            raw, f"编辑器物件 {editor_id}.sale_spec"
+        )
+    except schema.WorldPackageError as exc:
+        raise EditorBridgeError(
+            f"编辑器物件 {editor_id} 的 sale_spec 无效：{exc}"
+        ) from exc
+
+
+def _object_matter_profile(
+    obj: dict[str, Any], fields: dict[str, Any]
+) -> dict[str, Any]:
+    """包对象已声明物质档则透传，否则按品类/名称/备注推断并校验。"""
+    declared = obj.get("matter_profile")
+    try:
+        if declared:
+            return schema.normalize_matter_profile(
+                declared, f"对象 {obj.get('object_id', '?')}.matter_profile"
+            )
+        return schema.normalize_matter_profile(
+            infer_matter_profile(
+                obj.get("kind", ""),
+                name=obj.get("name", ""),
+                portable=bool(fields.get("portable", False)),
+                capacity=int(fields.get("capacity", 0) or 0),
+                note=obj.get("note", ""),
+            ),
+            f"对象 {obj.get('object_id', '?')}.matter_profile",
+        )
+    except schema.WorldPackageError as exc:
+        raise EditorBridgeError(
+            f"对象 {obj.get('object_id', '?')} 的 matter_profile 无效：{exc}"
+        ) from exc
+
+
+def _edited_matter_profile(
+    actual_obj: Mapping[str, Any], editor_id: str
+) -> Optional[dict[str, Any]]:
+    """读取编辑器物件声明的物质档并规范化；未声明时返回 None。"""
+    raw = actual_obj.get("matter_profile")
+    if raw is None:
+        return None
+    try:
+        return schema.normalize_matter_profile(
+            raw, f"编辑器物件 {editor_id}.matter_profile"
+        )
+    except schema.WorldPackageError as exc:
+        raise EditorBridgeError(
+            f"编辑器物件 {editor_id} 的 matter_profile 无效：{exc}"
+        ) from exc
+
+
 #: 摆位/差量比较涉及的编辑器物件字段
 _PLACEMENT_KEYS = (
     "kind", "x", "y", "visual", "actions", "behavior",
@@ -315,6 +431,12 @@ def to_editor_world(
                 if key in placement:
                     value = placement[key]
                     fields[key] = copy.deepcopy(value) if isinstance(value, (dict, list)) else value
+        if _supports_affordance_traits(editor):
+            fields["affordance_traits"] = _object_affordance_traits(obj, fields)
+        if _supports_matter_profile(editor):
+            fields["matter_profile"] = _object_matter_profile(obj, fields)
+        if _supports_sale_spec(editor) and obj.get("sale_spec") is not None:
+            fields["sale_spec"] = copy.deepcopy(obj["sale_spec"])
         objects.append(
             {
                 "id": editor_id,
@@ -419,6 +541,11 @@ def _load_edited(edited: Path | str | Mapping[str, Any]) -> dict[str, Any]:
         raw = copy.deepcopy(dict(edited))
     else:
         raw = json.loads(Path(edited).read_text(encoding="utf-8"))
+    stashed_sale_specs: dict[str, Any] = {}
+    if not _supports_sale_spec(editor) and isinstance(raw.get("objects"), list):
+        for obj in raw["objects"]:
+            if isinstance(obj, dict) and "sale_spec" in obj and isinstance(obj.get("id"), str):
+                stashed_sale_specs[obj["id"]] = obj.pop("sale_spec")
     try:
         validated, _warnings = editor.validate_package(raw)
     except editor.legacy.WorldError as exc:
@@ -427,6 +554,10 @@ def _load_edited(edited: Path | str | Mapping[str, Any]) -> dict[str, Any]:
         raise EditorBridgeError(
             "编辑器数据不是 v3（可能是旧格式升级结果）；请用编辑器 v0.4 重新导出"
         )
+    if stashed_sale_specs:
+        for obj in validated.get("objects", []):
+            if isinstance(obj, dict) and obj.get("id") in stashed_sale_specs:
+                obj["sale_spec"] = stashed_sale_specs[obj["id"]]
     return validated
 
 
@@ -499,6 +630,8 @@ def import_from_editor(
         "placements": copy.deepcopy(old_scene.get("placements", {})),
         "assets": copy.deepcopy(old_scene.get("assets", {})),
     }
+    if old_scene.get("navigation"):
+        new_scene["navigation"] = copy.deepcopy(old_scene["navigation"])
 
     locations_by_id = {
         loc["location_id"]: loc for loc in docs["topology.json"]["locations"]
@@ -682,6 +815,26 @@ def import_from_editor(
             "location_id": location_id,
             "note": actual_obj["description"],
         }
+        new_traits = _edited_affordance_traits(actual_obj, editor_id)
+        if new_traits is not None:
+            world_objects[editor_id]["affordance_traits"] = new_traits
+        new_profile = _edited_matter_profile(actual_obj, editor_id)
+        if new_profile is None:
+            # 编辑器未带物质档：按新建对象的品类推断，保持目录一致。
+            new_profile = schema.normalize_matter_profile(
+                infer_matter_profile(
+                    world_objects[editor_id]["kind"],
+                    name=world_objects[editor_id]["name"],
+                    portable=bool(actual_obj.get("portable", False)),
+                    capacity=int(actual_obj.get("capacity", 0) or 0),
+                    note=world_objects[editor_id]["note"],
+                ),
+                f"对象 {editor_id}.matter_profile",
+            )
+        world_objects[editor_id]["matter_profile"] = new_profile
+        new_sale_spec = _edited_sale_spec(actual_obj, editor_id)
+        if new_sale_spec is not None:
+            world_objects[editor_id]["sale_spec"] = new_sale_spec
         docs["objects.json"]["objects"].append(copy.deepcopy(world_objects[editor_id]))
         new_scene["placements"][editor_id] = _plain(
             {key: actual_obj[key] for key in _PLACEMENT_KEYS}
@@ -706,6 +859,24 @@ def import_from_editor(
         if actual_obj["room_id"] != expected_obj["room_id"]:
             world_obj["location_id"] = forward_location[actual_obj["room_id"]]
             updates["location_id"] = world_obj["location_id"]
+        actual_traits = _edited_affordance_traits(actual_obj, editor_id)
+        if actual_traits is not None:
+            expected_traits = list(expected_obj.get("affordance_traits") or [])
+            if actual_traits != expected_traits:
+                world_obj["affordance_traits"] = actual_traits
+                updates["affordance_traits"] = actual_traits
+        actual_profile = _edited_matter_profile(actual_obj, editor_id)
+        if actual_profile is not None:
+            expected_profile = expected_obj.get("matter_profile")
+            if actual_profile != expected_profile:
+                world_obj["matter_profile"] = actual_profile
+                updates["matter_profile"] = actual_profile
+        actual_sale = _edited_sale_spec(actual_obj, editor_id)
+        if actual_sale is not None:
+            expected_sale = expected_obj.get("sale_spec")
+            if actual_sale != expected_sale:
+                world_obj["sale_spec"] = actual_sale
+                updates["sale_spec"] = actual_sale
         if any(actual_obj[key] != expected_obj[key] for key in _PLACEMENT_KEYS):
             new_scene["placements"][editor_id] = _plain(
                 {key: actual_obj[key] for key in _PLACEMENT_KEYS}
@@ -756,6 +927,16 @@ def import_from_editor(
 
     # ---- 场景引用一致性（写盘前） ------------------------------------------
     object_ids = {obj["object_id"] for obj in docs["objects.json"]["objects"]}
+    if "navigation" in new_scene:
+        for loc_id in list(new_scene["navigation"]):
+            if loc_id not in locations_by_id:
+                new_scene["navigation"].pop(loc_id, None)
+                continue
+            fmap = new_scene["navigation"][loc_id].get("furniture_map", {})
+            for area_key in list(fmap):
+                fmap[area_key] = [oid for oid in fmap[area_key] if oid in object_ids]
+        if not new_scene["navigation"]:
+            new_scene.pop("navigation", None)
     missing_space = sorted(set(new_scene["spaces"]) - set(locations_by_id))
     missing_placement = sorted(set(new_scene["placements"]) - object_ids)
     if missing_space or missing_placement:
@@ -809,11 +990,67 @@ def import_from_editor(
     return receipt
 
 
+def _min_dist_to_anchors(point: tuple[float, float], anchors: list[tuple[float, float]] | tuple[tuple[float, float], ...]) -> float:
+    if not anchors:
+        return float("inf")
+    px, py = point
+    return min(((px - ax) ** 2 + (py - ay) ** 2) ** 0.5 for ax, ay in anchors)
+
+
+def map_editor_furniture_to_microzone(
+    x: float,
+    y: float,
+    tags: list[str] | tuple[str, ...],
+    window_points: list[tuple[float, float]] | tuple[tuple[float, float], ...] = (),
+    door_points: list[tuple[float, float]] | tuple[tuple[float, float], ...] = (),
+) -> str:
+    """将造世界编辑器的二维室内家具摆位自动归入房间五微区（第 105 章）。"""
+    tag_set = {str(t).strip().lower() for t in tags}
+    if tag_set & {"stove", "kettle", "tea", "sink", "kitchen", "heat"}:
+        return "stove_corner"
+    if "bed" not in tag_set and _min_dist_to_anchors((x, y), door_points) <= 1.5:
+        return "entryway"
+    if _min_dist_to_anchors((x, y), window_points) <= 1.5:
+        return "window_nook"
+    if tag_set & {"bed", "sofa", "cushion", "rug", "sleep"}:
+        return "bed_rest"
+    return "desk_zone"
+
+
+def check_road_graph_connected(
+    place_ids: list[str] | tuple[str, ...],
+    road_pairs: list[tuple[str, str]] | tuple[tuple[str, str], ...],
+) -> tuple[bool, list[str]]:
+    """保存世界副本前检查全部地点是否连通，返回 (是否连通, 断路地点列表)。"""
+    from collections import deque
+
+    places = list(dict.fromkeys(str(p) for p in place_ids))
+    if len(places) <= 1:
+        return True, []
+    adj: dict[str, set[str]] = {p: set() for p in places}
+    for a, b in road_pairs:
+        if a in adj and b in adj:
+            adj[a].add(b)
+            adj[b].add(a)
+    visited: set[str] = {places[0]}
+    q: deque[str] = deque([places[0]])
+    while q:
+        cur = q.popleft()
+        for nxt in adj[cur]:
+            if nxt not in visited:
+                visited.add(nxt)
+                q.append(nxt)
+    unreachable = [p for p in places if p not in visited]
+    return len(unreachable) == 0, unreachable
+
+
 __all__ = [
     "EditorBridgeError",
+    "check_road_graph_connected",
     "export_for_editor",
     "import_from_editor",
     "location_id_map",
+    "map_editor_furniture_to_microzone",
     "object_id_map",
     "to_editor_world",
     "write_editor_world",

@@ -37,6 +37,16 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 REUNION_SCHEMA = "phone.home.reunion_anchor.v1"
 RECIPES_SCHEMA = "phone.home.recipes.v1"
 PLANS_SCHEMA = "phone.home.tentative_plans.v1"
@@ -325,9 +335,10 @@ def read_reunion_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]]
 
 
 def write_reunion_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_reunion_state(dict(state))
-    _write_json(reunion_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(reunion_path(root)):
+        normalized = _validate_reunion_state(dict(state))
+        _write_json(reunion_path(root), normalized)
+        return normalized
 
 
 def _anchor_from_snapshot(snapshot: Mapping[str, Any], now_iso: str) -> dict[str, Any]:
@@ -598,9 +609,10 @@ def read_recipes_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]]
 
 
 def write_recipes_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_recipes_state(dict(state))
-    _write_json(recipes_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(recipes_path(root)):
+        normalized = _validate_recipes_state(dict(state))
+        _write_json(recipes_path(root), normalized)
+        return normalized
 
 
 def upsert_recipe(state: Mapping[str, Any], *, recipe_id: Optional[str], title: Any,
@@ -764,9 +776,10 @@ def read_plans_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]]:
 
 
 def write_plans_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_plans_state(dict(state))
-    _write_json(plans_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(plans_path(root)):
+        normalized = _validate_plans_state(dict(state))
+        _write_json(plans_path(root), normalized)
+        return normalized
 
 
 def _bump_plans(state: dict[str, Any], now_iso: str) -> None:

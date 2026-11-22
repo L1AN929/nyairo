@@ -34,7 +34,7 @@
       "description": "For users who want to inspect every setup script themselves, keep an offline copy of the release bundle, or deploy manually on a server.",
       "url": "https://nyairo.com/en/docs/linux/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -491,28 +491,28 @@ sh /tmp/uv-install.sh</code></pre></div>
 uv python install 3.13</code></pre></div>
 
 <h2 id="linux-section-2">Route A: Clone by Git Tag</h2>
-<p>Pick either Route A or Route B. When using Git, always check out the pinned release tag <code>v0.7.0</code> (do not install directly from an active development branch):</p>
+<p>Pick either Route A or Route B. When using Git, always check out the pinned release tag <code>v0.8.0</code> (do not install directly from an active development branch):</p>
 <div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>mkdir -p "$HOME/apps"
-git clone --branch v0.7.0 --depth 1 \
-  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0"
+git clone --branch v0.8.0 --depth 1 \
+  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0"
 bash scripts/bootstrap.sh</code></pre></div>
 <p>Seeing Git report <code>detached HEAD</code> when checking out a fixed tag is completely normal. Once installation finishes, you can run a manifest self-check to confirm every file is intact:</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>~/.local/share/nyairo/releases/v0.7.0/vendor/hermes/.venv/bin/python -B \
-  ~/.local/share/nyairo/releases/v0.7.0/scripts/verify_manifest.py</code></pre></div>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>~/.local/share/nyairo/releases/v0.8.0/vendor/hermes/.venv/bin/python -B \
+  ~/.local/share/nyairo/releases/v0.8.0/scripts/verify_manifest.py</code></pre></div>
 <p>Seeing <code>"valid": true</code> in the output confirms the file checksums match completely.</p>
 
 <h2 id="linux-section-3">Route B: Download and Verify Official ZIP</h2>
 <p>If you prefer to save the release archive locally, verify its checksum, and then extract and install:</p>
 <div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>mkdir -p "$HOME/apps" &amp;&amp; cd "$HOME/apps"
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256</code></pre></div>
-<p>Once the terminal prints <code>nyairo-v0.7.0.zip: OK</code>, extract the archive and run the bundled installer:</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0"
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256</code></pre></div>
+<p>Once the terminal prints <code>nyairo-v0.8.0.zip: OK</code>, extract the archive and run the bundled installer:</p>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0"
 bash scripts/bootstrap.sh</code></pre></div>
-<p>If you already downloaded the ZIP in a Windows browser, you can access it from WSL at <code>/mnt/c/Users/YourWindowsUsername/Downloads/nyairo-v0.7.0.zip</code>.</p>
+<p>If you already downloaded the ZIP in a Windows browser, you can access it from WSL at <code>/mnt/c/Users/YourWindowsUsername/Downloads/nyairo-v0.8.0.zip</code>.</p>
 
 <h2 id="linux-section-4">What If Hermes Is Already Installed?</h2>
 <p>There is no need to remove your existing Hermes installation. nyairo bundles a version-matched and tested Hermes environment and keeps all its data isolated under <code>~/.nyairo</code>, so the two do not interfere with each other. Do not manually copy nyairo's plugin directories into a different version of Hermes, as interface mismatches will likely cause errors.</p>

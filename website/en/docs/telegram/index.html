@@ -34,7 +34,7 @@
       "description": "Connect to your local companion via a Telegram bot or an official QQ bot; pay close attention to session allowlist authorization so replies don't silently...",
       "url": "https://nyairo.com/en/docs/telegram/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -485,7 +485,7 @@
 <h2 id="telegram-section-1">Telegram · Bind DM Memory Permissions</h2>
 <p>To prevent strangers who stumble upon your bot from accessing your private memories, nyairo requires you to explicitly specify which direct-message session has permission to read and write long-term memory.</p>
 <p>If you installed using the default one-line script (data stored in <code>~/.nyairo</code>), run the snippet below and enter your numeric DM User ID when prompted to compute the corresponding session key:</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.8.0"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" -c '
 from gateway.config import Platform
 from gateway.session import SessionSource, build_session_key

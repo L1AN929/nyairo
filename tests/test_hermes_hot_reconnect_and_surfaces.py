@@ -1,4 +1,4 @@
-"""End-to-end verification for Hermes hot-reconnect, world_move auto-hydration, and 28/28 phone_life_update surfaces.
+"""End-to-end verification for Hermes hot-reconnect, world_move auto-hydration, and 37/37 phone_life_update surfaces.
 
 Runs strictly inside an isolated ``/tmp/nyhb_*`` sandbox (never touching ``/root/.nyairo-day`` or
 ``/root/.nyairo-rc1``) with zero paid LLM calls, and cleans up the sandbox on exit.
@@ -31,7 +31,7 @@ for _p in (str(REPO_ROOT), str(HERMES_ROOT)):
 FROZEN_ANCHORS: dict[str, tuple[Path, str]] = {
     "autonomous_life_assembly.py": (
         REPO_ROOT / "components" / "life" / "scripts" / "autonomous_life_assembly.py",
-        "5f51c9e82a417d9354d08608841d3472fc5a869e6bd3c9d9a7ebed0b15397f7a",
+        "f14fe6291e1a604520318ebf69acedb583dfc876bfde42f538d6f91017f37434",
     ),
     "life_sharing_service.py": (
         REPO_ROOT / "components" / "life" / "scripts" / "life_sharing_service.py",
@@ -525,6 +525,38 @@ class HermesHotReconnectAndSurfacesE2ETest(unittest.TestCase):
                 "summary": "周六下午三点在坡道口旧书市碰头",
                 "ground_status": "SHARED_WITH_PARTNER",
             },
+            # v0.8：对真实可达物件留一张会自然淡去的动态贴纸（主体侧，需本地 capability）。
+            "v08_living_traces": {
+                "action": "apply_living_trace",
+                "object_id": "home_window",
+                "gesture_cn": "伸手擦了擦窗玻璃一角",
+                "state_sticker_cn": "窗玻璃上被擦出巴掌大一块透亮",
+                "fade_mode": "timed",
+                "ttl_minutes": 60,
+            },
+            # v3.0：只看过其中几页的有限视野，其余页严格扣留。
+            "v03_encounters": {
+                "action": "record_first_glance",
+                "target_ref": "reading:seawall_plants",
+                "target_title_cn": "海边植物图鉴",
+                "seen_pages": [1, 2, 3],
+                "total_pages": 12,
+                "current_impression_cn": "只翻了几页，图注比正文更耐看",
+                "shared": True,
+            },
+            # v0.8：只有彼此懂的说法（双方都能提出/确认，不强迫照演）。
+            "v08_emergent_echoes": {
+                "action": "propose_shared_idiom",
+                "phrase": "窗边时间",
+                "meaning_cn": "各自忙完手头事，在窗边坐一会儿的默契时刻",
+                "origin_summary_cn": "周末傍晚一起看海雾时自然叫起来的",
+            },
+            # v0.8：只留一次的普通身体照料提示（主体侧，需本地 capability）。
+            "v08_composable_body": {
+                "action": "share_body_care_hint_once",
+                "hint_cn": "今晚想早点歇一会儿，不用特意多问",
+                "ttl_minutes": 120,
+            },
         }
 
         self.assertEqual(set(surface_payloads.keys()), set(phone_tool.LIFE_UPDATE_SURFACES.keys()))
@@ -542,7 +574,7 @@ class HermesHotReconnectAndSurfacesE2ETest(unittest.TestCase):
             if not (res.get("ok") is True and res.get("http_status") == 200 and res.get("status") in ("applied", "already_applied")):
                 failures[surf] = res
 
-        self.assertEqual(failures, {}, f"Expected 31/31 surfaces applied, failures: {json.dumps(failures, ensure_ascii=False)}")
+        self.assertEqual(failures, {}, f"Expected 37/37 surfaces applied, failures: {json.dumps(failures, ensure_ascii=False)}")
 
         # Verify self-healing `supported_actions_hint` on bad/incomplete payloads (and zero fact fabrication!)
         err_missing_action = call_phone(

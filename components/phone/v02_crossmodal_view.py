@@ -48,12 +48,17 @@ PARTNER_ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "try_color_swatches",
     "clear_color_trial_pad",
     "mark_reading_uncertain",
+    "curate_shared_collection",
+    "ingest_audio_note",
 })
 
 SUBJECT_ALLOWED_ACTIONS: frozenset[str] = PARTNER_ALLOWED_ACTIONS | frozenset({
     "apply_palette_to_work",
     "check_collection_staleness",
     "invalidate_deleted_media_source",
+    "curate_unshown_box_item",
+    "withdraw_box_show_intent",
+    "invalidate_deleted_box_source",
 })
 
 ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
@@ -62,6 +67,7 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "image_base64",
         "album_id",
         "share_with_room",
+        "work_id",
     }),
     "try_color_swatches": COMMON_COMMAND_FIELDS | frozenset({
         "swatches",
@@ -96,11 +102,47 @@ ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         "note_cn",
         "share_with_room",
     }),
+    "curate_shared_collection": COMMON_COMMAND_FIELDS | frozenset({
+        "item_id",
+        "title",
+        "source_kind",
+        "source_ref",
+        "status",
+        "note_cn",
+        "share_with_room",
+    }),
     "invalidate_deleted_media_source": COMMON_COMMAND_FIELDS | frozenset({
         "study_id",
         "album_id",
         "sha256",
         "reason_cn",
+    }),
+    "curate_unshown_box_item": COMMON_COMMAND_FIELDS | frozenset({
+        "box_item_id",
+        "artifact_id",
+        "version_id",
+        "title_cn",
+        "curation_state",
+        "reuse_mode",
+        "note_cn",
+        "source_deleted",
+    }),
+    "withdraw_box_show_intent": COMMON_COMMAND_FIELDS | frozenset({
+        "box_item_id",
+    }),
+    "invalidate_deleted_box_source": COMMON_COMMAND_FIELDS | frozenset({
+        "artifact_id",
+    }),
+    "ingest_audio_note": COMMON_COMMAND_FIELDS | frozenset({
+        "title_cn",
+        "duration_seconds",
+        "audio_format",
+        "source_kind",
+        "sha256_hex",
+        "transcript_cn",
+        "transcript_status",
+        "ambient_tag_cn",
+        "shared",
     }),
 }
 
@@ -128,6 +170,15 @@ _OPTIONAL_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "study_id",
     "sha256",
     "reason_cn",
+    "box_item_id",
+    "version_id",
+    "reuse_mode",
+    "source_deleted",
+    "sha256_hex",
+    "transcript_cn",
+    "transcript_status",
+    "ambient_tag_cn",
+    "shared",
 })
 
 _OPTIONAL_BLANK_STRING_FIELDS: frozenset[str] = frozenset({
@@ -146,6 +197,12 @@ _OPTIONAL_BLANK_STRING_FIELDS: frozenset[str] = frozenset({
     "study_id",
     "sha256",
     "reason_cn",
+    "box_item_id",
+    "version_id",
+    "sha256_hex",
+    "transcript_cn",
+    "transcript_status",
+    "ambient_tag_cn",
 })
 
 
@@ -230,31 +287,37 @@ def _validate_request_payload(payload: Any, *, actor_side: str) -> str:
     return action
 
 
+_MIRRORED_DATA_KEYS: tuple[str, ...] = (
+    "state_exists",
+    "perspective",
+    "revision",
+    "observed_at",
+    "palette_studies",
+    "work_palette_applications",
+    "color_trial_pad",
+    "reading_uncertainty_marks",
+    "collection_health",
+    "unshown_work_box",
+    "audio_notes",
+    "audio_note_count",
+    "private_studies_withheld_count",
+    "private_marks_withheld_count",
+    "action_receipt",
+    "llm_calls",
+)
+
+
 def _compose_envelope(
     projected: Mapping[str, Any],
     *,
     read_only: bool,
     command_status: str = "READ",
 ) -> dict[str, Any]:
-    mirrored_keys = (
-        "state_exists",
-        "perspective",
-        "revision",
-        "observed_at",
-        "palette_studies",
-        "work_palette_applications",
-        "color_trial_pad",
-        "reading_uncertainty_marks",
-        "collection_health",
-        "private_studies_withheld_count",
-        "private_marks_withheld_count",
-        "llm_calls",
-    )
     data_block: dict[str, Any] = {
         "schema": V02_CROSSMODAL_SCHEMA,
         "read_only": bool(read_only),
     }
-    for k in mirrored_keys:
+    for k in _MIRRORED_DATA_KEYS:
         if k in projected:
             data_block[k] = copy.deepcopy(projected[k])
 

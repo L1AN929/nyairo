@@ -32,6 +32,16 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+try:  # package import (tests / phone service import ``components.phone``)
+    from ..life.scripts import state_tx_guard as _tx  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - flat import fallback (components/phone on sys.path)
+    import sys as _sys
+
+    _LIFE_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in _sys.path:
+        _sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
+
 WORKBENCH_SCHEMA = "phone.home.workbench.v1"
 CURIOS_SCHEMA = "phone.home.curios.v1"
 TRIO_SCHEMA = "phone.home.trio_exchange.v1"
@@ -228,9 +238,10 @@ def read_tray_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]]:
 
 
 def write_tray_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_tray_state(dict(state))
-    _write_json(tray_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(tray_path(root)):
+        normalized = _validate_tray_state(dict(state))
+        _write_json(tray_path(root), normalized)
+        return normalized
 
 
 def tray_identity(tray: Mapping[str, Any]) -> tuple:
@@ -340,9 +351,10 @@ def read_trio_state(root: Path | str) -> tuple[dict[str, Any], Optional[str]]:
 
 
 def write_trio_state(root: Path | str, state: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate_trio_state(dict(state))
-    _write_json(trio_path(root), normalized)
-    return normalized
+    with _tx.state_file_lock(trio_path(root)):
+        normalized = _validate_trio_state(dict(state))
+        _write_json(trio_path(root), normalized)
+        return normalized
 
 
 def her_identity(state: Mapping[str, Any]) -> tuple:

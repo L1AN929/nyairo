@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from collections import deque
+from pathlib import Path
 from typing import Any, Optional
 
 from . import schema
@@ -131,4 +132,32 @@ def validate_package_dir(package_dir, *, verify_manifest: bool = True) -> list[s
     return validate(docs)
 
 
-__all__ = ["WorldValidationError", "validate", "validate_graph", "validate_package_dir"]
+def validate_package(package_or_docs: Any, *, verify_manifest: bool = True) -> list[str]:
+    """统一校验入口：支持世界包目录路径、WorldPackage 实例或内存文档字典。"""
+    if isinstance(package_or_docs, (str, Path)):
+        return validate_package_dir(package_or_docs, verify_manifest=verify_manifest)
+    if hasattr(package_or_docs, "snapshot") and callable(package_or_docs.snapshot):
+        docs = package_or_docs.snapshot()
+        scene_doc = getattr(package_or_docs, "scene", None)
+        if scene_doc is not None:
+            docs[schema.SCENE_FILE] = scene_doc
+    elif isinstance(package_or_docs, dict):
+        docs = dict(package_or_docs)
+    else:
+        return [f"不支持的世界包输入类型: {type(package_or_docs).__name__}"]
+    messages = validate(docs)
+    if not messages and schema.SCENE_FILE in docs and docs[schema.SCENE_FILE] is not None:
+        try:
+            schema.validate_scene_doc(docs[schema.SCENE_FILE])
+        except schema.WorldPackageError as exc:
+            _fail(messages, f"{schema.SCENE_FILE}: {exc}")
+    return messages
+
+
+__all__ = [
+    "WorldValidationError",
+    "validate",
+    "validate_graph",
+    "validate_package",
+    "validate_package_dir",
+]

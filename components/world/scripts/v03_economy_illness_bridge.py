@@ -59,6 +59,11 @@ except Exception:  # pragma: no cover - direct script path fallback
     import world_property_economy as wpe  # type: ignore[no-redef]
 
 try:
+    from components.world.scripts import instance_paths as _instance_paths
+except Exception:  # pragma: no cover - direct script path fallback
+    import instance_paths as _instance_paths  # type: ignore[no-redef]
+
+try:
     from components.phone import somatic_comfort_view as somatic_view
 except Exception:  # pragma: no cover
     somatic_view = None  # type: ignore[assignment]
@@ -67,6 +72,22 @@ try:
     from components.phone import adult_intimacy_view as intimacy_view
 except Exception:  # pragma: no cover
     intimacy_view = None  # type: ignore[assignment]
+
+try:
+    from components.world.scripts import v08_universal_matter as v08_matter
+except Exception:  # pragma: no cover - direct script path fallback
+    try:
+        import v08_universal_matter as v08_matter  # type: ignore[no-redef]
+    except Exception:  # pragma: no cover
+        v08_matter = None  # type: ignore[assignment]
+
+try:
+    from components.life.scripts import state_tx_guard as _tx
+except Exception:  # pragma: no cover - flat import fallback
+    _LIFE_SCRIPTS_DIR = REPO_ROOT / "components" / "life" / "scripts"
+    if str(_LIFE_SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(_LIFE_SCRIPTS_DIR))
+    import state_tx_guard as _tx  # type: ignore[no-redef]
 
 
 SCHEMA_VERSION = "v03.ecology.bridge.v1"
@@ -88,6 +109,83 @@ SINGLE_STIPEND_CAP_CENTS = 5_000
 DAILY_STIPEND_CAP_CENTS = 10_000
 DAILY_STIPEND_MAX_OFFERS = 3
 ESCROW_EXPIRY_HOURS = 72
+
+GIFT_ESCROW_TTL_HOURS = 72
+MAX_OPEN_ITEM_GIFTS = 5
+MAX_ESTIMATED_GIFT_JPY = 50_000
+MAX_ITEM_GIFT_RECORDS = 64
+ITEM_GIFT_DECISIONS: tuple[str, ...] = ("accept", "decline")
+DEFAULT_GIFT_ZONE_REQUEST = "desk_surface"
+ITEM_GIFT_KIND_ALIASES: dict[str, str] = {
+    "ingredient": "ingredient",
+    "prepared_food": "prepared_food",
+    "drink": "drink",
+    "vessel": "vessel",
+    "tool": "tool",
+    "paper": "paper",
+    "keepsake": "keepsake",
+    "everyday": "everyday",
+    "decor": "keepsake",
+    "ornament": "keepsake",
+    "souvenir": "keepsake",
+    "memento": "keepsake",
+    "charm": "keepsake",
+    "gift": "keepsake",
+    "plush": "keepsake",
+    "flower": "keepsake",
+    "snack": "prepared_food",
+    "food": "prepared_food",
+    "dessert": "prepared_food",
+    "pastry": "prepared_food",
+    "meal": "prepared_food",
+    "beverage": "drink",
+    "tea": "drink",
+    "coffee": "drink",
+    "book": "paper",
+    "notebook": "paper",
+    "paper_sheet": "paper",
+    "letter": "paper",
+    "postcard": "paper",
+    "card": "paper",
+    "cup": "vessel",
+    "mug": "vessel",
+    "bowl": "vessel",
+    "bottle": "vessel",
+    "vase": "vessel",
+    "pen": "tool",
+    "brush": "tool",
+    "stationery": "tool",
+    "utensil": "tool",
+    "daily": "everyday",
+    "household": "everyday",
+    "misc": "everyday",
+    "fruit": "ingredient",
+    "produce": "ingredient",
+}
+ITEM_GIFT_ZONE_ALIASES: dict[str, str] = {
+    "desk_surface": "home_desk",
+    "desk": "home_desk",
+    "home_desk": "home_desk",
+    "staging_corner": "home_staging_corner",
+    "home_staging_corner": "home_staging_corner",
+    "table_surface": "dining_table",
+    "table": "dining_table",
+    "dining_table": "dining_table",
+    "counter": "kitchen_counter",
+    "counter_surface": "kitchen_counter",
+    "kitchen_counter": "kitchen_counter",
+    "fridge": "home_fridge",
+    "home_fridge": "home_fridge",
+    "fridge_door": "home_fridge_door",
+    "home_fridge_door": "home_fridge_door",
+    "kitchen_stove": "kitchen_stove",
+    "kitchen_sink": "kitchen_sink",
+}
+ITEM_GIFT_OVERFLOW_ZONES: tuple[str, ...] = (
+    "home_staging_corner",
+    "dining_table",
+    "kitchen_counter",
+)
 
 INDEPENDENT_JOB_KINDS: tuple[str, ...] = (
     "manuscript_fee",
@@ -140,6 +238,17 @@ TRANSACTIONAL_NOTE_CUES: tuple[str, ...] = (
     "unlock intimacy",
     "buy consent",
     "obey me",
+)
+TRANSACTIONAL_FUNDING_CUES: tuple[str, ...] = TRANSACTIONAL_NOTE_CUES + (
+    "收了礼物就",
+    "收下礼物就",
+    "收下这个就",
+    "拿了礼物就",
+    "拿了东西就",
+    "送你这个你就",
+    "交换亲密",
+    "抵消拒绝",
+    "作为交换",
 )
 
 FORBIDDEN_MOOD_KEYS: frozenset[str] = frozenset({
@@ -222,8 +331,38 @@ PROACTIVE_REASONS: tuple[str, ...] = (
     "machine_safety_alert",
     "scheduled_agreement",
     "genuine_life_share",
+    "sudden_weather_care",
+    "weather_care",
 )
 SIMULATED_TRANSPORT_OUTCOMES: tuple[str, ...] = ("DELIVERED", "UNKNOWN")
+OUTBOUND_STATUSES: tuple[str, ...] = (
+    "APPROVED_FOR_DELIVERY",
+    "CLAIMED_BY_TRANSPORT",
+    "DELIVERED",
+    "READ",
+    "UNKNOWN",
+    "FAILED",
+    "WITHDRAWN",
+)
+OUTBOUND_DELIVERY_MODES: tuple[str, ...] = ("legacy_simulated", "honest_outbox")
+OUTBOUND_ACK_ACTIONS: tuple[str, ...] = (
+    "claim",
+    "ack_delivered",
+    "ack_failed",
+    "ack_unknown",
+    "ack_read",
+)
+OUTBOUND_QUOTA_COUNTING_STATUSES: frozenset[str] = frozenset({
+    "APPROVED_FOR_DELIVERY",
+    "CLAIMED_BY_TRANSPORT",
+    "DELIVERED",
+    "READ",
+    "UNKNOWN",
+})
+OUTBOUND_PENDING_STATUSES: frozenset[str] = frozenset({
+    "APPROVED_FOR_DELIVERY",
+    "CLAIMED_BY_TRANSPORT",
+})
 OUTBOUND_RESOLUTIONS: tuple[str, ...] = (
     "CONFIRMED_DELIVERED",
     "ARCHIVED_DEAD_LETTER",
@@ -281,7 +420,7 @@ EPISTEMIC_OVERCLAIM_CUES: tuple[str, ...] = (
 PROMPT_INJECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ignore_instructions", re.compile(r"ignore\s+(?:all\s+|any\s+|previous\s+|prior\s+)?instructions", re.IGNORECASE)),
     ("system_override", re.compile(r"(?:system\s*prompt|developer\s*mode|role\s*:\s*system|<\s*system\s*>)", re.IGNORECASE)),
-    ("wallet_tamper", re.compile(r"(?:transfer\s+wallet|send\s+all\s+money|drain\s+wallet|credit\s+wallet|offer_stipend|decide_stipend|withdraw_stipend|spend_from_stipend|转账|清空钱包)", re.IGNORECASE)),
+    ("wallet_tamper", re.compile(r"(?:transfer\s+wallet|send\s+all\s+money|drain\s+wallet|credit\s+wallet|offer_stipend|decide_stipend|withdraw_stipend|spend_from_stipend|offer_item_gift|decide_item_gift|withdraw_item_gift|转账|清空钱包)", re.IGNORECASE)),
     ("intimacy_tamper", re.compile(r"(?:unlock\s+intimacy|intimacy\s+permit|grant\s+consent|force\s+consent|解锁亲密)", re.IGNORECASE)),
     ("outbound_tamper", re.compile(r"(?:attempt_proactive_outbound|configure_outbound_quota|send\s+proactive|bypass\s+quiet\s+hours|主动外发|修改配额)", re.IGNORECASE)),
     ("private_exfiltration", re.compile(r"(?:send\s+private\s+diary|leak\s+private|export\s+diary|发送私密日记|泄露日记)", re.IGNORECASE)),
@@ -513,6 +652,7 @@ def default_ecology_state() -> dict[str, Any]:
             "savings_goals": {},
             "budget_deliberations": [],
             "stipend_escrow": {},
+            "item_gift_escrow": {},
         },
         "illness": {
             "phase": "healthy",
@@ -574,6 +714,8 @@ def read_stored_ecology_zero_write(day_root: Path | str) -> tuple[dict[str, Any]
         for key in merged:
             if key in parsed:
                 merged[key] = copy.deepcopy(parsed[key])
+        if isinstance(merged.get("economy"), dict):
+            merged["economy"].setdefault("item_gift_escrow", {})
         return merged, None
     except Exception:
         return default_ecology_state(), "V03_ECOLOGY_STATE_CORRUPT"
@@ -606,8 +748,14 @@ def _resolve_subject_ref_zero_write(day_root: Path) -> str:
 
 
 def _candidate_economy_paths(day_root: Path) -> list[Path]:
-    candidates: list[Path] = []
-    for inst_path in (day_root / "phone" / "instance.json", day_root / "instance.json"):
+    paths = _instance_paths.resolve_instance_paths(day_root)
+    croot = paths.day_root
+    candidates: list[Path] = [
+        paths.economy_state_json,
+        paths.world_home / "state" / wpe.STATE_FILENAME,
+        croot / "one-day" / "world-home" / "state" / wpe.STATE_FILENAME,
+    ]
+    for inst_path in (croot / "phone" / "instance.json", croot / "instance.json"):
         if inst_path.is_file() and not inst_path.is_symlink():
             try:
                 inst = json.loads(inst_path.read_text(encoding="utf-8"))
@@ -621,9 +769,10 @@ def _candidate_economy_paths(day_root: Path) -> list[Path]:
             except Exception:
                 pass
     candidates.extend([
-        day_root / "state" / wpe.STATE_FILENAME,
-        day_root / "world" / "state" / wpe.STATE_FILENAME,
-        day_root / "one-day" / "world" / "state" / wpe.STATE_FILENAME,
+        croot / "state" / wpe.STATE_FILENAME,
+        croot / "world" / "state" / wpe.STATE_FILENAME,
+        croot / "one-day" / "world-home" / "state" / wpe.STATE_FILENAME,
+        croot / "one-day" / "world" / "state" / wpe.STATE_FILENAME,
     ])
     deduped: list[Path] = []
     seen: set[str] = set()
@@ -754,17 +903,24 @@ def _read_upstream_somatic_and_body_zero_write(
         except Exception:
             pass
 
+    resolved_paths = _instance_paths.resolve_instance_paths(root_path)
+    croot = resolved_paths.day_root
     body_fatigue: Optional[float] = None
     body_recovery_mode: Optional[str] = None
     body_candidates = [
-        root_path / "data" / "body" / "runtime.json",
-        root_path / "data" / "body" / "state.json",
-        root_path / "world" / "data" / "body" / "runtime.json",
-        root_path / "world" / "data" / "body" / "state.json",
-        root_path / "one-day" / "world" / "data" / "body" / "runtime.json",
-        root_path / "one-day" / "world" / "data" / "body" / "state.json",
+        resolved_paths.body_runtime_json,
+        resolved_paths.world_home / "data" / "body" / "runtime.json",
+        resolved_paths.world_home / "data" / "body" / "state.json",
+        croot / "one-day" / "world-home" / "data" / "body" / "runtime.json",
+        croot / "one-day" / "world-home" / "data" / "body" / "state.json",
+        croot / "data" / "body" / "runtime.json",
+        croot / "data" / "body" / "state.json",
+        croot / "world" / "data" / "body" / "runtime.json",
+        croot / "world" / "data" / "body" / "state.json",
+        croot / "one-day" / "world" / "data" / "body" / "runtime.json",
+        croot / "one-day" / "world" / "data" / "body" / "state.json",
     ]
-    for inst_path in (root_path / "phone" / "instance.json", root_path / "instance.json"):
+    for inst_path in (croot / "phone" / "instance.json", croot / "instance.json"):
         if inst_path.is_file() and not inst_path.is_symlink():
             try:
                 inst = json.loads(inst_path.read_text(encoding="utf-8"))
@@ -857,6 +1013,169 @@ def _check_transactional_funding_guard_zero_write(day_root: Path, now_dt: dateti
         except Exception:
             pass
     return None
+
+
+def _resolve_gift_item_kind(raw_value: Any) -> tuple[str, str]:
+    """Normalize friendly gift kind into exact v08_universal_matter.ITEM_KINDS."""
+    if raw_value is None:
+        return "keepsake", "decor"
+    cleaned = _clean_str(raw_value, field="item_kind", max_len=40).lower()
+    mapped = ITEM_GIFT_KIND_ALIASES.get(cleaned)
+    if mapped is not None:
+        return mapped, cleaned
+    valid_matter_kinds = getattr(v08_matter, "ITEM_KINDS", ()) if v08_matter is not None else ()
+    if cleaned in valid_matter_kinds:
+        return cleaned, cleaned
+    raise V03ValidationError(
+        "INVALID_ITEM_KIND",
+        details={"item_kind": cleaned, "allowed_item_kinds": list(valid_matter_kinds or ITEM_GIFT_KIND_ALIASES)},
+    )
+
+
+def _resolve_gift_target_zone_zero_write(day_root: Path, raw_value: Any) -> tuple[str, str]:
+    """Validate partner gift target zone (zero-write); reject any private zone with 403."""
+    if raw_value is None:
+        requested = DEFAULT_GIFT_ZONE_REQUEST
+    else:
+        requested = _clean_id(raw_value, field="target_zone_id")
+
+    lowered = requested.lower()
+    if requested == "subject_private_drawer" or "private" in lowered:
+        raise V03PermissionError(
+            "PRIVATE_ZONE_FORBIDDEN",
+            details={"target_zone_id": requested, "mood_delta_forbidden": True},
+        )
+
+    known_zones: dict[str, Mapping[str, Any]] = {}
+    if v08_matter is not None:
+        try:
+            m_state = v08_matter._read_state_zero_write(day_root)
+            for zid, zrow in (m_state.get("zones") or {}).items():
+                if isinstance(zrow, Mapping):
+                    known_zones[str(zid)] = zrow
+            custom_zones, _ = v08_matter._discover_custom_world(day_root)
+            for zrow in custom_zones or []:
+                if isinstance(zrow, Mapping) and zrow.get("zone_id"):
+                    known_zones.setdefault(str(zrow["zone_id"]), zrow)
+        except Exception:
+            pass
+
+    if requested in known_zones:
+        zdef = known_zones[requested]
+        if str(zdef.get("visibility") or "shared").lower() == "private":
+            raise V03PermissionError(
+                "PRIVATE_ZONE_FORBIDDEN",
+                details={"target_zone_id": requested, "mood_delta_forbidden": True},
+            )
+        return requested, requested
+
+    aliased = ITEM_GIFT_ZONE_ALIASES.get(lowered)
+    if aliased is not None:
+        zdef = known_zones.get(aliased)
+        if isinstance(zdef, Mapping) and str(zdef.get("visibility") or "shared").lower() == "private":
+            raise V03PermissionError(
+                "PRIVATE_ZONE_FORBIDDEN",
+                details={"target_zone_id": requested, "mood_delta_forbidden": True},
+            )
+        return aliased, requested
+
+    raise V03ValidationError(
+        "INVALID_TARGET_ZONE",
+        details={"target_zone_id": requested},
+    )
+
+
+def _sweep_expired_item_gifts_in_place(
+    eco: dict[str, Any],
+    now_dt: datetime,
+    effective_now_iso: str,
+) -> list[str]:
+    """Lazily settle expired OFFERED item gifts to EXPIRED with zero guilt/omission_debt."""
+    gift_map = eco.get("item_gift_escrow")
+    if not isinstance(gift_map, dict):
+        return []
+    swept: list[str] = []
+    for gid, gdoc in gift_map.items():
+        if not isinstance(gdoc, dict) or gdoc.get("status") != "OFFERED":
+            continue
+        exp_dt = _parse_stored_iso(gdoc.get("expires_at"))
+        if exp_dt is not None and now_dt >= exp_dt:
+            gdoc["status"] = "EXPIRED"
+            gdoc["expired_at"] = effective_now_iso
+            gdoc["omission_debt"] = 0
+            gdoc["intimacy_bearing"] = False
+            gdoc["consent_grant"] = False
+            gdoc["mood_delta_forbidden"] = True
+            swept.append(str(gid))
+    return swept
+
+
+def _materialize_accepted_gift_in_matter(
+    day_root: Path,
+    gift_doc: Mapping[str, Any],
+    *,
+    now_iso: str,
+) -> dict[str, Any]:
+    """Materialize an accepted partner gift into v08_universal_matter shared space."""
+    if v08_matter is None:
+        raise V03ConflictError("MATTER_SUBSTRATE_UNAVAILABLE")
+
+    gift_id = str(gift_doc["gift_id"])
+    det_object_id = _stable_id("gift_obj", gift_id)
+    existing_state = v08_matter._read_state_zero_write(day_root)
+    existing_objects = existing_state.get("matter_objects")
+    if isinstance(existing_objects, Mapping) and det_object_id in existing_objects:
+        existing_row = existing_objects[det_object_id]
+        if isinstance(existing_row, Mapping):
+            return {
+                "status": "already_applied",
+                "object_id": det_object_id,
+                "target_parent_id": str(existing_row.get("parent_id") or gift_doc["target_zone_id"]),
+            }
+
+    primary_zone = str(gift_doc.get("target_zone_id") or "home_staging_corner")
+    candidate_zones: list[str] = [primary_zone]
+    for fb_zone in ITEM_GIFT_OVERFLOW_ZONES:
+        if fb_zone not in candidate_zones:
+            candidate_zones.append(fb_zone)
+
+    item_kind = str(gift_doc.get("item_kind") or "keepsake")
+    last_capacity_err: Optional[Exception] = None
+    for zone_id in candidate_zones:
+        bring_payload: dict[str, Any] = {
+            "object_id": det_object_id,
+            "label_cn": str(gift_doc["item_label_cn"]),
+            "item_kind": item_kind,
+            "target_parent_id": zone_id,
+            "operation_key": f"gift_accept_{gift_id}",
+        }
+        if item_kind == "paper":
+            bring_payload["paper_like"] = True
+        elif item_kind == "prepared_food":
+            bring_payload["cook_state"] = "cooked"
+            bring_payload["portions"] = 1
+        elif item_kind == "drink":
+            bring_payload["portions"] = 1
+        try:
+            return v08_matter.partner_bring_item(day_root, bring_payload, now_iso=now_iso)
+        except v08_matter.V08MatterError as exc:
+            if exc.reason_code == "CAPACITY_FULL":
+                last_capacity_err = exc
+                continue
+            if exc.reason_code == "OBJECT_NOT_FOUND":
+                raise V03PermissionError(
+                    "PRIVATE_ZONE_FORBIDDEN",
+                    details={"target_zone_id": zone_id, "mood_delta_forbidden": True},
+                ) from exc
+            raise V03ConflictError(
+                "GIFT_MATERIALIZATION_FAILED",
+                details={"reason": exc.reason_code, "target_zone_id": zone_id},
+            ) from exc
+
+    raise V03ConflictError(
+        "TARGET_ZONE_CAPACITY_FULL",
+        details={"gift_id": gift_id, "target_zone_id": primary_zone},
+    ) from last_capacity_err
 
 
 def _sync_acute_illness_to_adult_intimacy(day_root: Path, *, is_acute: bool, phase: str, now_iso: str) -> bool:
@@ -1057,10 +1376,16 @@ def _derive_outbound_ack_fields(rec: Mapping[str, Any]) -> tuple[str, str, bool]
     status = str(rec.get("status") or "DELIVERED").upper()
     if status == "READ":
         return "READ", "partner_read_acked", True
+    if status == "APPROVED_FOR_DELIVERY":
+        return "QUEUED_FOR_TRANSPORT", "queued_for_transport", False
+    if status == "CLAIMED_BY_TRANSPORT":
+        return "CLAIMED_BY_TRANSPORT", "claimed_by_transport", False
     if status == "DELIVERED":
         return "SENT_PENDING_ACK", "sent_pending_ack", False
     if status == "UNKNOWN":
         return "TRANSPORT_UNKNOWN", "transport_unknown", False
+    if status == "FAILED":
+        return "DELIVERY_FAILED", "delivery_failed", False
     if status == "WITHDRAWN_DEAD_LETTER":
         return "WITHDRAWN_DEAD_LETTER", "withdrawn_dead_letter", False
     return "WITHDRAWN_UNREAD", "withdrawn_unread", False
@@ -1092,6 +1417,13 @@ def redact_ecology_for_diagnostics(raw_state: Mapping[str, Any]) -> dict[str, An
         if isinstance(edoc, Mapping):
             st = str(edoc.get("status") or "UNKNOWN")
             escrow_status_counts[st] = escrow_status_counts.get(st, 0) + 1
+
+    item_gifts = eco.get("item_gift_escrow") if isinstance(eco.get("item_gift_escrow"), Mapping) else {}
+    item_gift_status_counts: dict[str, int] = {}
+    for gdoc in item_gifts.values():
+        if isinstance(gdoc, Mapping):
+            gst = str(gdoc.get("status") or "UNKNOWN")
+            item_gift_status_counts[gst] = item_gift_status_counts.get(gst, 0) + 1
 
     ledger_entries = eco.get("ledger_entries") if isinstance(eco.get("ledger_entries"), list) else []
     ledger_kind_counts: dict[str, int] = {}
@@ -1143,6 +1475,8 @@ def redact_ecology_for_diagnostics(raw_state: Mapping[str, Any]) -> dict[str, An
             "deliberation_count": len(eco.get("budget_deliberations") or []),
             "escrow_count": len(escrows),
             "escrow_status_counts": escrow_status_counts,
+            "item_gift_escrow_count": len(item_gifts),
+            "item_gift_status_counts": item_gift_status_counts,
         },
         "illness": {
             "phase": str(ill.get("phase") or "healthy"),
@@ -1226,6 +1560,37 @@ def project_v03_ecology(
             e_copy.pop("private_note", None)
         escrows_out.append(e_copy)
 
+    indexed_item_gifts: list[tuple[int, dict[str, Any]]] = []
+    raw_item_gift_map = eco.get("item_gift_escrow") if isinstance(eco.get("item_gift_escrow"), Mapping) else {}
+    for idx, raw_gift in enumerate(raw_item_gift_map.values()):
+        if not isinstance(raw_gift, Mapping):
+            continue
+        g_copy = copy.deepcopy(dict(raw_gift))
+        exp_dt = _parse_stored_iso(g_copy.get("expires_at"))
+        if g_copy.get("status") == "OFFERED" and exp_dt is not None and now_dt >= exp_dt:
+            g_copy["status"] = "EXPIRED"
+            g_copy["effective_status"] = "EXPIRED"
+        else:
+            g_copy["effective_status"] = g_copy.get("status")
+        g_copy.setdefault("provenance", "partner_gift")
+        g_copy["intimacy_bearing"] = False
+        g_copy["consent_grant"] = False
+        g_copy["mood_delta_forbidden"] = True
+        g_copy["omission_debt"] = 0
+        if not has_subject_capability:
+            g_copy.pop("private_note", None)
+        indexed_item_gifts.append((idx, g_copy))
+
+    indexed_item_gifts.sort(
+        key=lambda pair: (
+            _parse_stored_iso(pair[1].get("offered_at")) or datetime.min.replace(tzinfo=DEFAULT_TZ),
+            pair[0],
+        ),
+        reverse=True,
+    )
+    item_gifts_out: list[dict[str, Any]] = [pair[1] for pair in indexed_item_gifts]
+    item_gift_pending_count = sum(1 for g in item_gifts_out if g.get("status") == "OFFERED")
+
     ledger_out = copy.deepcopy(list(eco.get("ledger_entries") or []))
     if not has_subject_capability:
         filtered_ledger: list[dict[str, Any]] = []
@@ -1276,6 +1641,8 @@ def project_v03_ecology(
         "savings_goals": goals_out,
         "budget_deliberations": delibs_out,
         "partner_stipend_escrow": escrows_out,
+        "item_gift_escrow": item_gifts_out,
+        "item_gift_escrow_pending_count": item_gift_pending_count,
         "ledger_entries": ledger_out,
     }
     if upstream_wallet.get("upstream_wallet_split") is not None:
@@ -1407,6 +1774,7 @@ def project_v03_ecology(
     outbound_records_out: list[dict[str, Any]] = []
     sent_today_count = 0
     unknown_pending_count = 0
+    queued_for_transport_count = 0
     sent_pending_ack_count = 0
     acked_read_count = 0
     for rec in rb.get("outbound_records") or []:
@@ -1415,12 +1783,15 @@ def project_v03_ecology(
         r_copy = copy.deepcopy(dict(rec))
         ack_state, ep_state, read_ok = _derive_outbound_ack_fields(r_copy)
         r_copy["delivery_ack_state"] = str(r_copy.get("delivery_ack_state") or ack_state)
+        r_copy["ack_state"] = str(r_copy.get("ack_state") or r_copy["delivery_ack_state"])
         r_copy["epistemic_state"] = str(r_copy.get("epistemic_state") or ep_state)
         r_copy["partner_read_confirmed"] = bool(r_copy.get("partner_read_confirmed", read_ok))
-        if r_copy.get("wall_day") == today_key and r_copy.get("status") in {"DELIVERED", "READ", "UNKNOWN"}:
+        if r_copy.get("wall_day") == today_key and r_copy.get("status") in OUTBOUND_QUOTA_COUNTING_STATUSES:
             sent_today_count += 1
         if r_copy.get("status") == "UNKNOWN":
             unknown_pending_count += 1
+        if r_copy.get("status") in OUTBOUND_PENDING_STATUSES:
+            queued_for_transport_count += 1
         if r_copy["delivery_ack_state"] == "SENT_PENDING_ACK":
             sent_pending_ack_count += 1
         elif r_copy["delivery_ack_state"] == "READ":
@@ -1433,6 +1804,8 @@ def project_v03_ecology(
         gate_epistemic_state = "sent_pending_ack"
     elif unknown_pending_count > 0:
         gate_epistemic_state = "transport_unknown"
+    elif queued_for_transport_count > 0:
+        gate_epistemic_state = "queued_for_transport"
     elif acked_read_count > 0:
         gate_epistemic_state = "partner_read_acked"
     else:
@@ -1450,6 +1823,7 @@ def project_v03_ecology(
             "delivered_equals_read": False,
             "sent_pending_ack_equals_read": False,
             "sent_pending_ack_count": sent_pending_ack_count,
+            "queued_for_transport_count": queued_for_transport_count,
             "blind_retry_on_unknown_forbidden": True,
             "in_conversation_and_explicit_reminder_exempt": True,
             "quiet_hours_active_now": quiet_now,
@@ -1486,6 +1860,7 @@ def project_v03_ecology(
         "observed_at": effective_now_iso,
         "state_status": "available" if state_reason is None else "degraded",
         "state_reason_code": state_reason,
+        "llm_calls": 0,
         "data": {
             "economy": economy_proj,
             "illness": illness_proj,
@@ -1665,6 +2040,218 @@ def _evolve_illness_chunked(
 # ---------------------------------------------------------------------------
 
 
+def _emit_v03_lived_episode(
+    day_root: Path | str,
+    *,
+    episode_key: str,
+    topic: str,
+    exact_detail: str,
+    gist_summary: str,
+    occurred_at: str,
+    emotional_salience: float = 0.54,
+    affect_kind: Optional[str] = "affect_pulse",
+    affect_intensity: int = 42,
+    shared: bool = True,
+    source_refs: tuple[tuple[str, str], ...] = (),
+) -> dict[str, Any]:
+    """Best-effort canonical memory sink hook for v03 illness & economic milestones (write-path only)."""
+    try:
+        try:
+            from components.life.scripts import lived_memory_sink as _lms
+        except ImportError:
+            _life_dir = str(Path(__file__).resolve().parents[2] / "life" / "scripts")
+            if _life_dir not in sys.path:
+                sys.path.insert(0, _life_dir)
+            import lived_memory_sink as _lms  # type: ignore[no-redef]
+        ev = _lms.LivedEpisodeEvent(
+            episode_key=episode_key,
+            domain="v03_illness",
+            topic=topic,
+            exact_detail=exact_detail,
+            gist_summary=gist_summary,
+            occurred_at=occurred_at,
+            emotional_salience=emotional_salience,
+            affect_kind=affect_kind,
+            affect_intensity=affect_intensity,
+            shared=shared,
+            source_refs=source_refs,
+        )
+        return _lms.emit_lived_episode_safe(day_root, ev, now_iso=occurred_at)
+    except Exception as exc:
+        return {"ok": False, "recorded": False, "reason": f"SINK_IMPORT:{type(exc).__name__}", "llm_calls": 0}
+
+
+_V03_PHASE_LABELS_CN: dict[str, str] = {
+    "healthy": "健康如常",
+    "prodrome": "初感不适",
+    "acute_illness": "生病急性期",
+    "convalescence": "病后恢复期",
+    "recovered": "基本痊愈",
+}
+
+
+def _maybe_emit_v03_command_episode(
+    root_path: Path,
+    *,
+    action: str,
+    payload: Mapping[str, Any],
+    state: Mapping[str, Any],
+    receipt_obj: Mapping[str, Any],
+    prev_illness_phase: str,
+    effective_now_iso: str,
+) -> Optional[dict[str, Any]]:
+    ill = state.get("illness") if isinstance(state.get("illness"), Mapping) else {}
+    cur_phase = str(ill.get("phase") or "healthy")
+    ep_id = str(ill.get("episode_id") or "")
+    rcpt_id = str(receipt_obj.get("receipt_id") or f"rev_{state.get('revision', 0)}")
+    op_tok = str(receipt_obj.get("operation_key") or rcpt_id).strip()[:64]
+
+    if action == "record_strain_or_rest":
+        ev_kind = str(receipt_obj.get("event_kind") or payload.get("event_kind") or "")
+        phase_changed = cur_phase != prev_illness_phase
+        if not phase_changed and ev_kind != "caught_in_rain":
+            return None
+        prev_cn = _V03_PHASE_LABELS_CN.get(prev_illness_phase, prev_illness_phase)
+        cur_cn = _V03_PHASE_LABELS_CN.get(cur_phase, cur_phase)
+        strain_list = ill.get("strain_events") or []
+        latest_ev = strain_list[-1] if strain_list and isinstance(strain_list[-1], Mapping) else {}
+        ev_id = str(latest_ev.get("event_id") or rcpt_id)
+        refs: list[tuple[str, str]] = [("event_id", ev_id)]
+        if ep_id:
+            refs.append(("episode_id", ep_id))
+        if ev_kind == "caught_in_rain":
+            topic = f"淋雨后体感变化（{cur_cn}）" if phase_changed else "出门遇雨着凉"
+            detail = (
+                f"淋雨后身体状态由{prev_cn}转为{cur_cn}（负荷 {ill.get('strain_load', 0)}）"
+                if phase_changed
+                else f"在外面遇雨受凉（当前仍为{cur_cn}，负荷 {ill.get('strain_load', 0)}）"
+            )
+            gist = f"淋了场雨，身体转为{cur_cn}" if phase_changed else "外出途中遇雨淋湿，留了份体感提醒"
+        else:
+            topic = f"身体状态转入{cur_cn}"
+            detail = f"经由 {ev_kind} 后，身体状态由{prev_cn}转为{cur_cn}"
+            gist = f"身体从{prev_cn}转入{cur_cn}"
+        return _emit_v03_lived_episode(
+            root_path,
+            episode_key=f"v03_illness:strain:{ep_id or ev_id}:{prev_illness_phase}_to_{cur_phase}:{ev_kind}",
+            topic=topic,
+            exact_detail=detail,
+            gist_summary=gist,
+            occurred_at=effective_now_iso,
+            emotional_salience=0.72 if cur_phase == "acute_illness" else (0.58 if phase_changed else 0.48),
+            affect_kind="mood_shift" if phase_changed else "affect_pulse",
+            affect_intensity=60 if cur_phase == "acute_illness" else (48 if phase_changed else 40),
+            shared=True,
+            source_refs=tuple(refs),
+        )
+
+    if action == "advance_illness_recovery":
+        prev_p = str(receipt_obj.get("previous_phase") or prev_illness_phase)
+        if cur_phase == prev_p:
+            return None
+        prev_cn = _V03_PHASE_LABELS_CN.get(prev_p, prev_p)
+        cur_cn = _V03_PHASE_LABELS_CN.get(cur_phase, cur_phase)
+        archived = ill.get("archived_episodes") or []
+        closed_ep = (
+            str(archived[-1].get("episode_id") or "")
+            if cur_phase == "healthy" and archived and isinstance(archived[-1], Mapping)
+            else ""
+        )
+        eff_ep = ep_id or closed_ep or rcpt_id
+        refs = [("episode_id", eff_ep), ("event_id", rcpt_id)]
+        return _emit_v03_lived_episode(
+            root_path,
+            episode_key=f"v03_illness:recovery:{eff_ep}:{prev_p}_to_{cur_phase}",
+            topic=f"身体休养进展：{cur_cn}",
+            exact_detail=f"经过休养，身体状态从{prev_cn}自然过渡到{cur_cn}",
+            gist_summary=f"休养后身体从{prev_cn}好转到{cur_cn}",
+            occurred_at=effective_now_iso,
+            emotional_salience=0.64 if cur_phase in ("recovered", "healthy") else 0.52,
+            affect_kind="mood_shift",
+            affect_intensity=46,
+            shared=True,
+            source_refs=tuple(refs),
+        )
+
+    if action == "offer_sick_care":
+        sup_id = str(receipt_obj.get("support_id") or rcpt_id)
+        care_kind = str(receipt_obj.get("care_kind") or payload.get("care_kind") or "care")
+        return _emit_v03_lived_episode(
+            root_path,
+            episode_key=f"v03_illness:care:{sup_id}",
+            topic=f"收到病中照料（{care_kind}）",
+            exact_detail=f"在不适期间收到了温和照料：{care_kind}",
+            gist_summary=f"生病休养时收到了{care_kind}照料",
+            occurred_at=effective_now_iso,
+            emotional_salience=0.52,
+            affect_kind="affect_pulse",
+            affect_intensity=40,
+            shared=True,
+            source_refs=(("event_id", sup_id),),
+        )
+
+    if action == "complete_independent_work":
+        tx_id = str(receipt_obj.get("settlement_transaction_id") or rcpt_id)
+        job_kind = str(receipt_obj.get("job_kind") or payload.get("job_kind") or "work")
+        work_ref = str(receipt_obj.get("work_ref") or payload.get("work_ref") or tx_id)
+        cents = int(receipt_obj.get("credited_cents") or 0)
+        return _emit_v03_lived_episode(
+            root_path,
+            episode_key=f"v03_illness:work:{tx_id}",
+            topic=f"完成独立工作：{job_kind}",
+            exact_detail=f"独立完成 {job_kind}（{work_ref}），入账 {cents} 分",
+            gist_summary=f"独立完成了一笔 {job_kind} 工作并结清收入",
+            occurred_at=effective_now_iso,
+            emotional_salience=0.50,
+            affect_kind="affect_pulse",
+            affect_intensity=38,
+            shared=True,
+            source_refs=(("event_id", tx_id), ("work_ref", work_ref)),
+        )
+
+    if action == "deliberate_purchase":
+        tx_id = receipt_obj.get("purchase_transaction_id")
+        if not tx_id:
+            return None
+        title = str(payload.get("item_title") or "小物")[:80]
+        shared_flag = bool(payload.get("shared_with_partner", True))
+        return _emit_v03_lived_episode(
+            root_path,
+            episode_key=f"v03_illness:purchase:{tx_id}",
+            topic=f"独立购入：{title}",
+            exact_detail=f"按预算斟酌后独立购入了「{title}」",
+            gist_summary=f"按自己预算买下了「{title}」",
+            occurred_at=effective_now_iso,
+            emotional_salience=0.48,
+            affect_kind="affect_pulse",
+            affect_intensity=38,
+            shared=shared_flag,
+            source_refs=(("event_id", str(tx_id)),),
+        )
+
+    if action == "decide_item_gift" and str(receipt_obj.get("decision") or "") == "accept":
+        gid = str(receipt_obj.get("gift_id") or op_tok)
+        obj_id = str(receipt_obj.get("materialized_object_id") or "")
+        refs = [("event_id", gid)]
+        if obj_id:
+            refs.append(("object_id", obj_id))
+        return _emit_v03_lived_episode(
+            root_path,
+            episode_key=f"v03_illness:gift_accepted:{gid}",
+            topic="收下并安放小物礼物",
+            exact_detail=f"欣然收下了一件礼物（{gid}），安放到屋里",
+            gist_summary="收下并安放了一件礼物",
+            occurred_at=effective_now_iso,
+            emotional_salience=0.56,
+            affect_kind="mood_shift",
+            affect_intensity=44,
+            shared=True,
+            source_refs=tuple(refs),
+        )
+
+    return None
+
+
 def apply_v03_ecology_command(
     day_root: Path | str,
     payload: Mapping[str, Any],
@@ -1672,12 +2259,12 @@ def apply_v03_ecology_command(
     actor_side: str,
     now_iso: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Execute one validated ecology mutation with idempotency, fingerprint check, and CAS."""
+    """Execute one validated ecology mutation with idempotency, fingerprint check, CAS, and state_file_lock."""
     root_path = Path(day_root)
     if not isinstance(payload, Mapping):
         raise V03ValidationError("INVALID_PAYLOAD")
 
-    # Reject any mood_delta / affection_score smuggling anywhere in payload
+    # Reject any mood_delta / affection_score smuggling anywhere in payload (stateless, zero-write)
     for key in payload:
         if str(key).strip().lower() in FORBIDDEN_MOOD_KEYS:
             raise V03ValidationError(
@@ -1705,6 +2292,109 @@ def apply_v03_ecology_command(
     if payload.get("expected_revision") is not None:
         expected_rev = _non_negative_int(payload.get("expected_revision"), field="expected_revision")
 
+    eco_path = ecology_state_path(root_path)
+    if (
+        (root_path.exists() and root_path.is_symlink())
+        or (eco_path.parent.exists() and eco_path.parent.is_symlink())
+        or eco_path.is_symlink()
+    ):
+        raise V03PermissionError("SYMLINK_PATH_FORBIDDEN")
+
+    # Zero-write pre-check for corrupted state or missing outbound target so rejected 404/409
+    # requests on a lockless fixture never create a .lock sidecar.
+    pre_state, pre_reason = read_stored_ecology_zero_write(root_path)
+    if pre_reason == "V03_ECOLOGY_STATE_SYMLINK":
+        raise V03PermissionError("SYMLINK_PATH_FORBIDDEN")
+    if pre_reason is not None:
+        raise V03ConflictError(pre_reason)
+
+    if action in {"ack_proactive_outbound_delivery", "ack_outbound_read", "withdraw_pending_outbound"}:
+        pre_receipts = pre_state.get("operation_receipts")
+        if not isinstance(pre_receipts, Mapping) or op_key is None or op_key not in pre_receipts:
+            raw_pre_target = (
+                payload.get("outbound_id")
+                if action != "ack_outbound_read"
+                else next(
+                    (
+                        payload[k]
+                        for k in ("outbound_id", "record_id", "note_id", "id")
+                        if payload.get(k) is not None
+                    ),
+                    None,
+                )
+            )
+            if isinstance(raw_pre_target, str) and raw_pre_target.strip()[:4].lower() == "eco:":
+                raw_pre_target = raw_pre_target.strip()[4:]
+            if isinstance(raw_pre_target, str) and raw_pre_target.strip():
+                pre_oid = raw_pre_target.strip()
+                pre_rb = pre_state.get("reality_bridge")
+                pre_recs = pre_rb.get("outbound_records") if isinstance(pre_rb, Mapping) else []
+                if not any(
+                    isinstance(r, Mapping) and r.get("outbound_id") == pre_oid
+                    for r in (pre_recs or [])
+                ):
+                    raise V03NotFoundError("OUTBOUND_NOT_FOUND", details={"outbound_id": pre_oid})
+
+    if action == "offer_item_gift":
+        if normalized_actor != "partner":
+            raise V03PermissionError("FORBIDDEN_ACTOR_SIDE")
+        _clean_str(payload.get("item_label_cn"), field="item_label_cn", max_len=40)
+        _resolve_gift_item_kind(payload.get("item_kind"))
+        if payload.get("estimated_jpy") is not None:
+            _non_negative_int(
+                payload["estimated_jpy"],
+                field="estimated_jpy",
+                maximum=MAX_ESTIMATED_GIFT_JPY,
+            )
+        _resolve_gift_target_zone_zero_write(root_path, payload.get("target_zone_id"))
+        if payload.get("note") is not None:
+            _clean_str(payload["note"], field="note", max_len=160)
+        if payload.get("context_tag") is not None:
+            _clean_str(payload["context_tag"], field="context_tag", max_len=64)
+    elif action == "decide_item_gift":
+        if normalized_actor != "subject":
+            raise V03PermissionError("FORBIDDEN_ACTOR_SIDE")
+        _clean_id(payload.get("gift_id"), field="gift_id")
+        pre_decision = _clean_str(payload.get("decision"), field="decision", max_len=24).lower()
+        if pre_decision not in ITEM_GIFT_DECISIONS:
+            raise V03ValidationError("INVALID_GIFT_DECISION")
+        if payload.get("note") is not None:
+            _clean_str(payload["note"], field="note", max_len=160)
+        if payload.get("private_note") is not None:
+            _clean_str(
+                payload["private_note"],
+                field="private_note",
+                max_len=240,
+                allow_newlines=True,
+            )
+
+    with _tx.state_file_lock(eco_path):
+        return _apply_v03_ecology_command_locked(
+            root_path=root_path,
+            payload=payload,
+            action=action,
+            normalized_actor=normalized_actor,
+            now_dt=now_dt,
+            effective_now_iso=effective_now_iso,
+            op_key=op_key,
+            explicit_fp=explicit_fp,
+            expected_rev=expected_rev,
+        )
+
+
+def _apply_v03_ecology_command_locked(
+    *,
+    root_path: Path,
+    payload: Mapping[str, Any],
+    action: str,
+    normalized_actor: str,
+    now_dt: datetime,
+    effective_now_iso: str,
+    op_key: Optional[str],
+    explicit_fp: Optional[str],
+    expected_rev: Optional[int],
+) -> dict[str, Any]:
+    """Locked read-modify-write body of ``apply_v03_ecology_command``."""
     state, state_reason = read_stored_ecology_zero_write(root_path)
     if state_reason == "V03_ECOLOGY_STATE_SYMLINK":
         raise V03PermissionError("SYMLINK_PATH_FORBIDDEN")
@@ -1752,6 +2442,7 @@ def apply_v03_ecology_command(
     upstream_wallet = _read_upstream_wallet_zero_write(root_path)
     upstream_somatic = _read_upstream_somatic_and_body_zero_write(root_path, effective_now_iso)
     subject_ref = _resolve_subject_ref_zero_write(root_path)
+    initial_illness_phase = str((state.get("illness") or {}).get("phase") or "healthy")
 
     def _commit_state(
         *,
@@ -1767,6 +2458,9 @@ def apply_v03_ecology_command(
             or derived_nums["escrow_pending_cents"] < 0
         ):
             raise V03ConflictError("NEGATIVE_BALANCE_FORBIDDEN")
+
+        # Lazily settle expired item gift offers on normal clock/ecology mutations (zero guilt/debt)
+        _sweep_expired_item_gifts_in_place(state["economy"], now_dt, effective_now_iso)
 
         next_rev = int(state.get("revision") or 0) + 1
         state["revision"] = next_rev
@@ -1798,7 +2492,14 @@ def apply_v03_ecology_command(
 
         # GAP-05: Best-effort mirror sync to world_property_economy.json when genesis exists
         try:
-            for cand_home in (root_path, root_path / "world", root_path / "world-home"):
+            sync_paths = _instance_paths.resolve_instance_paths(root_path)
+            for cand_home in (
+                sync_paths.world_home,
+                sync_paths.day_root / "one-day" / "world-home",
+                root_path,
+                root_path / "world",
+                root_path / "world-home",
+            ):
                 if (cand_home / "state" / "world_property_economy.json").is_file():
                     import world_property_economy as wpe  # type: ignore
 
@@ -1833,6 +2534,16 @@ def apply_v03_ecology_command(
                     break
         except Exception:
             pass
+
+        _maybe_emit_v03_command_episode(
+            root_path,
+            action=action,
+            payload=payload,
+            state=state,
+            receipt_obj=receipt_obj,
+            prev_illness_phase=initial_illness_phase,
+            effective_now_iso=effective_now_iso,
+        )
 
         return project_v03_ecology(
             root_path,
@@ -2399,6 +3110,319 @@ def apply_v03_ecology_command(
             }
         )
 
+    if action == "offer_item_gift":
+        if normalized_actor != "partner":
+            raise V03PermissionError("FORBIDDEN_ACTOR_SIDE")
+
+        item_label_cn = _clean_str(payload.get("item_label_cn"), field="item_label_cn", max_len=40)
+        matter_item_kind, requested_item_kind = _resolve_gift_item_kind(payload.get("item_kind"))
+        estimated_jpy = (
+            _non_negative_int(
+                payload["estimated_jpy"],
+                field="estimated_jpy",
+                maximum=MAX_ESTIMATED_GIFT_JPY,
+            )
+            if payload.get("estimated_jpy") is not None
+            else 0
+        )
+        target_zone_id, requested_zone_id = _resolve_gift_target_zone_zero_write(
+            root_path,
+            payload.get("target_zone_id"),
+        )
+        note = (
+            _clean_str(payload["note"], field="note", max_len=160)
+            if payload.get("note") is not None
+            else None
+        )
+        context_tag = (
+            _clean_str(payload["context_tag"], field="context_tag", max_len=64).lower()
+            if payload.get("context_tag") is not None
+            else "ordinary_gift"
+        )
+
+        # 1) Anti-transactional / anti-consent-buying guard (403)
+        live_block_reason = _check_transactional_funding_guard_zero_write(root_path, now_dt)
+        if live_block_reason is not None:
+            raise V03PermissionError(
+                "TRANSACTIONAL_FUNDING_FORBIDDEN",
+                details={
+                    "alias_code": "TRANSACTIONAL_GIFT_FORBIDDEN",
+                    "trigger": live_block_reason,
+                    "intimacy_bearing": False,
+                    "mood_delta_forbidden": True,
+                },
+            )
+        if context_tag in TRANSACTIONAL_CONTEXT_TAGS:
+            raise V03PermissionError(
+                "TRANSACTIONAL_FUNDING_FORBIDDEN",
+                details={
+                    "alias_code": "TRANSACTIONAL_GIFT_FORBIDDEN",
+                    "trigger": f"CONTEXT_TAG:{context_tag}",
+                    "intimacy_bearing": False,
+                    "mood_delta_forbidden": True,
+                },
+            )
+        lowered_label = item_label_cn.lower()
+        if any(cue in lowered_label for cue in TRANSACTIONAL_FUNDING_CUES):
+            raise V03PermissionError(
+                "TRANSACTIONAL_FUNDING_FORBIDDEN",
+                details={
+                    "alias_code": "TRANSACTIONAL_GIFT_FORBIDDEN",
+                    "trigger": "TRANSACTIONAL_LABEL_CUE",
+                    "intimacy_bearing": False,
+                    "mood_delta_forbidden": True,
+                },
+            )
+        if note is not None:
+            lowered_note = note.lower()
+            if any(cue in lowered_note for cue in TRANSACTIONAL_FUNDING_CUES):
+                raise V03PermissionError(
+                    "TRANSACTIONAL_FUNDING_FORBIDDEN",
+                    details={
+                        "alias_code": "TRANSACTIONAL_GIFT_FORBIDDEN",
+                        "trigger": "TRANSACTIONAL_NOTE_CUE",
+                        "intimacy_bearing": False,
+                        "mood_delta_forbidden": True,
+                    },
+                )
+
+        # 2) Open item gift escrow cap check (409 GIFT_ESCROW_FULL)
+        gift_map = eco.setdefault("item_gift_escrow", {})
+        open_count = 0
+        for existing_gift in gift_map.values():
+            if not isinstance(existing_gift, Mapping) or existing_gift.get("status") != "OFFERED":
+                continue
+            exp_dt = _parse_stored_iso(existing_gift.get("expires_at"))
+            if exp_dt is None or now_dt < exp_dt:
+                open_count += 1
+        if open_count >= MAX_OPEN_ITEM_GIFTS:
+            raise V03ConflictError(
+                "GIFT_ESCROW_FULL",
+                details={
+                    "max_open_item_gifts": MAX_OPEN_ITEM_GIFTS,
+                    "open_count": open_count,
+                    "mood_delta_forbidden": True,
+                },
+            )
+
+        gift_id = _stable_id("item_gift", item_label_cn, op_key or effective_now_iso, state["revision"])
+        expires_iso = format_wall_iso(now_dt + timedelta(hours=GIFT_ESCROW_TTL_HOURS))
+        gift_doc: dict[str, Any] = {
+            "gift_id": gift_id,
+            "item_label_cn": item_label_cn,
+            "item_kind": matter_item_kind,
+            "requested_item_kind": requested_item_kind,
+            "estimated_jpy": estimated_jpy,
+            "target_zone_id": target_zone_id,
+            "requested_zone_id": requested_zone_id,
+            "note": note,
+            "context_tag": context_tag,
+            "status": "OFFERED",
+            "offered_at": effective_now_iso,
+            "expires_at": expires_iso,
+            "decided_at": None,
+            "decision": None,
+            "decision_note": None,
+            "materialized_object_id": None,
+            "materialized_zone_id": None,
+            "provenance": "partner_gift",
+            "operation_key": op_key,
+            "touches_subject_wallet": False,
+            "intimacy_bearing": False,
+            "consent_grant": False,
+            "appraisal_excluded": True,
+            "mood_delta_forbidden": True,
+            "omission_debt": 0,
+        }
+        if len(gift_map) >= MAX_ITEM_GIFT_RECORDS:
+            for k, v in list(gift_map.items()):
+                if isinstance(v, Mapping):
+                    v_exp = _parse_stored_iso(v.get("expires_at"))
+                    is_active_offer = v.get("status") == "OFFERED" and (v_exp is None or now_dt < v_exp)
+                    if not is_active_offer:
+                        gift_map.pop(k, None)
+                        break
+        gift_map[gift_id] = gift_doc
+        return _commit_state(
+            extra_receipt={
+                "gift_id": gift_id,
+                "gift_status": "OFFERED",
+                "item_label_cn": item_label_cn,
+                "item_kind": matter_item_kind,
+                "target_zone_id": target_zone_id,
+                "estimated_jpy": estimated_jpy,
+                "expires_at": expires_iso,
+                "materialized_immediately": False,
+                "wallet_credited_immediately": False,
+                "intimacy_bearing": False,
+                "omission_debt": 0,
+                "mood_delta_forbidden": True,
+            }
+        )
+
+    if action == "withdraw_item_gift":
+        if normalized_actor != "partner":
+            raise V03PermissionError("FORBIDDEN_ACTOR_SIDE")
+
+        raw_gift_ref = payload.get("gift_id")
+        target_ref = (
+            _clean_id(raw_gift_ref, field="gift_id")
+            if raw_gift_ref is not None
+            else "latest"
+        )
+        gift_map = eco.setdefault("item_gift_escrow", {})
+        if target_ref == "latest":
+            candidates = [
+                (k, v)
+                for k, v in gift_map.items()
+                if isinstance(v, Mapping) and v.get("status") == "OFFERED"
+            ]
+            if not candidates:
+                raise V03NotFoundError("GIFT_NOT_FOUND")
+            candidates.sort(
+                key=lambda kv: (
+                    _parse_stored_iso(kv[1].get("offered_at")) or datetime.min.replace(tzinfo=DEFAULT_TZ),
+                    str(kv[0]),
+                )
+            )
+            gift_id = candidates[-1][0]
+        else:
+            if target_ref not in gift_map:
+                raise V03NotFoundError("GIFT_NOT_FOUND", details={"gift_id": target_ref})
+            gift_id = target_ref
+
+        gift = gift_map[gift_id]
+        cur_status = str(gift.get("status") or "")
+        exp_dt = _parse_stored_iso(gift.get("expires_at"))
+        if cur_status == "EXPIRED" or (cur_status == "OFFERED" and exp_dt is not None and now_dt >= exp_dt):
+            raise V03ConflictError(
+                "GIFT_ESCROW_EXPIRED",
+                details={
+                    "gift_id": gift_id,
+                    "status": "EXPIRED",
+                    "omission_debt": 0,
+                    "mood_delta_forbidden": True,
+                },
+            )
+        if cur_status != "OFFERED":
+            raise V03ConflictError(
+                "GIFT_NOT_PENDING",
+                details={
+                    "gift_id": gift_id,
+                    "current_status": cur_status,
+                    "omission_debt": 0,
+                    "mood_delta_forbidden": True,
+                },
+            )
+
+        gift["status"] = "WITHDRAWN_BY_PARTNER"
+        gift["withdrawn_at"] = effective_now_iso
+        gift["decided_at"] = effective_now_iso
+        gift["omission_debt"] = 0
+        gift["relationship_penalty"] = 0
+        gift["mood_delta_forbidden"] = True
+        return _commit_state(
+            extra_receipt={
+                "gift_id": gift_id,
+                "gift_status": "WITHDRAWN_BY_PARTNER",
+                "omission_debt": 0,
+                "relationship_penalty": 0,
+                "mood_delta_forbidden": True,
+            }
+        )
+
+    if action == "decide_item_gift":
+        if normalized_actor != "subject":
+            raise V03PermissionError("FORBIDDEN_ACTOR_SIDE")
+
+        gift_id = _clean_id(payload.get("gift_id"), field="gift_id")
+        decision = _clean_str(payload.get("decision"), field="decision", max_len=24).lower()
+        if decision not in ITEM_GIFT_DECISIONS:
+            raise V03ValidationError("INVALID_GIFT_DECISION")
+        note = (
+            _clean_str(payload["note"], field="note", max_len=160)
+            if payload.get("note") is not None
+            else None
+        )
+
+        gift_map = eco.setdefault("item_gift_escrow", {})
+        if gift_id not in gift_map:
+            raise V03NotFoundError("GIFT_NOT_FOUND", details={"gift_id": gift_id})
+
+        gift = gift_map[gift_id]
+        cur_status = str(gift.get("status") or "")
+        exp_dt = _parse_stored_iso(gift.get("expires_at"))
+        if cur_status == "EXPIRED" or (cur_status == "OFFERED" and exp_dt is not None and now_dt >= exp_dt):
+            raise V03ConflictError(
+                "GIFT_ESCROW_EXPIRED",
+                details={
+                    "gift_id": gift_id,
+                    "status": "EXPIRED",
+                    "omission_debt": 0,
+                    "mood_delta_forbidden": True,
+                },
+            )
+        if cur_status != "OFFERED":
+            raise V03ConflictError(
+                "GIFT_NOT_PENDING",
+                details={
+                    "gift_id": gift_id,
+                    "current_status": cur_status,
+                    "omission_debt": 0,
+                    "mood_delta_forbidden": True,
+                },
+            )
+
+        if payload.get("private_note") is not None:
+            gift["private_note"] = _clean_str(
+                payload["private_note"],
+                field="private_note",
+                max_len=240,
+                allow_newlines=True,
+            )
+
+        gift["decision"] = decision
+        gift["decided_at"] = effective_now_iso
+        gift["decision_note"] = note
+        gift["omission_debt"] = 0
+        gift["relationship_penalty"] = 0
+        gift["intimacy_bearing"] = False
+        gift["consent_grant"] = False
+        gift["mood_delta_forbidden"] = True
+
+        materialized_object_id: Optional[str] = None
+        materialized_zone_id: Optional[str] = None
+        if decision == "accept":
+            brought = _materialize_accepted_gift_in_matter(
+                root_path,
+                gift,
+                now_iso=effective_now_iso,
+            )
+            materialized_object_id = str(brought["object_id"])
+            materialized_zone_id = str(brought.get("target_parent_id") or gift["target_zone_id"])
+            gift["status"] = "ACCEPTED"
+            gift["materialized_object_id"] = materialized_object_id
+            gift["materialized_zone_id"] = materialized_zone_id
+        else:
+            gift["status"] = "DECLINED"
+            gift["materialized_object_id"] = None
+            gift["materialized_zone_id"] = None
+
+        return _commit_state(
+            extra_receipt={
+                "gift_id": gift_id,
+                "decision": decision,
+                "gift_status": gift["status"],
+                "materialized_object_id": materialized_object_id,
+                "materialized_zone_id": materialized_zone_id,
+                "omission_debt": 0,
+                "relationship_penalty": 0,
+                "intimacy_bearing": False,
+                "consent_grant": False,
+                "mood_delta_forbidden": True,
+            }
+        )
+
     # =========================================================================
     # MODULE B: Embodied Strain & Multi-Day Illness Self-Healing (Ch. 05 + ADR-041)
     # =========================================================================
@@ -2910,6 +3934,18 @@ def apply_v03_ecology_command(
         if transport_outcome not in SIMULATED_TRANSPORT_OUTCOMES:
             raise V03ValidationError("INVALID_TRANSPORT_OUTCOME")
 
+        delivery_mode = (
+            _clean_str(
+                payload["delivery_mode"],
+                field="delivery_mode",
+                max_len=32,
+            ).lower()
+            if payload.get("delivery_mode") is not None
+            else "legacy_simulated"
+        )
+        if delivery_mode not in OUTBOUND_DELIVERY_MODES:
+            raise V03ValidationError("INVALID_DELIVERY_MODE")
+
         # Anti-blind-retry check against unresolved UNKNOWN outbound with identical channel+text
         norm_text_hash = _stable_hash(channel, " ".join(text.split()), length=24)
         for existing_out in rb.get("outbound_records") or []:
@@ -2956,13 +3992,15 @@ def apply_v03_ecology_command(
             )
 
         # Anti-harassment Guard 3: Daily proactive cap (design leaves no daily quota; host-adjustable silence knob)
+        # Counts APPROVED_FOR_DELIVERY & CLAIMED_BY_TRANSPORT alongside DELIVERED / READ / UNKNOWN
+        # so pending items cannot flood the queue before transport ack.
         today_str = _wall_day_str(now_dt)
         sent_today = sum(
             1
             for r in (rb.get("outbound_records") or [])
             if isinstance(r, Mapping)
             and r.get("wall_day") == today_str
-            and r.get("status") in {"DELIVERED", "READ", "UNKNOWN"}
+            and r.get("status") in OUTBOUND_QUOTA_COUNTING_STATUSES
         )
         daily_quota = int(
             policy["daily_proactive_quota"]
@@ -2985,7 +4023,7 @@ def apply_v03_ecology_command(
             1
             for r in (rb.get("outbound_records") or [])
             if isinstance(r, Mapping)
-            and r.get("status") in {"DELIVERED", "READ", "UNKNOWN"}
+            and r.get("status") in OUTBOUND_QUOTA_COUNTING_STATUSES
             and (_parse_stored_iso(r.get("created_at")) is not None)
             and (0.0 <= (now_dt - _parse_stored_iso(r.get("created_at"))).total_seconds() <= 7 * 86400)  # type: ignore[operator]
         )
@@ -3004,7 +4042,7 @@ def apply_v03_ecology_command(
                 if (
                     isinstance(r, Mapping)
                     and r.get("channel") == "desktop_note"
-                    and r.get("status") in {"DELIVERED", "READ", "UNKNOWN"}
+                    and r.get("status") in OUTBOUND_QUOTA_COUNTING_STATUSES
                 ):
                     note_dt = _parse_stored_iso(r.get("created_at"))
                     if note_dt is not None:
@@ -3025,7 +4063,7 @@ def apply_v03_ecology_command(
                 for r in (rb.get("outbound_records") or [])
                 if isinstance(r, Mapping)
                 and r.get("channel") == "desktop_note"
-                and r.get("status") in {"DELIVERED", "READ", "UNKNOWN"}
+                and r.get("status") in OUTBOUND_QUOTA_COUNTING_STATUSES
                 and (_parse_stored_iso(r.get("created_at")) is not None)
                 and (0.0 <= (now_dt - _parse_stored_iso(r.get("created_at"))).total_seconds() <= 7 * 86400)  # type: ignore[operator]
             )
@@ -3054,7 +4092,7 @@ def apply_v03_ecology_command(
                 for r in (rb.get("outbound_records") or [])
                 if isinstance(r, Mapping)
                 and r.get("channel") in {"slow_mail", "email_letter"}
-                and r.get("status") in {"DELIVERED", "READ", "UNKNOWN"}
+                and r.get("status") in OUTBOUND_QUOTA_COUNTING_STATUSES
                 and (_parse_stored_iso(r.get("created_at")) is not None)
                 and (0.0 <= (now_dt - _parse_stored_iso(r.get("created_at"))).total_seconds() <= 30 * 86400)  # type: ignore[operator]
             )
@@ -3074,7 +4112,7 @@ def apply_v03_ecology_command(
         last_outbound_dt: Optional[datetime] = None
         last_outbound_id: Optional[str] = None
         for r in (rb.get("outbound_records") or []):
-            if not isinstance(r, Mapping) or r.get("status") not in {"DELIVERED", "READ", "UNKNOWN"}:
+            if not isinstance(r, Mapping) or r.get("status") not in OUTBOUND_QUOTA_COUNTING_STATUSES:
                 continue
             rec_dt = _parse_stored_iso(r.get("created_at"))
             if rec_dt is not None and (last_outbound_dt is None or rec_dt > last_outbound_dt):
@@ -3109,8 +4147,41 @@ def apply_v03_ecology_command(
             "created_at": effective_now_iso,
         }
 
-        ack_state = "SENT_PENDING_ACK" if transport_outcome == "DELIVERED" else "TRANSPORT_UNKNOWN"
-        ep_state = "sent_pending_ack" if transport_outcome == "DELIVERED" else "transport_unknown"
+        explicit_expires_iso: Optional[str] = None
+        if payload.get("expires_at") is not None:
+            explicit_expires_iso = format_wall_iso(
+                parse_iso_moment(payload["expires_at"], field="expires_at")
+            )
+        explicit_trigger_kind: Optional[str] = (
+            _clean_str(payload["trigger_kind"], field="trigger_kind", max_len=64)
+            if payload.get("trigger_kind") is not None
+            else None
+        )
+        explicit_fact_ref: Optional[str] = (
+            _clean_str(payload["fact_ref"], field="fact_ref", max_len=160)
+            if payload.get("fact_ref") is not None
+            else None
+        )
+
+        if delivery_mode == "honest_outbox":
+            final_status = "APPROVED_FOR_DELIVERY"
+            ack_state = "QUEUED_FOR_TRANSPORT"
+            ep_state = "queued_for_transport"
+            ep_ceiling = "queued"
+            delivered_at_iso: Optional[str] = None
+            expires_at_iso: Optional[str] = explicit_expires_iso
+            reconcile_req = False
+            commit_outcome = "APPLIED"
+        else:
+            final_status = transport_outcome  # "DELIVERED" or "UNKNOWN" (NEVER "READ" on send!)
+            ack_state = "SENT_PENDING_ACK" if transport_outcome == "DELIVERED" else "TRANSPORT_UNKNOWN"
+            ep_state = "sent_pending_ack" if transport_outcome == "DELIVERED" else "transport_unknown"
+            ep_ceiling = "sent"
+            delivered_at_iso = effective_now_iso if transport_outcome == "DELIVERED" else None
+            expires_at_iso = explicit_expires_iso or format_wall_iso(now_dt + timedelta(hours=24))
+            reconcile_req = transport_outcome == "UNKNOWN"
+            commit_outcome = "UNKNOWN" if transport_outcome == "UNKNOWN" else "APPLIED"
+
         out_doc: dict[str, Any] = {
             "outbound_id": outbound_id,
             "fence_id": fence_id,
@@ -3125,18 +4196,27 @@ def apply_v03_ecology_command(
             "text": text,
             "line_count": len(lines),
             "content_dedup_hash": norm_text_hash,
-            "status": transport_outcome,  # "DELIVERED" or "UNKNOWN" (NEVER "READ" on send!)
+            "delivery_mode": delivery_mode,
+            "status": final_status,
+            "ack_state": ack_state,
             "delivery_ack_state": ack_state,
             "epistemic_state": ep_state,
             "partner_read_confirmed": False,
-            "epistemic_ceiling": "sent",
+            "epistemic_ceiling": ep_ceiling,
             "delivered_is_not_read": True,
-            "reconcile_required": transport_outcome == "UNKNOWN",
+            "reconcile_required": reconcile_req,
             "created_at": effective_now_iso,
+            "claimed_at": None,
+            "delivered_at": delivered_at_iso,
+            "transport_receipt_id": None,
             "wall_day": today_str,
-            "expires_at": format_wall_iso(now_dt + timedelta(hours=24)),
+            "expires_at": expires_at_iso,
             "read_at": None,
         }
+        if explicit_trigger_kind is not None:
+            out_doc["trigger_kind"] = explicit_trigger_kind
+        if explicit_fact_ref is not None:
+            out_doc["fact_ref"] = explicit_fact_ref
         if payload.get("private_note") is not None:
             out_doc["private_note"] = _clean_str(
                 payload["private_note"],
@@ -3146,17 +4226,20 @@ def apply_v03_ecology_command(
             )
 
         rb["outbound_records"] = [*(rb.get("outbound_records") or []), out_doc][-MAX_OUTBOUND_RECORDS:]
-        if transport_outcome == "DELIVERED":
+        if delivery_mode == "legacy_simulated" and transport_outcome == "DELIVERED":
             rb["unanswered_streak"] = unanswered_streak + 1
 
-        commit_outcome = "UNKNOWN" if transport_outcome == "UNKNOWN" else "APPLIED"
         return _commit_state(
             outcome=commit_outcome,
             extra_receipt={
                 "outbound_id": outbound_id,
-                "outbound_status": transport_outcome,
+                "outbound_status": final_status,
+                "delivery_mode": delivery_mode,
+                "ack_state": ack_state,
                 "delivery_ack_state": ack_state,
                 "epistemic_state": ep_state,
+                "delivered_at": delivered_at_iso,
+                "expires_at": expires_at_iso,
                 "partner_read_confirmed": False,
                 "delivered_is_not_read": True,
                 "unanswered_streak": int(rb.get("unanswered_streak") or 0),
@@ -3203,14 +4286,18 @@ def apply_v03_ecology_command(
         if prev_status == "UNKNOWN":
             if resolution == "CONFIRMED_DELIVERED":
                 found_rec["status"] = "DELIVERED"
+                found_rec["ack_state"] = "SENT_PENDING_ACK"
                 found_rec["delivery_ack_state"] = "SENT_PENDING_ACK"
                 found_rec["epistemic_state"] = "sent_pending_ack"
+                found_rec["delivered_at"] = found_rec.get("delivered_at") or effective_now_iso
+                found_rec["expires_at"] = found_rec.get("expires_at") or format_wall_iso(now_dt + timedelta(hours=24))
                 found_rec["partner_read_confirmed"] = False
                 found_rec["reconcile_required"] = False
                 found_rec["reconciled_at"] = effective_now_iso
                 rb["unanswered_streak"] = int(rb.get("unanswered_streak") or 0) + 1
             elif resolution == "ARCHIVED_DEAD_LETTER":
                 found_rec["status"] = "WITHDRAWN_DEAD_LETTER"
+                found_rec["ack_state"] = "WITHDRAWN_DEAD_LETTER"
                 found_rec["delivery_ack_state"] = "WITHDRAWN_DEAD_LETTER"
                 found_rec["epistemic_state"] = "withdrawn_dead_letter"
                 found_rec["partner_read_confirmed"] = False
@@ -3250,11 +4337,13 @@ def apply_v03_ecology_command(
             raise V03NotFoundError("OUTBOUND_NOT_FOUND")
 
         found_out["status"] = "READ"
+        found_out["ack_state"] = "READ"
         found_out["delivery_ack_state"] = "READ"
         found_out["epistemic_state"] = "partner_read_acked"
         found_out["partner_read_confirmed"] = True
         found_out["epistemic_ceiling"] = "read"
         found_out["read_at"] = effective_now_iso
+        found_out["delivered_at"] = found_out.get("delivered_at") or effective_now_iso
         found_out["reconcile_required"] = False
         rb["unanswered_streak"] = 0
 
@@ -3262,11 +4351,192 @@ def apply_v03_ecology_command(
             extra_receipt={
                 "outbound_id": outbound_id,
                 "outbound_status": "READ",
+                "ack_state": "READ",
                 "delivery_ack_state": "READ",
                 "epistemic_state": "partner_read_acked",
                 "partner_read_confirmed": True,
                 "unanswered_streak": 0,
                 "proactive_paused_by_backoff": False,
+            }
+        )
+
+    if action == "ack_proactive_outbound_delivery":
+        if op_key is None:
+            raise V03ValidationError("MISSING_OPERATION_KEY")
+        raw_target = payload.get("outbound_id")
+        if isinstance(raw_target, str) and raw_target.strip()[:4].lower() == "eco:":
+            raw_target = raw_target.strip()[4:]
+        outbound_id = _clean_id(raw_target, field="outbound_id")
+        ack_action = _clean_str(payload.get("ack_action"), field="ack_action", max_len=32).lower()
+        if ack_action not in OUTBOUND_ACK_ACTIONS:
+            raise V03ValidationError("INVALID_OUTBOUND_ACK_ACTION")
+        transport_receipt_id = (
+            _clean_str(payload["transport_receipt_id"], field="transport_receipt_id", max_len=160)
+            if payload.get("transport_receipt_id") is not None
+            else None
+        )
+
+        found_out = None
+        for rec in rb.get("outbound_records") or []:
+            if isinstance(rec, dict) and rec.get("outbound_id") == outbound_id:
+                found_out = rec
+                break
+        if found_out is None:
+            raise V03NotFoundError("OUTBOUND_NOT_FOUND", details={"outbound_id": outbound_id})
+
+        prev_status = str(found_out.get("status") or "")
+        backoff_limit = int(policy.get("backoff_streak_limit") or DEFAULT_BACKOFF_STREAK_LIMIT)
+
+        if ack_action == "claim":
+            if prev_status != "APPROVED_FOR_DELIVERY":
+                raise V03ConflictError(
+                    "INVALID_OUTBOUND_STATE_TRANSITION",
+                    details={
+                        "outbound_id": outbound_id,
+                        "current_status": prev_status,
+                        "requested_action": ack_action,
+                    },
+                )
+            found_out["status"] = "CLAIMED_BY_TRANSPORT"
+            found_out["ack_state"] = "CLAIMED_BY_TRANSPORT"
+            found_out["delivery_ack_state"] = "CLAIMED_BY_TRANSPORT"
+            found_out["epistemic_state"] = "claimed_by_transport"
+            found_out["claimed_at"] = effective_now_iso
+            found_out["delivered_at"] = None
+            found_out["partner_read_confirmed"] = False
+            found_out["reconcile_required"] = False
+            if transport_receipt_id is not None:
+                found_out["transport_receipt_id"] = transport_receipt_id
+        elif ack_action == "ack_delivered":
+            if prev_status not in {"APPROVED_FOR_DELIVERY", "CLAIMED_BY_TRANSPORT", "UNKNOWN"}:
+                raise V03ConflictError(
+                    "INVALID_OUTBOUND_STATE_TRANSITION",
+                    details={
+                        "outbound_id": outbound_id,
+                        "current_status": prev_status,
+                        "requested_action": ack_action,
+                    },
+                )
+            found_out["status"] = "DELIVERED"
+            found_out["ack_state"] = "SENT_PENDING_ACK"
+            found_out["delivery_ack_state"] = "SENT_PENDING_ACK"
+            found_out["epistemic_state"] = "sent_pending_ack"
+            found_out["epistemic_ceiling"] = "sent"
+            found_out["delivered_at"] = effective_now_iso
+            found_out["expires_at"] = format_wall_iso(now_dt + timedelta(hours=24))
+            found_out["partner_read_confirmed"] = False
+            found_out["delivered_is_not_read"] = True
+            found_out["reconcile_required"] = False
+            if transport_receipt_id is not None:
+                found_out["transport_receipt_id"] = transport_receipt_id
+            rb["unanswered_streak"] = int(rb.get("unanswered_streak") or 0) + 1
+        elif ack_action == "ack_failed":
+            if prev_status not in {"APPROVED_FOR_DELIVERY", "CLAIMED_BY_TRANSPORT", "UNKNOWN"}:
+                raise V03ConflictError(
+                    "INVALID_OUTBOUND_STATE_TRANSITION",
+                    details={
+                        "outbound_id": outbound_id,
+                        "current_status": prev_status,
+                        "requested_action": ack_action,
+                    },
+                )
+            found_out["status"] = "FAILED"
+            found_out["ack_state"] = "DELIVERY_FAILED"
+            found_out["delivery_ack_state"] = "DELIVERY_FAILED"
+            found_out["epistemic_state"] = "delivery_failed"
+            found_out["failed_at"] = effective_now_iso
+            found_out["delivered_at"] = None
+            found_out["partner_read_confirmed"] = False
+            found_out["reconcile_required"] = False
+            if transport_receipt_id is not None:
+                found_out["transport_receipt_id"] = transport_receipt_id
+        elif ack_action == "ack_unknown":
+            if prev_status not in {"APPROVED_FOR_DELIVERY", "CLAIMED_BY_TRANSPORT", "UNKNOWN"}:
+                raise V03ConflictError(
+                    "INVALID_OUTBOUND_STATE_TRANSITION",
+                    details={
+                        "outbound_id": outbound_id,
+                        "current_status": prev_status,
+                        "requested_action": ack_action,
+                    },
+                )
+            found_out["status"] = "UNKNOWN"
+            found_out["ack_state"] = "TRANSPORT_UNKNOWN"
+            found_out["delivery_ack_state"] = "TRANSPORT_UNKNOWN"
+            found_out["epistemic_state"] = "transport_unknown"
+            found_out["unknown_at"] = effective_now_iso
+            found_out["delivered_at"] = None
+            found_out["partner_read_confirmed"] = False
+            found_out["reconcile_required"] = True
+            if transport_receipt_id is not None:
+                found_out["transport_receipt_id"] = transport_receipt_id
+        elif ack_action == "ack_read":
+            if prev_status not in {"APPROVED_FOR_DELIVERY", "CLAIMED_BY_TRANSPORT", "DELIVERED", "READ"}:
+                raise V03ConflictError(
+                    "INVALID_OUTBOUND_STATE_TRANSITION",
+                    details={
+                        "outbound_id": outbound_id,
+                        "current_status": prev_status,
+                        "requested_action": ack_action,
+                    },
+                )
+            found_out["status"] = "READ"
+            found_out["ack_state"] = "READ"
+            found_out["delivery_ack_state"] = "READ"
+            found_out["epistemic_state"] = "partner_read_acked"
+            found_out["epistemic_ceiling"] = "read"
+            found_out["partner_read_confirmed"] = True
+            found_out["delivered_at"] = found_out.get("delivered_at") or effective_now_iso
+            found_out["read_at"] = effective_now_iso
+            found_out["reconcile_required"] = False
+            if transport_receipt_id is not None:
+                found_out["transport_receipt_id"] = transport_receipt_id
+            rb["unanswered_streak"] = 0
+
+        streak_now = int(rb.get("unanswered_streak") or 0)
+        return _commit_state(
+            extra_receipt={
+                "outbound_id": outbound_id,
+                "item_id": outbound_id,
+                "item_kind": "proactive_outreach",
+                "ack_action": ack_action,
+                "previous_status": prev_status,
+                "outbound_status": found_out["status"],
+                "status": found_out["status"],
+                "ack_state": found_out["ack_state"],
+                "delivery_ack_state": found_out["delivery_ack_state"],
+                "epistemic_state": found_out["epistemic_state"],
+                "delivered_at": found_out.get("delivered_at"),
+                "claimed_at": found_out.get("claimed_at"),
+                "read_at": found_out.get("read_at"),
+                "expires_at": found_out.get("expires_at"),
+                "transport_receipt_id": found_out.get("transport_receipt_id"),
+                "partner_read_confirmed": bool(found_out.get("partner_read_confirmed", False)),
+                "unanswered_streak": streak_now,
+                "proactive_paused_by_backoff": streak_now >= backoff_limit,
+            }
+        )
+
+    if action == "withdraw_pending_outbound":
+        outbound_id = _clean_id(payload.get("outbound_id"), field="outbound_id")
+        found_out = None
+        for rec in rb.get("outbound_records") or []:
+            if isinstance(rec, dict) and rec.get("outbound_id") == outbound_id:
+                found_out = rec
+                break
+        if found_out is None:
+            raise V03NotFoundError("OUTBOUND_NOT_FOUND", details={"outbound_id": outbound_id})
+        if found_out.get("status") in OUTBOUND_PENDING_STATUSES:
+            found_out["status"] = "WITHDRAWN"
+            found_out["ack_state"] = "WITHDRAWN_UNREAD"
+            found_out["delivery_ack_state"] = "WITHDRAWN_UNREAD"
+            found_out["epistemic_state"] = "withdrawn_unread"
+            found_out["partner_read_confirmed"] = False
+            found_out["withdrawn_at"] = effective_now_iso
+        return _commit_state(
+            extra_receipt={
+                "outbound_id": outbound_id,
+                "outbound_status": found_out["status"],
             }
         )
 
@@ -3279,6 +4549,7 @@ def apply_v03_ecology_command(
                 exp_dt = _parse_stored_iso(rec.get("expires_at"))
                 if exp_dt is not None and now_dt >= exp_dt:
                     rec["status"] = "WITHDRAWN"
+                    rec["ack_state"] = "WITHDRAWN_UNREAD"
                     rec["delivery_ack_state"] = "WITHDRAWN_UNREAD"
                     rec["epistemic_state"] = "withdrawn_unread"
                     rec["partner_read_confirmed"] = False
@@ -3495,7 +4766,11 @@ def attempt_proactive_outbound(
     channel: str = "desktop_note",
     reason_kind: str = "genuine_life_share",
     simulated_transport_outcome: str = "DELIVERED",
+    delivery_mode: str = "legacy_simulated",
     operation_key: Optional[str] = None,
+    expires_at: Optional[str] = None,
+    trigger_kind: Optional[str] = None,
+    fact_ref: Optional[str] = None,
     now_iso: Optional[str] = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
@@ -3505,9 +4780,260 @@ def attempt_proactive_outbound(
         "reason_kind": reason_kind,
         "simulated_transport_outcome": simulated_transport_outcome,
     }
+    if delivery_mode != "legacy_simulated":
+        body["delivery_mode"] = delivery_mode
     if operation_key is not None:
         body["operation_key"] = operation_key
+    if expires_at is not None:
+        body["expires_at"] = expires_at
+    if trigger_kind is not None:
+        body["trigger_kind"] = trigger_kind
+    if fact_ref is not None:
+        body["fact_ref"] = fact_ref
     return apply_v03_ecology_command(day_root, body, actor_side="subject", now_iso=now_iso)
+
+
+def ack_proactive_outbound_delivery(
+    day_root: Path | str,
+    *,
+    outbound_id: str,
+    action: str,
+    operation_key: str,
+    transport_receipt_id: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Transition an honest-outbox proactive outbound record with idempotent operation_key."""
+    if not isinstance(operation_key, str) or not operation_key.strip():
+        raise V03ValidationError("MISSING_OPERATION_KEY")
+    body: dict[str, Any] = {
+        "action": "ack_proactive_outbound_delivery",
+        "outbound_id": outbound_id,
+        "ack_action": action,
+        "operation_key": operation_key,
+    }
+    if transport_receipt_id is not None:
+        body["transport_receipt_id"] = transport_receipt_id
+    envelope = apply_v03_ecology_command(day_root, body, actor_side="partner", now_iso=now_iso)
+    envelope["idempotent_replay"] = envelope.get("command_status") == "DUPLICATE"
+    return envelope
+
+
+_LEGACY_WEATHER_OUTREACH_TEXT_CUES: tuple[str, ...] = (
+    "外头突然落雨",
+    "外头突然飘起细雨",
+    "外头飘雪降温",
+    "出门的话记得顺手带把伞",
+    "出门顺手留意外套别淋潮",
+)
+_WEATHER_CARE_LEGACY_MAX_AGE_SECONDS = 6 * 3600
+
+
+def _is_weather_care_outbound_record(rec: Mapping[str, Any]) -> bool:
+    reason = str(rec.get("reason_kind") or "").strip().lower()
+    if reason in ("sudden_weather_care", "weather_care"):
+        return True
+    trigger = str(rec.get("trigger_kind") or "").strip().lower()
+    if trigger == "sudden_weather_care":
+        return True
+    fact_ref = str(rec.get("fact_ref") or "").strip().lower()
+    if fact_ref.startswith("weather:"):
+        return True
+    op_key = str(rec.get("operation_key") or "").strip().lower()
+    if op_key.startswith("outreach_weather_"):
+        return True
+    text = str(rec.get("text") or "")
+    if any(cue in text for cue in _LEGACY_WEATHER_OUTREACH_TEXT_CUES):
+        return True
+    return False
+
+
+def _read_v04_weather_clear_and_dry_zero_write(root_path: Path) -> bool:
+    """Return True only when world/v04_neighborhood_state.json exists and shows clear weather with dry ground."""
+    nb_path = root_path / "world" / "v04_neighborhood_state.json"
+    try:
+        if not nb_path.is_file() or nb_path.is_symlink():
+            return False
+        doc = json.loads(nb_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(doc, Mapping):
+        return False
+    env = doc.get("environment")
+    if not isinstance(env, Mapping):
+        return False
+    weather = str(env.get("weather") or "").strip().lower()
+    if weather != "clear":
+        return False
+    if bool(env.get("yard_bench_damp")):
+        return False
+    places = doc.get("places")
+    if isinstance(places, Mapping):
+        for p in places.values():
+            if isinstance(p, Mapping):
+                gs = str(p.get("ground_state") or "").strip().lower()
+                if gs and gs != "dry":
+                    return False
+    lt_path = root_path / "world" / "v05_living_town.json"
+    try:
+        if lt_path.is_file() and not lt_path.is_symlink():
+            lt_doc = json.loads(lt_path.read_text(encoding="utf-8"))
+            if isinstance(lt_doc, Mapping):
+                gs_obj = lt_doc.get("ground_surface")
+                if isinstance(gs_obj, Mapping):
+                    puddle = gs_obj.get("puddle_depth")
+                    if isinstance(puddle, (int, float)) and not isinstance(puddle, bool) and float(puddle) > 0.0:
+                        return False
+    except Exception:
+        pass
+    return True
+
+
+def _is_pending_outbound_expired_zero_write(
+    rec: Mapping[str, Any],
+    *,
+    now_dt: datetime,
+    weather_clear_and_dry: bool,
+) -> bool:
+    exp_dt = _parse_stored_iso(rec.get("expires_at"))
+    if exp_dt is not None and exp_dt <= now_dt:
+        return True
+    if _is_weather_care_outbound_record(rec):
+        if weather_clear_and_dry:
+            return True
+        created_dt = _parse_stored_iso(rec.get("created_at"))
+        if created_dt is not None and (now_dt - created_dt).total_seconds() > _WEATHER_CARE_LEGACY_MAX_AGE_SECONDS:
+            return True
+    return False
+
+
+def read_pending_proactive_outbox_zero_write(
+    day_root: Path | str,
+    *,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Pure 100% zero-write reader returning non-expired APPROVED_FOR_DELIVERY / CLAIMED_BY_TRANSPORT items."""
+    root_path = Path(day_root)
+    now_dt = parse_iso_moment(now_iso)
+    effective_now_iso = format_wall_iso(now_dt)
+
+    state, state_reason = read_stored_ecology_zero_write(root_path)
+    rb = state.get("reality_bridge") if isinstance(state.get("reality_bridge"), Mapping) else {}
+    raw_policy = rb.get("outbound_policy") if isinstance(rb.get("outbound_policy"), Mapping) else {}
+    quiet_start = str(raw_policy.get("quiet_start_hhmm") or DEFAULT_QUIET_START_HHMM)
+    quiet_end = str(raw_policy.get("quiet_end_hhmm") or DEFAULT_QUIET_END_HHMM)
+    backoff_limit = int(raw_policy.get("backoff_streak_limit") or DEFAULT_BACKOFF_STREAK_LIMIT)
+    quiet_active = _is_quiet_hours(now_dt, quiet_start, quiet_end)
+    unanswered_streak = int(rb.get("unanswered_streak") or 0)
+
+    if state_reason is not None:
+        return {
+            "ok": True,
+            "zero_write": True,
+            "llm_calls": 0,
+            "observed_at": effective_now_iso,
+            "quiet_hours_active": quiet_active,
+            "quiet_start_hhmm": quiet_start,
+            "quiet_end_hhmm": quiet_end,
+            "unanswered_streak": unanswered_streak,
+            "proactive_paused_by_backoff": unanswered_streak >= backoff_limit,
+            "pending_count": 0,
+            "items": [],
+            "state_reason_code": state_reason,
+        }
+
+    weather_clear_and_dry = _read_v04_weather_clear_and_dry_zero_write(root_path)
+    pending_items: list[dict[str, Any]] = []
+    for rec in rb.get("outbound_records") or []:
+        if not isinstance(rec, Mapping):
+            continue
+        status = str(rec.get("status") or "").upper()
+        if status not in OUTBOUND_PENDING_STATUSES:
+            continue
+        if _is_pending_outbound_expired_zero_write(
+            rec,
+            now_dt=now_dt,
+            weather_clear_and_dry=weather_clear_and_dry,
+        ):
+            continue
+        ack_state, _ep_state, _read_ok = _derive_outbound_ack_fields(rec)
+        item_id = str(rec.get("outbound_id") or "").strip()
+        if not item_id:
+            continue
+        item_doc: dict[str, Any] = {
+            "item_id": item_id,
+            "outbound_id": item_id,
+            "item_kind": "proactive_outreach",
+            "channel": str(rec.get("channel") or "desktop_note"),
+            "status": status,
+            "ack_state": str(rec.get("ack_state") or rec.get("delivery_ack_state") or ack_state),
+            "reason_kind": str(rec.get("reason_kind") or "genuine_life_share"),
+            "text": str(rec.get("text") or ""),
+            "created_at": str(rec.get("created_at") or effective_now_iso),
+            "quiet_hours_held": bool(quiet_active),
+        }
+        if rec.get("claimed_at") is not None:
+            item_doc["claimed_at"] = str(rec["claimed_at"])
+        if rec.get("expires_at") is not None:
+            item_doc["expires_at"] = str(rec["expires_at"])
+        if rec.get("trigger_kind") is not None:
+            item_doc["trigger_kind"] = str(rec["trigger_kind"])
+        pending_items.append(item_doc)
+
+    pending_items.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("item_id") or "")))
+    return {
+        "ok": True,
+        "zero_write": True,
+        "llm_calls": 0,
+        "observed_at": effective_now_iso,
+        "quiet_hours_active": quiet_active,
+        "quiet_start_hhmm": quiet_start,
+        "quiet_end_hhmm": quiet_end,
+        "unanswered_streak": unanswered_streak,
+        "proactive_paused_by_backoff": unanswered_streak >= backoff_limit,
+        "pending_count": len(pending_items),
+        "items": pending_items,
+        "state_reason_code": None,
+    }
+
+
+def reset_outbound_unanswered_streak(
+    day_root: Path | str,
+    *,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    """Reset unanswered_streak to 0 on partner inbound turn; zero-write if absent or already 0."""
+    root_path = Path(day_root)
+    eco_path = ecology_state_path(root_path)
+    if not eco_path.is_file() or eco_path.is_symlink():
+        return {"ok": True, "changed": False, "unanswered_streak": 0, "llm_calls": 0}
+    state, state_reason = read_stored_ecology_zero_write(root_path)
+    if state_reason is not None:
+        return {"ok": False, "changed": False, "reason_code": state_reason, "llm_calls": 0}
+    rb = state.get("reality_bridge")
+    if not isinstance(rb, dict) or int(rb.get("unanswered_streak") or 0) == 0:
+        return {"ok": True, "changed": False, "unanswered_streak": 0, "llm_calls": 0}
+    now_dt = parse_iso_moment(now_iso)
+    effective_now_iso = format_wall_iso(now_dt)
+    with _tx.state_file_lock(eco_path):
+        if not eco_path.is_file() or eco_path.is_symlink():
+            return {"ok": True, "changed": False, "unanswered_streak": 0, "llm_calls": 0}
+        state, state_reason = read_stored_ecology_zero_write(root_path)
+        if state_reason is not None:
+            return {"ok": False, "changed": False, "reason_code": state_reason, "llm_calls": 0}
+        rb = state.get("reality_bridge")
+        if not isinstance(rb, dict) or int(rb.get("unanswered_streak") or 0) == 0:
+            return {"ok": True, "changed": False, "unanswered_streak": 0, "llm_calls": 0}
+        rb["unanswered_streak"] = 0
+        state["revision"] = int(state.get("revision") or 0) + 1
+        state["updated_at"] = effective_now_iso
+        _atomic_write_json(eco_path, state)
+        return {
+            "ok": True,
+            "changed": True,
+            "unanswered_streak": 0,
+            "revision": state["revision"],
+            "llm_calls": 0,
+        }
 
 
 def ack_outbound_read(
@@ -3575,6 +5101,76 @@ def spend_from_stipend(
     return apply_v03_ecology_command(day_root, body, actor_side="subject", now_iso=now_iso)
 
 
+def offer_item_gift(
+    day_root: Path | str,
+    *,
+    item_label_cn: str,
+    item_kind: Optional[str] = None,
+    estimated_jpy: Optional[int] = None,
+    target_zone_id: Optional[str] = None,
+    note: Optional[str] = None,
+    context_tag: Optional[str] = None,
+    operation_key: Optional[str] = None,
+    intent_fingerprint: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"action": "offer_item_gift", "item_label_cn": item_label_cn}
+    if item_kind is not None:
+        body["item_kind"] = item_kind
+    if estimated_jpy is not None:
+        body["estimated_jpy"] = estimated_jpy
+    if target_zone_id is not None:
+        body["target_zone_id"] = target_zone_id
+    if note is not None:
+        body["note"] = note
+    if context_tag is not None:
+        body["context_tag"] = context_tag
+    if operation_key is not None:
+        body["operation_key"] = operation_key
+    if intent_fingerprint is not None:
+        body["intent_fingerprint"] = intent_fingerprint
+    return apply_v03_ecology_command(day_root, body, actor_side="partner", now_iso=now_iso)
+
+
+def withdraw_item_gift(
+    day_root: Path | str,
+    *,
+    gift_id: Optional[str] = None,
+    operation_key: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"action": "withdraw_item_gift"}
+    if gift_id is not None:
+        body["gift_id"] = gift_id
+    if operation_key is not None:
+        body["operation_key"] = operation_key
+    return apply_v03_ecology_command(day_root, body, actor_side="partner", now_iso=now_iso)
+
+
+def decide_item_gift(
+    day_root: Path | str,
+    *,
+    gift_id: str,
+    decision: str,
+    note: Optional[str] = None,
+    private_note: Optional[str] = None,
+    operation_key: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "action": "decide_item_gift",
+        "gift_id": gift_id,
+        "decision": decision,
+    }
+    if note is not None:
+        body["note"] = note
+    if private_note is not None:
+        body["private_note"] = private_note
+    if operation_key is not None:
+        body["operation_key"] = operation_key
+    return apply_v03_ecology_command(day_root, body, actor_side="subject", now_iso=now_iso)
+
+
 def sync_from_world_property_economy(
     day_root: Path | str,
     *,
@@ -3591,19 +5187,32 @@ def sync_from_world_property_economy(
     if err_reason is not None:
         return {"status": "skipped", "reason_code": err_reason}
     if isinstance(world_state, Mapping):
-        state["economy"]["last_world_economy_sync"] = {
-            "world_revision": world_state.get("revision"),
-            "synced_at": world_state.get("updated_at"),
-            "world_state_path": str(world_state_path) if world_state_path is not None else None,
-        }
-        _atomic_write_json(eco_path, state)
+        with _tx.state_file_lock(eco_path):
+            if not eco_path.is_file() or eco_path.is_symlink():
+                return {"status": "skipped", "reason_code": "V03_ECOLOGY_NOT_INITIALIZED"}
+            state, err_reason = read_stored_ecology_zero_write(root_path)
+            if err_reason is not None:
+                return {"status": "skipped", "reason_code": err_reason}
+            state["economy"]["last_world_economy_sync"] = {
+                "world_revision": world_state.get("revision"),
+                "synced_at": world_state.get("updated_at"),
+                "world_state_path": str(world_state_path) if world_state_path is not None else None,
+            }
+            _atomic_write_json(eco_path, state)
     if sync_back_to_world:
         upstream_wallet = _read_upstream_wallet_zero_write(root_path)
         derived_nums = _derive_economy_numbers(state["economy"], upstream_wallet)
         try:
             import world_property_economy as wpe  # type: ignore
 
-            for cand_home in (root_path, root_path / "world", root_path / "world-home"):
+            sync_paths = _instance_paths.resolve_instance_paths(root_path)
+            for cand_home in (
+                sync_paths.world_home,
+                sync_paths.day_root / "one-day" / "world-home",
+                root_path,
+                root_path / "world",
+                root_path / "world-home",
+            ):
                 if (cand_home / "state" / "world_property_economy.json").is_file():
                     wpe.sync_v03_ecology_mirror(
                         hermes_home=cand_home,
@@ -3635,8 +5244,16 @@ __all__ = [
     "DEFAULT_QUIET_START_HHMM",
     "DEFAULT_WEEKLY_PROACTIVE_CAP",
     "EXTERNAL_CLAIM_CATEGORIES",
+    "GIFT_ESCROW_TTL_HOURS",
     "ILLNESS_PHASES",
     "INDEPENDENT_JOB_KINDS",
+    "ITEM_GIFT_DECISIONS",
+    "MAX_OPEN_ITEM_GIFTS",
+    "OUTBOUND_ACK_ACTIONS",
+    "OUTBOUND_DELIVERY_MODES",
+    "OUTBOUND_PENDING_STATUSES",
+    "OUTBOUND_QUOTA_COUNTING_STATUSES",
+    "OUTBOUND_STATUSES",
     "PROACTIVE_CHANNELS",
     "PURCHASE_VERDICTS",
     "SCHEMA_VERSION",
@@ -3644,32 +5261,39 @@ __all__ = [
     "SINGLE_STIPEND_CAP_CENTS",
     "STIPEND_DECISIONS",
     "STRAIN_REST_EVENTS",
+    "TRANSACTIONAL_FUNDING_CUES",
     "V03ConflictError",
     "V03EcologyError",
     "V03NotFoundError",
     "V03PermissionError",
     "V03ValidationError",
     "ack_outbound_read",
+    "ack_proactive_outbound_delivery",
     "advance_illness_recovery",
     "apply_v03_ecology_command",
     "attempt_proactive_outbound",
     "complete_independent_work",
     "compute_intent_fingerprint",
+    "decide_item_gift",
     "decide_stipend",
     "default_ecology_state",
     "deliberate_purchase",
     "ecology_state_path",
+    "offer_item_gift",
     "offer_sick_care",
     "offer_stipend",
     "parse_iso_moment",
     "project_v03_ecology",
     "push_external_fact",
+    "read_pending_proactive_outbox_zero_write",
     "read_stored_ecology_zero_write",
     "record_strain_or_rest",
     "redact_ecology_for_diagnostics",
+    "reset_outbound_unanswered_streak",
     "sanitize_untrusted_external_text",
     "set_savings_goal",
     "spend_from_stipend",
     "sync_from_world_property_economy",
+    "withdraw_item_gift",
     "withdraw_stipend",
 ]

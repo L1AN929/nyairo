@@ -1,7 +1,8 @@
 """CHIYO context selection inside the standard Hermes CLI and gateway."""
 from __future__ import annotations
-import atexit,copy,hashlib,json,logging,os,re,sys,threading,uuid
+import atexit,copy,hashlib,inspect,json,logging,os,re,sys,threading,uuid,weakref
 from collections import OrderedDict
+from pathlib import Path
 from typing import Optional
 from agent.context_compressor import ContextCompressor
 from hermes_constants import get_hermes_home
@@ -10,6 +11,170 @@ _lock=threading.RLock();_instance=None;_home=None;_host_llm=None
 _SESSION_AUTH_CTX_MAX = 256
 _SESSION_AUTH_CTX: OrderedDict[str, tuple[str, Optional[str]]] = OrderedDict()
 _SESSION_DELEGATED: OrderedDict[str, bool] = OrderedDict()
+_SESSION_ARCHIVE_CONSULTED: OrderedDict[str, bool] = OrderedDict()
+_ACTIVE_ENGINES: "weakref.WeakSet[ChiyoContextEngine]" = weakref.WeakSet()
+
+NATIVE_RECALL_MAX_CHARS = 1600
+
+_ARCHIVE_CONSULT_PHONE_ACTIONS = frozenset({
+    "notes",
+    "references",
+    "reading",
+    "reading_material",
+    "diary",
+    "diary_read",
+    "album",
+    "album_image",
+    "projects",
+    "work_context",
+    "work_version",
+    "day_timeline",
+    "today",
+    "desk_notes",
+    "home_keepsakes",
+    "home_letters",
+    "v02_recall_projection",
+    "v02_common_ground",
+    "v02_honest_ux",
+    "v08_emergent_echoes",
+    "claims",
+    "claim_slot",
+})
+
+def _is_phone_archive_consult_action(args) -> bool:
+    if not isinstance(args, dict):
+        return False
+    action = str(args.get("action") or "").strip().lower()
+    if action in _ARCHIVE_CONSULT_PHONE_ACTIONS:
+        return True
+    if action == "phone_life_update":
+        surf = str(args.get("target_surface") or "").strip().lower()
+        payload = args.get("payload") if isinstance(args.get("payload"), dict) else {}
+        sub = str(payload.get("action") or "").strip().lower()
+        if surf in ("v02_recall_projection", "v02_common_ground") and sub in ("archive_lookup", "verify_recall", "consult_archive", "read"):
+            return True
+    return False
+
+def mark_turn_consulted_archive(session_id=None) -> None:
+    sid = session_id.strip() if isinstance(session_id, str) and session_id.strip() else None
+    with _lock:
+        if sid is not None:
+            _SESSION_ARCHIVE_CONSULTED[sid] = True
+            _SESSION_ARCHIVE_CONSULTED.move_to_end(sid)
+            while len(_SESSION_ARCHIVE_CONSULTED) > _SESSION_AUTH_CTX_MAX:
+                _SESSION_ARCHIVE_CONSULTED.popitem(last=False)
+        for eng in list(_ACTIVE_ENGINES):
+            eng_sid = getattr(eng, "_session_id", None)
+            if sid is None or eng_sid is None or str(eng_sid) == sid:
+                eng._turn_consulted_archive = True
+
+def _clear_session_consulted_archive(session_id=None) -> None:
+    sid = session_id.strip() if isinstance(session_id, str) and session_id.strip() else None
+    if sid is None:
+        return
+    with _lock:
+        _SESSION_ARCHIVE_CONSULTED.pop(sid, None)
+
+def _messages_show_archive_consultation(turn_messages) -> bool:
+    if not isinstance(turn_messages, list):
+        return False
+    for msg in turn_messages:
+        if not isinstance(msg, dict):
+            continue
+        tcalls = msg.get("tool_calls")
+        if not isinstance(tcalls, list):
+            continue
+        for tc in tcalls:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+            tname = str(fn.get("name") or tc.get("name") or "").strip()
+            if tname != "chiyo_phone":
+                continue
+            raw_args = fn.get("arguments") if "arguments" in fn else tc.get("arguments")
+            parsed_args = None
+            if isinstance(raw_args, dict):
+                parsed_args = raw_args
+            elif isinstance(raw_args, str) and raw_args.strip():
+                try:
+                    loaded = json.loads(raw_args)
+                    if isinstance(loaded, dict):
+                        parsed_args = loaded
+                except Exception:
+                    parsed_args = None
+            if _is_phone_archive_consult_action(parsed_args):
+                return True
+    return False
+
+def _resolve_barrier_day_root_readonly(home, cfg) -> Optional[Path]:
+    cands: list[Path] = []
+    if home is not None and isinstance(cfg, dict):
+        try:
+            from .lived_context_bridge import _resolve_day_root_candidates
+            cands.extend(_resolve_day_root_candidates(Path(home), cfg))
+        except Exception:
+            pass
+    env_dr = str(os.environ.get("NYAIRO_DAY_ROOT") or "").strip()
+    if env_dr:
+        p = Path(env_dr)
+        if p not in cands:
+            cands.append(p)
+    for cand in cands:
+        try:
+            if not cand.is_symlink() and cand.is_dir():
+                return cand
+        except OSError:
+            continue
+    return None
+
+def _load_forget_barrier_readonly_safe(day_root: Optional[Path]) -> dict:
+    if day_root is None:
+        return {}
+    try:
+        from components.life.scripts import v02_representation_lease_forget as _rlf
+        loaded = _rlf.load_unified_forget_barrier_readonly(day_root)
+        return dict(loaded) if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+def _apply_ch131_clarity_safe(objects, *, consulted_archive: bool, barrier: Optional[dict], now_iso: Optional[str] = None):
+    try:
+        from components.life.scripts import v02_recall_projection as _rp
+        return _rp.apply_ch131_two_stage_clarity_to_memory_objects(
+            list(objects or ()),
+            now_iso=now_iso,
+            consulted_archive=bool(consulted_archive),
+            barrier=barrier,
+        )
+    except Exception:
+        if isinstance(barrier, dict) and barrier.get("fail_closed"):
+            return []
+        return list(objects or ())
+
+def _invoke_m37_resolver(resolver, *, ids, current_user_text, current_user_event_id, visible_turn_ids, consulted_archive: bool, day_root: Optional[Path]):
+    base_kwargs = {
+        "ids": ids,
+        "current_user_text": current_user_text,
+        "current_user_event_id": current_user_event_id,
+        "visible_turn_ids": visible_turn_ids,
+    }
+    extra_kwargs = {}
+    try:
+        sig = inspect.signature(resolver)
+        params = sig.parameters
+        has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if has_varkw or "consulted_archive" in params:
+            extra_kwargs["consulted_archive"] = bool(consulted_archive)
+        if day_root is not None and (has_varkw or "day_root" in params):
+            extra_kwargs["day_root"] = day_root
+    except (TypeError, ValueError):
+        pass
+    if extra_kwargs:
+        try:
+            return resolver(**base_kwargs, **extra_kwargs)
+        except TypeError:
+            pass
+    return resolver(**base_kwargs)
 
 _RE_INJECTED_ENVELOPE_WITH_MARKER = re.compile(
     r"^\[当前真实处境与自主节律（[^\]]*）\]\r?\n[\s\S]*?\r?\n【伴侣此刻发来的原话】\r?\n"
@@ -57,6 +222,7 @@ def clear_session_auth_context():
     with _lock:
         _SESSION_AUTH_CTX.clear()
         _SESSION_DELEGATED.clear()
+        _SESSION_ARCHIVE_CONSULTED.clear()
 
 def is_session_delegated(session_id=None) -> bool:
     if isinstance(session_id, str) and session_id.strip():
@@ -214,6 +380,8 @@ def memory_tool_gate(tool_name,args,**kwargs):
             _allow_fn = globals().get('allowed')
             if callable(_allow_fn) and not _allow_fn(cfg, str(_plat), _ckey):
                 return {'action':'block','message':'这个聊天入口没有绑定你的个人实例，手机保持关闭。'}
+        if _is_phone_archive_consult_action(args):
+            mark_turn_consulted_archive(kwargs.get('session_id'))
         return None
     if tool_name in ('world_move', 'tool_search', 'tool_describe', 'tool_call'):
         return None
@@ -270,6 +438,7 @@ def note_command(raw_args='',*,source=None):
         if text.startswith('read '):
             result=_read_supply(svc.native._life_supply_client,svc.supply_subject,'read_artifact',text[5:].strip())
             if result.get('status')!='OK':return '没有找到属于你的资源文档。'
+            mark_turn_consulted_archive()
             return str((result.get('artifact') or {}).get('title',''))+'\n'+str(result.get('content') or '')[:8192]
         if '|' not in text:return '用法：/chiyo_note 标题 | 正文；读取：/chiyo_note read 文档ID；列表：/chiyo_status。'
         title,content=[part.strip() for part in text.split('|',1)]
@@ -374,15 +543,24 @@ class ChiyoContextEngine(ContextCompressor):
     def __init__(self):
         super().__init__(model='unconfigured',quiet_mode=True,config_context_length=32000)
         self._pending=None;self._authorized=False;self._service=None;self._error=None;self._delegated=False;self._memory_configured=True
-        self._turn_hint_raw=None;self._turn_hint_text=None
+        self._turn_hint_raw=None;self._turn_hint_text=None;self._turn_consulted_archive=False
+        with _lock:
+            _ACTIVE_ENGINES.add(self)
     @property
     def name(self):return 'chiyo'
     def __deepcopy__(self,memo):
         # Hermes clones a plugin before assigning model/session; no store or lock
         # is copied or shared as mutable per-session context state.
         clone=type(self)();memo[id(self)]=clone;return clone
+    def mark_archive_consulted(self):
+        self._turn_consulted_archive=True
+        sid=getattr(self,'_session_id',None)
+        if sid is not None:
+            mark_turn_consulted_archive(str(sid))
     def on_session_start(self,session_id,**kwargs):
         self._session_id=session_id;self._platform=kwargs.get('platform','cli');home,cfg=configuration()
+        self._turn_consulted_archive=False
+        _clear_session_consulted_archive(str(session_id) if session_id is not None else None)
         self._memory_configured=bool(cfg.get('memory'))
         self._delegated=self._delegated or bool(kwargs.get('parent_session_id') or kwargs.get('delegated'))
         conv_key=kwargs.get('conversation_id') if kwargs.get('conversation_id') is not None else kwargs.get('conversation_key')
@@ -393,6 +571,8 @@ class ChiyoContextEngine(ContextCompressor):
             except Exception as exc:self._error=type(exc).__name__;LOG.error('chiyo.owner.unavailable error_class=%s',self._error)
     def on_session_reset(self):
         super().on_session_reset();self._pending=None;self._turn_hint_raw=None;self._turn_hint_text=None
+        self._turn_consulted_archive=False
+        _clear_session_consulted_archive(getattr(self,'_session_id',None))
     def _begin_direct_input(self, raw):
         # Hermes may skip completion after a terminal provider failure. A new
         # authenticated direct input must not inherit that unfinished anchor.
@@ -400,6 +580,8 @@ class ChiyoContextEngine(ContextCompressor):
         if self._pending is not None and self._pending['raw'] != raw:
             self._pending = None
             self._error = None
+            self._turn_consulted_archive = False
+            _clear_session_consulted_archive(getattr(self,'_session_id',None))
     def select_context(self,request_messages,*,conversation_messages=None,incoming_message=None,budget_tokens=0):
         if not self._authorized:return None
         svc=self._service
@@ -500,13 +682,35 @@ class ChiyoContextEngine(ContextCompressor):
                     observe_life_input(svc,self._platform,self._session_id,ref)
                 pending=self._pending;projection=svc.native.memory_controls.projection()
                 ids={'user_id':svc.owner,'session_id':str(self._session_id),'conversation_id':svc.binding['conversation_id'],'turn_id':pending['turn']}
+                sid_str=str(getattr(self,'_session_id','') or '').strip()
+                if (sid_str and _SESSION_ARCHIVE_CONSULTED.get(sid_str) is True) or _messages_show_archive_consultation(messages[start:]):
+                    self._turn_consulted_archive=True
+                barrier_day_root=_resolve_barrier_day_root_readonly(home,_live_cfg)
                 # Evidence outside the Hermes transcript must not be mislabeled
                 # already visible. The current input is the causal anchor.
-                recalled=svc.native.m37_resolver(ids=ids,current_user_text=clean_user_text,current_user_event_id=pending['event'],visible_turn_ids=())
+                recalled=_invoke_m37_resolver(
+                    svc.native.m37_resolver,
+                    ids=ids,
+                    current_user_text=clean_user_text,
+                    current_user_event_id=pending['event'],
+                    visible_turn_ids=(),
+                    consulted_archive=self._turn_consulted_archive,
+                    day_root=barrier_day_root,
+                )
                 recalled,corrections=projection.recalls(recalled)
+                forget_barrier=_load_forget_barrier_readonly_safe(barrier_day_root)
+                recalled=_apply_ch131_clarity_safe(
+                    recalled,
+                    consulted_archive=self._turn_consulted_archive,
+                    barrier=forget_barrier,
+                )
                 from app.m3 import classify_intent
                 if classify_intent(clean_user_text)[0] in ('P1','P2'):corrections=list(dict.fromkeys(corrections+projection.active_corrections()))
-                text='\n'.join([obj.text for obj in recalled]+['【用户纠正】'+t for t in corrections])[:6000]
+                recalled_texts=[
+                    obj.text if hasattr(obj,'text') else str(obj.get('text') or '')
+                    for obj in recalled
+                ]
+                text='\n'.join([t for t in recalled_texts if t]+['【用户纠正】'+t for t in corrections])[:NATIVE_RECALL_MAX_CHARS]
                 if phrase_ctx:
                     text=(phrase_ctx+'\n'+text) if text else phrase_ctx
                 from .presence import presence_context
@@ -534,7 +738,8 @@ class ChiyoContextEngine(ContextCompressor):
             with _lock:self._service.form_evidence()
         # Generation is not delivery. The standard Hermes hook provides no
         # platform delivery receipt, so never mint DELIVERED assistant evidence.
-        self._pending=None;self._turn_hint_raw=None;self._turn_hint_text=None
+        self._pending=None;self._turn_hint_raw=None;self._turn_hint_text=None;self._turn_consulted_archive=False
+        _clear_session_consulted_archive(getattr(self,'_session_id',None))
         try:write_status_evidence()
         except Exception:LOG.warning('chiyo.status.evidence.unavailable')
     def get_status(self):

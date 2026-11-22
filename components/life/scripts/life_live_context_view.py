@@ -180,6 +180,15 @@ def _bounded_contract(raw: Any, *, limit: int, observed_at: Optional[str]) -> di
     ambient = _bound_ambient(raw.get("ambient"))
     if ambient:
         out["ambient"] = ambient
+    raw_labels = raw.get("candidate_labels")
+    if isinstance(raw_labels, Mapping):
+        cand_labels = {
+            _ref(k): _text(v, MAX_NAME_CHARS)
+            for k, v in list(raw_labels.items())[:32]
+            if _ref(k) and _text(v, MAX_NAME_CHARS)
+        }
+        if cand_labels:
+            out["candidate_labels"] = cand_labels
     if status == STATUS_UNAVAILABLE:
         out["reason_code"] = _text(raw.get("reason_code") or "", 60) or None
     return out
@@ -491,6 +500,36 @@ def _fallback_from_observation(provider: Any, *, limit: int,
             if label:
                 entry["label"] = label
             entry["in_hand"] = bool((visible.get(object_id) or {}).get("in_hand"))
+        purchase = item.get("purchase")
+        if isinstance(purchase, Mapping) and purchase:
+            p_name = _text(purchase.get("name"), MAX_NAME_CHARS)
+            if p_name:
+                entry["label"] = p_name
+            p_min = purchase.get("price_min")
+            p_max = purchase.get("price_max")
+            p_price = purchase.get("price")
+            p_curr = _text(purchase.get("currency") or "JPY", 12)
+            p_desc = _text(purchase.get("description"), MAX_TEXT_CHARS)
+            if (
+                isinstance(p_min, int)
+                and not isinstance(p_min, bool)
+                and isinstance(p_max, int)
+                and not isinstance(p_max, bool)
+                and p_min < p_max
+                and purchase.get("open_order")
+            ):
+                price_txt = f"{p_min}-{p_max} {p_curr}, 自选点单"
+                entry["description"] = _text(
+                    f"[{price_txt}] {p_desc}" if p_desc else price_txt,
+                    MAX_TEXT_CHARS,
+                )
+            elif isinstance(p_price, int) and not isinstance(p_price, bool):
+                entry["description"] = _text(
+                    f"[{p_price} {p_curr}] {p_desc}" if p_desc else f"{p_price} {p_curr}",
+                    MAX_TEXT_CHARS,
+                )
+            elif p_desc:
+                entry["description"] = p_desc
         # What the owner's own decoding said about this offer (pose/orientation/rest/stay).  It is
         # copied as a bounded string so the model reads the *meaning*, not an opaque ref.
         params = item.get("params")

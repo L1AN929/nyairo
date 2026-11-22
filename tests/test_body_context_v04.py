@@ -586,7 +586,7 @@ class RealBodyChainTests(unittest.TestCase):
                       {str(s.get("signal_type")) for s in signals}, signals)
         if view["body_capacity_state"] == body_capacity.CAPACITY_LIMITED:
             self.assertTrue(context["burden"])
-            self.assertEqual(context["freshness"], "FRESH")
+            self.assertEqual(context["freshness"], "fresh")
 
         # stop 只带 state：owner 的参数契约只允许 state=start 时出现 mode。
         stopped = self.h.act("REST", {"state": "stop"})

@@ -34,7 +34,7 @@
       "description": "How to synthesize a one-click template-free procedural exclusive world, switch among 7 built-in worlds and 4 theme styles, remodel shops and rooms in the d...",
       "url": "https://nyairo.com/en/docs/world-editor/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -484,7 +484,7 @@
 
 <h2 id="we-editor">Dark/Light Offline World Editor: Drawing Rooms &amp; Configuring Shops</h2>
 <p>Inside <code>components/world-editor/</code>, nyairo includes a refreshed, purely local visual spatial editor with <strong>dark and light theme switching</strong> (listening only on localhost <code>127.0.0.1</code>, working offline with zero model token usage). You can open it directly from the <strong>Neighborhood → Editor</strong> tab in the desktop client, or launch it manually from a terminal:</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>cd ~/.local/share/nyairo/releases/v0.7.0/components/world-editor
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>cd ~/.local/share/nyairo/releases/v0.8.0/components/world-editor
 python3 server.py --port 8766</code></pre></div>
 <p>Then open <code>http://127.0.0.1:8766</code> in your browser to start customizing your world:</p>
 <ol>
@@ -494,9 +494,9 @@ python3 server.py --port 8766</code></pre></div>
 </ol>
 
 <h2 id="we-cli">Template-Free Procedural Exclusive Worlds &amp; Seeded Generation</h2>
-<p>In <code>v0.7.0</code>, in addition to generating from the four themes—"Coastal Slope Town (<code>coastal_town</code>)", "Mountain Hot-Spring Town (<code>mountain_town</code>)", "Residential Suburb (<code>residential_town</code>)", and "Rural Farmland (<code>rural_farming</code>)"—opening <strong>Neighborhood → Generate New Town</strong> in the desktop app supports <strong>one-click template-free procedural exclusive worlds</strong> (<code>procedural</code> mode). Without picking a preset aesthetic, the generator uses a random seed to blend complementary landforms from <strong>6 terrain archetypes</strong> (headland slopes, canal alleys, foothill valleys, railway station towns, orchard terraces, and forest lakesides), paired with <strong>4 heterogeneous connected road topologies</strong> (star hub, ring loop, long promenade, and branching avenues), <strong>8 commercial shop categories</strong>, and <strong>multi-room residences</strong> (automatically pairing the bedroom with a living room, veranda, kitchenette, or study nook complete with thermal/humidity matter furniture), with support for hot-switching right after generation.</p>
+<p>In <code>v0.8.0</code>, in addition to generating from the four themes—"Coastal Slope Town (<code>coastal_town</code>)", "Mountain Hot-Spring Town (<code>mountain_town</code>)", "Residential Suburb (<code>residential_town</code>)", and "Rural Farmland (<code>rural_farming</code>)"—opening <strong>Neighborhood → Generate New Town</strong> in the desktop app supports <strong>one-click template-free procedural exclusive worlds</strong> (<code>procedural</code> mode). Without picking a preset aesthetic, the generator uses a random seed to blend complementary landforms from <strong>6 terrain archetypes</strong> (headland slopes, canal alleys, foothill valleys, railway station towns, orchard terraces, and forest lakesides), paired with <strong>4 heterogeneous connected road topologies</strong> (star hub, ring loop, long promenade, and branching avenues), <strong>8 commercial shop categories</strong>, and <strong>multi-room residences</strong> (automatically pairing the bedroom with a living room, veranda, kitchenette, or study nook complete with thermal/humidity matter furniture), with support for hot-switching right after generation.</p>
 <p>On Linux or WSL terminals, you can also invoke <code>components.worldgen</code> directly with <code>--theme procedural</code> (or any theme) and a numeric seed to generate a deterministic exclusive world in one command:</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.8.0"
 cd "$REL"
 # Synthesize a template-free procedural exclusive world from a seed, validate it, and render a preview map
 "$REL/vendor/hermes/.venv/bin/python" -m components.worldgen generate \

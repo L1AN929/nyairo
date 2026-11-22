@@ -32,7 +32,7 @@ import stat
 import errno
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Optional
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -44,6 +44,7 @@ SERVICE_UNIT = "chiyo-world-body.service"
 CONTROL_SOCKET_NAME = "control.sock"
 DEFAULT_TICK_SECONDS = 60.0
 MIN_ADVANCE_SECONDS = 60.0
+LIVED_NEEDS_SATURATED_RUNTIME_REFRESH_SECONDS = 900.0
 
 LOG = logging.getLogger("chiyo-world-body")
 
@@ -60,6 +61,12 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat()
 
 
+#: How far above ``world_home`` to look for the instance root that owns
+#: ``phone/v03_ecology.json``.  The real layout is
+#: ``<day_root>/one-day/world-home`` (two levels); the flat layout puts
+#: ``world_home`` directly under the day root (one level); the extra depth is
+#: for older/alternate placements.  Never unbounded: walking to ``/`` could
+#: pick up an unrelated instance's file.
 class StartupRefused(RuntimeError):
     """The service must not run.  Carries the ticket section 10 condition name."""
 
@@ -125,6 +132,7 @@ class WorldBodyService:
         self.body_store = br.BodyStore(config.body_dir)
         #: True only when this instance carries an explicit lived-needs profile.
         self.lived_needs_enabled = False
+        self._lived_needs_last_runtime_saved_at: Optional[datetime] = None
         self.consequence_ledger = bcon.ConsequenceLedger(config.body_dir / "consequences.jsonl")
         self.execution_ledger = wel.ExecutionLedger(config.ledger_path)
         # The Resolver must see the *service's* runtime identity, not whatever
@@ -324,6 +332,21 @@ class WorldBodyService:
         if self.body_store.load_profile() is None:
             self.body_store.save_profile(self.br.build_profile())
         self.body_state = body
+        # v0.8: S02 health record (illness course, chronic load, sleep debt).
+        # The runtime stays the authority for acute fatigue; this file carries
+        # what the runtime does not.  A corrupt record is refused, never reset.
+        import body_health_projection as bhp
+
+        self.health_store = bhp.HealthStore(cfg.body_dir)
+        try:
+            self.health_state = self.health_store.load()
+        except Exception as error:
+            raise StartupRefused("BODY_SCHEMA_UNKNOWN", "health record: %s" % error) from error
+        if self.health_state is None:
+            self.health_state = bhp.initial_record(
+                body_id=body["body_id"], subject_id="self", home_ref="",
+                at=self._moment(),
+            )
         step("body", "body_id=%s version=%s bootstrapped=%s migrated=%s lived_needs=%s"
              % (body["body_id"], body["version"], self.body_bootstrapped, migrated,
                 self.lived_needs_enabled))
@@ -471,6 +494,26 @@ class WorldBodyService:
         transition = outcome.get("transition")
         if transition:
             self.body_store.append_transition(transition)
+        # v0.8: only a real physical advance feeds chronic load / sleep debt.
+        # ``load_units`` is measured by the runtime from the consequence's own
+        # PHYSICAL_RESULT inputs; idle catch-up carries none, so this can never
+        # turn a stopped process into fabricated debt.
+        advance = outcome.get("advance")
+        if isinstance(advance, Mapping) and advance.get("advanced"):
+            summary = advance.get("inputs_summary") or {}
+            load_units = summary.get("load_units")
+            elapsed = advance.get("elapsed_seconds")
+            if (
+                isinstance(load_units, (int, float))
+                and not isinstance(load_units, bool)
+                and load_units > 0
+                and isinstance(elapsed, (int, float))
+                and not isinstance(elapsed, bool)
+                and elapsed > 0
+            ):
+                self._advance_health_record(
+                    hours=elapsed / 3600.0, load_hours=float(load_units)
+                )
         self.counters["writes"] += 1
         return state
 
@@ -583,6 +626,80 @@ class WorldBodyService:
         bounded["params"] = {key: value for key, value in params.items() if key != "mode"}
         return bounded
 
+    def _refresh_body_state_if_newer_on_disk(self) -> None:
+        """Pure zero-write sync if another process advanced ``runtime.json`` (e.g., lived-needs relief)."""
+
+        store = getattr(self, "body_store", None)
+        current = getattr(self, "body_state", None)
+        if store is None or not isinstance(current, Mapping):
+            return
+        rt_path = getattr(store, "runtime_path", None)
+        if rt_path is None:
+            return
+        try:
+            if rt_path.is_symlink() or not rt_path.is_file():
+                return
+            raw = json.loads(rt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(raw, Mapping):
+            return
+        disk_ver = raw.get("version")
+        mem_ver = current.get("version")
+        if (
+            isinstance(disk_ver, int)
+            and not isinstance(disk_ver, bool)
+            and isinstance(mem_ver, int)
+            and not isinstance(mem_ver, bool)
+            and disk_ver > mem_ver
+        ):
+            br = getattr(self, "br", None)
+            if br is not None:
+                try:
+                    self.body_state = br.validate_runtime(raw)
+                except Exception:
+                    return
+            else:
+                self.body_state = dict(raw)
+
+    def _maybe_auto_bind_composable_sleep(
+        self,
+        *,
+        execution_id: Any,
+        started_at: datetime,
+    ) -> Optional[dict[str, Any]]:
+        """Bind ``REST(start, sleep_like)`` into ``v08_composable_body`` when enabled (zero-write when off)."""
+
+        cfg = getattr(self, "config", None)
+        world_home = getattr(cfg, "world_home", None) if cfg is not None else None
+        if world_home is None:
+            return None
+        try:
+            import instance_paths as _ip
+            import v08_composable_body as _v08_cb
+        except Exception:
+            try:
+                from components.world.scripts import instance_paths as _ip  # type: ignore[no-redef]
+                from components.world.scripts import v08_composable_body as _v08_cb  # type: ignore[no-redef]
+            except Exception:
+                return None
+        try:
+            paths = _ip.resolve_instance_paths(world_home)
+            exec_tag = str(execution_id or "").strip()
+            sleep_id = (
+                f"world_sleep:{exec_tag}" if exec_tag else f"world_sleep:{_iso(started_at)}"
+            )[:64]
+            started_iso = _iso(started_at)
+            planned_wake_iso = _iso(started_at + timedelta(hours=7))
+            return _v08_cb.auto_bind_world_sleep_if_enabled(
+                paths.day_root,
+                sleep_activity_id=sleep_id,
+                started_at_iso=started_iso,
+                planned_wake_iso=planned_wake_iso,
+            )
+        except Exception:
+            return None
+
     def act(self, proposal: Mapping[str, Any]) -> dict[str, Any]:
         """Resolve one proposal and apply its body consequence, in-process.
 
@@ -599,6 +716,7 @@ class WorldBodyService:
           of the old fixed 600 s assumption.
         """
 
+        self._refresh_body_state_if_newer_on_disk()
         proposal = self._owner_rest_params(proposal)
         now = self._moment()
         preflight = self._rest_body_gate(proposal)
@@ -672,9 +790,19 @@ class WorldBodyService:
                         "settled" if outcome["applied"] else "unsettled"
                     )
         if action == "REST":
-            payload["recovery_state"] = (
-                (self.body_state or {}).get("recovery") or {}
-            ).get("state")
+            rec_block = (self.body_state or {}).get("recovery") or {}
+            payload["recovery_state"] = rec_block.get("state")
+            if result.get("status") == "applied":
+                rest_params = proposal.get("params") if isinstance(proposal.get("params"), Mapping) else {}
+                rest_state = str(rest_params.get("state") or "").strip().lower()
+                rest_mode = str(rest_params.get("mode") or rec_block.get("mode") or "").strip().lower()
+                if rest_state == "start" and rest_mode == "sleep_like" and rec_block.get("state") == "active":
+                    bind_res = self._maybe_auto_bind_composable_sleep(
+                        execution_id=result.get("execution_id") or proposal.get("execution_id"),
+                        started_at=now,
+                    )
+                    if isinstance(bind_res, Mapping) and bind_res.get("bound"):
+                        payload["composable_body_sleep_bind"] = dict(bind_res)
         # v0.4: the owner's own evidence travels with the result.  It is read
         # from the resolver's payload, never re-derived here: a receipt is the
         # only proof of a consumption, so a caller must not have to guess it.
@@ -783,6 +911,7 @@ class WorldBodyService:
         )
         self.body_store.append_transition(transition)
         self.body_store.save_runtime(after_state)
+        self._advance_health_record(hours=elapsed / 3600.0)
         self.counters["writes"] += 1
         return {
             "advanced": True,
@@ -790,6 +919,76 @@ class WorldBodyService:
             "wrote": True,
             "catch_up": result.get("catch_up"),
         }
+
+    def health_record(self) -> Any:
+        """The one health record the read surfaces use.
+
+        v03's illness state (rain / late nights) is the real exposure surface;
+        when it reports a course in progress, that wins over a persisted record
+        that says nothing is happening.  Nothing is written here.
+        """
+
+        import body_health_projection as bhp
+
+        body_id = (self.body_state or {}).get("body_id") or "chiyo_body"
+        illness = bhp.read_v03_illness(self.config.world_home)
+        if isinstance(illness, Mapping):
+            phase = str(illness.get("phase") or "healthy").strip().lower()
+            if phase in ("prodrome", "acute_illness", "convalescence"):
+                return bhp.record_from_illness(
+                    illness, body_id=body_id, subject_id="self", home_ref="",
+                    at=self._moment(),
+                )
+            persisted = getattr(self, "health_state", None)
+            if persisted is not None:
+                if persisted.episode is not None:
+                    from dataclasses import replace as _dc_replace
+
+                    return _dc_replace(
+                        persisted,
+                        episode=None,
+                        status=bhp.HealthStatus.HEALTHY,
+                        status_authority="derived",
+                        source_reason=None,
+                    )
+                return persisted
+            return bhp.initial_record(
+                body_id=body_id, subject_id="self", home_ref="", at=self._moment()
+            )
+        persisted = getattr(self, "health_state", None)
+        if persisted is not None:
+            return persisted
+        return bhp.initial_record(
+            body_id=body_id, subject_id="self", home_ref="", at=self._moment()
+        )
+
+    def _advance_health_record(self, *, hours: float, load_hours: float = 0.0) -> None:
+        """Move the health course over an interval the body really advanced.
+
+        Recovery mode comes from the body's own recovery session, never from a
+        label the caller passes.  ``load_hours`` is the runtime's measured
+        ``load_units`` for this interval -- only real physical work is billed,
+        so chronic load and sleep debt are never fabricated from idle time.
+        With no open session the course only clears at the ``none`` rate --
+        resting is something the body did, not something a message says.
+        """
+
+        record = getattr(self, "health_state", None)
+        store = getattr(self, "health_store", None)
+        if record is None or store is None or hours <= 0:
+            return
+        import body_health_projection as bhp
+
+        recovery = (self.body_state or {}).get("recovery") or {}
+        rested = recovery.get("state") == "active"
+        mode = (recovery.get("mode") or "rest") if rested else "none"
+        advanced = bhp.advance_record(
+            record, at=self._moment(), hours=hours, load_hours=max(0.0, load_hours),
+            mode=mode, rested=rested,
+        )
+        if advanced.revision == record.revision:
+            return
+        self.health_state = store.save(advanced)
 
     def _advance_lived_needs_window(self) -> Optional[dict[str, Any]]:
         """Grow lived needs only over an interval this service witnessed.
@@ -825,6 +1024,55 @@ class WorldBodyService:
         after = dict(state)
         after["lived_needs"] = outcome["state"]
         self.body_state = after
+        levels_changed = any(
+            abs(
+                float(after["lived_needs"]["levels"][k])
+                - float(block["levels"][k])
+            )
+            > self.br.CHANGE_EPSILON
+            for k in ("hunger", "thirst", "toilet")
+        )
+        moment_utc = (
+            moment.astimezone(timezone.utc)
+            if moment.tzinfo is not None
+            else moment.replace(tzinfo=timezone.utc)
+        )
+        if not levels_changed and skipped <= 0.0:
+            last_saved_dt = getattr(self, "_lived_needs_last_runtime_saved_at", None)
+            if last_saved_dt is None:
+                raw_last = block.get("last_live_at")
+                if isinstance(raw_last, str) and raw_last.strip():
+                    try:
+                        parsed_last = datetime.fromisoformat(
+                            raw_last.strip().replace("Z", "+00:00")
+                        )
+                        if parsed_last.tzinfo is None:
+                            parsed_last = parsed_last.replace(tzinfo=timezone.utc)
+                        last_saved_dt = parsed_last.astimezone(timezone.utc)
+                    except ValueError:
+                        last_saved_dt = None
+            else:
+                if last_saved_dt.tzinfo is None:
+                    last_saved_dt = last_saved_dt.replace(tzinfo=timezone.utc)
+                else:
+                    last_saved_dt = last_saved_dt.astimezone(timezone.utc)
+            should_save_runtime = (
+                last_saved_dt is None
+                or (moment_utc - last_saved_dt).total_seconds()
+                >= LIVED_NEEDS_SATURATED_RUNTIME_REFRESH_SECONDS
+            )
+            if should_save_runtime:
+                self.body_store.save_runtime(after)
+                self._lived_needs_last_runtime_saved_at = moment_utc
+                self.counters["writes"] += 1
+            return {
+                "reason": reason,
+                "counted_seconds": round(counted, 3),
+                "skipped_seconds": round(skipped, 3),
+                "levels_changed": False,
+                "transition_skipped": True,
+                "wrote": should_save_runtime,
+            }
         transition = self.br.build_transition(
             before,
             after,
@@ -838,11 +1086,14 @@ class WorldBodyService:
         )
         self.body_store.append_transition(transition)
         self.body_store.save_runtime(after)
+        self._lived_needs_last_runtime_saved_at = moment_utc
         self.counters["writes"] += 1
         return {
             "reason": reason,
             "counted_seconds": round(counted, 3),
             "skipped_seconds": round(skipped, 3),
+            "levels_changed": levels_changed,
+            "transition_skipped": False,
             "wrote": True,
         }
 
@@ -1032,6 +1283,7 @@ class WorldBodyService:
         """
 
         self.counters["ticks"] += 1
+        self._refresh_body_state_if_newer_on_disk()
         arrival = self._settle_arrivals()
         pending = self._settle_pending_movements()
         deliveries = self._settle_deliveries()
@@ -1123,13 +1375,21 @@ class WorldBodyService:
         if substrate is None:
             return []
         placements = substrate.get("placements") or {}
+        consumed_objects = {
+            str(receipt.get("object_id"))
+            for receipt in (substrate.get("consumptions") or {}).values()
+            if isinstance(receipt, Mapping) and receipt.get("object_id")
+        }
         return [
             str(item["item_instance_id"])
             for item in state.get("items") or []
             if isinstance(item, Mapping)
             and str(item.get("disposition")) == economy.DISPOSITION_OWNED
-            and item.get("current_location") == economy.HOME_ITEM_LOCATION
+            and isinstance(item.get("current_location"), str)
+            and "/" in item["current_location"]
+            and not item["current_location"].startswith("in_transit/")
             and str(item.get("item_instance_id")) not in placements
+            and str(item.get("item_instance_id")) not in consumed_objects
         ]
 
     def _materialize_delivered(self) -> list[dict[str, Any]]:
@@ -1349,6 +1609,8 @@ class WorldBodyService:
     def body_summary(self) -> dict[str, Any]:
         """Qualitative only: no raw somatic value ever leaves here."""
 
+        if hasattr(self, "_refresh_body_state_if_newer_on_disk"):
+            self._refresh_body_state_if_newer_on_disk()
         state = self.body_state or {}
         import body_signal as bs
         import body_signal as bsi

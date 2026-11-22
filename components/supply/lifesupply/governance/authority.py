@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
+from lifesupply.db import readonly_sqlite_uri
 from lifesupply.fencing import activate_writer_epoch, install_write_guards, register_writer_connection, require_schema_columns, reject_incompatible_existing_schema
 
 CAPABILITIES = frozenset({
@@ -143,12 +144,19 @@ class GovernanceAuthority:
             finally:
                 con.close()
             return
-        uri = f"file:{self.db_path}?mode=ro" if self.read_only else self.db_path
-        con = sqlite3.connect(uri, uri=self.read_only, timeout=10, isolation_level=None)
-        con.row_factory = sqlite3.Row
-        con.execute("PRAGMA foreign_keys=ON")
-        con.execute("PRAGMA busy_timeout=10000")
-        register_writer_connection(con, self.writer_fence)
+        if self.read_only:
+            con = sqlite3.connect(
+                readonly_sqlite_uri(self.db_path), uri=True, timeout=10, isolation_level=None
+            )
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only=ON")
+            con.execute("PRAGMA busy_timeout=10000")
+        else:
+            con = sqlite3.connect(self.db_path, uri=False, timeout=10, isolation_level=None)
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA foreign_keys=ON")
+            con.execute("PRAGMA busy_timeout=10000")
+            register_writer_connection(con, self.writer_fence)
         try:
             yield con
         finally:
