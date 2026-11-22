@@ -34,7 +34,7 @@
       "description": "升级只替换程序目录，不动你的聊天记录与人设；万一新版用着不顺手，一行命令就能退回上一版。",
       "url": "https://nyairo.com/docs/update/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -474,7 +474,7 @@
 
         <article class="markdown-body">
           <h2 id="update-section-0">升级前先检查与备份</h2>
-<p>nyairo 把程序装在 <code>~/.local/share/nyairo</code>，把你的个人数据（<code>SOUL.md</code>、模型密钥、聊天数据库与记忆）单独放在 <code>~/.nyairo</code>。正常升级不会改写个人数据，但由于当前 <code>v0.7.0</code> 仍处于快速迭代的公开测试阶段，<strong>升级前请先退出正在运行的聊天和网关进程，顺手打个备份包</strong>：</p>
+<p>nyairo 把程序装在 <code>~/.local/share/nyairo</code>，把你的个人数据（<code>SOUL.md</code>、模型密钥、聊天数据库与记忆）单独放在 <code>~/.nyairo</code>。正常升级不会改写个人数据，但由于当前 <code>v0.8.0</code> 仍处于快速迭代的公开测试阶段，<strong>升级前请先退出正在运行的聊天和网关进程，顺手打个备份包</strong>：</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div>
 <pre><code>tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo</code></pre></div>
@@ -487,10 +487,10 @@
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div>
 <pre><code>nyairo update --check</code></pre></div>
-<p>确认要升级时（公开测试版频道需指定版本号，例如 <code>v0.7.0</code>），运行：</p>
+<p>确认要升级时（公开测试版频道需指定版本号，例如 <code>v0.8.0</code>），运行：</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div>
-<pre><code>nyairo update --version v0.7.0</code></pre></div>
+<pre><code>nyairo update --version v0.8.0</code></pre></div>
 <p>程序会自动下载官方压缩包、核对 SHA256 与文件清单、配好新版环境并切换入口。</p>
 
 <h2 id="update-section-2">一键回滚与中断恢复</h2>

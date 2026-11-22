@@ -34,7 +34,7 @@
       "description": "テンプレート選択不要の完全ランダム専用ワールドのワンクリック生成、7 種の内蔵ワールドと 4 種のテーマスタイルの切り替え、ライト／ダーク両対応オフラインマップエディタを使った店舗や部屋の改築、そして現在の実装上の境界線について解説します。",
       "url": "https://nyairo.com/ja/docs/world-editor/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -484,7 +484,7 @@
 
 <h2 id="we-editor">ライト／ダーク両対応オフラインマップエディタ：間取り描画と店舗設定</h2>
 <p>リポジトリ内の <code>components/world-editor/</code> には、<strong>ライトテーマとダークテーマの切り替え</strong>に対応して刷新された純ローカルのビジュアル空間エディタが内蔵されています（ローカルマシン <code>127.0.0.1</code> のみで待ち受けるため、インターネット接続不要でモデルのトークンも消費しません）。デスクトップ版の「街区 → エディタ」タブからそのまま開けるほか、ターミナルから手動で起動することもできます。</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>cd ~/.local/share/nyairo/releases/v0.7.0/components/world-editor
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>cd ~/.local/share/nyairo/releases/v0.8.0/components/world-editor
 python3 server.py --port 8766</code></pre></div>
 <p>続いてブラウザで <code>http://127.0.0.1:8766</code> を開けば、ワールドの改築を始められます。</p>
 <ol>
@@ -494,9 +494,9 @@ python3 server.py --port 8766</code></pre></div>
 </ol>
 
 <h2 id="we-cli">テーマ選択不要の完全ランダム専用ワールドとシード値生成</h2>
-<p><code>v0.7.0</code> では、「海辺の坂道タウン（<code>coastal_town</code>）」「山あいの温泉町（<code>mountain_town</code>）」「郊外の住宅街（<code>residential_town</code>）」「田園の農村（<code>rural_farming</code>）」の 4 種類のテーマに沿った生成に加えて、デスクトップ版の「<strong>街区 → 新しい街を生成</strong>」から<strong>テーマ選択不要の完全ランダム専用ワールドをワンクリックで生成</strong>できるようになりました（<code>procedural</code> モード）。あらかじめスタイルを選ばなくても、ジェネレーターがシード値にもとづいて <strong>6 種の地形</strong>（岬の坂道・運河と水路の路地・山麓の渓谷・鉄道の駅町・果樹園の台地・森の湖畔）から調和する景観を掛け合わせ、<strong>4 種の異なるトポロジーの連結道路網</strong>（放射状ハブ型・環状ルート・一本道プロムナード・分岐大通り）、<strong>8 業種の商業店舗</strong>、および<strong>複数部屋の自宅</strong>（寝室に加えてリビング、縁側、ミニキッチン、書斎コーナー、さらに温冷・乾湿の物性を持つ家具を自動組み合わせ）を構築し、「生成後すぐホットスイッチで反映」にも対応しています。</p>
+<p><code>v0.8.0</code> では、「海辺の坂道タウン（<code>coastal_town</code>）」「山あいの温泉町（<code>mountain_town</code>）」「郊外の住宅街（<code>residential_town</code>）」「田園の農村（<code>rural_farming</code>）」の 4 種類のテーマに沿った生成に加えて、デスクトップ版の「<strong>街区 → 新しい街を生成</strong>」から<strong>テーマ選択不要の完全ランダム専用ワールドをワンクリックで生成</strong>できるようになりました（<code>procedural</code> モード）。あらかじめスタイルを選ばなくても、ジェネレーターがシード値にもとづいて <strong>6 種の地形</strong>（岬の坂道・運河と水路の路地・山麓の渓谷・鉄道の駅町・果樹園の台地・森の湖畔）から調和する景観を掛け合わせ、<strong>4 種の異なるトポロジーの連結道路網</strong>（放射状ハブ型・環状ルート・一本道プロムナード・分岐大通り）、<strong>8 業種の商業店舗</strong>、および<strong>複数部屋の自宅</strong>（寝室に加えてリビング、縁側、ミニキッチン、書斎コーナー、さらに温冷・乾湿の物性を持つ家具を自動組み合わせ）を構築し、「生成後すぐホットスイッチで反映」にも対応しています。</p>
 <p>Linux / WSL のターミナルでお使いの場合も、<code>components.worldgen</code> に <code>--theme procedural</code>（または任意のテーマ）と数値シードを指定して、決定論的な専用ワールドをコマンド一発で生成できます。</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.8.0"
 cd "$REL"
 # テーマ選択なしでシード値から完全ランダム専用ワールドを生成・検証し、プレビューマップを出力
 "$REL/vendor/hermes/.venv/bin/python" -m components.worldgen generate \

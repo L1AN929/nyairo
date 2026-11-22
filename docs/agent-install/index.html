@@ -34,7 +34,7 @@
       "description": "如果你平时在用 Claude Code、Codex 或其他带终端权限的 AI 编程工具，可以把这段标准说明直接复制给它，让它先检查环境再安全安装。",
       "url": "https://nyairo.com/docs/agent-install/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -483,12 +483,12 @@
 
 <h2 id="agent-section-1">整段复制给 AI 助手的指令</h2>
 <p>点击代码块右上角的「复制」，原样发给你的 AI 助手即可：</p>
-<div class="code-block"><div class="code-header"><span>text</span><button class="copy-btn" type="button">复制</button></div><pre><code>请帮我在这台电脑上安装 nyairo（v0.7.0）。请严格按 https://nyairo.com/AGENT_INSTALL.zh-CN.md 的规范执行，每一步用中文告诉我你在做什么，不要跳过检查，也不要假装成功：
+<div class="code-block"><div class="code-header"><span>text</span><button class="copy-btn" type="button">复制</button></div><pre><code>请帮我在这台电脑上安装 nyairo（v0.8.0）。请严格按 https://nyairo.com/AGENT_INSTALL.zh-CN.md 的规范执行，每一步用中文告诉我你在做什么，不要跳过检查，也不要假装成功：
 
 1. 【只读检查，先别安装】检查系统环境（需 Linux 或 WSL 2）、磁盘剩余空间（建议 ≥ 3 GB）、能否连上 github.com 与 astral.sh；检查当前 HOME 是否已有 ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1，以及是否有正在运行的 m0_writer_worker 或 gateway 进程。若发现已有实例，必须立刻停下来汇报并建议换独立 Linux 用户或独立 HOME，绝不能覆盖已有数据，也绝不能终止已有实例的进程。
-2. 【征求确认】向我说明即将创建的目录（~/.local/share/nyairo/releases/v0.7.0、~/.nyairo、~/.local/bin/nyairo），涉及 sudo 或新建系统用户必须先等我同意。
-3. 【校验安装】从 https://github.com/L1AN929/nyairo/releases/download/v0.7.0/ 下载 nyairo-v0.7.0.zip 与同名 .sha256，执行 sha256sum -c 校验通过后解压，运行包内 bash scripts/bootstrap.sh（无交互终端可加 --no-setup --no-launch）。
-4. 【实机核验】检查 ~/.local/state/nyairo/install.json 版本为 v0.7.0，用包内 Python 运行 scripts/verify_manifest.py 确认输出 "valid": true，执行一次 ~/.local/bin/nyairo -z "安装自检" 并确认新实例无残留进程。我未填密钥前，模型与外部通道一律如实标为「尚未验证」。
+2. 【征求确认】向我说明即将创建的目录（~/.local/share/nyairo/releases/v0.8.0、~/.nyairo、~/.local/bin/nyairo），涉及 sudo 或新建系统用户必须先等我同意。
+3. 【校验安装】从 https://github.com/L1AN929/nyairo/releases/download/v0.8.0/ 下载 nyairo-v0.8.0.zip 与同名 .sha256，执行 sha256sum -c 校验通过后解压，运行包内 bash scripts/bootstrap.sh（无交互终端可加 --no-setup --no-launch）。
+4. 【实机核验】检查 ~/.local/state/nyairo/install.json 版本为 v0.8.0，用包内 Python 运行 scripts/verify_manifest.py 确认输出 "valid": true，执行一次 ~/.local/bin/nyairo -z "安装自检" 并确认新实例无残留进程。我未填密钥前，模型与外部通道一律如实标为「尚未验证」。
 5. 【中文交付】用简明中文告诉我启动（nyairo）、配模型（nyairo setup model）、接微信/Telegram、更新与备份方法。全程绝不要让我把 API Key 或密码发到聊天框里。</code></pre></div>
 
 <h2 id="agent-section-2">为什么要设这四条安全规矩</h2>
@@ -502,7 +502,7 @@
 <h2 id="agent-section-3">装完后你自己核对哪几项</h2>
 <p>AI 汇报「安装完成」后，你可以顺手看一眼这三件事确认没被糊弄：</p>
 <ol>
-<li><code>cat ~/.local/state/nyairo/install.json</code> 里的 <code>version</code> 确实是 <code>v0.7.0</code>（注：直接敲 <code>nyairo --version</code> 显示的是底层宿主 Hermes 的版本号，看 nyairo 自身版本以 <code>install.json</code> 为准）；</li>
+<li><code>cat ~/.local/state/nyairo/install.json</code> 里的 <code>version</code> 确实是 <code>v0.8.0</code>（注：直接敲 <code>nyairo --version</code> 显示的是底层宿主 Hermes 的版本号，看 nyairo 自身版本以 <code>install.json</code> 为准）；</li>
 <li><code>~/.nyairo</code> 目录下已经生成了 <code>SOUL.md</code>、<code>config.yaml</code> 和 <code>chiyo/config.json</code>；</li>
 <li>运行 <code>nyairo setup model</code> 填好你自己的 API Key，再敲 <code>nyairo</code> 发一句问候，能正常收到回复就大功告成了。</li>
 </ol>

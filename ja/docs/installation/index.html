@@ -34,7 +34,7 @@
       "description": "インストール前に 1 分ほどかけて OS 環境・ディスク空き容量・ディレクトリ構成を確認しておくと、後からやり直す手間を省けます。",
       "url": "https://nyairo.com/ja/docs/installation/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -475,7 +475,7 @@
         <article class="markdown-body">
           <h2 id="installation-section-0">対応している OS</h2>
 <ul>
-<li><strong>Windows 10 / 11</strong>：ネイティブのデスクトップクライアント（<code>nyairo-0.7.0-setup.exe</code>）を提供しており、生活状態や記憶のバックエンドは Windows 公式の WSL 2（Ubuntu）上で動作します。操作手順の詳細は <a href="../windows/">Windows へのインストール</a> をご覧ください。</li>
+<li><strong>Windows 10 / 11</strong>：ネイティブのデスクトップクライアント（<code>nyairo-0.8.0-setup.exe</code>）を提供しており、生活状態や記憶のバックエンドは Windows 公式の WSL 2（Ubuntu）上で動作します。操作手順の詳細は <a href="../windows/">Windows へのインストール</a> をご覧ください。</li>
 <li><strong>Linux デスクトップまたはサーバー</strong>：Ubuntu / Debian 環境で最も十分に動作確認されており、1 行のセットアップコマンドをそのまま実行できます。その他のディストリビューションでは、基本的な展開・ビルドツールを各自で事前に導入する必要があります。</li>
 <li><strong>macOS</strong>：現時点ではパッケージ化と一連の動作検証が完了していないため、そのまま使える状態での動作は保証していません。コマンドラインに慣れている方はソースコードを参照して手動で試すか、今後の正式対応をお待ちください。</li>
 </ul>
@@ -483,7 +483,7 @@
 <h2 id="installation-section-1">プログラム本体と個人データの保存先</h2>
 <p>アップグレード時に大切な会話履歴を誤って上書きしないよう、nyairo は「プログラム本体」と「個人データ」を完全に別のディレクトリへ分けて管理しています。</p>
 <ul>
-<li><strong>プログラムディレクトリ</strong>：Linux / WSL 環境では <code>~/.local/share/nyairo/releases/v0.7.0</code>（Windows デスクトップ版の画面プログラムは <code>%LOCALAPPDATA%\Programs\nyairo</code>）に配置され、アップデート時はこの領域のみが置き換わります。</li>
+<li><strong>プログラムディレクトリ</strong>：Linux / WSL 環境では <code>~/.local/share/nyairo/releases/v0.8.0</code>（Windows デスクトップ版の画面プログラムは <code>%LOCALAPPDATA%\Programs\nyairo</code>）に配置され、アップデート時はこの領域のみが置き換わります。</li>
 <li><strong>個人データディレクトリ</strong>：<code>~/.nyairo</code> に配置され、人物設定（<code>SOUL.md</code>）、モデル設定、会話履歴、ローカル SQLite の長期記憶データベースがすべてここに保存されます。</li>
 </ul>
 <p>デスクトップクライアントをアンインストールして再インストールしたり、旧バージョンへロールバックしたりしても、<code>~/.nyairo</code> を手動で削除しない限り、これまでの記憶や設定はすべてそのまま残ります。</p>

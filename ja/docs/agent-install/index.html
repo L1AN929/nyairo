@@ -34,7 +34,7 @@
       "description": "普段から Claude Code や Codex などターミナル操作権限を持つ AI コーディングツールをお使いの場合は、この標準プロンプトをそのまま渡すことで、事前チェックを行ったうえで安全にインストールさせられます。",
       "url": "https://nyairo.com/ja/docs/agent-install/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -483,12 +483,12 @@
 
 <h2 id="agent-section-1">そのままコピーして AI アシスタントに渡す指示文</h2>
 <p>コードブロック右上の「コピー」をクリックし、そのままお使いの AI アシスタントへ送信してください。</p>
-<div class="code-block"><div class="code-header"><span>text</span><button class="copy-btn" type="button">コピー</button></div><pre><code>この PC に nyairo（v0.7.0）をインストールしてください。https://nyairo.com/AGENT_INSTALL.zh-CN.md の仕様を厳密に守り、各ステップで何を行っているかを日本語で説明しながら進めてください。確認を省略したり、確認せず成功と報告したりしないでください：
+<div class="code-block"><div class="code-header"><span>text</span><button class="copy-btn" type="button">コピー</button></div><pre><code>この PC に nyairo（v0.8.0）をインストールしてください。https://nyairo.com/AGENT_INSTALL.zh-CN.md の仕様を厳密に守り、各ステップで何を行っているかを日本語で説明しながら進めてください。確認を省略したり、確認せず成功と報告したりしないでください：
 
 1. 【読み取り専用チェック・まだインストールしない】OS 環境（Linux または WSL 2 であること）、空きディスク容量（3 GB 以上推奨）、github.com と astral.sh への接続可否を確認してください。あわせて現在の HOME 配下に ~/.nyairo、~/.local/share/nyairo、~/.chiyo-v1 がすでに存在しないか、および稼働中の m0_writer_worker または gateway プロセスがないか確認してください。既存インスタンスが見つかった場合は即座に作業を停止して報告し、別の Linux ユーザーまたは別の HOME を使うよう提案してください。既存データの上書きや、既存インスタンスのプロセス終了は絶対に行わないでください。
-2. 【事前確認の取得】作成予定のディレクトリ（~/.local/share/nyairo/releases/v0.7.0、~/.nyairo、~/.local/bin/nyairo）について説明してください。sudo の実行やシステムユーザーの新規作成が必要な場合は、必ず私の同意を得てから進めてください。
-3. 【検証付きインストール】https://github.com/L1AN929/nyairo/releases/download/v0.7.0/ から nyairo-v0.7.0.zip と同名の .sha256 ファイルを取得し、sha256sum -c で一致を確認してから展開したうえで、同梱の bash scripts/bootstrap.sh を実行してください（非対話ターミナルでは --no-setup --no-launch を付与可）。
-4. 【実機検証】~/.local/state/nyairo/install.json のバージョンが v0.7.0 であることを確認し、同梱の Python で scripts/verify_manifest.py を実行して "valid": true が出力されることを確認してください。また ~/.local/bin/nyairo -z "インストール自己診断" を 1 回実行し、新インスタンス側に残留プロセスがないことを確認してください。私が認証キーを設定する前の段階では、モデルや外部チャネルの状態は必ず正直に「未検証」と記載してください。
+2. 【事前確認の取得】作成予定のディレクトリ（~/.local/share/nyairo/releases/v0.8.0、~/.nyairo、~/.local/bin/nyairo）について説明してください。sudo の実行やシステムユーザーの新規作成が必要な場合は、必ず私の同意を得てから進めてください。
+3. 【検証付きインストール】https://github.com/L1AN929/nyairo/releases/download/v0.8.0/ から nyairo-v0.8.0.zip と同名の .sha256 ファイルを取得し、sha256sum -c で一致を確認してから展開したうえで、同梱の bash scripts/bootstrap.sh を実行してください（非対話ターミナルでは --no-setup --no-launch を付与可）。
+4. 【実機検証】~/.local/state/nyairo/install.json のバージョンが v0.8.0 であることを確認し、同梱の Python で scripts/verify_manifest.py を実行して "valid": true が出力されることを確認してください。また ~/.local/bin/nyairo -z "インストール自己診断" を 1 回実行し、新インスタンス側に残留プロセスがないことを確認してください。私が認証キーを設定する前の段階では、モデルや外部チャネルの状態は必ず正直に「未検証」と記載してください。
 5. 【日本語での引き継ぎ】起動方法（nyairo）、モデル設定（nyairo setup model）、WeChat / Telegram 連携、アップデートとバックアップの方法をわかりやすい日本語で案内してください。全工程を通じて、API キーやパスワードをチャット欄へ送信させることは絶対に行わないでください。</code></pre></div>
 
 <h2 id="agent-section-2">4 つの安全ルールを設けている理由</h2>
@@ -502,7 +502,7 @@
 <h2 id="agent-section-3">導入後にご自身で確認すべきポイント</h2>
 <p>AI から「インストール完了」と報告を受けたら、最後に次の 3 点を軽く確認しておくと安心です。</p>
 <ol>
-<li><code>cat ~/.local/state/nyairo/install.json</code> に含まれる <code>version</code> が確実に <code>v0.7.0</code> になっていること（注：<code>nyairo --version</code> を直接実行した場合に表示されるのは基盤ホストである Hermes 側のバージョンです。nyairo 本体のバージョン確認は <code>install.json</code> を基準としてください）。</li>
+<li><code>cat ~/.local/state/nyairo/install.json</code> に含まれる <code>version</code> が確実に <code>v0.8.0</code> になっていること（注：<code>nyairo --version</code> を直接実行した場合に表示されるのは基盤ホストである Hermes 側のバージョンです。nyairo 本体のバージョン確認は <code>install.json</code> を基準としてください）。</li>
 <li><code>~/.nyairo</code> ディレクトリ配下に <code>SOUL.md</code>、<code>config.yaml</code>、<code>chiyo/config.json</code> が生成されていること。</li>
 <li><code>nyairo setup model</code> を実行してご自身の API キーを設定したあと、<code>nyairo</code> を起動して挨拶を送り、問題なく返信が返ってくること。</li>
 </ol>

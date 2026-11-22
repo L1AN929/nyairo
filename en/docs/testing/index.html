@@ -34,7 +34,7 @@
       "description": "An honest record of what checks each public release went through—and which scenarios remain untested—rather than hiding behind raw unit-test counts.",
       "url": "https://nyairo.com/en/docs/testing/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -478,14 +478,14 @@
 
 <h2 id="testing-section-1">Automated &amp; Real-Machine Checks Covered Today</h2>
 <ul>
-<li><strong>Core mechanics &amp; component suites</strong>: Offline automated tests cover memory read/write and correction boundaries, multi-hop road-graph pathfinding, pause/resume without re-walking, daily API request caps, diurnal world changes and bodily rhythms, suitcase preflight checks, and source redaction (including 263 checks in the <code>v0.4</code> world suite and passing rhythm, quota-convergence, and redaction suites across <code>v0.5.1</code> to <code>v0.7.0</code>).</li>
+<li><strong>Core mechanics &amp; component suites</strong>: Offline automated tests cover memory read/write and correction boundaries, multi-hop road-graph pathfinding, pause/resume without re-walking, daily API request caps, diurnal world changes and bodily rhythms, suitcase preflight checks, and source redaction (including 263 checks in the <code>v0.4</code> world suite and passing rhythm, quota-convergence, and redaction suites across <code>v0.5.1</code> to <code>v0.8.0</code>).</li>
 <li><strong>Release package integrity verification</strong>: Every GitHub Release ZIP ships with a <code>MANIFEST.json</code> inventory and <code>.sha256</code> hash file ensuring every script and component written to disk matches the release build byte for byte.</li>
-<li><strong>Windows desktop &amp; website real-machine checks</strong>: The <code>nyairo-0.7.0-setup.exe</code> installer, desktop views (Overview, streaming chat, map, draft version diff), and desktop/mobile website interactions have been verified directly on real machines.</li>
+<li><strong>Windows desktop &amp; website real-machine checks</strong>: The <code>nyairo-0.8.0-setup.exe</code> installer, desktop views (Overview, streaming chat, map, draft version diff), and desktop/mobile website interactions have been verified directly on real machines.</li>
 </ul>
 
 <h2 id="testing-section-2">What Is Explicitly Not Covered Yet</h2>
 <ul>
-<li><strong>No 24+ hour continuous live-LLM soak test on <code>v0.7.0</code></strong>: Automated suites rely primarily on deterministic stubs and controlled clocks to verify logic correctness, which is not a substitute for multi-day live runs against real commercial LLMs.</li>
+<li><strong>No 24+ hour continuous live-LLM soak test on <code>v0.8.0</code></strong>: Automated suites rely primarily on deterministic stubs and controlled clocks to verify logic correctness, which is not a substitute for multi-day live runs against real commercial LLMs.</li>
 <li><strong>No cloud GitHub Actions CI gate enabled yet</strong>: Workflows under <code>ci/templates/</code> in the repository are reference templates; full-suite automated CI is not yet triggered on every GitHub commit, so we intentionally do not display a synthetic CI Passing badge.</li>
 <li><strong>Limited cross-platform coverage</strong>: Verification has focused on Ubuntu / Debian Linux and Windows 10/11 (WSL 2 Ubuntu). macOS, less common Linux distributions, Docker containerized deployments, and long-lived real-account connections on QQ or Feishu have not completed full acceptance testing.</li>
 </ul>

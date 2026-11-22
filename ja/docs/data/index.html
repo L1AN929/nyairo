@@ -34,7 +34,7 @@
       "description": "各フォルダに何が保存されているか、サービスを停止して完全なバックアップを取る手順、PC 買い替え時のデータ移行方法、そして目的に応じたクリーンなアンインストール手順を解説します。",
       "url": "https://nyairo.com/ja/docs/data/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -497,11 +497,11 @@ chmod 600 "$bkp"
 tar -tzf "$bkp" &gt;/dev/null &amp;&amp; echo "バックアップの整合性チェックに成功しました：$bkp"</code></pre></div>
 
 <h2 id="data-section-2">現在 PC を買い替える際のデータ移行方法</h2>
-<p>現在の <code>v0.7.0</code> では、API キーとローカルパスを自動除外するロスレス引越しスーツケース（<code>.nyairo-suitcase.zip</code>）のエクスポートに対応しています。デスクトップ版で「<strong>設定 → 環境と診断</strong>」（または概要ページの「引越しスーツケース」カード）を開き、「<strong>ポータブルスーツケースを書き出す (.nyairo-suitcase.zip)</strong>」をクリックすると、二層メモリーランタン帳簿、エッセイや作品、生活の進行状態に加えて<strong>現在のカスタム／ランダムワールドのスライスと透明性の高い「移行ロス一覧」一式をまとめてパッケージ化</strong>できます。新しい PC にインストールした後、同じ画面から「<strong>スーツケースファイルを選択してインポート復元</strong>」をクリックし（2段階の安全事前チェックが自動実行されます）、モデルキーを再入力すれば完了です。</p>
+<p>現在の <code>v0.8.0</code> では、API キーとローカルパスを自動除外するロスレス引越しスーツケース（<code>.nyairo-suitcase.zip</code>）のエクスポートに対応しています。デスクトップ版で「<strong>設定 → 環境と診断</strong>」（または概要ページの「引越しスーツケース」カード）を開き、「<strong>ポータブルスーツケースを書き出す (.nyairo-suitcase.zip)</strong>」をクリックすると、二層メモリーランタン帳簿、エッセイや作品、生活の進行状態に加えて<strong>現在のカスタム／ランダムワールドのスライスと透明性の高い「移行ロス一覧」一式をまとめてパッケージ化</strong>できます。新しい PC にインストールした後、同じ画面から「<strong>スーツケースファイルを選択してインポート復元</strong>」をクリックし（2段階の安全事前チェックが自動実行されます）、モデルキーを再入力すれば完了です。</p>
 <p>ローカルのキーファイルやゲートウェイのホワイトリストも含めて低レイヤーでディレクトリごとコピー移行したい場合は、次の4ステップで手動移行することもできます：</p>
 <ol>
 <li><strong>旧 PC</strong> で nyairo とゲートウェイプロセスを完全に終了し、上記のコマンドで <code>~/.nyairo</code> を <code>.tar.gz</code> にまとめます。</li>
-<li><strong>新 PC</strong> に同じバージョン（<code>v0.7.0</code>）の nyairo をあらかじめインストールしておき、まだゲートウェイは起動しないでください。</li>
+<li><strong>新 PC</strong> に同じバージョン（<code>v0.8.0</code>）の nyairo をあらかじめインストールしておき、まだゲートウェイは起動しないでください。</li>
 <li>USB メモリまたはローカルネットワーク経由でバックアップアーカイブを新 PC（WSL 環境）へ転送し、新 PC の <code>~/.nyairo</code> に上書き展開します。</li>
 <li><strong>パスの違いを確認</strong>：旧 PC と新 PC で Linux ユーザー名が異なる場合（例：旧 PC が <code>alice</code>、新 PC が <code>bob</code>）、<code>~/.nyairo/chiyo/config.json</code> と <code>~/.nyairo/config.yaml</code> を開き、旧ユーザー名の絶対パス（<code>/home/alice/...</code> など）が固定記載されている箇所を新しいユーザー名のパスへ書き換えてからプログラムを起動してください（同じ Telegram Token を使って2台の PC を同時にオンラインにすることは絶対に避けてください）。</li>
 </ol>

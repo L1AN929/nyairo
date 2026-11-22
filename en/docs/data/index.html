@@ -34,7 +34,7 @@
       "description": "Understand what lives in each folder, how to take a clean offline backup, how to move your data to a new computer, and how to uninstall cleanly.",
       "url": "https://nyairo.com/en/docs/data/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -497,11 +497,11 @@ chmod 600 "$bkp"
 tar -tzf "$bkp" &gt;/dev/null &amp;&amp; echo "Backup archive integrity check passed: $bkp"</code></pre></div>
 
 <h2 id="data-section-2">Migrating Data to a New Computer</h2>
-<p>Starting in <code>v0.7.0</code>, nyairo supports exporting a lossless migration suitcase (<code>.nyairo-suitcase.zip</code>) that automatically strips API keys and local machine paths: open <strong>Settings → Environment &amp; Diagnostics</strong> in the desktop app (or the "Migration Suitcase" card on Overview) and click <strong>Export Portable Suitcase (.nyairo-suitcase.zip)</strong>. nyairo packages your dual-layer memory lantern ledger, drafts, and daily-life progress <strong>alongside your current custom or procedural world slice and a transparent migration loss manifest</strong>. After installing nyairo on your new machine, go to the same screen, click <strong>Select Suitcase File to Import &amp; Restore</strong> (which runs an automatic two-step safety preflight check), and re-enter your model API key.</p>
+<p>Starting in <code>v0.8.0</code>, nyairo supports exporting a lossless migration suitcase (<code>.nyairo-suitcase.zip</code>) that automatically strips API keys and local machine paths: open <strong>Settings → Environment &amp; Diagnostics</strong> in the desktop app (or the "Migration Suitcase" card on Overview) and click <strong>Export Portable Suitcase (.nyairo-suitcase.zip)</strong>. nyairo packages your dual-layer memory lantern ledger, drafts, and daily-life progress <strong>alongside your current custom or procedural world slice and a transparent migration loss manifest</strong>. After installing nyairo on your new machine, go to the same screen, click <strong>Select Suitcase File to Import &amp; Restore</strong> (which runs an automatic two-step safety preflight check), and re-enter your model API key.</p>
 <p>If you prefer a raw full-directory transfer that also preserves your local key files and gateway allowlist, follow these four manual steps:</p>
 <ol>
 <li>On the <strong>old computer</strong>, completely exit nyairo and any gateway processes, then archive <code>~/.nyairo</code> into a <code>.tar.gz</code> using the commands above;</li>
-<li>On the <strong>new computer</strong>, install the exact same version (<code>v0.7.0</code>) of nyairo, but do not start the gateway yet;</li>
+<li>On the <strong>new computer</strong>, install the exact same version (<code>v0.8.0</code>) of nyairo, but do not start the gateway yet;</li>
 <li>Copy the backup archive to the new computer (inside WSL if on Windows) via USB drive or local network, and extract it over the new machine's <code>~/.nyairo</code>;</li>
 <li><strong>Check for path differences</strong>: If the Linux username differs between the old and new machines (for example, <code>alice</code> on the old machine vs. <code>bob</code> on the new one), inspect <code>~/.nyairo/chiyo/config.json</code> and <code>~/.nyairo/config.yaml</code>, update any hardcoded absolute paths referencing the old username (such as <code>/home/alice/...</code>) to the new username path, and then start nyairo (never run two machines online simultaneously with the same Telegram bot token).</li>
 </ol>

@@ -34,7 +34,7 @@
       "description": "CLI のみの環境やサーバー環境で、独立推論アドバイス（/chiyo_consider）、読み取り専用ワールド位置サービス、および独立した原稿ワークスペースを手動で有効化する方法を解説します。",
       "url": "https://nyairo.com/ja/docs/modules/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -475,7 +475,7 @@
         <article class="markdown-body">
           <h2 id="modules-section-1">軽量ワールド位置サービスの手動マウント</h2>
 <p><strong>Windows デスクトップ版</strong>では、街区での経路移動、室内の部屋移動、照明操作が最初から自動設定されています（マップのビジュアル編集方法は「<a href="../world-editor/">マップエディタとワールドパック</a>」をご覧ください）。<strong>純粋な手動 CLI インストール</strong>をお使いで、軽量かつ読み取り専用の位置・姿勢サービスだけを単独で動かしたい場合は、手動で初期化して起動できます。</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.7.0"
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div><pre><code>REL="$HOME/.local/share/nyairo/releases/v0.8.0"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \
   -m chiyo_bundle.world_read_service init --home "$HOME/.nyairo-world"
 PYTHONPATH="$REL:$REL/vendor/hermes" "$REL/vendor/hermes/.venv/bin/python" \

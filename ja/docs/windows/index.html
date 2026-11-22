@@ -34,7 +34,7 @@
       "description": "管理者権限不要のネイティブ Windows デスクトップ版の利用をおすすめします（SmartScreen の 2 ステップ図解と自動環境セットアップ付き）。WSL 2 ターミナルのみでのコマンドライン導入にも対応しています。",
       "url": "https://nyairo.com/ja/docs/windows/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -474,11 +474,11 @@
 
         <article class="markdown-body">
           <h2 id="windows-desktop">方法 1：Windows デスクトップクライアント（推奨）</h2>
-<p>Windows 10 / 11 をご利用の方は、ネイティブのデスクトップ版をそのまま導入できます（約 5.8 MB・現在のユーザー領域にインストールされるため管理者権限は不要です）：</p>
+<p>Windows 10 / 11 をご利用の方は、ネイティブのデスクトップ版をそのまま導入できます（約 6.0 MB・現在のユーザー領域にインストールされるため管理者権限は不要です）：</p>
 <ol>
-<li>インストーラーをダウンロード：<a href="../../../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe"><strong>nyairo-0.7.0-setup.exe</strong></a>（SHA256：<code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code>）。</li>
+<li>インストーラーをダウンロード：<a href="../../../downloads/nyairo-0.8.0-setup.exe" download="nyairo-0.8.0-setup.exe"><strong>nyairo-0.8.0-setup.exe</strong></a>（SHA256：<code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code>）。</li>
 <li>ダブルクリックしてインストールを完了し、<strong>nyairo</strong> を起動します（初回起動時に SmartScreen の警告が出た場合は、下の 2 ステップ図解どおり「詳細情報 → 実行」をクリックしてください）。起動後は画面右下のシステムトレイにアイコンが常駐します。</li>
-<li>初回起動時には 2 段階のセットアップウィザードが案内されます。<strong>ステップ 1 では環境を自動構築</strong>し（<code>v0.7.0</code> リリースアーカイブのダウンロードと検証 → Python 依存パッケージの導入 → 独立した個人ディレクトリの作成 → ローカル通信キーの生成 → ゲートウェイ起動 → ヘルスチェック）、<strong>ステップ 2 では初期設定を入力</strong>します（その場でパートナーの呼び名や代名詞、モデル名と API キーを設定でき、ローカルの Ollama にも接続可能です。詳しくは <a href="../configuration/#configuration-beginner-model">初心者向けモデル設定ガイド</a> をご覧ください）。</li>
+<li>初回起動時には 2 段階のセットアップウィザードが案内されます。<strong>ステップ 1 では環境を自動構築</strong>し（<code>v0.8.0</code> リリースアーカイブのダウンロードと検証 → Python 依存パッケージの導入 → 独立した個人ディレクトリの作成 → ローカル通信キーの生成 → ゲートウェイ起動 → ヘルスチェック）、<strong>ステップ 2 では初期設定を入力</strong>します（その場でパートナーの呼び名や代名詞、モデル名と API キーを設定でき、ローカルの Ollama にも接続可能です。詳しくは <a href="../configuration/#configuration-beginner-model">初心者向けモデル設定ガイド</a> をご覧ください）。</li>
 <li>「完了して始める」をクリックするとメイン画面が開きます。各画面の機能やショートカット操作については <a href="../desktop-guide/">デスクトップクライアント操作ガイド</a> をご覧ください。</li>
 </ol>
 <div class="callout callout-info"><div class="callout-title">アンインストールしても記憶は消えません</div><p>デスクトップ版の画面プログラムは <code>%LOCALAPPDATA%\Programs\nyairo</code> にインストールされますが、会話の記憶や人物設定は WSL 側の個人ディレクトリに独立して保存されています。デスクトップクライアントをアンインストールしても、停止されるのはゲートウェイと自動起動設定・ウィンドウキャッシュのみであり、個人データには一切触れません（詳細は <a href="../data/">データディレクトリ・バックアップ・アンインストール</a> をご覧ください）。</p></div>
@@ -487,7 +487,7 @@
 <p>なぜこの確認画面が表示されるのでしょうか？ Microsoft は、年間数万円規模の費用がかかる商用 EV コード署名証明書をまだ取得していない新規公開の独立系オープンソースソフトに対して一律でこの注意表示を出しています。ファイル自体に問題があるわけではありませんので、以下の 3 ステップで確認のうえ起動を許可してください。</p>
 <ol>
 <li><strong>ステップ 1 · 「詳細情報」をクリック</strong>：「Windows によって PC が保護されました」のポップアップ本文の下にある、下線付きの小さな「<strong>詳細情報</strong>」リンクをクリックします。</li>
-<li><strong>SHA256 ハッシュの確認（任意）</strong>：インストーラーを保存したフォルダで PowerShell を開き、<code>Get-FileHash .\nyairo-0.7.0-setup.exe -Algorithm SHA256</code> を実行して、算出されたハッシュ値が公式サイト掲載の <code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code> と一字一句一致していることを確認します。</li>
+<li><strong>SHA256 ハッシュの確認（任意）</strong>：インストーラーを保存したフォルダで PowerShell を開き、<code>Get-FileHash .\nyairo-0.8.0-setup.exe -Algorithm SHA256</code> を実行して、算出されたハッシュ値が公式サイト掲載の <code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code> と一字一句一致していることを確認します。</li>
 <li><strong>ステップ 2 · 「実行」をクリック</strong>：ウィンドウ下部に新しく表示された「<strong>実行</strong>」ボタンをクリックすると、通常どおりインストールが始まります。</li>
 </ol>
 <div class="smartscreen-guide" style="margin: 16px 0 20px;">
@@ -522,9 +522,9 @@
   </g>
   <text x="382" y="64" fill="var(--fg)" font-size="14" font-weight="600" font-family="var(--font-sans, sans-serif)">Windows によって PC が保護されました</text>
   <rect x="382" y="78" width="276" height="66" rx="6" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
-  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">アプリ: nyairo-0.7.0-setup.exe</text>
+  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">アプリ: nyairo-0.8.0-setup.exe</text>
   <text x="394" y="116" fill="var(--muted)" font-size="11" font-family="var(--font-sans, sans-serif)">発行元: 不明な発行元（ハッシュ一致で安全）</text>
-  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 174e4597...14dd8</text>
+  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 36ed8ef7...76eb8</text>
   <text x="528" y="169" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600" font-family="var(--font-sans, sans-serif)">2. 次に「実行」をクリック</text>
   <rect x="482" y="182" width="92" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
   <text x="528" y="200" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600" font-family="var(--font-sans, sans-serif)">実行</text>
@@ -554,11 +554,11 @@
 <p>実行前にハッシュ検証を行いたい場合は、以下のコマンドで SHA256 を照合してからインストールできます。</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">コピー</button></div>
-<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256
-python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
+<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
 </div>
 <p>インストール後に画面の指示に沿ってモデルの API キーを入力すれば完了です。以降は Ubuntu を開いて <code>nyairo</code> と入力するだけでいつでも対話できます。</p>
         </article>

@@ -34,7 +34,7 @@
       "description": "Take a minute before installing to confirm your OS environment, disk space, and directory layout so you can skip unnecessary troubleshooting later.",
       "url": "https://nyairo.com/en/docs/installation/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -475,7 +475,7 @@
         <article class="markdown-body">
           <h2 id="installation-section-0">Supported Operating Systems</h2>
 <ul>
-<li><strong>Windows 10 / 11</strong>: Includes a native desktop client (<code>nyairo-0.7.0-setup.exe</code>), while the life and memory backend runs inside Windows' built-in WSL 2 (Ubuntu). See <a href="../windows/">Installing on Windows</a> for step-by-step instructions.</li>
+<li><strong>Windows 10 / 11</strong>: Includes a native desktop client (<code>nyairo-0.8.0-setup.exe</code>), while the life and memory backend runs inside Windows' built-in WSL 2 (Ubuntu). See <a href="../windows/">Installing on Windows</a> for step-by-step instructions.</li>
 <li><strong>Linux Desktop or Server</strong>: Most thoroughly validated on Ubuntu / Debian, where a single bootstrap command gets everything running. On other distributions, you will need to install basic archive extraction and build tools yourself.</li>
 <li><strong>macOS</strong>: Full packaging and end-to-end flow validation are not yet complete, so out-of-the-box support is not promised yet. Users comfortable with the command line can try running from source manually, or wait for dedicated macOS support in a future release.</li>
 </ul>
@@ -483,7 +483,7 @@
 <h2 id="installation-section-1">Where Program Files and Personal Data Live</h2>
 <p>To keep software upgrades from ever touching your chat history, nyairo completely separates program files from personal data into two separate directories:</p>
 <ul>
-<li><strong>Program directory</strong>: Located at <code>~/.local/share/nyairo/releases/v0.7.0</code> on Linux / WSL (with the Windows desktop UI installed under <code>%LOCALAPPDATA%\Programs\nyairo</code>). Upgrades only replace this directory.</li>
+<li><strong>Program directory</strong>: Located at <code>~/.local/share/nyairo/releases/v0.8.0</code> on Linux / WSL (with the Windows desktop UI installed under <code>%LOCALAPPDATA%\Programs\nyairo</code>). Upgrades only replace this directory.</li>
 <li><strong>Personal data directory</strong>: Located at <code>~/.nyairo</code>, storing your companion's persona (<code>SOUL.md</code>), model configuration, chat history, and local SQLite long-term memory database.</li>
 </ul>
 <p>Even if you uninstall and reinstall the client or roll back to an earlier version, all existing memories and settings stay intact as long as you do not manually delete <code>~/.nyairo</code>.</p>

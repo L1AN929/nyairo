@@ -34,7 +34,7 @@
       "description": "说明每个公开版本发布前做过哪些真实检查、哪些场景还没有测过，不拿单元测试数量冒充全场景稳定性保证。",
       "url": "https://nyairo.com/docs/testing/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -478,14 +478,14 @@
 
 <h2 id="testing-section-1">目前已覆盖的自动化与实机检查</h2>
 <ul>
-<li><strong>核心机制与组件测试</strong>：记忆读写与纠错边界、多段路网寻路、暂停恢复不重走、每日请求预算上限、世界早晚变化与身体节律、旅行箱预检与源码脱敏等核心模块均有对应的离线自动化测试（如 <code>v0.4</code> 世界套件 263 项、<code>v0.5.1</code> 至 <code>v0.7.0</code> 生活节律、配额收敛与安全脱敏测试均通过）。</li>
+<li><strong>核心机制与组件测试</strong>：记忆读写与纠错边界、多段路网寻路、暂停恢复不重走、每日请求预算上限、世界早晚变化与身体节律、旅行箱预检与源码脱敏等核心模块均有对应的离线自动化测试（如 <code>v0.4</code> 世界套件 263 项、<code>v0.5.1</code> 至 <code>v0.8.0</code> 生活节律、配额收敛与安全脱敏测试均通过）。</li>
 <li><strong>发行包完整性校验</strong>：每次发布的 GitHub Release ZIP 均附带 <code>MANIFEST.json</code> 清单与 <code>.sha256</code> 哈希校验，确保安装落盘的每一个脚本与组件字节与打包时完全一致。</li>
-<li><strong>Windows 桌面端与官网实机核验</strong>：<code>nyairo-0.7.0-setup.exe</code> 安装包、桌面端各功能视图（总览、流式对话、地图、文稿版本对比）及官网桌面/移动端交互均在本机环境实测核对通过。</li>
+<li><strong>Windows 桌面端与官网实机核验</strong>：<code>nyairo-0.8.0-setup.exe</code> 安装包、桌面端各功能视图（总览、流式对话、地图、文稿版本对比）及官网桌面/移动端交互均在本机环境实测核对通过。</li>
 </ul>
 
 <h2 id="testing-section-2">明确尚未覆盖的范围</h2>
 <ul>
-<li><strong>未做 <code>v0.7.0</code> 连续 24 小时以上真实大模型挂机长测</strong>：自动化测试主要使用确定性替身与受控时钟来验证逻辑正确性，不能代替真实商业大模型跑上好几天后的自然表现验收。</li>
+<li><strong>未做 <code>v0.8.0</code> 连续 24 小时以上真实大模型挂机长测</strong>：自动化测试主要使用确定性替身与受控时钟来验证逻辑正确性，不能代替真实商业大模型跑上好几天后的自然表现验收。</li>
 <li><strong>未启用云端自动 GitHub Actions 功能门禁</strong>：仓库 <code>ci/templates/</code> 下存放的是供参考的测试工作流模板，尚未在 GitHub 云端开启每次提交自动跑全量测试，因此我们不挂虚假的 CI Passing 徽章。</li>
 <li><strong>跨平台覆盖有限</strong>：主要验证环境集中在 Ubuntu / Debian Linux 与 Windows 10/11（WSL 2 Ubuntu）；macOS、其他小众 Linux 发行版、Docker 容器化部署以及 QQ / 飞书真实账号长连均未完成完整验收。</li>
 </ul>

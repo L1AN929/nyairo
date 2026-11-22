@@ -34,7 +34,7 @@
       "description": "装之前花一分钟确认系统环境、磁盘空间与目录结构，省去后面来回折腾。",
       "url": "https://nyairo.com/docs/installation/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -475,7 +475,7 @@
         <article class="markdown-body">
           <h2 id="installation-section-0">支持哪些操作系统</h2>
 <ul>
-<li><strong>Windows 10 / 11</strong>：提供原生桌面客户端（<code>nyairo-0.7.0-setup.exe</code>），生活与记忆后端运行在 Windows 官方自带的 WSL 2（Ubuntu）里。操作步骤见 <a href="../windows/">在 Windows 上安装</a>。</li>
+<li><strong>Windows 10 / 11</strong>：提供原生桌面客户端（<code>nyairo-0.8.0-setup.exe</code>），生活与记忆后端运行在 Windows 官方自带的 WSL 2（Ubuntu）里。操作步骤见 <a href="../windows/">在 Windows 上安装</a>。</li>
 <li><strong>Linux 桌面或服务器</strong>：在 Ubuntu / Debian 环境下验证最完整，直接运行一行引导命令即可。其他发行版需自行安装基础解压与编译工具。</li>
 <li><strong>macOS</strong>：目前还没有做完完整的打包与流程验证，暂不承诺开箱即用；熟悉命令行的用户可以参考源码手动尝试，或等后续专门适配。</li>
 </ul>
@@ -483,7 +483,7 @@
 <h2 id="installation-section-1">程序与个人数据存在哪</h2>
 <p>为了避免升级软件时误伤你的聊天记录，nyairo 把「程序文件」和「个人数据」彻底分在两个目录里：</p>
 <ul>
-<li><strong>程序目录</strong>：Linux / WSL 下位于 <code>~/.local/share/nyairo/releases/v0.7.0</code>（Windows 桌面端界面程序位于 <code>%LOCALAPPDATA%\Programs\nyairo</code>），升级时只替换这一块；</li>
+<li><strong>程序目录</strong>：Linux / WSL 下位于 <code>~/.local/share/nyairo/releases/v0.8.0</code>（Windows 桌面端界面程序位于 <code>%LOCALAPPDATA%\Programs\nyairo</code>），升级时只替换这一块；</li>
 <li><strong>个人数据目录</strong>：位于 <code>~/.nyairo</code>，里面放着你的人设（<code>SOUL.md</code>）、模型配置、聊天记录和本地 SQLite 长期记忆数据库。</li>
 </ul>
 <p>哪怕卸载重装客户端或回滚版本，只要不手动删掉 <code>~/.nyairo</code>，之前的记忆和设置就都在。</p>

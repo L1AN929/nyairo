@@ -34,7 +34,7 @@
       "description": "推荐使用免管理员权限的原生 Windows 桌面端（附 SmartScreen 两步矢量图解与自动环境引导），也支持纯 WSL 2 终端命令行安装。",
       "url": "https://nyairo.com/docs/windows/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -474,11 +474,11 @@
 
         <article class="markdown-body">
           <h2 id="windows-desktop">方式一：Windows 桌面客户端（推荐）</h2>
-<p>Windows 10 / 11 用户可以直接装原生桌面端（约 5.8 MB，装在当前用户目录下，不需要管理员权限）：</p>
+<p>Windows 10 / 11 用户可以直接装原生桌面端（约 6.0 MB，装在当前用户目录下，不需要管理员权限）：</p>
 <ol>
-<li>下载安装包：<a href="../../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe"><strong>nyairo-0.7.0-setup.exe</strong></a>（SHA256：<code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code>）；</li>
+<li>下载安装包：<a href="../../downloads/nyairo-0.8.0-setup.exe" download="nyairo-0.8.0-setup.exe"><strong>nyairo-0.8.0-setup.exe</strong></a>（SHA256：<code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code>）；</li>
 <li>双击完成安装并打开 <strong>nyairo</strong>（首次打开若弹出 SmartScreen 提示，按下方两步图解点「更多信息 → 仍要运行」即可），程序图标会常驻在屏幕右下角系统托盘；</li>
-<li>首次启动时，客户端走两步引导：<strong>第一步自动准备环境</strong>（下载校验 <code>v0.7.0</code> 发行包 → 装好 Python 依赖 → 建立独立个人目录 → 生成本机通信密钥 → 启动网关 → 探活验证）；<strong>第二步填配置</strong>（当场设置怎么称呼 TA、代词、模型名与 API Key，也可连接本机 Ollama，详见 <a href="../configuration/#configuration-beginner-model">新手零门槛模型教程</a>）；</li>
+<li>首次启动时，客户端走两步引导：<strong>第一步自动准备环境</strong>（下载校验 <code>v0.8.0</code> 发行包 → 装好 Python 依赖 → 建立独立个人目录 → 生成本机通信密钥 → 启动网关 → 探活验证）；<strong>第二步填配置</strong>（当场设置怎么称呼 TA、代词、模型名与 API Key，也可连接本机 Ollama，详见 <a href="../configuration/#configuration-beginner-model">新手零门槛模型教程</a>）；</li>
 <li>点「完成，开始使用」即可进入主界面。各页面的具体功能与快捷操作见 <a href="../desktop-guide/">桌面客户端使用指南</a>。</li>
 </ol>
 <div class="callout callout-info"><div class="callout-title">卸载不会删记忆</div><p>桌面端界面程序装在 <code>%LOCALAPPDATA%\Programs\nyairo</code>，而聊天记忆和人设独立保存在 WSL 的个人目录里。卸载桌面客户端只会停掉网关、清理开机自启项与窗口缓存，不会动你的个人数据（详见 <a href="../data/">数据目录、备份与卸载</a>）。</p></div>
@@ -487,7 +487,7 @@
 <p>为什么会弹这个提示？因为微软会对尚未购买商业 EV 代码签名证书（每年费用数千元）的新发布独立开源软件统一显示此提醒，并不代表文件有风险。按下面三步核对放行即可：</p>
 <ol>
 <li><strong>第 1 步 · 点击「更多信息」</strong>：在「Windows 已保护你的电脑」弹窗文字下方，点击带下划线的「<strong>更多信息</strong>」小字；</li>
-<li><strong>核对 SHA256 指纹（可选）</strong>：在安装包所在文件夹打开 PowerShell，运行 <code>Get-FileHash .\nyairo-0.7.0-setup.exe -Algorithm SHA256</code>，确认算出的指纹与官网公布的 <code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code> 一字不差；</li>
+<li><strong>核对 SHA256 指纹（可选）</strong>：在安装包所在文件夹打开 PowerShell，运行 <code>Get-FileHash .\nyairo-0.8.0-setup.exe -Algorithm SHA256</code>，确认算出的指纹与官网公布的 <code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code> 一字不差；</li>
 <li><strong>第 2 步 · 点击「仍要运行」</strong>：点击窗口底部新出现的「<strong>仍要运行</strong>」按钮，即可正常启动安装。</li>
 </ol>
 <div class="smartscreen-guide" style="margin: 16px 0 20px;">
@@ -522,9 +522,9 @@
   </g>
   <text x="382" y="64" fill="var(--fg)" font-size="14" font-weight="600" font-family="var(--font-sans, sans-serif)">Windows 已保护你的电脑</text>
   <rect x="382" y="78" width="276" height="66" rx="6" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
-  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">应用: nyairo-0.7.0-setup.exe</text>
+  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">应用: nyairo-0.8.0-setup.exe</text>
   <text x="394" y="116" fill="var(--muted)" font-size="11" font-family="var(--font-sans, sans-serif)">发布者: 未知发布者（核对官网哈希一致即安全）</text>
-  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 174e4597...14dd8</text>
+  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 36ed8ef7...76eb8</text>
   <text x="528" y="169" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600" font-family="var(--font-sans, sans-serif)">2. 再点「仍要运行」</text>
   <rect x="482" y="182" width="92" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
   <text x="528" y="200" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600" font-family="var(--font-sans, sans-serif)">仍要运行</text>
@@ -554,11 +554,11 @@
 <p>想先校验再运行，可按下面几行核对 SHA256 后再安装：</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div>
-<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256
-python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
+<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
 </div>
 <p>装完按屏幕提示填好模型 API Key，之后每次打开 Ubuntu 输入 <code>nyairo</code> 就能对话。</p>
         </article>

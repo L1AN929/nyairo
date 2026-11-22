@@ -34,7 +34,7 @@
       "description": "搞清楚每个文件夹里装的是什么、怎么停机打一份完整备份、换新电脑怎么迁数据，以及怎样按需干净卸载。",
       "url": "https://nyairo.com/docs/data/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -497,11 +497,11 @@ chmod 600 "$bkp"
 tar -tzf "$bkp" &gt;/dev/null &amp;&amp; echo "备份包完整性检查通过：$bkp"</code></pre></div>
 
 <h2 id="data-section-2">现阶段换新电脑怎么迁数据</h2>
-<p>当前 <code>v0.7.0</code> 已支持导出自动剥离 API 密钥与本机路径的无损搬家旅行箱（<code>.nyairo-suitcase.zip</code>）：在桌面端打开「<strong>设置 → 环境与诊断</strong>」（或总览页「迁居旅行箱」卡片），点击「<strong>导出便携旅行箱 (.nyairo-suitcase.zip)</strong>」，程序会将双层回忆灯账本、随笔作品、起居进度<strong>连同当前自定义/随机世界切片与一份透明的「迁移损失清单」整套打包带走</strong>；换到新电脑装好后，在同一入口点击「<strong>选择旅行箱文件导入恢复</strong>」（自动执行双步安全预检）并重填模型密钥即可。</p>
+<p>当前 <code>v0.8.0</code> 已支持导出自动剥离 API 密钥与本机路径的无损搬家旅行箱（<code>.nyairo-suitcase.zip</code>）：在桌面端打开「<strong>设置 → 环境与诊断</strong>」（或总览页「迁居旅行箱」卡片），点击「<strong>导出便携旅行箱 (.nyairo-suitcase.zip)</strong>」，程序会将双层回忆灯账本、随笔作品、起居进度<strong>连同当前自定义/随机世界切片与一份透明的「迁移损失清单」整套打包带走</strong>；换到新电脑装好后，在同一入口点击「<strong>选择旅行箱文件导入恢复</strong>」（自动执行双步安全预检）并重填模型密钥即可。</p>
 <p>如果你想连同本机密钥文件与网关白名单做底层整目录拷贝迁移，也可以按下面四步手动迁过去：</p>
 <ol>
 <li>在<strong>旧电脑</strong>上彻底退出 nyairo 和网关进程，按上面的命令把 <code>~/.nyairo</code> 打包成 <code>.tar.gz</code>；</li>
-<li>在<strong>新电脑</strong>上先装好相同版本（<code>v0.7.0</code>）的 nyairo，先不要启动网关；</li>
+<li>在<strong>新电脑</strong>上先装好相同版本（<code>v0.8.0</code>）的 nyairo，先不要启动网关；</li>
 <li>通过 U 盘或局域网把备份包传到新电脑（WSL 环境），解压覆盖到新电脑的 <code>~/.nyairo</code>；</li>
 <li><strong>检查路径差异</strong>：如果新旧电脑的 Linux 用户名不一样（比如旧电脑叫 <code>alice</code>、新电脑叫 <code>bob</code>），打开 <code>~/.nyairo/chiyo/config.json</code> 和 <code>~/.nyairo/config.yaml</code> 看一眼，把里面写死了旧用户名绝对路径（如 <code>/home/alice/...</code>）的地方改成新用户名路径，最后再启动程序（千万不要两台电脑同时挂着同一个 Telegram Token 在线）。</li>
 </ol>

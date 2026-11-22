@@ -34,7 +34,7 @@
       "description": "各公開バージョンのリリース前に実際にどのような検証を行ったか、どのシナリオがまだ未検証かを明確にし、単体テストの件数だけで全シナリオの安定性保証に見せかけることはしません。",
       "url": "https://nyairo.com/ja/docs/testing/",
       "inLanguage": "ja",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -478,14 +478,14 @@
 
 <h2 id="testing-section-1">現在カバーされている自動テストと実機確認</h2>
 <ul>
-<li><strong>中核メカニズムとコンポーネントテスト</strong>：記憶の読み書きと訂正境界、複数区間の道路網経路探索、一時停止・再開時にやり直さない歩行制御、1日あたりのリクエスト予算上限、ワールドの朝夕変化と身体リズム、スーツケース事前チェックとソースコード匿名化といった中核モジュールについて、それぞれ対応するオフライン自動テストを実施しています（例：<code>v0.4</code> ワールドスイート 263 項目、<code>v0.5.1</code>〜<code>v0.7.0</code> の生活リズム・クォータ収束・安全匿名化テストがいずれも合格）。</li>
+<li><strong>中核メカニズムとコンポーネントテスト</strong>：記憶の読み書きと訂正境界、複数区間の道路網経路探索、一時停止・再開時にやり直さない歩行制御、1日あたりのリクエスト予算上限、ワールドの朝夕変化と身体リズム、スーツケース事前チェックとソースコード匿名化といった中核モジュールについて、それぞれ対応するオフライン自動テストを実施しています（例：<code>v0.4</code> ワールドスイート 263 項目、<code>v0.5.1</code>〜<code>v0.8.0</code> の生活リズム・クォータ収束・安全匿名化テストがいずれも合格）。</li>
 <li><strong>配布パッケージの整合性検証</strong>：公開される GitHub Release ZIP には毎回 <code>MANIFEST.json</code> マニフェストと <code>.sha256</code> ハッシュチェックサムを同梱し、展開されるすべてのスクリプトとコンポーネントがパッケージ作成時と1バイト単位で完全一致することを保証しています。</li>
-<li><strong>Windows デスクトップ版および公式サイトの実機確認</strong>：<code>nyairo-0.7.0-setup.exe</code> インストーラー、デスクトップ版の各機能ビュー（概要・ストリーミング対話・マップ・原稿バージョン差分比較）、および公式サイトのデスクトップ／モバイル表示の動作をローカル実機環境で確認済みです。</li>
+<li><strong>Windows デスクトップ版および公式サイトの実機確認</strong>：<code>nyairo-0.8.0-setup.exe</code> インストーラー、デスクトップ版の各機能ビュー（概要・ストリーミング対話・マップ・原稿バージョン差分比較）、および公式サイトのデスクトップ／モバイル表示の動作をローカル実機環境で確認済みです。</li>
 </ul>
 
 <h2 id="testing-section-2">まだカバーされていない検証範囲</h2>
 <ul>
-<li><strong><code>v0.7.0</code> での 24 時間以上連続した実 LLM 放置稼働テストは未実施</strong>：自動テストでは主に決定論的なテストダブルと制御クロックを使ってロジックの正しさを検証しており、実際の商用 LLM を数日間連続稼働させたときの自然な振る舞いの長期検証に代わるものではありません。</li>
+<li><strong><code>v0.8.0</code> での 24 時間以上連続した実 LLM 放置稼働テストは未実施</strong>：自動テストでは主に決定論的なテストダブルと制御クロックを使ってロジックの正しさを検証しており、実際の商用 LLM を数日間連続稼働させたときの自然な振る舞いの長期検証に代わるものではありません。</li>
 <li><strong>クラウド側の GitHub Actions 自動ゲートは未有効化</strong>：リポジトリの <code>ci/templates/</code> には参考用のテストワークフローテンプレートを置いていますが、GitHub クラウド上で毎回のコミットに対して全量テストを自動実行する構成にはしていないため、見せかけの CI Passing バッジは掲げていません。</li>
 <li><strong>クロスプラットフォームの網羅範囲は限定的</strong>：主な検証環境は Ubuntu / Debian Linux および Windows 10/11（WSL 2 Ubuntu）に集中しています。macOS、その他のマイナーな Linux ディストリビューション、Docker コンテナ化デプロイ、ならびに QQ / Feishu（Lark）の実アカウントでの常時接続については、まだ完全な受け入れ検証を完了していません。</li>
 </ul>

@@ -34,7 +34,7 @@
       "description": "根据你手头的电脑选择最顺手的装法：Windows 用户直接装桌面端，新手花 5 元配好 DeepSeek 密钥或免费连本地 Ollama 就能开聊。",
       "url": "https://nyairo.com/docs/quickstart/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -476,16 +476,16 @@
           <h2 id="quickstart-section-0">先选适合你的安装方式</h2>
 <p>开始前只需要准备好一台能上网的电脑，以及一个大模型接口（花 5 元配好 DeepSeek API Key，或者免费连本机 Ollama 均可）。按你的系统二选一：</p>
 <ul>
-<li><strong>如果你用 Windows 10 / 11（推荐）</strong>：直接下载约 5.8 MB 的 <a href="../../downloads/nyairo-0.7.0-setup.exe" download="nyairo-0.7.0-setup.exe"><strong>Windows 桌面端安装包</strong></a>，双击安装后会自动检测 WSL 2 并引导配好后台环境，不需要自己记终端命令。完整步骤见 <a href="../windows/">在 Windows 上安装</a>，界面用法见 <a href="../desktop-guide/">桌面客户端使用指南</a>。</li>
+<li><strong>如果你用 Windows 10 / 11（推荐）</strong>：直接下载约 6.0 MB 的 <a href="../../downloads/nyairo-0.8.0-setup.exe" download="nyairo-0.8.0-setup.exe"><strong>Windows 桌面端安装包</strong></a>，双击安装后会自动检测 WSL 2 并引导配好后台环境，不需要自己记终端命令。完整步骤见 <a href="../windows/">在 Windows 上安装</a>，界面用法见 <a href="../desktop-guide/">桌面客户端使用指南</a>。</li>
 <li><strong>如果你用 Linux，或习惯纯终端操作</strong>：继续看下面的一行命令安装步骤即可。</li>
 <li><strong>如果你平时用 Claude Code / Codex 等编程助手</strong>：也可以直接把 <a href="../agent-install/">交给 AI 助手自动安装</a> 里的标准指令复制给它代装。</li>
 </ul>
 
 <h2 id="quickstart-smartscreen">Windows 首次运行提示「已保护你的电脑」两步图解</h2>
-<p>独立开源项目暂未购买每年数千元的商业 EV 代码签名证书，首次双击 <code>nyairo-0.7.0-setup.exe</code> 时 Windows SmartScreen 可能会弹出常规拦截提示。按下面两步点开即可（全程无需管理员权限）：</p>
+<p>独立开源项目暂未购买每年数千元的商业 EV 代码签名证书，首次双击 <code>nyairo-0.8.0-setup.exe</code> 时 Windows SmartScreen 可能会弹出常规拦截提示。按下面两步点开即可（全程无需管理员权限）：</p>
 <ol>
 <li>先点弹窗文字下方的「<strong>更多信息</strong>」展开安装包详情；</li>
-<li>可顺手核对安装包 SHA256 与官网公布的 <code>174e459727af67c5d97204abd69dd7ce0741ed056a084fc64ba78a187bc14dd8</code> 一致，再点右下角出现的「<strong>仍要运行</strong>」即可进入安装向导。</li>
+<li>可顺手核对安装包 SHA256 与官网公布的 <code>36ed8ef7d4aabeb86e1a55fff298eaa2df4a995cd603b845bb885cf81ef76eb8</code> 一致，再点右下角出现的「<strong>仍要运行</strong>」即可进入安装向导。</li>
 </ol>
 <div class="smartscreen-guide" style="margin: 16px 0 20px;">
 <svg viewBox="0 0 680 232" role="img" aria-label="Windows SmartScreen 两步放行示意图：第一步点击更多信息，第二步核对 SHA256 后点击仍要运行" style="width: 100%; max-width: 680px; height: auto; display: block; color: var(--fg);">
@@ -519,9 +519,9 @@
   </g>
   <text x="382" y="64" fill="var(--fg)" font-size="14" font-weight="600" font-family="var(--font-sans, sans-serif)">Windows 已保护你的电脑</text>
   <rect x="382" y="78" width="276" height="66" rx="6" fill="var(--card-2)" stroke="var(--line)" stroke-width="1"/>
-  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">应用: nyairo-0.7.0-setup.exe</text>
+  <text x="394" y="98" fill="var(--fg-2)" font-size="11.5" font-family="var(--font-sans, sans-serif)">应用: nyairo-0.8.0-setup.exe</text>
   <text x="394" y="116" fill="var(--muted)" font-size="11" font-family="var(--font-sans, sans-serif)">发布者: 未知发布者（核对官网哈希一致即安全）</text>
-  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 174e4597...14dd8</text>
+  <text x="394" y="134" fill="var(--accent)" font-size="10.5" font-family="var(--font-mono, monospace)">SHA256: 36ed8ef7...76eb8</text>
   <text x="528" y="169" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600" font-family="var(--font-sans, sans-serif)">2. 再点「仍要运行」</text>
   <rect x="482" y="182" width="92" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
   <text x="528" y="200" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600" font-family="var(--font-sans, sans-serif)">仍要运行</text>
@@ -539,13 +539,13 @@
 <p>想先校验再运行，可分步下载官方压缩包与校验文件：</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div>
-<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256
-python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
+<pre><code>curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256
+python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0" &amp;&amp; bash scripts/bootstrap.sh</code></pre>
 </div>
-<p>不用提前装 Python 或 Git。脚本会自动下载并校验官方 <code>v0.7.0</code> 发行包，配好 Python 3.13 运行环境，并在 <code>~/.nyairo</code> 下建好你的个人数据目录。</p>
+<p>不用提前装 Python 或 Git。脚本会自动下载并校验官方 <code>v0.8.0</code> 发行包，配好 Python 3.13 运行环境，并在 <code>~/.nyairo</code> 下建好你的个人数据目录。</p>
 <p>看到终端提示 <code>[5/5] 程序安装完成</code> 后，会自动进入模型配置向导：</p>
 <ol>
 <li>用上下方向键选择你的模型服务商；</li>

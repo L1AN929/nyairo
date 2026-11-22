@@ -34,7 +34,7 @@
       "description": "Upgrades replace only the program directory without touching your chat history or persona; if a new release does not suit you, one command rolls back to th...",
       "url": "https://nyairo.com/en/docs/update/",
       "inLanguage": "en",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -474,7 +474,7 @@
 
         <article class="markdown-body">
           <h2 id="update-section-0">Pre-Upgrade Check &amp; Backup</h2>
-<p>nyairo installs the application under <code>~/.local/share/nyairo</code> and stores your personal data (<code>SOUL.md</code>, model API keys, chat database, and memories) separately in <code>~/.nyairo</code>. Normal upgrades do not overwrite personal data, but because <code>v0.7.0</code> is still in an active public beta cycle, <strong>exit any running chat sessions and gateway processes before upgrading and take a quick backup archive</strong>:</p>
+<p>nyairo installs the application under <code>~/.local/share/nyairo</code> and stores your personal data (<code>SOUL.md</code>, model API keys, chat database, and memories) separately in <code>~/.nyairo</code>. Normal upgrades do not overwrite personal data, but because <code>v0.8.0</code> is still in an active public beta cycle, <strong>exit any running chat sessions and gateway processes before upgrading and take a quick backup archive</strong>:</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div>
 <pre><code>tar -czf "$HOME/nyairo-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$HOME" .nyairo</code></pre></div>
@@ -487,10 +487,10 @@
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div>
 <pre><code>nyairo update --check</code></pre></div>
-<p>When you are ready to upgrade (the public beta channel requires specifying a version tag, such as <code>v0.7.0</code>), run:</p>
+<p>When you are ready to upgrade (the public beta channel requires specifying a version tag, such as <code>v0.8.0</code>), run:</p>
 <div class="code-block">
 <div class="code-header"><span>bash</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>nyairo update --version v0.7.0</code></pre></div>
+<pre><code>nyairo update --version v0.8.0</code></pre></div>
 <p>The updater automatically downloads the official release archive, verifies its SHA256 checksum and file manifest, configures the new environment, and switches the active entry point.</p>
 
 <h2 id="update-section-2">One-Command Rollback &amp; Interrupted Recovery</h2>

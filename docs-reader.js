@@ -1,6 +1,6 @@
 /* ==========================================================================
    nyairo Localized Documentation Center Engine (/en/docs/ & /ja/docs/)
-   Mirrors app.js v070-55 docs reader, search, Style A palette & Option 6 theme
+   Mirrors app.js v080-55 docs reader, search, Style A palette & Option 6 theme
    ========================================================================== */
 
 const DOCS_LOCALE = window.NYAIRO_DOCS_LOCALE === 'ja' ? 'ja' : 'en';
@@ -66,13 +66,13 @@ const I18N = {
     quickCommands: [
       {
         group: 'Quick Actions',
-        title: 'Download Windows Desktop Installer (v0.7.0 · 5.8 MB)',
-        summary: 'Direct download for nyairo-0.7.0-setup.exe (no admin rights required)',
+        title: 'Download Windows Desktop Installer (v0.8.0 · 6.0 MB)',
+        summary: 'Direct download for nyairo-0.8.0-setup.exe (no admin rights required)',
         badge: 'Download',
         run: () => {
           const a = document.createElement('a');
-          a.href = '../../downloads/nyairo-0.7.0-setup.exe';
-          a.download = 'nyairo-0.7.0-setup.exe';
+          a.href = '../../downloads/nyairo-0.8.0-setup.exe';
+          a.download = 'nyairo-0.8.0-setup.exe';
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -142,10 +142,10 @@ const I18N = {
       },
       {
         group: 'Popular Docs',
-        title: 'v0.7.0 Changelog & Release Notes',
+        title: 'v0.8.0 Changelog & Release Notes',
         summary: 'Craftsmanship Notebook, model diff lab, autonomy rails, and test scope',
         badge: 'NEW',
-        href: '#changelog-v0-7-0'
+        href: '#changelog-v0-8-0'
       },
       {
         group: 'Popular Docs',
@@ -223,13 +223,13 @@ const I18N = {
     quickCommands: [
       {
         group: 'クイック操作',
-        title: 'Windows デスクトップ版インストーラを取得 (v0.7.0 · 5.8 MB)',
-        summary: 'nyairo-0.7.0-setup.exe を直接ダウンロード（管理者権限不要）',
+        title: 'Windows デスクトップ版インストーラを取得 (v0.8.0 · 6.0 MB)',
+        summary: 'nyairo-0.8.0-setup.exe を直接ダウンロード（管理者権限不要）',
         badge: '取得',
         run: () => {
           const a = document.createElement('a');
-          a.href = '../../downloads/nyairo-0.7.0-setup.exe';
-          a.download = 'nyairo-0.7.0-setup.exe';
+          a.href = '../../downloads/nyairo-0.8.0-setup.exe';
+          a.download = 'nyairo-0.8.0-setup.exe';
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -299,10 +299,10 @@ const I18N = {
       },
       {
         group: 'よく読まれるガイド',
-        title: 'v0.7.0 リリースノートと更新内容',
+        title: 'v0.8.0 リリースノートと更新内容',
         summary: '個人手帳、モデル対照ラボ、自律判断ロック、テスト公開範囲の案内',
         badge: 'NEW',
-        href: '#changelog-v0-7-0'
+        href: '#changelog-v0-8-0'
       },
       {
         group: 'よく読まれるガイド',

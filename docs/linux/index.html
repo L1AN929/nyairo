@@ -34,7 +34,7 @@
       "description": "适合想自己查看每一步脚本、离线保存发行包，或在服务器上手动部署的用户。",
       "url": "https://nyairo.com/docs/linux/",
       "inLanguage": "zh-CN",
-      "dateModified": "2026-11-21",
+      "dateModified": "2026-11-22",
       "isPartOf": {
         "@type": "WebSite",
         "name": "nyairo",
@@ -94,7 +94,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../style.css?v=20261121-v070-58">
+  <link rel="stylesheet" href="../../style.css?v=20261122-v080-59">
   <link rel="icon" href="../../assets/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon-16.png">
@@ -120,7 +120,7 @@
           </span>
           <span class="brand-text">
             <span class="brand-name">nyairo</span>
-            <span class="brand-tag font-mono">v0.7.0</span>
+            <span class="brand-tag font-mono">v0.8.0</span>
           </span>
         </a>
 
@@ -491,28 +491,28 @@ sh /tmp/uv-install.sh</code></pre></div>
 uv python install 3.13</code></pre></div>
 
 <h2 id="linux-section-2">路线 A：通过 Git 标签克隆安装</h2>
-<p>路线 A 和路线 B 选一种就行。使用 Git 时，请固定检出已发布的 <code>v0.7.0</code> 标签（不要直接装正在变动中的开发分支）：</p>
+<p>路线 A 和路线 B 选一种就行。使用 Git 时，请固定检出已发布的 <code>v0.8.0</code> 标签（不要直接装正在变动中的开发分支）：</p>
 <div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>mkdir -p "$HOME/apps"
-git clone --branch v0.7.0 --depth 1 \
-  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0"
+git clone --branch v0.8.0 --depth 1 \
+  https://github.com/L1AN929/nyairo.git "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0"
 bash scripts/bootstrap.sh</code></pre></div>
 <p>检出固定标签时 Git 提示 <code>detached HEAD</code> 是正常现象。安装完成后，可以跑一遍清单自检确认所有文件完整无缺：</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>~/.local/share/nyairo/releases/v0.7.0/vendor/hermes/.venv/bin/python -B \
-  ~/.local/share/nyairo/releases/v0.7.0/scripts/verify_manifest.py</code></pre></div>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>~/.local/share/nyairo/releases/v0.8.0/vendor/hermes/.venv/bin/python -B \
+  ~/.local/share/nyairo/releases/v0.8.0/scripts/verify_manifest.py</code></pre></div>
 <p>输出中包含 <code>"valid": true</code> 即代表文件校验完全一致。</p>
 
 <h2 id="linux-section-3">路线 B：下载官方 ZIP 校验安装</h2>
 <p>如果你想先把发行包保存下来核对哈希，再解压安装：</p>
 <div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>mkdir -p "$HOME/apps" &amp;&amp; cd "$HOME/apps"
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip
-curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.7.0/nyairo-v0.7.0.zip.sha256
-sha256sum -c nyairo-v0.7.0.zip.sha256</code></pre></div>
-<p>确认屏幕输出 <code>nyairo-v0.7.0.zip: OK</code> 后，解压并调用包内安装器：</p>
-<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>python3 -m zipfile -e nyairo-v0.7.0.zip "$HOME/apps/nyairo-v0.7.0"
-cd "$HOME/apps/nyairo-v0.7.0"
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip
+curl -fsSL -O https://github.com/L1AN929/nyairo/releases/download/v0.8.0/nyairo-v0.8.0.zip.sha256
+sha256sum -c nyairo-v0.8.0.zip.sha256</code></pre></div>
+<p>确认屏幕输出 <code>nyairo-v0.8.0.zip: OK</code> 后，解压并调用包内安装器：</p>
+<div class="code-block"><div class="code-header"><span>bash</span><button class="copy-btn" type="button">复制</button></div><pre><code>python3 -m zipfile -e nyairo-v0.8.0.zip "$HOME/apps/nyairo-v0.8.0"
+cd "$HOME/apps/nyairo-v0.8.0"
 bash scripts/bootstrap.sh</code></pre></div>
-<p>如果 ZIP 是你在 Windows 浏览器里提前下载好的，WSL 里可以通过 <code>/mnt/c/Users/你的Windows用户名/Downloads/nyairo-v0.7.0.zip</code> 访问它。</p>
+<p>如果 ZIP 是你在 Windows 浏览器里提前下载好的，WSL 里可以通过 <code>/mnt/c/Users/你的Windows用户名/Downloads/nyairo-v0.8.0.zip</code> 访问它。</p>
 
 <h2 id="linux-section-4">机器上已经装过 Hermes 怎么办</h2>
 <p>不用删掉你原来的 Hermes。nyairo 自带了经过版本匹配测试的配套 Hermes 环境，并把数据独立放在 <code>~/.nyairo</code> 下，跟原版互不干扰。请不要手动把 nyairo 的插件目录硬拷进其他版本的 Hermes 里混用，否则很容易因为接口差异报错。</p>
