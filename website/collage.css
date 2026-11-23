@@ -1,0 +1,1014 @@
+/* ==========================================================================
+   nyairo · Monochrome Manga Collage Hero (Variant B) & Streamlined Homepage
+   - Shared across ZH (/), EN (/en/), and JA (/ja/)
+   - Scoped to body.ny-variant-topright / .home-view so static docs are untouched
+   ========================================================================== */
+
+body.ny-variant-topright {
+  overflow-x: clip;
+}
+
+#ny-collage-track {
+  position: relative;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  height: 210vh;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.ny-collage-sticky {
+  position: sticky;
+  top: var(--header-h, 60px);
+  height: calc(100vh - var(--header-h, 60px));
+  min-height: 640px;
+  max-height: 980px;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: var(--bg);
+}
+
+/* Tactile fine archival paper grain + whisper coordinate grid */
+.ny-collage-paper-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.45;
+  background-image:
+    radial-gradient(color-mix(in srgb, var(--fg) 7%, transparent) 0.65px, transparent 0.65px),
+    radial-gradient(color-mix(in srgb, var(--warm, var(--muted)) 6%, transparent) 0.65px, transparent 0.65px);
+  background-size: 20px 20px, 32px 32px;
+  background-position: 0 0, 10px 14px;
+}
+
+html:not([data-theme="light"]) .ny-collage-paper-grain {
+  opacity: 0.22;
+}
+
+.ny-collage-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(ellipse 84% 82% at 54% 46%, rgba(0, 0, 0, 0.85) 18%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 84% 82% at 54% 46%, rgba(0, 0, 0, 0.85) 18%, transparent 100%);
+}
+
+.ny-collage-canvas {
+  position: relative;
+  width: 100%;
+  max-width: 1440px;
+  height: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* Vector connector overlay */
+.ny-collage-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+  overflow: visible;
+}
+
+.ny-edge-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--fg) 26%, transparent);
+  stroke-width: 1;
+  transition: stroke 0.24s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    stroke-width 0.24s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    opacity 0.24s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-edge-line.is-dotted {
+  stroke-dasharray: 2.5 4.5;
+  stroke: color-mix(in srgb, var(--fg) 20%, transparent);
+}
+
+.ny-edge-line.is-highlighted {
+  stroke: var(--accent, var(--fg));
+  stroke-opacity: 0.9;
+  stroke-width: 1.4;
+}
+
+.ny-edge-anchor {
+  fill: var(--accent, var(--fg));
+  stroke: var(--bg);
+  stroke-width: 1;
+  opacity: 0;
+  transition: opacity 0.24s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+/* Figma-style 4-corner hairline selection frame for upper-right compact cluster */
+.ny-collage-frame {
+  position: absolute;
+  left: 53.6%;
+  top: 6.5%;
+  width: 40.8%;
+  height: 59%;
+  border: 1px solid color-mix(in srgb, var(--fg) 26%, transparent);
+  pointer-events: none;
+  z-index: 18;
+}
+
+.ny-frame-handle,
+.ny-sheet-handle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: var(--accent, var(--fg));
+  border: 1px solid var(--bg);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.ny-frame-handle.tl,
+.ny-sheet-handle.tl { left: -4px; top: -4px; }
+.ny-frame-handle.tr,
+.ny-sheet-handle.tr { right: -4px; top: -4px; }
+.ny-frame-handle.bl,
+.ny-sheet-handle.bl { left: -4px; bottom: -4px; }
+.ny-frame-handle.br,
+.ny-sheet-handle.br { right: -4px; bottom: -4px; }
+
+/* Art plates */
+.ny-sheets-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ny-sheet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: center center;
+  transform: translate3d(calc(var(--ny-px, 0) * var(--depth-x, 8px)), calc(var(--ny-py, 0) * var(--depth-y, 6px)), 0)
+    rotate(var(--sheet-rot, 0deg))
+    scale(var(--sheet-scale, 1));
+  will-change: transform, opacity;
+  pointer-events: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ny-collage-sticky.is-interactive .ny-sheet {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ny-sheet.is-active {
+  z-index: 28 !important;
+}
+
+/* Offset archival paper swatches (for study & onsen) */
+.ny-sheet-swatch {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.ny-sheet[data-sheet="onsen"] .ny-sheet-swatch {
+  transform: translate(9px, -9px);
+  background: color-mix(in srgb, var(--warm, var(--muted)) 22%, var(--bg-elev));
+  border: 1px solid var(--warm-line, var(--line-2));
+}
+
+.ny-sheet[data-sheet="study"] .ny-sheet-swatch {
+  transform: translate(-9px, 9px);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line, var(--line-2));
+}
+
+/* Theme-adaptive monochrome manga G-pen line-art plates (overlap-safe via isolation) */
+.ny-sheet-art {
+  position: relative;
+  z-index: 1;
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  overflow: visible;
+  isolation: isolate;
+  box-shadow: 0 14px 36px rgba(14, 18, 30, 0.16), 0 2px 6px rgba(14, 18, 30, 0.08);
+  transition: box-shadow 0.24s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    transform 0.24s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-sheet-art img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: none;
+  border-radius: 3px;
+}
+
+html[data-theme="light"] .ny-sheet-art img {
+  mix-blend-mode: multiply;
+  filter: contrast(1.1);
+}
+
+html:not([data-theme="light"]) .ny-sheet-art {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--fg) 16%, var(--line));
+  box-shadow: 0 20px 46px rgba(0, 0, 0, 0.62), 0 4px 12px rgba(0, 0, 0, 0.42);
+}
+
+html:not([data-theme="light"]) .ny-sheet-art img {
+  filter: invert(1) contrast(1.08);
+  mix-blend-mode: screen;
+  opacity: 0.92;
+}
+
+.ny-collage-sticky.is-interactive .ny-sheet:hover .ny-sheet-art {
+  box-shadow: 0 18px 44px rgba(14, 18, 30, 0.22), 0 4px 10px rgba(14, 18, 30, 0.1);
+}
+
+html:not([data-theme="light"]) .ny-collage-sticky.is-interactive .ny-sheet:hover .ny-sheet-art {
+  box-shadow: 0 24px 52px rgba(0, 0, 0, 0.72), 0 0 0 1px color-mix(in srgb, var(--accent, var(--fg)) 45%, rgba(255, 255, 255, 0.2));
+}
+
+.ny-sheet-outline {
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--accent, var(--fg));
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+  transition: opacity 0.2s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-sheet.is-active .ny-sheet-outline {
+  opacity: 1;
+}
+
+.ny-sheet-handle {
+  width: 6px;
+  height: 6px;
+  z-index: 4;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.2s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    transform 0.2s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-sheet.is-active .ny-sheet-handle {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Bare printed editorial marginalia */
+.ny-sheet-caption {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  min-width: 195px;
+  max-width: 245px;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transform: translateY(5px);
+  text-shadow: 0 1px 12px var(--bg), 0 0 6px var(--bg);
+  transition: opacity 0.24s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    transform 0.28s var(--ease-smooth, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-sheet.is-right-edge .ny-sheet-caption {
+  left: auto;
+  right: 0;
+  text-align: right;
+}
+
+.ny-collage-sticky.is-interactive .ny-sheet.is-active .ny-sheet-caption {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ny-cap-en {
+  display: block;
+  font-family: Georgia, "Times New Roman", "Noto Serif SC", serif;
+  font-size: 0.92rem;
+  font-style: italic;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.24;
+  letter-spacing: -0.01em;
+}
+
+.ny-cap-zh {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.77rem;
+  color: var(--fg-2);
+  line-height: 1.46;
+}
+
+/* Upper-left hero overlay inside sticky exhibition */
+.ny-hero-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: var(--container-w, 1080px);
+  margin: 0 auto;
+  padding: clamp(36px, 6.8vh, 84px) 24px clamp(22px, 3.6vh, 40px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  z-index: 26;
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+
+.ny-hero-overlay.is-hidden-phase {
+  pointer-events: none !important;
+}
+
+.ny-hero-overlay #hero-copy-stage {
+  max-width: min(542px, 47.2vw);
+  width: 100%;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.ny-hero-overlay:not(.is-hidden-phase) #hero-copy-stage a,
+.ny-hero-overlay:not(.is-hidden-phase) #hero-copy-stage button,
+.ny-hero-overlay:not(.is-hidden-phase) .hero-spec-rail,
+.ny-hero-overlay:not(.is-hidden-phase) .ny-hero-scroll-cue {
+  pointer-events: auto;
+}
+
+.ny-variant-topright .ny-hero-overlay .hero-title,
+html[data-theme="light"] .ny-variant-topright .ny-hero-overlay .hero-title {
+  font-size: clamp(2.05rem, 3.2vw, 2.88rem);
+  margin-bottom: 16px;
+}
+
+.ny-variant-topright .ny-hero-overlay .hero-subtitle {
+  font-size: 1.04rem;
+  line-height: 1.62;
+  margin-bottom: 22px;
+}
+
+/* EN hero refinements to keep clean right-column gap on 1280x800 & 1440x900 */
+body.ny-lang-en.ny-variant-topright .ny-hero-overlay .hero-title,
+html[data-theme="light"] body.ny-lang-en.ny-variant-topright .ny-hero-overlay .hero-title {
+  font-size: clamp(1.85rem, 2.75vw, 2.5rem);
+  line-height: 1.09;
+  margin: 14px 0 12px;
+}
+
+body.ny-lang-en.ny-variant-topright .ny-hero-overlay .hero-subtitle {
+  font-size: 0.96rem;
+  line-height: 1.56;
+  margin-bottom: 18px;
+}
+
+body.ny-lang-en .ny-collage-heading {
+  font-size: clamp(24px, 2.5vw, 37px);
+}
+
+/* JA hero refinements inside #hero-copy-stage wrapper */
+body.ny-lang-ja .ny-hero-overlay #hero-copy-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+body.ny-lang-ja.ny-variant-topright .ny-hero-overlay .ja-hero-title {
+  font-size: clamp(1.78rem, 2.6vw, 2.42rem);
+  line-height: 1.18;
+  margin: 14px 0 12px;
+}
+
+body.ny-lang-ja.ny-variant-topright .ny-hero-overlay .ja-hero-subtitle {
+  font-size: 0.94rem;
+  line-height: 1.66;
+  margin-bottom: 18px;
+}
+
+body.ny-lang-ja .ny-hero-overlay .hero-cta-row {
+  margin-top: 2px;
+  margin-bottom: 12px;
+}
+
+.ny-hero-overlay .hero-spec-rail {
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.ny-hero-scroll-cue {
+  margin-top: clamp(14px, 2vh, 22px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 520;
+  cursor: pointer;
+  transition: color 0.18s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-hero-scroll-cue:hover {
+  color: var(--accent, var(--fg));
+}
+
+.ny-hero-scroll-arrow {
+  display: inline-block;
+  color: var(--accent, var(--fg));
+  animation: nyCueBob 2.1s ease-in-out infinite;
+}
+
+@keyframes nyCueBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+
+/* Lower-left Quiet 3-Line Editorial Lockup (fades in after Hero fades out) */
+.ny-collage-lockup {
+  position: absolute;
+  left: clamp(28px, 4.6vw, 68px);
+  bottom: clamp(28px, 5.2vh, 52px);
+  width: min(560px, 44vw);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  pointer-events: none;
+  opacity: 0;
+  will-change: opacity, transform;
+}
+
+.ny-collage-sticky.is-expanded-phase .ny-collage-lockup {
+  opacity: 1;
+}
+
+.ny-collage-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--warm, var(--muted));
+  margin-bottom: 10px;
+}
+
+.ny-collage-heading {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", "Noto Serif SC", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 650;
+  line-height: 1.18;
+  letter-spacing: -0.022em;
+  color: var(--fg);
+}
+
+.ny-collage-accent {
+  color: var(--accent, var(--fg));
+}
+
+.ny-collage-sub {
+  margin: 12px 0 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--fg-2);
+}
+
+.ny-collage-cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 0.2s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-collage-sticky.is-interactive .ny-collage-cue {
+  color: var(--accent, var(--fg));
+}
+
+.ny-collage-cue-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* Bottom-right chapter selector (01-07) */
+.ny-collage-dots {
+  position: absolute;
+  right: clamp(28px, 5vw, 72px);
+  bottom: clamp(28px, 5.2vh, 52px);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 84%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity 0.26s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    transform 0.28s var(--ease-smooth, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-collage-dots.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.ny-dot-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.16s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    color 0.16s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-dot-btn:hover {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+
+.ny-dot-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent, var(--fg));
+}
+
+.home-view .section-preview-lead {
+  margin-top: 44px !important;
+  padding-top: 12px;
+}
+
+/* ==========================================================================
+   Streamlined Lower Sections (ZH / EN / JA)
+   ========================================================================== */
+
+/* Hide redundant nav entries for sections merged into each locale's 4-tab hub */
+#nav-capabilities,
+#nav-gallery,
+.sidebar-mobile-chip[data-mobile-home="home-capabilities"],
+.sidebar-mobile-chip[data-mobile-home="home-gallery"],
+.nav-link[data-section="en-gallery"],
+.en-mobile-link[href="#en-gallery"],
+.ja-nav-link[data-section="ja-capabilities"],
+.ja-nav-link[data-section="ja-gallery"],
+.ja-mobile-link[href="#ja-capabilities"],
+.ja-mobile-link[href="#ja-gallery"] {
+  display: none !important;
+}
+
+/* Tighter editorial pacing */
+.home-view .section-block:not(.section-preview-lead) {
+  margin-top: 48px !important;
+  padding-top: 38px !important;
+}
+
+.home-view .section-head {
+  margin-bottom: 20px !important;
+}
+
+.home-view .section-title {
+  margin-bottom: 8px;
+}
+
+.stage-caption-cell {
+  padding: 13px 16px;
+}
+
+/* Unified Mechanism / Showcase Hub (.ny-has-hub) */
+.ny-hub-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.ny-hub-tabs {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  max-width: 100%;
+}
+
+.ny-hub-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 550;
+  line-height: 1.2;
+  padding: 7px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.16s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    color 0.16s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)),
+    border-color 0.16s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-hub-tab:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--card) 55%, transparent);
+}
+
+.ny-hub-tab.is-active {
+  background: var(--card);
+  color: var(--fg);
+  border-color: var(--line-2);
+  box-shadow: 0 1px 2px rgba(15, 20, 34, 0.06);
+}
+
+.ny-hub-panel[hidden] {
+  display: none !important;
+}
+
+.ny-hub-panel > .bento-grid,
+.ny-hub-panel > .cap-grid,
+.ny-hub-panel > .eco-strip,
+.ny-hub-panel > .magpie-bento-grid,
+.ny-hub-panel > .hub-flow-shell,
+.ny-hub-panel > .worlds-gallery-grid,
+.ny-hub-panel > .worlds-hairline-grid {
+  margin-top: 0 !important;
+}
+
+.ny-has-hub .bento-grid {
+  gap: 14px;
+}
+
+.ny-has-hub .bento-card {
+  padding: 18px 20px 20px;
+  gap: 14px;
+}
+
+.ny-has-hub .bento-visual {
+  height: 158px;
+}
+
+.ny-has-hub .bento-title {
+  font-size: 1.06rem;
+  margin-bottom: 5px;
+}
+
+.ny-has-hub .bento-desc {
+  font-size: 0.86rem;
+  line-height: 1.58;
+}
+
+.ny-has-hub .gallery-block + .gallery-block {
+  margin-top: 22px;
+}
+
+.ny-has-hub .gallery-personas-shell,
+.ny-has-hub .personas-hairline-wrap {
+  margin-top: 20px;
+}
+
+.ny-has-hub .gallery-world-card,
+.ny-has-hub .gallery-personas-grid .persona-card,
+.ny-has-hub .cap-card {
+  padding: 17px 18px !important;
+}
+
+.ny-hub-subfoot {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Slim 1-row Trust + BYOK + SHA256 fact bar */
+.ny-hub-trust-bar {
+  margin-top: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+.ny-hub-trust-bar .trust-verify-bar {
+  border-top: none;
+  padding: 11px 16px;
+}
+
+/* Shared Collapsible Disclosure Drawers (Evolution Timeline & Beginner Guide) */
+.ny-compact-disclosure {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+}
+
+.ny-disclosure-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 18px;
+  font-size: 0.88rem;
+  font-weight: 580;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+  background: var(--card);
+  transition: background-color 0.16s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-disclosure-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ny-disclosure-summary:hover {
+  background: var(--card-hover, var(--bg-elev));
+}
+
+.ny-disclosure-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  transition: transform 0.2s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.ny-compact-disclosure[open] > .ny-disclosure-summary {
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--line);
+}
+
+.ny-compact-disclosure[open] > .ny-disclosure-summary .ny-disclosure-chevron {
+  transform: rotate(180deg);
+}
+
+.ny-disclosure-body {
+  padding: 16px;
+  background: var(--bg);
+}
+
+.ny-disclosure-body > .evo-card {
+  margin-top: 0;
+}
+
+.ny-disclosure-body > .release-feed.is-archived {
+  margin-top: 12px;
+}
+
+.ny-disclosure-body > .beginner-guide-grid,
+.ny-disclosure-body > .setup-guides-grid {
+  margin-top: 0 !important;
+}
+
+/* Compact Release Feed, Downloads, Final CTA & Footers */
+#home-release-feed {
+  margin-top: 12px;
+}
+
+#home-evolution .release-row {
+  padding: 11px 16px;
+}
+
+#home-downloads .dl-card,
+#en-downloads .dl-card {
+  padding: 20px 20px 18px;
+}
+
+#home-downloads .downloads-platform-note {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
+.magpie-final-cta,
+.cta-banner.cta-closing-emblem,
+.magpie-closing {
+  margin-top: 48px !important;
+  padding: 46px 28px 42px !important;
+}
+
+.home-footer,
+.magpie-footer-1row {
+  margin-top: 32px !important;
+  padding-top: 32px !important;
+  padding-bottom: 32px !important;
+}
+
+/* ==========================================================================
+   Mobile & Tablet Horizontal Gallery (Zero Horizontal Page Overflow)
+   ========================================================================== */
+@media (max-width: 900px) {
+  #ny-collage-track,
+  #ny-collage-track.is-hero-topright {
+    width: 100% !important;
+    margin-left: 0 !important;
+    height: auto !important;
+    border-left: none;
+    border-right: none;
+  }
+
+  .ny-collage-sticky,
+  #ny-collage-track.is-hero-topright .ny-collage-sticky {
+    position: relative !important;
+    top: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    flex-direction: column;
+    padding: 8px 0 32px;
+  }
+
+  .ny-hero-overlay {
+    position: relative !important;
+    inset: auto !important;
+    padding: 20px 4px 12px !important;
+    opacity: 1 !important;
+    transform: none !important;
+    pointer-events: auto !important;
+  }
+
+  .ny-hero-overlay #hero-copy-stage {
+    max-width: 100% !important;
+  }
+
+  .ny-hero-scroll-cue,
+  .ny-collage-svg,
+  .ny-collage-frame,
+  .ny-collage-dots,
+  .ny-collage-cue,
+  .ny-sheet-swatch {
+    display: none !important;
+  }
+
+  .ny-collage-canvas {
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .ny-collage-lockup,
+  #ny-collage-track.is-hero-topright .ny-collage-lockup {
+    position: relative !important;
+    left: auto !important;
+    bottom: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 4px;
+    order: 1;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .ny-collage-heading {
+    font-size: clamp(26px, 7.2vw, 36px);
+  }
+
+  .ny-sheets-layer {
+    position: relative !important;
+    inset: auto !important;
+    order: 2;
+    display: flex !important;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding: 12px 4px 16px;
+    pointer-events: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ny-sheet {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    flex: 0 0 72vw;
+    max-width: 268px;
+    width: auto !important;
+    opacity: 1 !important;
+    transform: none !important;
+    scroll-snap-align: center;
+    pointer-events: auto !important;
+    cursor: pointer;
+  }
+
+  .ny-sheet-caption {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    min-width: 0;
+    margin-top: 10px;
+    max-width: 100%;
+    text-align: left !important;
+    text-shadow: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .home-view .section-block:not(.section-preview-lead) {
+    margin-top: 36px !important;
+    padding-top: 28px !important;
+  }
+
+  .ny-hub-tabs {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ny-has-hub .bento-visual {
+    height: auto;
+    min-height: 148px;
+  }
+
+  .ny-disclosure-summary {
+    padding: 12px 14px;
+    font-size: 0.84rem;
+  }
+
+  .ny-disclosure-body {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .ny-hub-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+    overflow-x: visible;
+  }
+
+  .ny-hub-tab {
+    text-align: center;
+    padding: 8px 6px;
+    font-size: 0.81rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #ny-collage-track,
+  #ny-collage-track.is-hero-topright {
+    height: auto !important;
+  }
+  .ny-collage-sticky {
+    position: relative !important;
+    top: 0 !important;
+    height: 820px !important;
+  }
+  .ny-hero-scroll-arrow {
+    animation: none;
+  }
+  .ny-sheet,
+  .ny-edge-line,
+  .ny-edge-anchor,
+  .ny-sheet-caption,
+  .ny-disclosure-chevron {
+    transition: none !important;
+  }
+}
